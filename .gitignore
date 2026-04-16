@@ -1,0 +1,26 @@
+# Environment
+.env
+.env.prod
+
+# Rust / Backend
+backend/target/
+
+# Node / Frontend
+frontend/node_modules/
+frontend/dist/
+
+# Docker volumes
+postgres_data/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# SSL certs
+nginx/ssl/
