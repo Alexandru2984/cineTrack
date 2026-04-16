@@ -49,6 +49,7 @@ impl ResponseError for AppError {
             AppError::ValidationError(msg) => (actix_web::http::StatusCode::BAD_REQUEST, msg.clone()),
             AppError::TmdbError(msg) => (actix_web::http::StatusCode::BAD_GATEWAY, msg.clone()),
             AppError::InternalError(_) | AppError::DatabaseError(_) => {
+                eprintln!("Internal error: {:?}", self);
                 log::error!("Internal error: {:?}", self);
                 (
                     actix_web::http::StatusCode::INTERNAL_SERVER_ERROR,

@@ -45,7 +45,7 @@ CREATE TABLE media (
     status VARCHAR(50),
     genres JSONB,
     runtime_minutes INTEGER,
-    tmdb_vote_average DECIMAL(3,1),
+    tmdb_vote_average DOUBLE PRECISION,
     tmdb_cached_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE(tmdb_id, media_type)
 );
