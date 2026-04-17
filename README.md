@@ -34,6 +34,7 @@ A personal movie and TV show tracker with social features, inspired by TV Time. 
 ### Frontend
 - **React 19** + **TypeScript** — UI framework
 - **Vite 8** — Build tool
+- **Vitest** — Unit testing framework
 - **Tailwind CSS 4** — Styling
 - **TanStack Query 5** — Server state management
 - **Zustand 5** — Client state management
@@ -141,16 +142,45 @@ npm install
 npm run dev
 ```
 
+### Testing
+
+The project has **160 tests** across three layers:
+
+```bash
+# Backend unit tests (85 tests) — no external dependencies
+cd backend && cargo test
+
+# Frontend tests (49 tests) — Vitest + jsdom
+cd frontend && npm test
+
+# Backend integration tests (26 tests) — needs a test DB
+docker compose -f docker-compose.test.yml up -d --wait
+cd backend && TEST_DATABASE_URL="postgres://test_user:test_pass@127.0.0.1:5433/cinetrack_test" \
+  cargo test --test api_tests -- --ignored --test-threads=1
+docker compose -f docker-compose.test.yml down
+
+# Or run everything at once:
+./scripts/run_tests.sh
+```
+
+**What's tested:**
+- **Unit tests** — JWT generation/validation, Argon2id hashing, password policy, all DTO validators (boundary cases, XSS rejection), error mapping & sanitization
+- **Integration tests** — Full auth flows (register, login, refresh rotation, logout), access control (all protected endpoints return 401), IDOR protection, user enumeration prevention, profile privacy (email hidden), follow/unfollow, list CRUD
+- **Frontend tests** — Zustand stores (auth, theme), utility functions (class merging, URL builders, formatters), type contracts
+
 ## Project Structure
 
 ```
 văzute/
 ├── backend/                # Rust + Actix-Web API
 │   ├── migrations/         # SQLx database migrations
+│   ├── tests/
+│   │   └── api_tests.rs    # Integration tests (26 tests, need test DB)
 │   └── src/
 │       ├── config.rs       # Environment configuration
 │       ├── db.rs           # Database pool setup
 │       ├── errors.rs       # Error types & sanitization
+│       ├── lib.rs          # Library re-exports (for integration tests)
 │       ├── main.rs         # Entry point, middleware wiring
 │       ├── dto/            # Request/Response types + validation
 │       │   ├── auth.rs     # Auth DTOs, password policy
@@ -170,9 +200,13 @@ văzute/
 │       ├── pages/          # Route pages
 │       ├── store/          # Zustand stores (auth, theme)
 │       ├── lib/            # API client with refresh interceptor
+│       ├── test/           # Vitest tests (49 tests)
 │       └── types/          # TypeScript interfaces
+├── scripts/
+│   └── run_tests.sh        # All-in-one test runner
 ├── nginx/                  # Internal reverse proxy config
 ├── docker-compose.yml      # Development stack
+├── docker-compose.test.yml # Ephemeral test DB (tmpfs, port 5433)
 └── docker-compose.prod.yml # Production stack (with resource limits)
 ```
 
