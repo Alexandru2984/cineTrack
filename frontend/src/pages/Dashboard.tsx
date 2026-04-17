@@ -63,7 +63,7 @@ export default function Dashboard() {
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
             {trending?.results.slice(0, 12).map((item) => (
-              <MediaCard key={`${item.id}-${item.media_type}`} item={item} />
+              <MediaCard key={`${item.id}-${item.media_type}`} item={item} showQuickAdd />
             ))}
           </div>
         )}

@@ -20,7 +20,10 @@ export function useCreateTracking() {
       const res = await api.post('/tracking', data);
       return res.data;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['tracking'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['tracking'] });
+      qc.invalidateQueries({ queryKey: ['stats'] });
+    },
   });
 }
 
@@ -31,7 +34,10 @@ export function useUpdateTracking() {
       const res = await api.patch(`/tracking/${id}`, data);
       return res.data;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['tracking'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['tracking'] });
+      qc.invalidateQueries({ queryKey: ['stats'] });
+    },
   });
 }
 

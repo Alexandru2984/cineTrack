@@ -77,9 +77,14 @@ async fn create_tracking(
 
     // Create tracking entry
     let user_media = sqlx::query_as::<_, crate::models::UserMedia>(
-        r#"INSERT INTO user_media (user_id, media_id, status)
-        VALUES ($1, $2, $3)
-        ON CONFLICT (user_id, media_id) DO UPDATE SET status = $3, updated_at = NOW()
+        r#"INSERT INTO user_media (user_id, media_id, status, started_at, completed_at)
+        VALUES ($1, $2, $3,
+            CASE WHEN $3 IN ('watching', 'completed') THEN CURRENT_DATE END,
+            CASE WHEN $3 = 'completed' THEN CURRENT_DATE END
+        )
+        ON CONFLICT (user_id, media_id) DO UPDATE SET status = $3, updated_at = NOW(),
+            started_at = COALESCE(user_media.started_at, CASE WHEN $3 IN ('watching', 'completed') THEN CURRENT_DATE END),
+            completed_at = CASE WHEN $3 = 'completed' THEN CURRENT_DATE ELSE user_media.completed_at END
         RETURNING *"#
     )
     .bind(user_id)
@@ -87,6 +92,33 @@ async fn create_tracking(
     .bind(&data.status)
     .fetch_one(pool.get_ref())
     .await?;
+
+    // Auto-create watch_history entry for tracking activity (for heatmap)
+    let _ = sqlx::query(
+        r#"INSERT INTO watch_history (user_id, media_id, watched_at)
+        VALUES ($1, $2, NOW())
+        ON CONFLICT DO NOTHING"#
+    )
+    .bind(user_id)
+    .bind(media.id)
+    .execute(pool.get_ref())
+    .await;
+
+    // If completed TV show, also mark all cached episodes as watched
+    if data.status == "completed" && media.media_type == "tv" {
+        let _ = sqlx::query(
+            r#"INSERT INTO watch_history (user_id, media_id, episode_id, watched_at)
+            SELECT $1, $2, e.id, NOW()
+            FROM episodes e
+            JOIN seasons s ON e.season_id = s.id
+            WHERE s.media_id = $2
+            ON CONFLICT DO NOTHING"#
+        )
+        .bind(user_id)
+        .bind(media.id)
+        .execute(pool.get_ref())
+        .await;
+    }
 
     Ok(HttpResponse::Created().json(TrackingResponse {
         id: user_media.id,

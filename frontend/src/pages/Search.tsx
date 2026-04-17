@@ -43,7 +43,7 @@ export default function SearchPage() {
           <p className="text-sm text-[hsl(var(--muted-foreground))]">{data.total_results} results</p>
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
             {data.results.map((item) => (
-              <MediaCard key={`${item.id}-${item.media_type || type}`} item={{ ...item, media_type: item.media_type || type || undefined }} />
+              <MediaCard key={`${item.id}-${item.media_type || type}`} item={{ ...item, media_type: item.media_type || type || undefined }} showQuickAdd />
             ))}
           </div>
 

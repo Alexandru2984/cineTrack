@@ -35,12 +35,27 @@ async fn my_stats(
     .fetch_one(pool.get_ref())
     .await?;
 
-    let total_episodes = sqlx::query_scalar::<_, i64>(
+    // Count episodes: individually watched + episode counts from completed shows (for shows without individual episode tracking)
+    let watched_episodes = sqlx::query_scalar::<_, i64>(
         "SELECT COUNT(*) FROM watch_history WHERE user_id = $1 AND episode_id IS NOT NULL"
     )
     .bind(user_id)
     .fetch_one(pool.get_ref())
     .await?;
+
+    let completed_show_episodes = sqlx::query_scalar::<_, Option<i64>>(
+        r#"SELECT SUM(COALESCE(s.episode_count, 0))
+        FROM user_media um
+        JOIN media m ON um.media_id = m.id
+        JOIN seasons s ON s.media_id = m.id AND s.season_number > 0
+        WHERE um.user_id = $1 AND m.media_type = 'tv' AND um.status = 'completed'"#
+    )
+    .bind(user_id)
+    .fetch_one(pool.get_ref())
+    .await?
+    .unwrap_or(0);
+
+    let total_episodes = std::cmp::max(watched_episodes, completed_show_episodes);
 
     // Total hours calculation
     let total_minutes: Option<i64> = sqlx::query_scalar(
@@ -135,9 +150,17 @@ async fn my_heatmap(
     let end_date = chrono::NaiveDate::from_ymd_opt(year, 12, 31).unwrap();
 
     let data = sqlx::query_as::<_, (chrono::NaiveDate, i64)>(
-        r#"SELECT watched_at::date as watch_date, COUNT(*) as count
-        FROM watch_history
-        WHERE user_id = $1 AND watched_at::date BETWEEN $2 AND $3
+        r#"SELECT watch_date, SUM(cnt)::bigint as count FROM (
+            SELECT watched_at::date as watch_date, COUNT(*) as cnt
+            FROM watch_history
+            WHERE user_id = $1 AND watched_at::date BETWEEN $2 AND $3
+            GROUP BY watch_date
+            UNION ALL
+            SELECT updated_at::date as watch_date, COUNT(*) as cnt
+            FROM user_media
+            WHERE user_id = $1 AND updated_at::date BETWEEN $2 AND $3
+            GROUP BY watch_date
+        ) combined
         GROUP BY watch_date
         ORDER BY watch_date"#
     )
