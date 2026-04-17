@@ -21,3 +21,43 @@ pub fn verify_password(password: &str, hash: &str) -> Result<bool, AppError> {
         .verify_password(password.as_bytes(), &parsed_hash)
         .is_ok())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_hash_password_produces_argon2_hash() {
+        let hash = hash_password("TestPass123").unwrap();
+        assert!(hash.starts_with("$argon2"));
+    }
+
+    #[test]
+    fn test_verify_password_correct() {
+        let hash = hash_password("MyPassword1").unwrap();
+        assert!(verify_password("MyPassword1", &hash).unwrap());
+    }
+
+    #[test]
+    fn test_verify_password_wrong() {
+        let hash = hash_password("MyPassword1").unwrap();
+        assert!(!verify_password("WrongPassword1", &hash).unwrap());
+    }
+
+    #[test]
+    fn test_hash_password_unique_salts() {
+        let h1 = hash_password("SamePassword1").unwrap();
+        let h2 = hash_password("SamePassword1").unwrap();
+        // Different salts → different hashes
+        assert_ne!(h1, h2);
+        // But both verify correctly
+        assert!(verify_password("SamePassword1", &h1).unwrap());
+        assert!(verify_password("SamePassword1", &h2).unwrap());
+    }
+
+    #[test]
+    fn test_verify_password_rejects_invalid_hash() {
+        let result = verify_password("test", "not_a_valid_hash");
+        assert!(result.is_err());
+    }
+}

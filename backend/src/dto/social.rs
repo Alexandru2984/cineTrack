@@ -60,3 +60,87 @@ pub struct ListResponse {
 pub struct AddListItemRequest {
     pub media_id: Uuid,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use validator::Validate;
+
+    #[test]
+    fn test_create_list_valid() {
+        let req = CreateListRequest {
+            name: "My Favorites".to_string(),
+            description: Some("Best movies ever".to_string()),
+            is_public: Some(true),
+        };
+        assert!(req.validate().is_ok());
+    }
+
+    #[test]
+    fn test_create_list_empty_name_rejected() {
+        let req = CreateListRequest {
+            name: "".to_string(),
+            description: None,
+            is_public: None,
+        };
+        assert!(req.validate().is_err());
+    }
+
+    #[test]
+    fn test_create_list_name_too_long() {
+        let req = CreateListRequest {
+            name: "x".repeat(201),
+            description: None,
+            is_public: None,
+        };
+        assert!(req.validate().is_err());
+    }
+
+    #[test]
+    fn test_create_list_name_boundary_200() {
+        let req = CreateListRequest {
+            name: "x".repeat(200),
+            description: None,
+            is_public: None,
+        };
+        assert!(req.validate().is_ok());
+    }
+
+    #[test]
+    fn test_create_list_description_too_long() {
+        let req = CreateListRequest {
+            name: "Test".to_string(),
+            description: Some("x".repeat(1001)),
+            is_public: None,
+        };
+        assert!(req.validate().is_err());
+    }
+
+    #[test]
+    fn test_create_list_description_boundary_1000() {
+        let req = CreateListRequest {
+            name: "Test".to_string(),
+            description: Some("x".repeat(1000)),
+            is_public: None,
+        };
+        assert!(req.validate().is_ok());
+    }
+
+    #[test]
+    fn test_update_list_all_none_valid() {
+        let req = UpdateListRequest {
+            name: None, description: None, is_public: None,
+        };
+        assert!(req.validate().is_ok());
+    }
+
+    #[test]
+    fn test_update_list_empty_name_rejected() {
+        let req = UpdateListRequest {
+            name: Some("".to_string()),
+            description: None,
+            is_public: None,
+        };
+        assert!(req.validate().is_err());
+    }
+}

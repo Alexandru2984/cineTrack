@@ -61,3 +61,51 @@ pub struct HistoryResponse {
     pub episode_name: Option<String>,
     pub watched_at: chrono::DateTime<chrono::Utc>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use validator::Validate;
+
+    #[test]
+    fn test_update_tracking_valid_all_none() {
+        let req = UpdateTrackingRequest {
+            status: None, rating: None, review: None,
+            is_favorite: None, started_at: None, completed_at: None,
+        };
+        assert!(req.validate().is_ok());
+    }
+
+    #[test]
+    fn test_update_tracking_review_too_long() {
+        let req = UpdateTrackingRequest {
+            status: None, rating: None,
+            review: Some("x".repeat(5001)),
+            is_favorite: None, started_at: None, completed_at: None,
+        };
+        assert!(req.validate().is_err());
+    }
+
+    #[test]
+    fn test_update_tracking_review_boundary_5000() {
+        let req = UpdateTrackingRequest {
+            status: None, rating: None,
+            review: Some("x".repeat(5000)),
+            is_favorite: None, started_at: None, completed_at: None,
+        };
+        assert!(req.validate().is_ok());
+    }
+
+    #[test]
+    fn test_update_tracking_with_valid_fields() {
+        let req = UpdateTrackingRequest {
+            status: Some("completed".to_string()),
+            rating: Some(8),
+            review: Some("Great movie!".to_string()),
+            is_favorite: Some(true),
+            started_at: None,
+            completed_at: None,
+        };
+        assert!(req.validate().is_ok());
+    }
+}

@@ -23,7 +23,6 @@ pub struct OAuthAccount {
     pub user_id: Uuid,
     pub provider: String,
     pub provider_user_id: String,
-    pub access_token: Option<String>,
     pub created_at: DateTime<Utc>,
 }
 

@@ -97,3 +97,165 @@ pub struct RefreshRequest {
 pub struct LogoutRequest {
     pub refresh_token: String,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use validator::Validate;
+
+    // --- Password strength validator tests ---
+
+    #[test]
+    fn test_password_valid() {
+        assert!(validate_password_strength("MyPass123").is_ok());
+    }
+
+    #[test]
+    fn test_password_valid_complex() {
+        assert!(validate_password_strength("C0mpl3x!P@ss").is_ok());
+    }
+
+    #[test]
+    fn test_password_no_digit() {
+        assert!(validate_password_strength("OnlyLetters").is_err());
+    }
+
+    #[test]
+    fn test_password_no_letter() {
+        assert!(validate_password_strength("12345678").is_err());
+    }
+
+    #[test]
+    fn test_password_all_same_char() {
+        assert!(validate_password_strength("aaaaaaaa").is_err());
+    }
+
+    #[test]
+    fn test_password_all_same_digit() {
+        assert!(validate_password_strength("11111111").is_err());
+    }
+
+    #[test]
+    fn test_password_mixed_but_all_same() {
+        // All same character — even if it looks complex, rejects
+        assert!(validate_password_strength("aaaaaaaa").is_err());
+    }
+
+    #[test]
+    fn test_password_minimum_valid() {
+        // Exactly 1 letter + 1 digit + not all same
+        assert!(validate_password_strength("a1b2c3d4").is_ok());
+    }
+
+    // --- RegisterRequest validation tests ---
+
+    #[test]
+    fn test_register_valid() {
+        let req = RegisterRequest {
+            username: "testuser".to_string(),
+            email: "test@example.com".to_string(),
+            password: "SecurePass1".to_string(),
+        };
+        assert!(req.validate().is_ok());
+    }
+
+    #[test]
+    fn test_register_username_too_short() {
+        let req = RegisterRequest {
+            username: "ab".to_string(),
+            email: "test@example.com".to_string(),
+            password: "SecurePass1".to_string(),
+        };
+        assert!(req.validate().is_err());
+    }
+
+    #[test]
+    fn test_register_username_too_long() {
+        let req = RegisterRequest {
+            username: "a".repeat(51),
+            email: "test@example.com".to_string(),
+            password: "SecurePass1".to_string(),
+        };
+        assert!(req.validate().is_err());
+    }
+
+    #[test]
+    fn test_register_invalid_email() {
+        let req = RegisterRequest {
+            username: "testuser".to_string(),
+            email: "not-an-email".to_string(),
+            password: "SecurePass1".to_string(),
+        };
+        assert!(req.validate().is_err());
+    }
+
+    #[test]
+    fn test_register_password_too_short() {
+        let req = RegisterRequest {
+            username: "testuser".to_string(),
+            email: "test@example.com".to_string(),
+            password: "Short1".to_string(),
+        };
+        assert!(req.validate().is_err());
+    }
+
+    #[test]
+    fn test_register_password_too_long() {
+        let req = RegisterRequest {
+            username: "testuser".to_string(),
+            email: "test@example.com".to_string(),
+            password: format!("{}1", "a".repeat(128)),
+        };
+        assert!(req.validate().is_err());
+    }
+
+    #[test]
+    fn test_register_password_no_digit_fails_custom() {
+        let req = RegisterRequest {
+            username: "testuser".to_string(),
+            email: "test@example.com".to_string(),
+            password: "OnlyLettersHere".to_string(),
+        };
+        assert!(req.validate().is_err());
+    }
+
+    #[test]
+    fn test_register_password_no_letter_fails_custom() {
+        let req = RegisterRequest {
+            username: "testuser".to_string(),
+            email: "test@example.com".to_string(),
+            password: "123456789".to_string(),
+        };
+        assert!(req.validate().is_err());
+    }
+
+    #[test]
+    fn test_register_username_boundary_3_chars() {
+        let req = RegisterRequest {
+            username: "abc".to_string(),
+            email: "test@example.com".to_string(),
+            password: "SecurePass1".to_string(),
+        };
+        assert!(req.validate().is_ok());
+    }
+
+    #[test]
+    fn test_register_username_boundary_50_chars() {
+        let req = RegisterRequest {
+            username: "a".repeat(50),
+            email: "test@example.com".to_string(),
+            password: "SecurePass1".to_string(),
+        };
+        assert!(req.validate().is_ok());
+    }
+
+    #[test]
+    fn test_register_password_boundary_8_chars() {
+        let req = RegisterRequest {
+            username: "testuser".to_string(),
+            email: "test@example.com".to_string(),
+            password: "Abcdef1x".to_string(), // exactly 8
+        };
+        assert!(req.validate().is_ok());
+    }
+}
