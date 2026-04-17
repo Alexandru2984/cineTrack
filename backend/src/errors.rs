@@ -73,7 +73,8 @@ impl From<validator::ValidationErrors> for AppError {
 
 impl From<jsonwebtoken::errors::Error> for AppError {
     fn from(err: jsonwebtoken::errors::Error) -> Self {
-        AppError::Unauthorized(format!("Invalid token: {}", err))
+        log::debug!("JWT validation failed: {}", err);
+        AppError::Unauthorized("Invalid or expired token".to_string())
     }
 }
 

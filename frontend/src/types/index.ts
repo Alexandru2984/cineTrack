@@ -118,6 +118,7 @@ export interface PublicUserProfile {
   username: string;
   avatar_url: string | null;
   bio: string | null;
+  is_public: boolean;
   followers_count: number;
   following_count: number;
   is_following: boolean;

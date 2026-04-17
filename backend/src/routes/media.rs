@@ -1,9 +1,10 @@
-use actix_web::{web, HttpResponse};
+use actix_web::{web, HttpRequest, HttpResponse};
 use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::dto::media::*;
 use crate::errors::AppError;
+use crate::middleware::auth::require_auth;
 use crate::services::tmdb::TmdbService;
 
 pub fn configure(cfg: &mut web::ServiceConfig) {
@@ -19,8 +20,10 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
 
 async fn search(
     tmdb: web::Data<TmdbService>,
+    req: HttpRequest,
     query: web::Query<SearchQuery>,
 ) -> Result<HttpResponse, AppError> {
+    require_auth(&req).await?;
     let results = tmdb
         .search(&query.q, query.media_type.as_deref(), query.page)
         .await?;
@@ -30,7 +33,9 @@ async fn search(
 
 async fn trending(
     tmdb: web::Data<TmdbService>,
+    req: HttpRequest,
 ) -> Result<HttpResponse, AppError> {
+    require_auth(&req).await?;
     let results = tmdb.get_trending().await?;
     Ok(HttpResponse::Ok().json(results))
 }
@@ -38,9 +43,11 @@ async fn trending(
 async fn get_detail(
     pool: web::Data<PgPool>,
     tmdb: web::Data<TmdbService>,
+    req: HttpRequest,
     path: web::Path<String>,
     query: web::Query<std::collections::HashMap<String, String>>,
 ) -> Result<HttpResponse, AppError> {
+    require_auth(&req).await?;
     let id_str = path.into_inner();
     let media_type = query.get("type").map(|s| s.as_str()).unwrap_or("movie");
 
@@ -66,8 +73,10 @@ async fn get_detail(
 
 async fn get_seasons(
     pool: web::Data<PgPool>,
+    req: HttpRequest,
     path: web::Path<String>,
 ) -> Result<HttpResponse, AppError> {
+    require_auth(&req).await?;
     let id_str = path.into_inner();
 
     let media_id = if let Ok(uuid) = id_str.parse::<Uuid>() {
@@ -97,8 +106,10 @@ async fn get_seasons(
 async fn get_episodes(
     pool: web::Data<PgPool>,
     tmdb: web::Data<TmdbService>,
+    req: HttpRequest,
     path: web::Path<(String, i32)>,
 ) -> Result<HttpResponse, AppError> {
+    require_auth(&req).await?;
     let (id_str, season_number) = path.into_inner();
 
     let media = if let Ok(uuid) = id_str.parse::<Uuid>() {

@@ -22,7 +22,7 @@ export default function LoginPage() {
         <div className="text-center">
           <Film className="mx-auto h-12 w-12 text-[hsl(var(--primary))]" />
           <h1 className="mt-4 text-3xl font-bold">Welcome back</h1>
-          <p className="mt-2 text-[hsl(var(--muted-foreground))]">Sign in to your CineTrack account</p>
+          <p className="mt-2 text-[hsl(var(--muted-foreground))]">Sign in to your Văzute account</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">

@@ -103,17 +103,22 @@ async fn create_tracking(
     .await?;
 
     // Auto-create watch_history entry for tracking activity (for heatmap)
+    // Only insert if no entry exists for this user+media today (prevents duplicates)
     let _ = sqlx::query(
         r#"INSERT INTO watch_history (user_id, media_id, watched_at)
-        VALUES ($1, $2, NOW())
-        ON CONFLICT DO NOTHING"#
+        SELECT $1, $2, NOW()
+        WHERE NOT EXISTS (
+            SELECT 1 FROM watch_history
+            WHERE user_id = $1 AND media_id = $2 AND episode_id IS NULL
+            AND watched_at::date = CURRENT_DATE
+        )"#
     )
     .bind(user_id)
     .bind(media.id)
     .execute(pool.get_ref())
     .await;
 
-    // If completed TV show, also mark all cached episodes as watched
+    // If completed TV show, also mark all cached episodes as watched (skip already watched today)
     if data.status == "completed" && media.media_type == "tv" {
         let _ = sqlx::query(
             r#"INSERT INTO watch_history (user_id, media_id, episode_id, watched_at)
@@ -121,7 +126,11 @@ async fn create_tracking(
             FROM episodes e
             JOIN seasons s ON e.season_id = s.id
             WHERE s.media_id = $2
-            ON CONFLICT DO NOTHING"#
+            AND NOT EXISTS (
+                SELECT 1 FROM watch_history wh
+                WHERE wh.user_id = $1 AND wh.media_id = $2 AND wh.episode_id = e.id
+                AND wh.watched_at::date = CURRENT_DATE
+            )"#
         )
         .bind(user_id)
         .bind(media.id)

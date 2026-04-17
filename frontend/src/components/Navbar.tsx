@@ -25,7 +25,7 @@ export function Navbar() {
         <div className="flex h-16 items-center justify-between">
           <Link to="/" className="flex items-center gap-2 text-xl font-bold text-[hsl(var(--primary))]">
             <Film className="h-6 w-6" />
-            CineTrack
+            Văzute
           </Link>
 
           {authed && (
