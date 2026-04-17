@@ -160,7 +160,8 @@ pub async fn get_current_user(
     Ok(UserResponse::from(user))
 }
 
-/// Issue a new access + refresh token pair, storing the refresh token in DB
+/// Issue a new access + refresh token pair, storing the refresh token in DB.
+/// Caps active refresh tokens at 5 per user — oldest are deleted when exceeded.
 async fn issue_token_pair(
     pool: &PgPool,
     config: &Config,
@@ -177,6 +178,19 @@ async fn issue_token_pair(
     .bind(user.id)
     .bind(&token_hash)
     .bind(expires_at)
+    .execute(pool)
+    .await?;
+
+    // Keep at most 5 active tokens per user — delete oldest beyond that
+    sqlx::query(
+        r#"DELETE FROM refresh_tokens WHERE id IN (
+            SELECT id FROM refresh_tokens
+            WHERE user_id = $1
+            ORDER BY created_at DESC
+            OFFSET 5
+        )"#
+    )
+    .bind(user.id)
     .execute(pool)
     .await?;
 

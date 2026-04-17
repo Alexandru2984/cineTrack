@@ -1,6 +1,7 @@
 use actix_web::{web, HttpRequest, HttpResponse};
 use sqlx::PgPool;
 use uuid::Uuid;
+use validator::Validate;
 
 use crate::dto::tracking::*;
 use crate::errors::AppError;
@@ -20,20 +21,25 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
 async fn list_tracking(
     pool: web::Data<PgPool>,
     req: HttpRequest,
-    query: web::Query<std::collections::HashMap<String, String>>,
+    query: web::Query<TrackingQueryParams>,
 ) -> Result<HttpResponse, AppError> {
     let user_id = require_auth(&req).await?;
-    let status_filter = query.get("status");
+    let params = query.into_inner();
+    let limit = params.limit.unwrap_or(50).min(100) as i64;
+    let offset = ((params.page.unwrap_or(1).max(1) - 1) as i64) * limit;
 
-    let rows = if let Some(status) = status_filter {
+    let rows = if let Some(status) = params.status {
         sqlx::query_as::<_, (Uuid, Uuid, i32, String, String, Option<String>, String, Option<i16>, Option<String>, bool, Option<chrono::NaiveDate>, Option<chrono::NaiveDate>)>(
             r#"SELECT um.id, um.media_id, m.tmdb_id, m.media_type, m.title, m.poster_path, um.status, um.rating, um.review, um.is_favorite, um.started_at, um.completed_at
             FROM user_media um JOIN media m ON um.media_id = m.id
             WHERE um.user_id = $1 AND um.status = $2
-            ORDER BY um.updated_at DESC"#
+            ORDER BY um.updated_at DESC
+            LIMIT $3 OFFSET $4"#
         )
         .bind(user_id)
         .bind(status)
+        .bind(limit)
+        .bind(offset)
         .fetch_all(pool.get_ref())
         .await?
     } else {
@@ -41,9 +47,12 @@ async fn list_tracking(
             r#"SELECT um.id, um.media_id, m.tmdb_id, m.media_type, m.title, m.poster_path, um.status, um.rating, um.review, um.is_favorite, um.started_at, um.completed_at
             FROM user_media um JOIN media m ON um.media_id = m.id
             WHERE um.user_id = $1
-            ORDER BY um.updated_at DESC"#
+            ORDER BY um.updated_at DESC
+            LIMIT $2 OFFSET $3"#
         )
         .bind(user_id)
+        .bind(limit)
+        .bind(offset)
         .fetch_all(pool.get_ref())
         .await?
     };
@@ -144,6 +153,7 @@ async fn update_tracking(
 ) -> Result<HttpResponse, AppError> {
     let user_id = require_auth(&req).await?;
     let tracking_id = path.into_inner();
+    body.validate()?;
     let data = body.into_inner();
 
     if let Some(ref status) = data.status {

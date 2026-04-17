@@ -193,7 +193,8 @@ async fn my_genres(
         jsonb_array_elements(m.genres) as genre
         WHERE um.user_id = $1 AND m.genres IS NOT NULL
         GROUP BY genre_name
-        ORDER BY count DESC"#
+        ORDER BY count DESC
+        LIMIT 50"#
     )
     .bind(user_id)
     .fetch_all(pool.get_ref())

@@ -1,6 +1,6 @@
 use std::env;
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct Config {
     pub app_env: String,
     pub app_host: String,

@@ -1,7 +1,9 @@
 use actix_web::{web, HttpRequest, HttpResponse};
 use sqlx::PgPool;
 use uuid::Uuid;
+use validator::Validate;
 
+use crate::dto::common::PaginationParams;
 use crate::dto::social::*;
 use crate::errors::AppError;
 use crate::middleware::auth::require_auth;
@@ -22,17 +24,23 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
 async fn my_lists(
     pool: web::Data<PgPool>,
     req: HttpRequest,
+    pagination: web::Query<PaginationParams>,
 ) -> Result<HttpResponse, AppError> {
     let user_id = require_auth(&req).await?;
+    let limit = pagination.limit_val();
+    let offset = pagination.offset();
 
     let lists = sqlx::query_as::<_, (Uuid, String, Option<String>, bool, i64, chrono::DateTime<chrono::Utc>)>(
         r#"SELECT l.id, l.name, l.description, l.is_public,
             (SELECT COUNT(*) FROM list_items li WHERE li.list_id = l.id) as item_count,
             l.created_at
         FROM lists l WHERE l.user_id = $1
-        ORDER BY l.created_at DESC"#
+        ORDER BY l.created_at DESC
+        LIMIT $2 OFFSET $3"#
     )
     .bind(user_id)
+    .bind(limit)
+    .bind(offset)
     .fetch_all(pool.get_ref())
     .await?;
 
@@ -49,6 +57,7 @@ async fn create_list(
     body: web::Json<CreateListRequest>,
 ) -> Result<HttpResponse, AppError> {
     let user_id = require_auth(&req).await?;
+    body.validate()?;
     let data = body.into_inner();
 
     let list = sqlx::query_as::<_, crate::models::List>(
@@ -72,6 +81,7 @@ async fn get_list(
     path: web::Path<Uuid>,
 ) -> Result<HttpResponse, AppError> {
     let list_id = path.into_inner();
+    let current_user_id = require_auth(&req).await.ok();
 
     let list = sqlx::query_as::<_, crate::models::List>(
         "SELECT * FROM lists WHERE id = $1"
@@ -80,6 +90,14 @@ async fn get_list(
     .fetch_optional(pool.get_ref())
     .await?
     .ok_or_else(|| AppError::NotFound("List not found".to_string()))?;
+
+    // Private lists are only visible to the owner
+    if !list.is_public {
+        match current_user_id {
+            Some(uid) if uid == list.user_id => {}
+            _ => return Err(AppError::NotFound("List not found".to_string())),
+        }
+    }
 
     let items = sqlx::query_as::<_, crate::models::Media>(
         r#"SELECT m.* FROM media m
@@ -105,6 +123,7 @@ async fn update_list(
 ) -> Result<HttpResponse, AppError> {
     let user_id = require_auth(&req).await?;
     let list_id = path.into_inner();
+    body.validate()?;
     let data = body.into_inner();
 
     let list = sqlx::query_as::<_, crate::models::List>(

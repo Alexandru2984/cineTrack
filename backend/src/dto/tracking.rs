@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+use validator::Validate;
 
 #[derive(Debug, Deserialize)]
 pub struct CreateTrackingRequest {
@@ -8,14 +9,22 @@ pub struct CreateTrackingRequest {
     pub status: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Validate)]
 pub struct UpdateTrackingRequest {
     pub status: Option<String>,
     pub rating: Option<i16>,
+    #[validate(length(max = 5000, message = "Review must be at most 5000 characters"))]
     pub review: Option<String>,
     pub is_favorite: Option<bool>,
     pub started_at: Option<chrono::NaiveDate>,
     pub completed_at: Option<chrono::NaiveDate>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TrackingQueryParams {
+    pub status: Option<String>,
+    pub page: Option<u32>,
+    pub limit: Option<u32>,
 }
 
 #[derive(Debug, Serialize)]
