@@ -1,10 +1,12 @@
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '@/store/auth';
-import { Film, Search, User, LogOut, BarChart3, Menu, X } from 'lucide-react';
+import { useThemeStore } from '@/store/theme';
+import { Film, Search, User, LogOut, BarChart3, Menu, X, Sun, Moon } from 'lucide-react';
 import { useState } from 'react';
 
 export function Navbar() {
   const { user, logout, isAuthenticated } = useAuthStore();
+  const { isDark, toggle } = useThemeStore();
   const navigate = useNavigate();
   const [mobileOpen, setMobileOpen] = useState(false);
   const authed = isAuthenticated();
@@ -40,11 +42,17 @@ export function Navbar() {
               <button onClick={handleLogout} className="flex items-center gap-1 text-sm text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--destructive))] transition-colors">
                 <LogOut className="h-4 w-4" /> Logout
               </button>
+              <button onClick={toggle} className="rounded-md p-2 hover:bg-[hsl(var(--accent))] transition-colors" title="Toggle theme">
+                {isDark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+              </button>
             </div>
           )}
 
           {!authed && (
             <div className="hidden md:flex items-center gap-4">
+              <button onClick={toggle} className="rounded-md p-2 hover:bg-[hsl(var(--accent))] transition-colors" title="Toggle theme">
+                {isDark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+              </button>
               <Link to="/login" className="text-sm hover:text-[hsl(var(--primary))]">Login</Link>
               <Link to="/register" className="rounded-md bg-[hsl(var(--primary))] px-4 py-2 text-sm text-white hover:opacity-90">Register</Link>
             </div>
@@ -64,9 +72,11 @@ export function Navbar() {
                 <Link to="/stats" className="block py-2 text-sm" onClick={() => setMobileOpen(false)}>Stats</Link>
                 <Link to={`/profile/${user?.username}`} className="block py-2 text-sm" onClick={() => setMobileOpen(false)}>Profile</Link>
                 <button onClick={handleLogout} className="block py-2 text-sm text-[hsl(var(--destructive))]">Logout</button>
+                <button onClick={toggle} className="flex items-center gap-2 py-2 text-sm">{isDark ? <><Sun className="h-4 w-4" /> Light Mode</> : <><Moon className="h-4 w-4" /> Dark Mode</>}</button>
               </>
             ) : (
               <>
+                <button onClick={toggle} className="flex items-center gap-2 py-2 text-sm">{isDark ? <><Sun className="h-4 w-4" /> Light Mode</> : <><Moon className="h-4 w-4" /> Dark Mode</>}</button>
                 <Link to="/login" className="block py-2 text-sm" onClick={() => setMobileOpen(false)}>Login</Link>
                 <Link to="/register" className="block py-2 text-sm" onClick={() => setMobileOpen(false)}>Register</Link>
               </>
