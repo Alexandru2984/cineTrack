@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '@/lib/api';
-import type { PublicUserProfile, ActivityItem, User } from '@/types';
+import type { PublicUserProfile, ActivityItem, UserSummary } from '@/types';
 
 export function useUserProfile(username: string) {
   return useQuery<PublicUserProfile>({
@@ -45,7 +45,7 @@ export function useUnfollow() {
 }
 
 export function useFollowers() {
-  return useQuery<User[]>({
+  return useQuery<UserSummary[]>({
     queryKey: ['followers'],
     queryFn: async () => {
       const res = await api.get('/users/me/followers');
@@ -55,7 +55,7 @@ export function useFollowers() {
 }
 
 export function useFollowing() {
-  return useQuery<User[]>({
+  return useQuery<UserSummary[]>({
     queryKey: ['following'],
     queryFn: async () => {
       const res = await api.get('/users/me/following');

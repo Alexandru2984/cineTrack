@@ -1,3 +1,4 @@
+use actix_governor::{Governor, GovernorConfigBuilder};
 use actix_web::{web, HttpRequest, HttpResponse};
 use sqlx::PgPool;
 use validator::Validate;
@@ -9,8 +10,15 @@ use crate::middleware::auth::require_auth;
 use crate::services;
 
 pub fn configure(cfg: &mut web::ServiceConfig) {
+    let auth_governor = GovernorConfigBuilder::default()
+        .per_second(3)
+        .burst_size(10)
+        .finish()
+        .expect("Failed to build auth rate limiter");
+
     cfg.service(
         web::scope("/auth")
+            .wrap(Governor::new(&auth_governor))
             .route("/register", web::post().to(register))
             .route("/login", web::post().to(login))
             .route("/logout", web::post().to(logout))
@@ -38,18 +46,20 @@ async fn login(
     Ok(HttpResponse::Ok().json(resp))
 }
 
-async fn logout() -> Result<HttpResponse, AppError> {
-    // In a full implementation, we'd invalidate the refresh token
+async fn logout(
+    pool: web::Data<PgPool>,
+    body: web::Json<LogoutRequest>,
+) -> Result<HttpResponse, AppError> {
+    services::auth::logout(pool.get_ref(), body.into_inner()).await?;
     Ok(HttpResponse::Ok().json(serde_json::json!({"message": "Logged out successfully"})))
 }
 
 async fn refresh(
     pool: web::Data<PgPool>,
     config: web::Data<Config>,
-    req: HttpRequest,
+    body: web::Json<RefreshRequest>,
 ) -> Result<HttpResponse, AppError> {
-    let user_id = require_auth(&req).await?;
-    let resp = services::auth::refresh_token(pool.get_ref(), config.get_ref(), user_id).await?;
+    let resp = services::auth::refresh_token(pool.get_ref(), config.get_ref(), body.into_inner()).await?;
     Ok(HttpResponse::Ok().json(resp))
 }
 

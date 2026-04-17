@@ -1,6 +1,7 @@
 use chrono::{Duration, Utc};
 use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::errors::AppError;
@@ -41,10 +42,12 @@ pub fn generate_refresh_token() -> String {
     use rand::Rng;
     let mut rng = rand::thread_rng();
     let bytes: Vec<u8> = (0..64).map(|_| rng.gen()).collect();
-    use std::fmt::Write;
-    let mut hex = String::with_capacity(128);
-    for b in bytes {
-        let _ = write!(hex, "{:02x}", b);
-    }
-    hex
+    hex::encode(bytes)
+}
+
+/// SHA-256 hash for refresh token storage (fast, secure for high-entropy tokens)
+pub fn hash_refresh_token(token: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(token.as_bytes());
+    hex::encode(hasher.finalize())
 }

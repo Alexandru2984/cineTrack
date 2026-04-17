@@ -9,6 +9,7 @@ mod services;
 mod utils;
 
 use actix_cors::Cors;
+use actix_governor::{Governor, GovernorConfigBuilder};
 use actix_web::{web, App, HttpServer, middleware as actix_middleware};
 use services::tmdb::TmdbService;
 
@@ -34,6 +35,12 @@ async fn main() -> std::io::Result<()> {
     let port = config.app_port;
     let allowed_origins = config.cors_allowed_origins.clone();
 
+    let governor_conf = GovernorConfigBuilder::default()
+        .per_second(config.rate_limit_rps.into())
+        .burst_size(config.rate_limit_burst)
+        .finish()
+        .expect("Failed to build rate limiter config");
+
     log::info!("Starting server at {}:{}", host, port);
 
     HttpServer::new(move || {
@@ -44,7 +51,6 @@ async fn main() -> std::io::Result<()> {
                 actix_web::http::header::CONTENT_TYPE,
                 actix_web::http::header::ACCEPT,
             ])
-            .supports_credentials()
             .max_age(3600);
 
         for origin in &allowed_origins {
@@ -52,6 +58,7 @@ async fn main() -> std::io::Result<()> {
         }
 
         App::new()
+            .wrap(Governor::new(&governor_conf))
             .wrap(cors)
             .wrap(actix_middleware::Logger::default())
             .app_data(web::Data::new(pool.clone()))

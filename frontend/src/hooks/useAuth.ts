@@ -10,7 +10,7 @@ export function useRegister() {
       const res = await api.post<AuthResponse>('/auth/register', data);
       return res.data;
     },
-    onSuccess: (data) => setAuth(data.access_token, data.user),
+    onSuccess: (data) => setAuth(data.access_token, data.refresh_token, data.user),
   });
 }
 
@@ -21,7 +21,20 @@ export function useLogin() {
       const res = await api.post<AuthResponse>('/auth/login', data);
       return res.data;
     },
-    onSuccess: (data) => setAuth(data.access_token, data.user),
+    onSuccess: (data) => setAuth(data.access_token, data.refresh_token, data.user),
+  });
+}
+
+export function useLogout() {
+  const logout = useAuthStore((s) => s.logout);
+  const refreshToken = useAuthStore((s) => s.refreshToken);
+  return useMutation({
+    mutationFn: async () => {
+      if (refreshToken) {
+        await api.post('/auth/logout', { refresh_token: refreshToken }).catch(() => {});
+      }
+    },
+    onSuccess: () => logout(),
   });
 }
 

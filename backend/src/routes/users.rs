@@ -179,7 +179,7 @@ async fn my_followers(
     .fetch_all(pool.get_ref())
     .await?;
 
-    let response: Vec<crate::dto::auth::UserResponse> = followers.into_iter().map(|u| u.into()).collect();
+    let response: Vec<crate::dto::auth::UserSummary> = followers.into_iter().map(|u| u.into()).collect();
     Ok(HttpResponse::Ok().json(response))
 }
 
@@ -190,13 +190,13 @@ async fn my_following(
     let user_id = require_auth(&req).await?;
 
     let following = sqlx::query_as::<_, User>(
-        "SELECT u.* FROM users u JOIN follows f ON u.id = f.follower_id WHERE f.follower_id = $1"
+        "SELECT u.* FROM users u JOIN follows f ON u.id = f.following_id WHERE f.follower_id = $1"
     )
     .bind(user_id)
     .fetch_all(pool.get_ref())
     .await?;
 
-    let response: Vec<crate::dto::auth::UserResponse> = following.into_iter().map(|u| u.into()).collect();
+    let response: Vec<crate::dto::auth::UserSummary> = following.into_iter().map(|u| u.into()).collect();
     Ok(HttpResponse::Ok().json(response))
 }
 

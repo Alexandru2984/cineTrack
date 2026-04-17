@@ -8,8 +8,16 @@ export interface User {
   created_at: string;
 }
 
+export interface UserSummary {
+  id: string;
+  username: string;
+  avatar_url: string | null;
+  bio: string | null;
+}
+
 export interface AuthResponse {
   access_token: string;
+  refresh_token: string;
   token_type: string;
   expires_in: number;
   user: User;

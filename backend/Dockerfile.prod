@@ -1,4 +1,4 @@
-FROM rust:1.78-slim AS builder
+FROM rust:1-slim-bookworm AS builder
 RUN apt-get update && apt-get install -y pkg-config libssl-dev && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY Cargo.toml Cargo.lock ./
@@ -8,6 +8,8 @@ RUN touch src/main.rs && cargo build --release
 
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y ca-certificates libssl3 && rm -rf /var/lib/apt/lists/*
+RUN groupadd -r appuser && useradd -r -g appuser -d /app -s /sbin/nologin appuser
 COPY --from=builder /app/target/release/cinetrack /usr/local/bin/cinetrack
 COPY --from=builder /app/migrations /migrations
+USER appuser
 CMD ["cinetrack"]

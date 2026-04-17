@@ -1,19 +1,22 @@
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '@/store/auth';
+import { useLogout } from '@/hooks/useAuth';
 import { useThemeStore } from '@/store/theme';
 import { Film, Search, User, LogOut, BarChart3, Menu, X, Sun, Moon } from 'lucide-react';
 import { useState } from 'react';
 
 export function Navbar() {
-  const { user, logout, isAuthenticated } = useAuthStore();
+  const { user, isAuthenticated } = useAuthStore();
   const { isDark, toggle } = useThemeStore();
   const navigate = useNavigate();
   const [mobileOpen, setMobileOpen] = useState(false);
   const authed = isAuthenticated();
+  const logoutMutation = useLogout();
 
   const handleLogout = () => {
-    logout();
-    navigate('/login');
+    logoutMutation.mutate(undefined, {
+      onSuccess: () => navigate('/login'),
+    });
   };
 
   return (
