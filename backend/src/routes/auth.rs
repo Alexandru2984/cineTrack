@@ -257,7 +257,7 @@ fn refresh_cookie(token: &str, config: &Config) -> Cookie<'static> {
         .finish()
 }
 
-fn clear_refresh_cookie(config: &Config) -> Cookie<'static> {
+pub(crate) fn clear_refresh_cookie(config: &Config) -> Cookie<'static> {
     Cookie::build(REFRESH_COOKIE_NAME, "")
         .http_only(true)
         .secure(config.is_production())

@@ -38,6 +38,15 @@ pub struct UpdateProfileRequest {
     pub is_public: Option<bool>,
 }
 
+/// Account deletion is irreversible, so we require the current password as a
+/// confirmation step (also blocks CSRF-style state changes from a stolen cookie
+/// alone, since the access token is required separately).
+#[derive(Debug, Deserialize, Validate)]
+pub struct DeleteAccountRequest {
+    #[validate(length(min = 1, message = "Password is required"))]
+    pub password: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

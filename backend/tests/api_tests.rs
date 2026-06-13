@@ -1025,6 +1025,82 @@ async fn test_update_profile_avatar_xss_rejected() {
     assert_eq!(resp.status(), 400);
 }
 
+// ── Account Deletion Tests ────────────────────────────────────
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn test_delete_account_requires_auth() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+
+    let req = actix_test::TestRequest::delete()
+        .uri("/api/users/me")
+        .set_json(json!({ "password": "Pass1234" }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 401);
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn test_delete_account_wrong_password_rejected() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+
+    let (token, _, _) = register_user(&app, "deluser", "del@example.com", "Pass1234").await;
+
+    let req = actix_test::TestRequest::delete()
+        .uri("/api/users/me")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .set_json(json!({ "password": "WrongPass1" }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 401);
+
+    // Account still exists.
+    login_user(&app, "del@example.com", "Pass1234").await;
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn test_delete_account_success() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+
+    let (token, _, _) = register_user(&app, "goneuser", "gone@example.com", "Pass1234").await;
+
+    let req = actix_test::TestRequest::delete()
+        .uri("/api/users/me")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .set_json(json!({ "password": "Pass1234" }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+
+    // Login no longer works and the profile is gone.
+    let req = actix_test::TestRequest::post()
+        .uri("/api/auth/login")
+        .set_json(json!({ "email": "gone@example.com", "password": "Pass1234" }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 401);
+
+    let req = actix_test::TestRequest::get()
+        .uri("/api/users/goneuser")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 404);
+}
+
 // ── Follow System Tests ───────────────────────────────────────
 
 #[actix_web::test]

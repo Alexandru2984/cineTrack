@@ -3,17 +3,20 @@ use sqlx::PgPool;
 use uuid::Uuid;
 use validator::Validate;
 
+use crate::config::Config;
 use crate::dto::common::PaginationParams;
 use crate::dto::social::*;
 use crate::dto::user::*;
 use crate::errors::AppError;
 use crate::middleware::auth::require_auth;
 use crate::models::User;
+use crate::utils::password;
 
 pub fn configure(cfg: &mut web::ServiceConfig) {
     cfg.service(
         web::scope("/users")
             .route("/me", web::patch().to(update_profile))
+            .route("/me", web::delete().to(delete_account))
             .route("/me/followers", web::get().to(my_followers))
             .route("/me/following", web::get().to(my_following))
             .route("/{username}", web::get().to(get_profile))
@@ -114,6 +117,43 @@ async fn update_profile(
     .await?;
 
     Ok(HttpResponse::Ok().json(crate::dto::auth::UserResponse::from(user)))
+}
+
+/// Permanently delete the authenticated user's account. Requires re-entering
+/// the password; all related rows are removed via ON DELETE CASCADE, and the
+/// refresh cookie is cleared so the now-orphaned session ends cleanly.
+async fn delete_account(
+    pool: web::Data<PgPool>,
+    config: web::Data<Config>,
+    req: HttpRequest,
+    body: web::Json<DeleteAccountRequest>,
+) -> Result<HttpResponse, AppError> {
+    let user_id = require_auth(&req).await?;
+    body.validate()?;
+
+    let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = $1")
+        .bind(user_id)
+        .fetch_optional(pool.get_ref())
+        .await?
+        .ok_or_else(|| AppError::NotFound("User not found".to_string()))?;
+
+    let password_hash = user
+        .password_hash
+        .as_ref()
+        .ok_or_else(|| AppError::BadRequest("Password login is not enabled".to_string()))?;
+
+    if !password::verify_password(&body.password, password_hash)? {
+        return Err(AppError::Unauthorized("Password is incorrect".to_string()));
+    }
+
+    sqlx::query("DELETE FROM users WHERE id = $1")
+        .bind(user_id)
+        .execute(pool.get_ref())
+        .await?;
+
+    Ok(HttpResponse::Ok()
+        .cookie(crate::routes::auth::clear_refresh_cookie(config.get_ref()))
+        .json(serde_json::json!({"message": "Account deleted"})))
 }
 
 async fn follow_user(
