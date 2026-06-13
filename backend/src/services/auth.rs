@@ -8,15 +8,23 @@ use crate::errors::AppError;
 use crate::models::{RefreshToken, User};
 use crate::utils::{jwt, password};
 
+/// Normalize an email for storage and lookup: trimmed and lowercased, so
+/// `Test@X.com ` and `test@x.com` resolve to the same account.
+pub fn normalize_email(email: &str) -> String {
+    email.trim().to_lowercase()
+}
+
 pub async fn register(
     pool: &PgPool,
     config: &Config,
     req: RegisterRequest,
 ) -> Result<(AuthResponse, String), AppError> {
+    let email = normalize_email(&req.email);
+
     let existing = sqlx::query_scalar::<_, i64>(
         "SELECT COUNT(*) FROM users WHERE email = $1 OR username = $2",
     )
-    .bind(&req.email)
+    .bind(&email)
     .bind(&req.username)
     .fetch_one(pool)
     .await?;
@@ -35,7 +43,7 @@ pub async fn register(
         RETURNING *"#,
     )
     .bind(&req.username)
-    .bind(&req.email)
+    .bind(&email)
     .bind(&password_hash)
     .fetch_one(pool)
     .await?;
@@ -57,8 +65,9 @@ pub async fn login(
     config: &Config,
     req: LoginRequest,
 ) -> Result<(AuthResponse, String), AppError> {
+    let email = normalize_email(&req.email);
     let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE email = $1")
-        .bind(&req.email)
+        .bind(&email)
         .fetch_optional(pool)
         .await?
         .ok_or_else(|| AppError::Unauthorized("Invalid email or password".to_string()))?;
@@ -240,4 +249,20 @@ where
     .await?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_normalize_email_lowercases_and_trims() {
+        assert_eq!(normalize_email("  Test@Example.COM  "), "test@example.com");
+    }
+
+    #[test]
+    fn test_normalize_email_idempotent() {
+        let once = normalize_email("user@example.com");
+        assert_eq!(normalize_email(&once), once);
+    }
 }
