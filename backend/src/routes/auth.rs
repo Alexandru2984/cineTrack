@@ -142,3 +142,62 @@ fn clear_refresh_cookie(config: &Config) -> Cookie<'static> {
         .max_age(CookieDuration::seconds(0))
         .finish()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_config(app_env: &str) -> Config {
+        Config {
+            app_env: app_env.to_string(),
+            app_host: "127.0.0.1".to_string(),
+            app_port: 0,
+            frontend_url: "http://localhost:5173".to_string(),
+            database_url: "postgres://example".to_string(),
+            jwt_secret: "test_secret_must_be_64_chars_long_so_we_pad_it_here_abcdefghijklmnopq"
+                .to_string(),
+            jwt_expiry_hours: 1,
+            jwt_refresh_expiry_days: 30,
+            tmdb_api_key: "fake".to_string(),
+            tmdb_base_url: "https://api.themoviedb.org/3".to_string(),
+            tmdb_image_base_url: "https://image.tmdb.org/t/p".to_string(),
+            tmdb_timeout_seconds: 10,
+            cors_allowed_origins: vec!["http://localhost:5173".to_string()],
+            rate_limit_rps: 10,
+            rate_limit_burst: 50,
+        }
+    }
+
+    #[test]
+    fn refresh_cookie_uses_http_only_lax_and_auth_path() {
+        let config = test_config("development");
+        let cookie = refresh_cookie("refresh-token", &config);
+
+        assert_eq!(cookie.name(), REFRESH_COOKIE_NAME);
+        assert_eq!(cookie.value(), "refresh-token");
+        assert_eq!(cookie.path(), Some(REFRESH_COOKIE_PATH));
+        assert_eq!(cookie.http_only(), Some(true));
+        assert_eq!(cookie.secure(), Some(false));
+        assert_eq!(cookie.same_site(), Some(SameSite::Lax));
+    }
+
+    #[test]
+    fn refresh_cookie_is_secure_in_production() {
+        let config = test_config("production");
+        let cookie = refresh_cookie("refresh-token", &config);
+
+        assert_eq!(cookie.secure(), Some(true));
+    }
+
+    #[test]
+    fn clear_refresh_cookie_expires_cookie() {
+        let config = test_config("development");
+        let cookie = clear_refresh_cookie(&config);
+
+        assert_eq!(cookie.name(), REFRESH_COOKIE_NAME);
+        assert_eq!(cookie.value(), "");
+        assert_eq!(cookie.path(), Some(REFRESH_COOKIE_PATH));
+        assert_eq!(cookie.http_only(), Some(true));
+        assert_eq!(cookie.max_age(), Some(CookieDuration::seconds(0)));
+    }
+}

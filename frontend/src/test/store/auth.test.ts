@@ -39,6 +39,15 @@ describe('useAuthStore', () => {
     expect(state.user).toEqual(mockUser);
   });
 
+  it('does not persist refresh tokens', () => {
+    useAuthStore.getState().setAuth('access-tok', mockUser);
+    const persisted = localStorage.getItem('cinetrack-auth');
+
+    expect(persisted).toBeTruthy();
+    expect(persisted).not.toContain('refreshToken');
+    expect(persisted).not.toContain('refresh-tok');
+  });
+
   it('isAuthenticated returns true after setAuth', () => {
     useAuthStore.getState().setAuth('access-tok', mockUser);
     expect(useAuthStore.getState().isAuthenticated()).toBe(true);

@@ -46,3 +46,55 @@ fn is_trusted_proxy_peer(ip: IpAddr) -> bool {
         IpAddr::V6(ip) => ip.is_loopback() || ((ip.segments()[0] & 0xfe00) == 0xfc00),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_plain_ip_and_socket_addr() {
+        assert_eq!(
+            parse_ip("203.0.113.10"),
+            Some(IpAddr::from_str("203.0.113.10").unwrap())
+        );
+        assert_eq!(
+            parse_ip("203.0.113.10:1234"),
+            Some(IpAddr::from_str("203.0.113.10").unwrap())
+        );
+    }
+
+    #[test]
+    fn trusts_loopback_and_private_peers_only() {
+        assert!(is_trusted_proxy_peer(
+            IpAddr::from_str("127.0.0.1").unwrap()
+        ));
+        assert!(is_trusted_proxy_peer(
+            IpAddr::from_str("172.18.0.2").unwrap()
+        ));
+        assert!(!is_trusted_proxy_peer(
+            IpAddr::from_str("203.0.113.10").unwrap()
+        ));
+    }
+
+    #[actix_web::test]
+    async fn extracts_forwarded_ip_from_trusted_proxy_peer() {
+        let req = actix_web::test::TestRequest::default()
+            .peer_addr("172.18.0.2:4321".parse().unwrap())
+            .insert_header(("x-forwarded-for", "203.0.113.10, 172.18.0.2"))
+            .to_srv_request();
+
+        let key = TrustedProxyIpKeyExtractor.extract(&req).unwrap();
+        assert_eq!(key, IpAddr::from_str("203.0.113.10").unwrap());
+    }
+
+    #[actix_web::test]
+    async fn ignores_forwarded_ip_from_untrusted_peer() {
+        let req = actix_web::test::TestRequest::default()
+            .peer_addr("198.51.100.7:4321".parse().unwrap())
+            .insert_header(("x-forwarded-for", "203.0.113.10"))
+            .to_srv_request();
+
+        let key = TrustedProxyIpKeyExtractor.extract(&req).unwrap();
+        assert_eq!(key, IpAddr::from_str("198.51.100.7").unwrap());
+    }
+}
