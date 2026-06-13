@@ -2,7 +2,10 @@ use actix_cors::Cors;
 use actix_governor::{Governor, GovernorConfigBuilder};
 use actix_web::{middleware as actix_middleware, web, App, HttpServer};
 
-use cinetrack::{config, db, routes, services::tmdb::TmdbService};
+use cinetrack::{
+    config, db, middleware::rate_limit::TrustedProxyIpKeyExtractor, routes,
+    services::tmdb::TmdbService,
+};
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
@@ -29,6 +32,7 @@ async fn main() -> std::io::Result<()> {
     let governor_conf = GovernorConfigBuilder::default()
         .requests_per_second(config.rate_limit_rps.into())
         .burst_size(config.rate_limit_burst)
+        .key_extractor(TrustedProxyIpKeyExtractor)
         .finish()
         .expect("Failed to build rate limiter config");
 

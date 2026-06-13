@@ -105,7 +105,12 @@ impl From<jsonwebtoken::errors::Error> for AppError {
 
 impl From<reqwest::Error> for AppError {
     fn from(err: reqwest::Error) -> Self {
-        log::error!("TMDB request error: {}", err);
+        log::error!(
+            "TMDB request failed: status={:?}, timeout={}, connect={}",
+            err.status(),
+            err.is_timeout(),
+            err.is_connect()
+        );
         AppError::TmdbError("External API request failed".to_string())
     }
 }

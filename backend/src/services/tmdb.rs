@@ -1,5 +1,6 @@
 use chrono::{NaiveDate, Utc};
 use sqlx::PgPool;
+use std::time::Duration;
 
 use crate::config::Config;
 use crate::dto::media::*;
@@ -15,8 +16,15 @@ pub struct TmdbService {
 
 impl TmdbService {
     pub fn new(config: &Config) -> Self {
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(config.tmdb_timeout_seconds))
+            .connect_timeout(Duration::from_secs(5))
+            .user_agent("cinetrack/0.1")
+            .build()
+            .expect("Failed to build TMDB HTTP client");
+
         Self {
-            client: reqwest::Client::new(),
+            client,
             api_key: config.tmdb_api_key.clone(),
             base_url: config.tmdb_base_url.clone(),
         }
@@ -45,6 +53,7 @@ impl TmdbService {
             ])
             .send()
             .await?
+            .error_for_status()?
             .json::<TmdbSearchResponse>()
             .await?;
 
@@ -61,6 +70,7 @@ impl TmdbService {
             ])
             .send()
             .await?
+            .error_for_status()?
             .json::<TmdbMovieDetail>()
             .await?;
 
@@ -77,6 +87,7 @@ impl TmdbService {
             ])
             .send()
             .await?
+            .error_for_status()?
             .json::<TmdbTvDetail>()
             .await?;
 
@@ -100,6 +111,7 @@ impl TmdbService {
             ])
             .send()
             .await?
+            .error_for_status()?
             .json::<TmdbSeasonDetail>()
             .await?;
 
@@ -116,6 +128,7 @@ impl TmdbService {
             ])
             .send()
             .await?
+            .error_for_status()?
             .json::<TmdbTrendingResponse>()
             .await?;
 

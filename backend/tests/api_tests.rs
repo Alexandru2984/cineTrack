@@ -63,6 +63,7 @@ fn test_config() -> cinetrack::config::Config {
         tmdb_api_key: "fake_tmdb_key".into(),
         tmdb_base_url: "https://api.themoviedb.org/3".into(),
         tmdb_image_base_url: "https://image.tmdb.org/t/p".into(),
+        tmdb_timeout_seconds: 10,
         cors_allowed_origins: vec!["http://localhost:5173".into()],
         rate_limit_rps: 100,
         rate_limit_burst: 200,

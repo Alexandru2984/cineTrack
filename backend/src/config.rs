@@ -13,6 +13,7 @@ pub struct Config {
     pub tmdb_api_key: String,
     pub tmdb_base_url: String,
     pub tmdb_image_base_url: String,
+    pub tmdb_timeout_seconds: u64,
     pub cors_allowed_origins: Vec<String>,
     pub rate_limit_rps: u32,
     pub rate_limit_burst: u32,
@@ -52,6 +53,10 @@ impl Config {
                 .unwrap_or_else(|_| "https://api.themoviedb.org/3".to_string()),
             tmdb_image_base_url: env::var("TMDB_IMAGE_BASE_URL")
                 .unwrap_or_else(|_| "https://image.tmdb.org/t/p".to_string()),
+            tmdb_timeout_seconds: env::var("TMDB_TIMEOUT_SECONDS")
+                .unwrap_or_else(|_| "10".to_string())
+                .parse()
+                .expect("TMDB_TIMEOUT_SECONDS must be a number"),
             cors_allowed_origins: env::var("CORS_ALLOWED_ORIGINS")
                 .unwrap_or_else(|_| "http://localhost:5173".to_string())
                 .split(',')

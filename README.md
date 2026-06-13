@@ -97,6 +97,7 @@ The application has been through multiple security audits. Key measures include:
    TMDB_API_KEY=<your-tmdb-api-key>
    TMDB_BASE_URL=https://api.themoviedb.org/3
    TMDB_IMAGE_BASE_URL=https://image.tmdb.org/t/p
+   TMDB_TIMEOUT_SECONDS=10
 
    CORS_ALLOWED_ORIGINS=http://localhost:5173
    RATE_LIMIT_REQUESTS_PER_SECOND=10

@@ -10,6 +10,7 @@ use crate::config::Config;
 use crate::dto::auth::*;
 use crate::errors::AppError;
 use crate::middleware::auth::require_auth;
+use crate::middleware::rate_limit::TrustedProxyIpKeyExtractor;
 use crate::services;
 
 const REFRESH_COOKIE_NAME: &str = "cinetrack_refresh";
@@ -19,6 +20,7 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
     let auth_governor = GovernorConfigBuilder::default()
         .requests_per_second(3)
         .burst_size(10)
+        .key_extractor(TrustedProxyIpKeyExtractor)
         .finish()
         .expect("Failed to build auth rate limiter");
 
