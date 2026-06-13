@@ -197,6 +197,50 @@ pub async fn logout(pool: &PgPool, refresh_token: &str) -> Result<(), AppError> 
     Ok(())
 }
 
+/// Change the password of an authenticated user after verifying the current
+/// one, then revoke every refresh token so other sessions must re-authenticate.
+pub async fn change_password(
+    pool: &PgPool,
+    user_id: Uuid,
+    current_password: &str,
+    new_password: &str,
+) -> Result<(), AppError> {
+    let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = $1")
+        .bind(user_id)
+        .fetch_optional(pool)
+        .await?
+        .ok_or_else(|| AppError::NotFound("User not found".to_string()))?;
+
+    let password_hash = user
+        .password_hash
+        .as_ref()
+        .ok_or_else(|| AppError::BadRequest("Password login is not enabled".to_string()))?;
+
+    if !password::verify_password(current_password, password_hash)? {
+        return Err(AppError::Unauthorized(
+            "Current password is incorrect".to_string(),
+        ));
+    }
+
+    let new_hash = password::hash_password(new_password)?;
+
+    let mut tx = pool.begin().await?;
+    sqlx::query("UPDATE users SET password_hash = $2, updated_at = NOW() WHERE id = $1")
+        .bind(user_id)
+        .bind(&new_hash)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query(
+        "UPDATE refresh_tokens SET revoked_at = NOW() WHERE user_id = $1 AND revoked_at IS NULL",
+    )
+    .bind(user_id)
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+
+    Ok(())
+}
+
 pub async fn get_current_user(pool: &PgPool, user_id: Uuid) -> Result<UserResponse, AppError> {
     let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = $1")
         .bind(user_id)

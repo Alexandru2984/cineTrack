@@ -31,6 +31,7 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
             .route("/login", web::post().to(login))
             .route("/logout", web::post().to(logout))
             .route("/refresh", web::post().to(refresh))
+            .route("/password", web::patch().to(change_password))
             .route("/me", web::get().to(me)),
     );
 }
@@ -95,6 +96,29 @@ async fn me(pool: web::Data<PgPool>, req: HttpRequest) -> Result<HttpResponse, A
     let user_id = require_auth(&req).await?;
     let user = services::auth::get_current_user(pool.get_ref(), user_id).await?;
     Ok(HttpResponse::Ok().json(user))
+}
+
+async fn change_password(
+    pool: web::Data<PgPool>,
+    config: web::Data<Config>,
+    req: HttpRequest,
+    body: web::Json<ChangePasswordRequest>,
+) -> Result<HttpResponse, AppError> {
+    let user_id = require_auth(&req).await?;
+    body.validate()?;
+    let data = body.into_inner();
+    services::auth::change_password(
+        pool.get_ref(),
+        user_id,
+        &data.current_password,
+        &data.new_password,
+    )
+    .await?;
+
+    // All refresh tokens were revoked; drop the current session's cookie too.
+    Ok(HttpResponse::Ok()
+        .cookie(clear_refresh_cookie(config.get_ref()))
+        .json(serde_json::json!({"message": "Password changed successfully"})))
 }
 
 fn refresh_token_from_request<T>(req: &HttpRequest, body: Option<&T>) -> Option<String>

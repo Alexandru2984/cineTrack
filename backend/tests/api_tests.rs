@@ -465,6 +465,84 @@ async fn test_logout_invalidates_refresh_token() {
     assert_eq!(resp.status(), 401);
 }
 
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn test_change_password_success() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+
+    let (token, _, _) = register_user(&app, "pwuser", "pw@example.com", "Pass1234").await;
+
+    let req = actix_test::TestRequest::patch()
+        .uri("/api/auth/password")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .set_json(json!({ "current_password": "Pass1234", "new_password": "NewPass5678" }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+
+    // Old password no longer works
+    let req = actix_test::TestRequest::post()
+        .uri("/api/auth/login")
+        .set_json(json!({ "email": "pw@example.com", "password": "Pass1234" }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 401);
+
+    // New password works
+    login_user(&app, "pw@example.com", "NewPass5678").await;
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn test_change_password_wrong_current_rejected() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+
+    let (token, _, _) = register_user(&app, "pwuser2", "pw2@example.com", "Pass1234").await;
+
+    let req = actix_test::TestRequest::patch()
+        .uri("/api/auth/password")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .set_json(json!({ "current_password": "WrongPass1", "new_password": "NewPass5678" }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 401);
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn test_change_password_revokes_refresh_tokens() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+
+    let (token, refresh, _) = register_user(&app, "pwuser3", "pw3@example.com", "Pass1234").await;
+
+    let req = actix_test::TestRequest::patch()
+        .uri("/api/auth/password")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .set_json(json!({ "current_password": "Pass1234", "new_password": "NewPass5678" }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+
+    // The pre-change refresh token must no longer be usable
+    let req = actix_test::TestRequest::post()
+        .uri("/api/auth/refresh")
+        .set_json(json!({ "refresh_token": refresh }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 401);
+}
+
 // ── Access Control Tests ──────────────────────────────────────
 
 #[actix_web::test]

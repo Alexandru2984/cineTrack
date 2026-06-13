@@ -109,6 +109,17 @@ impl From<crate::models::User> for UserSummary {
     }
 }
 
+#[derive(Debug, Deserialize, Validate)]
+pub struct ChangePasswordRequest {
+    #[validate(length(min = 1, message = "Current password is required"))]
+    pub current_password: String,
+    #[validate(
+        length(min = 8, max = 128, message = "Password must be 8-128 characters"),
+        custom(function = "validate_password_strength")
+    )]
+    pub new_password: String,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct RefreshRequest {
     pub refresh_token: String,
