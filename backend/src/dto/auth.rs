@@ -7,7 +7,10 @@ pub struct RegisterRequest {
     pub username: String,
     #[validate(email(message = "Invalid email address"))]
     pub email: String,
-    #[validate(length(min = 8, max = 128, message = "Password must be 8-128 characters"), custom(function = "validate_password_strength"))]
+    #[validate(
+        length(min = 8, max = 128, message = "Password must be 8-128 characters"),
+        custom(function = "validate_password_strength")
+    )]
     pub password: String,
 }
 

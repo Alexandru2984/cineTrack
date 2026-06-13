@@ -22,7 +22,12 @@ impl TmdbService {
         }
     }
 
-    pub async fn search(&self, query: &str, media_type: Option<&str>, page: Option<u32>) -> Result<TmdbSearchResponse, AppError> {
+    pub async fn search(
+        &self,
+        query: &str,
+        media_type: Option<&str>,
+        page: Option<u32>,
+    ) -> Result<TmdbSearchResponse, AppError> {
         let endpoint = match media_type {
             Some("movie") => "search/movie",
             Some("tv") => "search/tv",
@@ -50,7 +55,10 @@ impl TmdbService {
         let resp = self
             .client
             .get(format!("{}/movie/{}", self.base_url, tmdb_id))
-            .query(&[("api_key", &self.api_key), ("language", &"en-US".to_string())])
+            .query(&[
+                ("api_key", &self.api_key),
+                ("language", &"en-US".to_string()),
+            ])
             .send()
             .await?
             .json::<TmdbMovieDetail>()
@@ -63,7 +71,10 @@ impl TmdbService {
         let resp = self
             .client
             .get(format!("{}/tv/{}", self.base_url, tmdb_id))
-            .query(&[("api_key", &self.api_key), ("language", &"en-US".to_string())])
+            .query(&[
+                ("api_key", &self.api_key),
+                ("language", &"en-US".to_string()),
+            ])
             .send()
             .await?
             .json::<TmdbTvDetail>()
@@ -72,11 +83,21 @@ impl TmdbService {
         Ok(resp)
     }
 
-    pub async fn get_season_episodes(&self, tmdb_id: i32, season_number: i32) -> Result<TmdbSeasonDetail, AppError> {
+    pub async fn get_season_episodes(
+        &self,
+        tmdb_id: i32,
+        season_number: i32,
+    ) -> Result<TmdbSeasonDetail, AppError> {
         let resp = self
             .client
-            .get(format!("{}/tv/{}/season/{}", self.base_url, tmdb_id, season_number))
-            .query(&[("api_key", &self.api_key), ("language", &"en-US".to_string())])
+            .get(format!(
+                "{}/tv/{}/season/{}",
+                self.base_url, tmdb_id, season_number
+            ))
+            .query(&[
+                ("api_key", &self.api_key),
+                ("language", &"en-US".to_string()),
+            ])
             .send()
             .await?
             .json::<TmdbSeasonDetail>()
@@ -89,7 +110,10 @@ impl TmdbService {
         let resp = self
             .client
             .get(format!("{}/trending/all/week", self.base_url))
-            .query(&[("api_key", &self.api_key), ("language", &"en-US".to_string())])
+            .query(&[
+                ("api_key", &self.api_key),
+                ("language", &"en-US".to_string()),
+            ])
             .send()
             .await?
             .json::<TmdbTrendingResponse>()
@@ -107,7 +131,7 @@ impl TmdbService {
     ) -> Result<Media, AppError> {
         // Check cache first
         let cached = sqlx::query_as::<_, Media>(
-            "SELECT * FROM media WHERE tmdb_id = $1 AND media_type = $2"
+            "SELECT * FROM media WHERE tmdb_id = $1 AND media_type = $2",
         )
         .bind(tmdb_id)
         .bind(media_type)
@@ -135,10 +159,18 @@ impl TmdbService {
         }
     }
 
-    async fn upsert_movie(&self, pool: &PgPool, detail: &TmdbMovieDetail) -> Result<Media, AppError> {
-        let release_date = detail.release_date.as_deref()
+    async fn upsert_movie(
+        &self,
+        pool: &PgPool,
+        detail: &TmdbMovieDetail,
+    ) -> Result<Media, AppError> {
+        let release_date = detail
+            .release_date
+            .as_deref()
             .and_then(|d| NaiveDate::parse_from_str(d, "%Y-%m-%d").ok());
-        let genres_json = detail.genres.as_ref()
+        let genres_json = detail
+            .genres
+            .as_ref()
             .map(|g| serde_json::to_value(g).unwrap_or_default());
 
         let media = sqlx::query_as::<_, Media>(
@@ -166,11 +198,17 @@ impl TmdbService {
     }
 
     async fn upsert_tv(&self, pool: &PgPool, detail: &TmdbTvDetail) -> Result<Media, AppError> {
-        let air_date = detail.first_air_date.as_deref()
+        let air_date = detail
+            .first_air_date
+            .as_deref()
             .and_then(|d| NaiveDate::parse_from_str(d, "%Y-%m-%d").ok());
-        let genres_json = detail.genres.as_ref()
+        let genres_json = detail
+            .genres
+            .as_ref()
             .map(|g| serde_json::to_value(g).unwrap_or_default());
-        let runtime = detail.episode_run_time.as_ref()
+        let runtime = detail
+            .episode_run_time
+            .as_ref()
             .and_then(|r| r.first().copied());
 
         let media = sqlx::query_as::<_, Media>(
@@ -197,7 +235,9 @@ impl TmdbService {
         // Also cache seasons
         if let Some(seasons) = &detail.seasons {
             for s in seasons {
-                let season_air_date = s.air_date.as_deref()
+                let season_air_date = s
+                    .air_date
+                    .as_deref()
                     .and_then(|d| NaiveDate::parse_from_str(d, "%Y-%m-%d").ok());
                 let _ = sqlx::query(
                     r#"INSERT INTO seasons (media_id, season_number, name, episode_count, air_date)
@@ -224,7 +264,7 @@ impl TmdbService {
         season_number: i32,
     ) -> Result<Vec<crate::models::Episode>, AppError> {
         let season = sqlx::query_as::<_, crate::models::Season>(
-            "SELECT * FROM seasons WHERE media_id = $1 AND season_number = $2"
+            "SELECT * FROM seasons WHERE media_id = $1 AND season_number = $2",
         )
         .bind(media.id)
         .bind(season_number)
@@ -232,10 +272,14 @@ impl TmdbService {
         .await?
         .ok_or_else(|| AppError::NotFound("Season not found".to_string()))?;
 
-        let tmdb_episodes = self.get_season_episodes(media.tmdb_id, season_number).await?;
+        let tmdb_episodes = self
+            .get_season_episodes(media.tmdb_id, season_number)
+            .await?;
 
         for ep in &tmdb_episodes.episodes {
-            let ep_air_date = ep.air_date.as_deref()
+            let ep_air_date = ep
+                .air_date
+                .as_deref()
                 .and_then(|d| NaiveDate::parse_from_str(d, "%Y-%m-%d").ok());
             let _ = sqlx::query(
                 r#"INSERT INTO episodes (season_id, episode_number, name, overview, runtime_minutes, air_date, still_path)
@@ -255,7 +299,7 @@ impl TmdbService {
         }
 
         let episodes = sqlx::query_as::<_, crate::models::Episode>(
-            "SELECT * FROM episodes WHERE season_id = $1 ORDER BY episode_number"
+            "SELECT * FROM episodes WHERE season_id = $1 ORDER BY episode_number",
         )
         .bind(season.id)
         .fetch_all(pool)

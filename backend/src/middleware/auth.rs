@@ -1,4 +1,4 @@
-use actix_web::{dev::ServiceRequest, Error, HttpMessage, HttpRequest, web};
+use actix_web::{dev::ServiceRequest, web, HttpMessage, HttpRequest};
 use uuid::Uuid;
 
 use crate::config::Config;
@@ -16,7 +16,10 @@ pub fn extract_optional_user_id(req: &HttpRequest) -> Option<Uuid> {
     req.extensions().get::<Uuid>().copied()
 }
 
-pub async fn validate_token_from_request(req: &ServiceRequest, config: &Config) -> Result<Uuid, AppError> {
+pub async fn validate_token_from_request(
+    req: &ServiceRequest,
+    config: &Config,
+) -> Result<Uuid, AppError> {
     let auth_header = req
         .headers()
         .get("Authorization")

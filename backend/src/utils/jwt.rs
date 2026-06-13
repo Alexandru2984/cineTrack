@@ -13,7 +13,11 @@ pub struct Claims {
     pub iat: i64,
 }
 
-pub fn generate_access_token(user_id: Uuid, secret: &str, expiry_hours: i64) -> Result<String, AppError> {
+pub fn generate_access_token(
+    user_id: Uuid,
+    secret: &str,
+    expiry_hours: i64,
+) -> Result<String, AppError> {
     let now = Utc::now();
     let claims = Claims {
         sub: user_id,

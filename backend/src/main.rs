@@ -1,17 +1,8 @@
-mod config;
-mod db;
-mod dto;
-mod errors;
-mod middleware;
-mod models;
-mod routes;
-mod services;
-mod utils;
-
 use actix_cors::Cors;
 use actix_governor::{Governor, GovernorConfigBuilder};
-use actix_web::{web, App, HttpServer, middleware as actix_middleware};
-use services::tmdb::TmdbService;
+use actix_web::{middleware as actix_middleware, web, App, HttpServer};
+
+use cinetrack::{config, db, routes, services::tmdb::TmdbService};
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
@@ -36,7 +27,7 @@ async fn main() -> std::io::Result<()> {
     let allowed_origins = config.cors_allowed_origins.clone();
 
     let governor_conf = GovernorConfigBuilder::default()
-        .per_second(config.rate_limit_rps.into())
+        .requests_per_second(config.rate_limit_rps.into())
         .burst_size(config.rate_limit_burst)
         .finish()
         .expect("Failed to build rate limiter config");

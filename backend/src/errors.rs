@@ -1,6 +1,5 @@
 use actix_web::{HttpResponse, ResponseError};
 use serde::Serialize;
-use std::fmt;
 
 #[derive(Debug, thiserror::Error)]
 pub enum AppError {
@@ -46,7 +45,9 @@ impl ResponseError for AppError {
             AppError::Unauthorized(msg) => (actix_web::http::StatusCode::UNAUTHORIZED, msg.clone()),
             AppError::Forbidden(msg) => (actix_web::http::StatusCode::FORBIDDEN, msg.clone()),
             AppError::Conflict(msg) => (actix_web::http::StatusCode::CONFLICT, msg.clone()),
-            AppError::ValidationError(msg) => (actix_web::http::StatusCode::BAD_REQUEST, msg.clone()),
+            AppError::ValidationError(msg) => {
+                (actix_web::http::StatusCode::BAD_REQUEST, msg.clone())
+            }
             AppError::TmdbError(msg) => (actix_web::http::StatusCode::BAD_GATEWAY, msg.clone()),
             AppError::InternalError(_) | AppError::DatabaseError(_) => {
                 eprintln!("Internal error: {:?}", self);
@@ -97,37 +98,58 @@ mod tests {
 
     #[test]
     fn test_not_found_is_404() {
-        assert_eq!(status_of(&AppError::NotFound("x".into())), StatusCode::NOT_FOUND);
+        assert_eq!(
+            status_of(&AppError::NotFound("x".into())),
+            StatusCode::NOT_FOUND
+        );
     }
 
     #[test]
     fn test_bad_request_is_400() {
-        assert_eq!(status_of(&AppError::BadRequest("x".into())), StatusCode::BAD_REQUEST);
+        assert_eq!(
+            status_of(&AppError::BadRequest("x".into())),
+            StatusCode::BAD_REQUEST
+        );
     }
 
     #[test]
     fn test_unauthorized_is_401() {
-        assert_eq!(status_of(&AppError::Unauthorized("x".into())), StatusCode::UNAUTHORIZED);
+        assert_eq!(
+            status_of(&AppError::Unauthorized("x".into())),
+            StatusCode::UNAUTHORIZED
+        );
     }
 
     #[test]
     fn test_forbidden_is_403() {
-        assert_eq!(status_of(&AppError::Forbidden("x".into())), StatusCode::FORBIDDEN);
+        assert_eq!(
+            status_of(&AppError::Forbidden("x".into())),
+            StatusCode::FORBIDDEN
+        );
     }
 
     #[test]
     fn test_conflict_is_409() {
-        assert_eq!(status_of(&AppError::Conflict("x".into())), StatusCode::CONFLICT);
+        assert_eq!(
+            status_of(&AppError::Conflict("x".into())),
+            StatusCode::CONFLICT
+        );
     }
 
     #[test]
     fn test_validation_error_is_400() {
-        assert_eq!(status_of(&AppError::ValidationError("x".into())), StatusCode::BAD_REQUEST);
+        assert_eq!(
+            status_of(&AppError::ValidationError("x".into())),
+            StatusCode::BAD_REQUEST
+        );
     }
 
     #[test]
     fn test_tmdb_error_is_502() {
-        assert_eq!(status_of(&AppError::TmdbError("x".into())), StatusCode::BAD_GATEWAY);
+        assert_eq!(
+            status_of(&AppError::TmdbError("x".into())),
+            StatusCode::BAD_GATEWAY
+        );
     }
 
     #[test]
@@ -140,7 +162,9 @@ mod tests {
     fn test_internal_error_hides_details() {
         let err = AppError::InternalError(anyhow::anyhow!("secret database details"));
         let resp = err.error_response();
-        let body = actix_web::rt::System::new().block_on(to_bytes(resp.into_body())).unwrap();
+        let body = actix_web::rt::System::new()
+            .block_on(to_bytes(resp.into_body()))
+            .unwrap();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json["message"], "Internal server error");
         // Must NOT contain the actual error details
@@ -151,7 +175,9 @@ mod tests {
     fn test_error_response_json_format() {
         let err = AppError::NotFound("Item not found".into());
         let resp = err.error_response();
-        let body = actix_web::rt::System::new().block_on(to_bytes(resp.into_body())).unwrap();
+        let body = actix_web::rt::System::new()
+            .block_on(to_bytes(resp.into_body()))
+            .unwrap();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert!(json.get("error").is_some());
         assert!(json.get("message").is_some());
@@ -161,9 +187,9 @@ mod tests {
     #[test]
     fn test_jwt_error_generic_message() {
         // Simulate what happens when a JWT error is converted
-        let jwt_err: AppError = jsonwebtoken::errors::Error::from(
-            jsonwebtoken::errors::ErrorKind::ExpiredSignature
-        ).into();
+        let jwt_err: AppError =
+            jsonwebtoken::errors::Error::from(jsonwebtoken::errors::ErrorKind::ExpiredSignature)
+                .into();
         match &jwt_err {
             AppError::Unauthorized(msg) => {
                 assert_eq!(msg, "Invalid or expired token");

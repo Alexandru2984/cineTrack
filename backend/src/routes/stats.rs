@@ -11,14 +11,11 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
             .route("/me", web::get().to(my_stats))
             .route("/me/heatmap", web::get().to(my_heatmap))
             .route("/me/genres", web::get().to(my_genres))
-            .route("/me/monthly", web::get().to(my_monthly))
+            .route("/me/monthly", web::get().to(my_monthly)),
     );
 }
 
-async fn my_stats(
-    pool: web::Data<PgPool>,
-    req: HttpRequest,
-) -> Result<HttpResponse, AppError> {
+async fn my_stats(pool: web::Data<PgPool>, req: HttpRequest) -> Result<HttpResponse, AppError> {
     let user_id = require_auth(&req).await?;
 
     let total_movies = sqlx::query_scalar::<_, i64>(
@@ -37,7 +34,7 @@ async fn my_stats(
 
     // Count episodes: individually watched + episode counts from completed shows (for shows without individual episode tracking)
     let watched_episodes = sqlx::query_scalar::<_, i64>(
-        "SELECT COUNT(*) FROM watch_history WHERE user_id = $1 AND episode_id IS NOT NULL"
+        "SELECT COUNT(*) FROM watch_history WHERE user_id = $1 AND episode_id IS NOT NULL",
     )
     .bind(user_id)
     .fetch_one(pool.get_ref())
@@ -48,7 +45,7 @@ async fn my_stats(
         FROM user_media um
         JOIN media m ON um.media_id = m.id
         JOIN seasons s ON s.media_id = m.id AND s.season_number > 0
-        WHERE um.user_id = $1 AND m.media_type = 'tv' AND um.status = 'completed'"#
+        WHERE um.user_id = $1 AND m.media_type = 'tv' AND um.status = 'completed'"#,
     )
     .bind(user_id)
     .fetch_one(pool.get_ref())
@@ -66,7 +63,7 @@ async fn my_stats(
         FROM watch_history wh
         JOIN media m ON wh.media_id = m.id
         LEFT JOIN episodes e ON wh.episode_id = e.id
-        WHERE wh.user_id = $1"#
+        WHERE wh.user_id = $1"#,
     )
     .bind(user_id)
     .fetch_one(pool.get_ref())
@@ -78,7 +75,7 @@ async fn my_stats(
     let streak_data = sqlx::query_as::<_, (chrono::NaiveDate,)>(
         r#"SELECT DISTINCT watched_at::date as watch_date
         FROM watch_history WHERE user_id = $1
-        ORDER BY watch_date DESC"#
+        ORDER BY watch_date DESC"#,
     )
     .bind(user_id)
     .fetch_all(pool.get_ref())
@@ -141,13 +138,22 @@ async fn my_heatmap(
     query: web::Query<std::collections::HashMap<String, String>>,
 ) -> Result<HttpResponse, AppError> {
     let user_id = require_auth(&req).await?;
-    let year: i32 = query.get("year")
+    let year: i32 = query
+        .get("year")
         .and_then(|y| y.parse().ok())
         .unwrap_or_else(|| chrono::Utc::now().year());
 
+    if !(1900..=2100).contains(&year) {
+        return Err(AppError::BadRequest(
+            "Year must be between 1900 and 2100".to_string(),
+        ));
+    }
+
     use chrono::Datelike;
-    let start_date = chrono::NaiveDate::from_ymd_opt(year, 1, 1).unwrap();
-    let end_date = chrono::NaiveDate::from_ymd_opt(year, 12, 31).unwrap();
+    let start_date = chrono::NaiveDate::from_ymd_opt(year, 1, 1)
+        .ok_or_else(|| AppError::BadRequest("Invalid year".to_string()))?;
+    let end_date = chrono::NaiveDate::from_ymd_opt(year, 12, 31)
+        .ok_or_else(|| AppError::BadRequest("Invalid year".to_string()))?;
 
     let data = sqlx::query_as::<_, (chrono::NaiveDate, i64)>(
         r#"SELECT watch_date, SUM(cnt)::bigint as count FROM (
@@ -162,7 +168,7 @@ async fn my_heatmap(
             GROUP BY watch_date
         ) combined
         GROUP BY watch_date
-        ORDER BY watch_date"#
+        ORDER BY watch_date"#,
     )
     .bind(user_id)
     .bind(start_date)
@@ -170,20 +176,18 @@ async fn my_heatmap(
     .fetch_all(pool.get_ref())
     .await?;
 
-    let response: Vec<HeatmapDay> = data.into_iter().map(|(date, count)| {
-        HeatmapDay {
+    let response: Vec<HeatmapDay> = data
+        .into_iter()
+        .map(|(date, count)| HeatmapDay {
             date: date.to_string(),
             count,
-        }
-    }).collect();
+        })
+        .collect();
 
     Ok(HttpResponse::Ok().json(response))
 }
 
-async fn my_genres(
-    pool: web::Data<PgPool>,
-    req: HttpRequest,
-) -> Result<HttpResponse, AppError> {
+async fn my_genres(pool: web::Data<PgPool>, req: HttpRequest) -> Result<HttpResponse, AppError> {
     let user_id = require_auth(&req).await?;
 
     let data = sqlx::query_as::<_, (String, i64)>(
@@ -194,23 +198,21 @@ async fn my_genres(
         WHERE um.user_id = $1 AND m.genres IS NOT NULL
         GROUP BY genre_name
         ORDER BY count DESC
-        LIMIT 50"#
+        LIMIT 50"#,
     )
     .bind(user_id)
     .fetch_all(pool.get_ref())
     .await?;
 
-    let response: Vec<GenreDistribution> = data.into_iter().map(|(genre, count)| {
-        GenreDistribution { genre, count }
-    }).collect();
+    let response: Vec<GenreDistribution> = data
+        .into_iter()
+        .map(|(genre, count)| GenreDistribution { genre, count })
+        .collect();
 
     Ok(HttpResponse::Ok().json(response))
 }
 
-async fn my_monthly(
-    pool: web::Data<PgPool>,
-    req: HttpRequest,
-) -> Result<HttpResponse, AppError> {
+async fn my_monthly(pool: web::Data<PgPool>, req: HttpRequest) -> Result<HttpResponse, AppError> {
     let user_id = require_auth(&req).await?;
 
     let data = sqlx::query_as::<_, (String, Option<i64>, i64)>(
@@ -233,13 +235,14 @@ async fn my_monthly(
     .fetch_all(pool.get_ref())
     .await?;
 
-    let response: Vec<MonthlyActivity> = data.into_iter().map(|(month, minutes, count)| {
-        MonthlyActivity {
+    let response: Vec<MonthlyActivity> = data
+        .into_iter()
+        .map(|(month, minutes, count)| MonthlyActivity {
             month,
             hours: minutes.unwrap_or(0) as f64 / 60.0,
             count,
-        }
-    }).collect();
+        })
+        .collect();
 
     Ok(HttpResponse::Ok().json(response))
 }

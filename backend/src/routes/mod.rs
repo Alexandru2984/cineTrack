@@ -1,10 +1,10 @@
 pub mod auth;
-pub mod users;
-pub mod media;
-pub mod tracking;
 pub mod history;
 pub mod lists;
+pub mod media;
 pub mod stats;
+pub mod tracking;
+pub mod users;
 
 use actix_web::web;
 
@@ -17,6 +17,6 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
             .configure(tracking::configure)
             .configure(history::configure)
             .configure(lists::configure)
-            .configure(stats::configure)
+            .configure(stats::configure),
     );
 }

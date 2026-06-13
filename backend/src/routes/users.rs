@@ -3,12 +3,11 @@ use sqlx::PgPool;
 use uuid::Uuid;
 use validator::Validate;
 
-use crate::config::Config;
 use crate::dto::common::PaginationParams;
 use crate::dto::social::*;
 use crate::dto::user::*;
 use crate::errors::AppError;
-use crate::middleware::auth::{extract_optional_user_id, require_auth};
+use crate::middleware::auth::require_auth;
 use crate::models::User;
 
 pub fn configure(cfg: &mut web::ServiceConfig) {
@@ -22,7 +21,7 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
             .route("/{username}/heatmap", web::get().to(get_user_heatmap))
             .route("/{username}/activity", web::get().to(get_user_activity))
             .route("/{username}/follow", web::post().to(follow_user))
-            .route("/{username}/follow", web::delete().to(unfollow_user))
+            .route("/{username}/follow", web::delete().to(unfollow_user)),
     );
 }
 
@@ -34,31 +33,27 @@ async fn get_profile(
     let username = path.into_inner();
     let current_user_id = require_auth(&req).await.ok();
 
-    let user = sqlx::query_as::<_, User>(
-        "SELECT * FROM users WHERE username = $1"
-    )
-    .bind(&username)
-    .fetch_optional(pool.get_ref())
-    .await?
-    .ok_or_else(|| AppError::NotFound("User not found".to_string()))?;
+    let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE username = $1")
+        .bind(&username)
+        .fetch_optional(pool.get_ref())
+        .await?
+        .ok_or_else(|| AppError::NotFound("User not found".to_string()))?;
 
-    let followers_count = sqlx::query_scalar::<_, i64>(
-        "SELECT COUNT(*) FROM follows WHERE following_id = $1"
-    )
-    .bind(user.id)
-    .fetch_one(pool.get_ref())
-    .await?;
+    let followers_count =
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM follows WHERE following_id = $1")
+            .bind(user.id)
+            .fetch_one(pool.get_ref())
+            .await?;
 
-    let following_count = sqlx::query_scalar::<_, i64>(
-        "SELECT COUNT(*) FROM follows WHERE follower_id = $1"
-    )
-    .bind(user.id)
-    .fetch_one(pool.get_ref())
-    .await?;
+    let following_count =
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM follows WHERE follower_id = $1")
+            .bind(user.id)
+            .fetch_one(pool.get_ref())
+            .await?;
 
     let is_following = if let Some(uid) = current_user_id {
         sqlx::query_scalar::<_, bool>(
-            "SELECT EXISTS(SELECT 1 FROM follows WHERE follower_id = $1 AND following_id = $2)"
+            "SELECT EXISTS(SELECT 1 FROM follows WHERE follower_id = $1 AND following_id = $2)",
         )
         .bind(uid)
         .bind(user.id)
@@ -97,7 +92,7 @@ async fn update_profile(
             avatar_url = COALESCE($4, avatar_url),
             is_public = COALESCE($5, is_public),
             updated_at = NOW()
-        WHERE id = $1 RETURNING *"#
+        WHERE id = $1 RETURNING *"#,
     )
     .bind(user_id)
     .bind(&data.username)
@@ -118,20 +113,18 @@ async fn follow_user(
     let user_id = require_auth(&req).await?;
     let username = path.into_inner();
 
-    let target = sqlx::query_as::<_, User>(
-        "SELECT * FROM users WHERE username = $1"
-    )
-    .bind(&username)
-    .fetch_optional(pool.get_ref())
-    .await?
-    .ok_or_else(|| AppError::NotFound("User not found".to_string()))?;
+    let target = sqlx::query_as::<_, User>("SELECT * FROM users WHERE username = $1")
+        .bind(&username)
+        .fetch_optional(pool.get_ref())
+        .await?
+        .ok_or_else(|| AppError::NotFound("User not found".to_string()))?;
 
     if target.id == user_id {
         return Err(AppError::BadRequest("Cannot follow yourself".to_string()));
     }
 
     sqlx::query(
-        "INSERT INTO follows (follower_id, following_id) VALUES ($1, $2) ON CONFLICT DO NOTHING"
+        "INSERT INTO follows (follower_id, following_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
     )
     .bind(user_id)
     .bind(target.id)
@@ -149,21 +142,17 @@ async fn unfollow_user(
     let user_id = require_auth(&req).await?;
     let username = path.into_inner();
 
-    let target = sqlx::query_as::<_, User>(
-        "SELECT * FROM users WHERE username = $1"
-    )
-    .bind(&username)
-    .fetch_optional(pool.get_ref())
-    .await?
-    .ok_or_else(|| AppError::NotFound("User not found".to_string()))?;
+    let target = sqlx::query_as::<_, User>("SELECT * FROM users WHERE username = $1")
+        .bind(&username)
+        .fetch_optional(pool.get_ref())
+        .await?
+        .ok_or_else(|| AppError::NotFound("User not found".to_string()))?;
 
-    sqlx::query(
-        "DELETE FROM follows WHERE follower_id = $1 AND following_id = $2"
-    )
-    .bind(user_id)
-    .bind(target.id)
-    .execute(pool.get_ref())
-    .await?;
+    sqlx::query("DELETE FROM follows WHERE follower_id = $1 AND following_id = $2")
+        .bind(user_id)
+        .bind(target.id)
+        .execute(pool.get_ref())
+        .await?;
 
     Ok(HttpResponse::Ok().json(serde_json::json!({"message": "Unfollowed successfully"})))
 }
@@ -186,7 +175,8 @@ async fn my_followers(
     .fetch_all(pool.get_ref())
     .await?;
 
-    let response: Vec<crate::dto::auth::UserSummary> = followers.into_iter().map(|u| u.into()).collect();
+    let response: Vec<crate::dto::auth::UserSummary> =
+        followers.into_iter().map(|u| u.into()).collect();
     Ok(HttpResponse::Ok().json(response))
 }
 
@@ -208,20 +198,21 @@ async fn my_following(
     .fetch_all(pool.get_ref())
     .await?;
 
-    let response: Vec<crate::dto::auth::UserSummary> = following.into_iter().map(|u| u.into()).collect();
+    let response: Vec<crate::dto::auth::UserSummary> =
+        following.into_iter().map(|u| u.into()).collect();
     Ok(HttpResponse::Ok().json(response))
 }
 
 async fn get_user_stats(
-    pool: web::Data<PgPool>,
-    path: web::Path<String>,
+    _pool: web::Data<PgPool>,
+    _path: web::Path<String>,
 ) -> Result<HttpResponse, AppError> {
     Ok(HttpResponse::Ok().json(serde_json::json!({"message": "Use /api/stats/me"})))
 }
 
 async fn get_user_heatmap(
-    pool: web::Data<PgPool>,
-    path: web::Path<String>,
+    _pool: web::Data<PgPool>,
+    _path: web::Path<String>,
 ) -> Result<HttpResponse, AppError> {
     Ok(HttpResponse::Ok().json(serde_json::json!({"message": "Use /api/stats/me/heatmap"})))
 }
@@ -236,31 +227,29 @@ async fn get_user_activity(
     let username = path.into_inner();
     let current_user_id = require_auth(&req).await.ok();
 
-    let user = sqlx::query_as::<_, User>(
-        "SELECT * FROM users WHERE username = $1"
-    )
-    .bind(&username)
-    .fetch_optional(pool.get_ref())
-    .await?
-    .ok_or_else(|| AppError::NotFound("User not found".to_string()))?;
+    let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE username = $1")
+        .bind(&username)
+        .fetch_optional(pool.get_ref())
+        .await?
+        .ok_or_else(|| AppError::NotFound("User not found".to_string()))?;
 
     // Enforce privacy: private users' activity is only visible to themselves or followers
     if !user.is_public {
         let allowed = match current_user_id {
             Some(uid) if uid == user.id => true,
-            Some(uid) => {
-                sqlx::query_scalar::<_, bool>(
-                    "SELECT EXISTS(SELECT 1 FROM follows WHERE follower_id = $1 AND following_id = $2)"
-                )
-                .bind(uid)
-                .bind(user.id)
-                .fetch_one(pool.get_ref())
-                .await?
-            }
+            Some(uid) => sqlx::query_scalar::<_, bool>(
+                "SELECT EXISTS(SELECT 1 FROM follows WHERE follower_id = $1 AND following_id = $2)",
+            )
+            .bind(uid)
+            .bind(user.id)
+            .fetch_one(pool.get_ref())
+            .await?,
             None => false,
         };
         if !allowed {
-            return Err(AppError::Forbidden("This user's activity is private".to_string()));
+            return Err(AppError::Forbidden(
+                "This user's activity is private".to_string(),
+            ));
         }
     }
 
@@ -277,19 +266,24 @@ async fn get_user_activity(
     .fetch_all(pool.get_ref())
     .await?;
 
-    let items: Vec<ActivityItem> = activities.into_iter().map(|(id, user_id, username, avatar_url, title, media_type, poster_path, timestamp)| {
-        ActivityItem {
-            id,
-            user_id,
-            username,
-            avatar_url,
-            action: "watched".to_string(),
-            media_title: title,
-            media_type,
-            poster_path,
-            timestamp,
-        }
-    }).collect();
+    let items: Vec<ActivityItem> = activities
+        .into_iter()
+        .map(
+            |(id, user_id, username, avatar_url, title, media_type, poster_path, timestamp)| {
+                ActivityItem {
+                    id,
+                    user_id,
+                    username,
+                    avatar_url,
+                    action: "watched".to_string(),
+                    media_title: title,
+                    media_type,
+                    poster_path,
+                    timestamp,
+                }
+            },
+        )
+        .collect();
 
     Ok(HttpResponse::Ok().json(items))
 }

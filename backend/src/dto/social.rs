@@ -129,7 +129,9 @@ mod tests {
     #[test]
     fn test_update_list_all_none_valid() {
         let req = UpdateListRequest {
-            name: None, description: None, is_public: None,
+            name: None,
+            description: None,
+            is_public: None,
         };
         assert!(req.validate().is_ok());
     }

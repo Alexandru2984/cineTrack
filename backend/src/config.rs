@@ -29,10 +29,8 @@ impl Config {
                 .expect("APP_PORT must be a number"),
             frontend_url: env::var("FRONTEND_URL")
                 .unwrap_or_else(|_| "http://localhost:5173".to_string()),
-            database_url: env::var("DATABASE_URL")
-                .expect("DATABASE_URL must be set"),
-            jwt_secret: env::var("JWT_SECRET")
-                .expect("JWT_SECRET must be set"),
+            database_url: env::var("DATABASE_URL").expect("DATABASE_URL must be set"),
+            jwt_secret: env::var("JWT_SECRET").expect("JWT_SECRET must be set"),
             jwt_expiry_hours: env::var("JWT_EXPIRY_HOURS")
                 .unwrap_or_else(|_| "24".to_string())
                 .parse()
@@ -41,8 +39,9 @@ impl Config {
                 .unwrap_or_else(|_| "30".to_string())
                 .parse()
                 .expect("JWT_REFRESH_EXPIRY_DAYS must be a number"),
-            tmdb_api_key: env::var("TMDB_API_KEY")
-                .unwrap_or_else(|_| env::var("API_KEY").expect("TMDB_API_KEY or API_KEY must be set")),
+            tmdb_api_key: env::var("TMDB_API_KEY").unwrap_or_else(|_| {
+                env::var("API_KEY").expect("TMDB_API_KEY or API_KEY must be set")
+            }),
             tmdb_base_url: env::var("TMDB_BASE_URL")
                 .unwrap_or_else(|_| "https://api.themoviedb.org/3".to_string()),
             tmdb_image_base_url: env::var("TMDB_IMAGE_BASE_URL")

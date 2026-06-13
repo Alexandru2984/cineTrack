@@ -91,7 +91,10 @@ mod tests {
     #[test]
     fn test_profile_all_none_valid() {
         let req = UpdateProfileRequest {
-            username: None, bio: None, avatar_url: None, is_public: None,
+            username: None,
+            bio: None,
+            avatar_url: None,
+            is_public: None,
         };
         assert!(req.validate().is_ok());
     }
@@ -99,7 +102,10 @@ mod tests {
     #[test]
     fn test_profile_username_too_short() {
         let req = UpdateProfileRequest {
-            username: Some("ab".to_string()), bio: None, avatar_url: None, is_public: None,
+            username: Some("ab".to_string()),
+            bio: None,
+            avatar_url: None,
+            is_public: None,
         };
         assert!(req.validate().is_err());
     }
@@ -107,7 +113,10 @@ mod tests {
     #[test]
     fn test_profile_username_too_long() {
         let req = UpdateProfileRequest {
-            username: Some("a".repeat(51)), bio: None, avatar_url: None, is_public: None,
+            username: Some("a".repeat(51)),
+            bio: None,
+            avatar_url: None,
+            is_public: None,
         };
         assert!(req.validate().is_err());
     }
@@ -115,7 +124,10 @@ mod tests {
     #[test]
     fn test_profile_bio_too_long() {
         let req = UpdateProfileRequest {
-            username: None, bio: Some("x".repeat(501)), avatar_url: None, is_public: None,
+            username: None,
+            bio: Some("x".repeat(501)),
+            avatar_url: None,
+            is_public: None,
         };
         assert!(req.validate().is_err());
     }
@@ -123,7 +135,10 @@ mod tests {
     #[test]
     fn test_profile_bio_exactly_500() {
         let req = UpdateProfileRequest {
-            username: None, bio: Some("x".repeat(500)), avatar_url: None, is_public: None,
+            username: None,
+            bio: Some("x".repeat(500)),
+            avatar_url: None,
+            is_public: None,
         };
         assert!(req.validate().is_ok());
     }
@@ -131,7 +146,10 @@ mod tests {
     #[test]
     fn test_profile_bad_avatar_url() {
         let req = UpdateProfileRequest {
-            username: None, bio: None, avatar_url: Some("javascript:alert(1)".to_string()), is_public: None,
+            username: None,
+            bio: None,
+            avatar_url: Some("javascript:alert(1)".to_string()),
+            is_public: None,
         };
         assert!(req.validate().is_err());
     }

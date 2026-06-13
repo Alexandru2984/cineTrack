@@ -17,7 +17,7 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
             .route("/{id}", web::patch().to(update_list))
             .route("/{id}", web::delete().to(delete_list))
             .route("/{id}/items", web::post().to(add_item))
-            .route("/{id}/items/{media_id}", web::delete().to(remove_item))
+            .route("/{id}/items/{media_id}", web::delete().to(remove_item)),
     );
 }
 
@@ -30,13 +30,23 @@ async fn my_lists(
     let limit = pagination.limit_val();
     let offset = pagination.offset();
 
-    let lists = sqlx::query_as::<_, (Uuid, String, Option<String>, bool, i64, chrono::DateTime<chrono::Utc>)>(
+    let lists = sqlx::query_as::<
+        _,
+        (
+            Uuid,
+            String,
+            Option<String>,
+            bool,
+            i64,
+            chrono::DateTime<chrono::Utc>,
+        ),
+    >(
         r#"SELECT l.id, l.name, l.description, l.is_public,
             (SELECT COUNT(*) FROM list_items li WHERE li.list_id = l.id) as item_count,
             l.created_at
         FROM lists l WHERE l.user_id = $1
         ORDER BY l.created_at DESC
-        LIMIT $2 OFFSET $3"#
+        LIMIT $2 OFFSET $3"#,
     )
     .bind(user_id)
     .bind(limit)
@@ -44,9 +54,19 @@ async fn my_lists(
     .fetch_all(pool.get_ref())
     .await?;
 
-    let response: Vec<ListResponse> = lists.into_iter().map(|(id, name, description, is_public, item_count, created_at)| {
-        ListResponse { id, name, description, is_public, item_count, created_at }
-    }).collect();
+    let response: Vec<ListResponse> = lists
+        .into_iter()
+        .map(
+            |(id, name, description, is_public, item_count, created_at)| ListResponse {
+                id,
+                name,
+                description,
+                is_public,
+                item_count,
+                created_at,
+            },
+        )
+        .collect();
 
     Ok(HttpResponse::Ok().json(response))
 }
@@ -63,7 +83,7 @@ async fn create_list(
     let list = sqlx::query_as::<_, crate::models::List>(
         r#"INSERT INTO lists (user_id, name, description, is_public)
         VALUES ($1, $2, $3, $4)
-        RETURNING *"#
+        RETURNING *"#,
     )
     .bind(user_id)
     .bind(&data.name)
@@ -83,13 +103,11 @@ async fn get_list(
     let list_id = path.into_inner();
     let current_user_id = require_auth(&req).await.ok();
 
-    let list = sqlx::query_as::<_, crate::models::List>(
-        "SELECT * FROM lists WHERE id = $1"
-    )
-    .bind(list_id)
-    .fetch_optional(pool.get_ref())
-    .await?
-    .ok_or_else(|| AppError::NotFound("List not found".to_string()))?;
+    let list = sqlx::query_as::<_, crate::models::List>("SELECT * FROM lists WHERE id = $1")
+        .bind(list_id)
+        .fetch_optional(pool.get_ref())
+        .await?
+        .ok_or_else(|| AppError::NotFound("List not found".to_string()))?;
 
     // Private lists are only visible to the owner
     if !list.is_public {
@@ -103,7 +121,7 @@ async fn get_list(
         r#"SELECT m.* FROM media m
         JOIN list_items li ON m.id = li.media_id
         WHERE li.list_id = $1
-        ORDER BY li.added_at DESC"#
+        ORDER BY li.added_at DESC"#,
     )
     .bind(list_id)
     .fetch_all(pool.get_ref())
@@ -132,7 +150,7 @@ async fn update_list(
             description = COALESCE($4, description),
             is_public = COALESCE($5, is_public)
         WHERE id = $1 AND user_id = $2
-        RETURNING *"#
+        RETURNING *"#,
     )
     .bind(list_id)
     .bind(user_id)
@@ -178,7 +196,7 @@ async fn add_item(
 
     // Verify list ownership
     let _list = sqlx::query_as::<_, crate::models::List>(
-        "SELECT * FROM lists WHERE id = $1 AND user_id = $2"
+        "SELECT * FROM lists WHERE id = $1 AND user_id = $2",
     )
     .bind(list_id)
     .bind(user_id)
@@ -187,7 +205,7 @@ async fn add_item(
     .ok_or_else(|| AppError::NotFound("List not found".to_string()))?;
 
     sqlx::query(
-        "INSERT INTO list_items (list_id, media_id) VALUES ($1, $2) ON CONFLICT DO NOTHING"
+        "INSERT INTO list_items (list_id, media_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
     )
     .bind(list_id)
     .bind(body.media_id)
@@ -207,7 +225,7 @@ async fn remove_item(
 
     // Verify ownership
     let _list = sqlx::query_as::<_, crate::models::List>(
-        "SELECT * FROM lists WHERE id = $1 AND user_id = $2"
+        "SELECT * FROM lists WHERE id = $1 AND user_id = $2",
     )
     .bind(list_id)
     .bind(user_id)

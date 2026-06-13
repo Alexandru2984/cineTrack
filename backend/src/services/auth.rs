@@ -14,7 +14,7 @@ pub async fn register(
     req: RegisterRequest,
 ) -> Result<AuthResponse, AppError> {
     let existing = sqlx::query_scalar::<_, i64>(
-        "SELECT COUNT(*) FROM users WHERE email = $1 OR username = $2"
+        "SELECT COUNT(*) FROM users WHERE email = $1 OR username = $2",
     )
     .bind(&req.email)
     .bind(&req.username)
@@ -32,7 +32,7 @@ pub async fn register(
     let user = sqlx::query_as::<_, User>(
         r#"INSERT INTO users (username, email, password_hash)
         VALUES ($1, $2, $3)
-        RETURNING *"#
+        RETURNING *"#,
     )
     .bind(&req.username)
     .bind(&req.email)
@@ -56,19 +56,21 @@ pub async fn login(
     config: &Config,
     req: LoginRequest,
 ) -> Result<AuthResponse, AppError> {
-    let user = sqlx::query_as::<_, User>(
-        "SELECT * FROM users WHERE email = $1"
-    )
-    .bind(&req.email)
-    .fetch_optional(pool)
-    .await?
-    .ok_or_else(|| AppError::Unauthorized("Invalid email or password".to_string()))?;
+    let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE email = $1")
+        .bind(&req.email)
+        .fetch_optional(pool)
+        .await?
+        .ok_or_else(|| AppError::Unauthorized("Invalid email or password".to_string()))?;
 
-    let password_hash = user.password_hash.as_ref()
+    let password_hash = user
+        .password_hash
+        .as_ref()
         .ok_or_else(|| AppError::Unauthorized("Invalid email or password".to_string()))?;
 
     if !password::verify_password(&req.password, password_hash)? {
-        return Err(AppError::Unauthorized("Invalid email or password".to_string()));
+        return Err(AppError::Unauthorized(
+            "Invalid email or password".to_string(),
+        ));
     }
 
     // Clean up expired refresh tokens for this user
@@ -96,7 +98,7 @@ pub async fn refresh_token(
     let token_hash = jwt::hash_refresh_token(&req.refresh_token);
 
     let stored = sqlx::query_as::<_, crate::models::RefreshToken>(
-        "SELECT * FROM refresh_tokens WHERE token_hash = $1"
+        "SELECT * FROM refresh_tokens WHERE token_hash = $1",
     )
     .bind(&token_hash)
     .fetch_optional(pool)
@@ -117,13 +119,11 @@ pub async fn refresh_token(
         .execute(pool)
         .await?;
 
-    let user = sqlx::query_as::<_, User>(
-        "SELECT * FROM users WHERE id = $1"
-    )
-    .bind(stored.user_id)
-    .fetch_optional(pool)
-    .await?
-    .ok_or_else(|| AppError::Unauthorized("User not found".to_string()))?;
+    let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = $1")
+        .bind(stored.user_id)
+        .fetch_optional(pool)
+        .await?
+        .ok_or_else(|| AppError::Unauthorized("User not found".to_string()))?;
 
     let (access_token, new_refresh_token) = issue_token_pair(pool, config, &user).await?;
 
@@ -145,17 +145,12 @@ pub async fn logout(pool: &PgPool, req: LogoutRequest) -> Result<(), AppError> {
     Ok(())
 }
 
-pub async fn get_current_user(
-    pool: &PgPool,
-    user_id: Uuid,
-) -> Result<UserResponse, AppError> {
-    let user = sqlx::query_as::<_, User>(
-        "SELECT * FROM users WHERE id = $1"
-    )
-    .bind(user_id)
-    .fetch_optional(pool)
-    .await?
-    .ok_or_else(|| AppError::NotFound("User not found".to_string()))?;
+pub async fn get_current_user(pool: &PgPool, user_id: Uuid) -> Result<UserResponse, AppError> {
+    let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = $1")
+        .bind(user_id)
+        .fetch_optional(pool)
+        .await?
+        .ok_or_else(|| AppError::NotFound("User not found".to_string()))?;
 
     Ok(UserResponse::from(user))
 }
@@ -167,19 +162,18 @@ async fn issue_token_pair(
     config: &Config,
     user: &User,
 ) -> Result<(String, String), AppError> {
-    let access_token = jwt::generate_access_token(user.id, &config.jwt_secret, config.jwt_expiry_hours)?;
+    let access_token =
+        jwt::generate_access_token(user.id, &config.jwt_secret, config.jwt_expiry_hours)?;
     let refresh_token = jwt::generate_refresh_token();
     let token_hash = jwt::hash_refresh_token(&refresh_token);
     let expires_at = Utc::now() + Duration::days(config.jwt_refresh_expiry_days);
 
-    sqlx::query(
-        "INSERT INTO refresh_tokens (user_id, token_hash, expires_at) VALUES ($1, $2, $3)"
-    )
-    .bind(user.id)
-    .bind(&token_hash)
-    .bind(expires_at)
-    .execute(pool)
-    .await?;
+    sqlx::query("INSERT INTO refresh_tokens (user_id, token_hash, expires_at) VALUES ($1, $2, $3)")
+        .bind(user.id)
+        .bind(&token_hash)
+        .bind(expires_at)
+        .execute(pool)
+        .await?;
 
     // Keep at most 5 active tokens per user — delete oldest beyond that
     sqlx::query(
@@ -188,7 +182,7 @@ async fn issue_token_pair(
             WHERE user_id = $1
             ORDER BY created_at DESC
             OFFSET 5
-        )"#
+        )"#,
     )
     .bind(user.id)
     .execute(pool)

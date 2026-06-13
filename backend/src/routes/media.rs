@@ -14,7 +14,10 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
             .route("/trending", web::get().to(trending))
             .route("/{id}", web::get().to(get_detail))
             .route("/{id}/seasons", web::get().to(get_seasons))
-            .route("/{id}/seasons/{season_number}/episodes", web::get().to(get_episodes))
+            .route(
+                "/{id}/seasons/{season_number}/episodes",
+                web::get().to(get_episodes),
+            ),
     );
 }
 
@@ -53,21 +56,22 @@ async fn get_detail(
 
     // Try UUID first (local media), then TMDB ID
     if let Ok(uuid) = id_str.parse::<Uuid>() {
-        let media = sqlx::query_as::<_, crate::models::Media>(
-            "SELECT * FROM media WHERE id = $1"
-        )
-        .bind(uuid)
-        .fetch_optional(pool.get_ref())
-        .await?
-        .ok_or_else(|| AppError::NotFound("Media not found".to_string()))?;
+        let media = sqlx::query_as::<_, crate::models::Media>("SELECT * FROM media WHERE id = $1")
+            .bind(uuid)
+            .fetch_optional(pool.get_ref())
+            .await?
+            .ok_or_else(|| AppError::NotFound("Media not found".to_string()))?;
 
         return Ok(HttpResponse::Ok().json(media));
     }
 
-    let tmdb_id: i32 = id_str.parse()
+    let tmdb_id: i32 = id_str
+        .parse()
         .map_err(|_| AppError::BadRequest("Invalid ID".to_string()))?;
 
-    let media = tmdb.get_or_cache_media(pool.get_ref(), tmdb_id, media_type).await?;
+    let media = tmdb
+        .get_or_cache_media(pool.get_ref(), tmdb_id, media_type)
+        .await?;
     Ok(HttpResponse::Ok().json(media))
 }
 
@@ -82,10 +86,11 @@ async fn get_seasons(
     let media_id = if let Ok(uuid) = id_str.parse::<Uuid>() {
         uuid
     } else {
-        let tmdb_id: i32 = id_str.parse()
+        let tmdb_id: i32 = id_str
+            .parse()
             .map_err(|_| AppError::BadRequest("Invalid ID".to_string()))?;
         sqlx::query_scalar::<_, Uuid>(
-            "SELECT id FROM media WHERE tmdb_id = $1 AND media_type = 'tv'"
+            "SELECT id FROM media WHERE tmdb_id = $1 AND media_type = 'tv'",
         )
         .bind(tmdb_id)
         .fetch_optional(pool.get_ref())
@@ -94,7 +99,7 @@ async fn get_seasons(
     };
 
     let seasons = sqlx::query_as::<_, crate::models::Season>(
-        "SELECT * FROM seasons WHERE media_id = $1 ORDER BY season_number"
+        "SELECT * FROM seasons WHERE media_id = $1 ORDER BY season_number",
     )
     .bind(media_id)
     .fetch_all(pool.get_ref())
@@ -113,18 +118,17 @@ async fn get_episodes(
     let (id_str, season_number) = path.into_inner();
 
     let media = if let Ok(uuid) = id_str.parse::<Uuid>() {
-        sqlx::query_as::<_, crate::models::Media>(
-            "SELECT * FROM media WHERE id = $1"
-        )
-        .bind(uuid)
-        .fetch_optional(pool.get_ref())
-        .await?
-        .ok_or_else(|| AppError::NotFound("Media not found".to_string()))?
+        sqlx::query_as::<_, crate::models::Media>("SELECT * FROM media WHERE id = $1")
+            .bind(uuid)
+            .fetch_optional(pool.get_ref())
+            .await?
+            .ok_or_else(|| AppError::NotFound("Media not found".to_string()))?
     } else {
-        let tmdb_id: i32 = id_str.parse()
+        let tmdb_id: i32 = id_str
+            .parse()
             .map_err(|_| AppError::BadRequest("Invalid ID".to_string()))?;
         sqlx::query_as::<_, crate::models::Media>(
-            "SELECT * FROM media WHERE tmdb_id = $1 AND media_type = 'tv'"
+            "SELECT * FROM media WHERE tmdb_id = $1 AND media_type = 'tv'",
         )
         .bind(tmdb_id)
         .fetch_optional(pool.get_ref())
@@ -132,6 +136,8 @@ async fn get_episodes(
         .ok_or_else(|| AppError::NotFound("Media not found".to_string()))?
     };
 
-    let episodes = tmdb.cache_season_episodes(pool.get_ref(), &media, season_number).await?;
+    let episodes = tmdb
+        .cache_season_episodes(pool.get_ref(), &media, season_number)
+        .await?;
     Ok(HttpResponse::Ok().json(episodes))
 }

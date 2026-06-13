@@ -70,8 +70,12 @@ mod tests {
     #[test]
     fn test_update_tracking_valid_all_none() {
         let req = UpdateTrackingRequest {
-            status: None, rating: None, review: None,
-            is_favorite: None, started_at: None, completed_at: None,
+            status: None,
+            rating: None,
+            review: None,
+            is_favorite: None,
+            started_at: None,
+            completed_at: None,
         };
         assert!(req.validate().is_ok());
     }
@@ -79,9 +83,12 @@ mod tests {
     #[test]
     fn test_update_tracking_review_too_long() {
         let req = UpdateTrackingRequest {
-            status: None, rating: None,
+            status: None,
+            rating: None,
             review: Some("x".repeat(5001)),
-            is_favorite: None, started_at: None, completed_at: None,
+            is_favorite: None,
+            started_at: None,
+            completed_at: None,
         };
         assert!(req.validate().is_err());
     }
@@ -89,9 +96,12 @@ mod tests {
     #[test]
     fn test_update_tracking_review_boundary_5000() {
         let req = UpdateTrackingRequest {
-            status: None, rating: None,
+            status: None,
+            rating: None,
             review: Some("x".repeat(5000)),
-            is_favorite: None, started_at: None, completed_at: None,
+            is_favorite: None,
+            started_at: None,
+            completed_at: None,
         };
         assert!(req.validate().is_ok());
     }
