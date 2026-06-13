@@ -90,8 +90,13 @@ fn create_app(
     let tmdb_service = cinetrack::services::tmdb::TmdbService::new(&config);
     let email_service = cinetrack::services::email::EmailService::new(&config);
 
-    // No rate limiter in tests — actix-governor needs real peer_addr from TCP
+    // No rate limiter in tests — actix-governor needs real peer_addr from TCP.
+    // request_id + metrics mirror the production middleware stack.
     App::new()
+        .wrap(actix_web::middleware::from_fn(
+            cinetrack::middleware::request_id::request_id,
+        ))
+        .wrap(cinetrack::metrics::build())
         .app_data(web::Data::new(pool))
         .app_data(web::Data::new(config))
         .app_data(web::Data::new(tmdb_service))
@@ -1243,6 +1248,59 @@ async fn test_list_name_too_long_rejected() {
 
     let resp = actix_test::call_service(&app, req).await;
     assert_eq!(resp.status(), 400);
+}
+
+// ── Observability Tests ───────────────────────────────────────
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn test_request_id_header_present() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+
+    let req = actix_test::TestRequest::get()
+        .uri("/api/auth/me")
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+
+    let id = resp
+        .headers()
+        .get("x-request-id")
+        .expect("response should carry X-Request-Id")
+        .to_str()
+        .unwrap();
+    assert_eq!(id.len(), 36, "expected a hyphenated UUID, got {id:?}");
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn test_metrics_endpoint_exposed() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+
+    // Generate at least one measured request.
+    let warm = actix_test::TestRequest::get()
+        .uri("/api/health")
+        .peer_addr(peer_addr())
+        .to_request();
+    let _ = actix_test::call_service(&app, warm).await;
+
+    let req = actix_test::TestRequest::get()
+        .uri("/metrics")
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+
+    let body = actix_test::read_body(resp).await;
+    let text = String::from_utf8(body.to_vec()).unwrap();
+    assert!(
+        text.contains("cinetrack_http_requests_total"),
+        "metrics output missing request counter:\n{text}"
+    );
 }
 
 // ── Invalid Token Tests ───────────────────────────────────────

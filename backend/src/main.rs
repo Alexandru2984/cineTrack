@@ -3,9 +3,14 @@ use actix_governor::{Governor, GovernorConfigBuilder};
 use actix_web::{middleware as actix_middleware, web, App, HttpResponse, HttpServer};
 
 use cinetrack::{
-    config, db, middleware::rate_limit::TrustedProxyIpKeyExtractor, routes,
-    services::email::EmailService, services::tmdb::TmdbService,
+    config, db, metrics, middleware::rate_limit::TrustedProxyIpKeyExtractor,
+    middleware::request_id::request_id, routes, services::email::EmailService,
+    services::tmdb::TmdbService,
 };
+
+/// Access-log format including the per-request correlation id (set by the
+/// request_id middleware and echoed in the X-Request-Id response header).
+const LOG_FORMAT: &str = r#"%a "%r" %s %b "%{User-Agent}i" %T req-id=%{x-request-id}o"#;
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
@@ -25,6 +30,8 @@ async fn main() -> std::io::Result<()> {
 
     let tmdb_service = TmdbService::new(&config);
     let email_service = EmailService::new(&config);
+
+    let prometheus = metrics::build();
 
     let host = config.app_host.clone();
     let port = config.app_port;
@@ -81,7 +88,9 @@ async fn main() -> std::io::Result<()> {
             .wrap(Governor::new(&governor_conf))
             .wrap(cors)
             .wrap(security_headers)
-            .wrap(actix_middleware::Logger::default())
+            .wrap(actix_middleware::from_fn(request_id))
+            .wrap(actix_middleware::Logger::new(LOG_FORMAT))
+            .wrap(prometheus.clone())
             .app_data(json_cfg)
             .app_data(web::Data::new(pool.clone()))
             .app_data(web::Data::new(config.clone()))

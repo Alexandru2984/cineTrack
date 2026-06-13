@@ -2,6 +2,7 @@ pub mod config;
 pub mod db;
 pub mod dto;
 pub mod errors;
+pub mod metrics;
 pub mod middleware;
 pub mod models;
 pub mod routes;
