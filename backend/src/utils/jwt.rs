@@ -1,5 +1,6 @@
 use chrono::{Duration, Utc};
-use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
+use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
+use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
@@ -30,22 +31,24 @@ pub fn generate_access_token(
         &claims,
         &EncodingKey::from_secret(secret.as_bytes()),
     )
-    .map_err(|e| AppError::Unauthorized(format!("Failed to generate token: {}", e)))
+    .map_err(|_| AppError::InternalError(anyhow::anyhow!("Failed to generate access token")))
 }
 
 pub fn validate_token(token: &str, secret: &str) -> Result<Claims, AppError> {
+    let mut validation = Validation::new(Algorithm::HS256);
+    validation.validate_exp = true;
+
     let token_data = decode::<Claims>(
         token,
         &DecodingKey::from_secret(secret.as_bytes()),
-        &Validation::default(),
+        &validation,
     )?;
     Ok(token_data.claims)
 }
 
 pub fn generate_refresh_token() -> String {
-    use rand::Rng;
-    let mut rng = rand::thread_rng();
-    let bytes: Vec<u8> = (0..64).map(|_| rng.gen()).collect();
+    let mut bytes = [0u8; 64];
+    rand::rngs::OsRng.fill_bytes(&mut bytes);
     hex::encode(bytes)
 }
 

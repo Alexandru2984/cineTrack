@@ -20,6 +20,12 @@ pub struct Config {
 
 impl Config {
     pub fn from_env() -> Self {
+        let jwt_secret = env::var("JWT_SECRET").expect("JWT_SECRET must be set");
+        assert!(
+            jwt_secret.len() >= 32,
+            "JWT_SECRET must be at least 32 bytes"
+        );
+
         Self {
             app_env: env::var("APP_ENV").unwrap_or_else(|_| "development".to_string()),
             app_host: env::var("APP_HOST").unwrap_or_else(|_| "0.0.0.0".to_string()),
@@ -30,9 +36,9 @@ impl Config {
             frontend_url: env::var("FRONTEND_URL")
                 .unwrap_or_else(|_| "http://localhost:5173".to_string()),
             database_url: env::var("DATABASE_URL").expect("DATABASE_URL must be set"),
-            jwt_secret: env::var("JWT_SECRET").expect("JWT_SECRET must be set"),
+            jwt_secret,
             jwt_expiry_hours: env::var("JWT_EXPIRY_HOURS")
-                .unwrap_or_else(|_| "24".to_string())
+                .unwrap_or_else(|_| "1".to_string())
                 .parse()
                 .expect("JWT_EXPIRY_HOURS must be a number"),
             jwt_refresh_expiry_days: env::var("JWT_REFRESH_EXPIRY_DAYS")

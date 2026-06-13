@@ -5,7 +5,7 @@ use uuid::Uuid;
 use crate::config::Config;
 use crate::dto::auth::*;
 use crate::errors::AppError;
-use crate::models::User;
+use crate::models::{RefreshToken, User};
 use crate::utils::{jwt, password};
 
 pub async fn register(
@@ -73,11 +73,18 @@ pub async fn login(
         ));
     }
 
-    // Clean up expired refresh tokens for this user
-    sqlx::query("DELETE FROM refresh_tokens WHERE user_id = $1 AND expires_at < NOW()")
-        .bind(user.id)
-        .execute(pool)
-        .await?;
+    sqlx::query(
+        r#"DELETE FROM refresh_tokens
+        WHERE user_id = $1
+        AND (
+            expires_at < NOW()
+            OR (consumed_at IS NOT NULL AND consumed_at < NOW() - INTERVAL '7 days')
+            OR (revoked_at IS NOT NULL AND revoked_at < NOW() - INTERVAL '7 days')
+        )"#,
+    )
+    .bind(user.id)
+    .execute(pool)
+    .await?;
 
     let (access_token, refresh_token) = issue_token_pair(pool, config, &user).await?;
 
@@ -96,36 +103,67 @@ pub async fn refresh_token(
     req: RefreshRequest,
 ) -> Result<AuthResponse, AppError> {
     let token_hash = jwt::hash_refresh_token(&req.refresh_token);
+    let mut tx = pool.begin().await?;
 
-    let stored = sqlx::query_as::<_, crate::models::RefreshToken>(
-        "SELECT * FROM refresh_tokens WHERE token_hash = $1",
+    let stored = sqlx::query_as::<_, RefreshToken>(
+        "SELECT * FROM refresh_tokens WHERE token_hash = $1 FOR UPDATE",
     )
     .bind(&token_hash)
-    .fetch_optional(pool)
+    .fetch_optional(&mut *tx)
     .await?
     .ok_or_else(|| AppError::Unauthorized("Invalid refresh token".to_string()))?;
+
+    if stored.consumed_at.is_some() {
+        sqlx::query("DELETE FROM refresh_tokens WHERE user_id = $1")
+            .bind(stored.user_id)
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        return Err(AppError::Unauthorized(
+            "Refresh token reuse detected".to_string(),
+        ));
+    }
+
+    if stored.revoked_at.is_some() {
+        tx.commit().await?;
+        return Err(AppError::Unauthorized("Invalid refresh token".to_string()));
+    }
 
     if stored.expires_at < Utc::now() {
         sqlx::query("DELETE FROM refresh_tokens WHERE id = $1")
             .bind(stored.id)
-            .execute(pool)
+            .execute(&mut *tx)
             .await?;
+        tx.commit().await?;
         return Err(AppError::Unauthorized("Refresh token expired".to_string()));
     }
 
-    // Delete the used refresh token (rotation)
-    sqlx::query("DELETE FROM refresh_tokens WHERE id = $1")
+    sqlx::query("UPDATE refresh_tokens SET consumed_at = NOW() WHERE id = $1")
         .bind(stored.id)
-        .execute(pool)
+        .execute(&mut *tx)
         .await?;
 
     let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = $1")
         .bind(stored.user_id)
-        .fetch_optional(pool)
+        .fetch_optional(&mut *tx)
         .await?
         .ok_or_else(|| AppError::Unauthorized("User not found".to_string()))?;
 
-    let (access_token, new_refresh_token) = issue_token_pair(pool, config, &user).await?;
+    let access_token =
+        jwt::generate_access_token(user.id, &config.jwt_secret, config.jwt_expiry_hours)?;
+    let new_refresh_token = jwt::generate_refresh_token();
+    let new_token_hash = jwt::hash_refresh_token(&new_refresh_token);
+    let expires_at = Utc::now() + Duration::days(config.jwt_refresh_expiry_days);
+
+    sqlx::query("INSERT INTO refresh_tokens (user_id, token_hash, expires_at) VALUES ($1, $2, $3)")
+        .bind(user.id)
+        .bind(&new_token_hash)
+        .bind(expires_at)
+        .execute(&mut *tx)
+        .await?;
+
+    cap_active_refresh_tokens(&mut *tx, user.id).await?;
+    tx.commit().await?;
 
     Ok(AuthResponse {
         access_token,
@@ -138,10 +176,12 @@ pub async fn refresh_token(
 
 pub async fn logout(pool: &PgPool, req: LogoutRequest) -> Result<(), AppError> {
     let token_hash = jwt::hash_refresh_token(&req.refresh_token);
-    sqlx::query("DELETE FROM refresh_tokens WHERE token_hash = $1")
-        .bind(&token_hash)
-        .execute(pool)
-        .await?;
+    sqlx::query(
+        "UPDATE refresh_tokens SET revoked_at = NOW() WHERE token_hash = $1 AND revoked_at IS NULL",
+    )
+    .bind(&token_hash)
+    .execute(pool)
+    .await?;
     Ok(())
 }
 
@@ -175,18 +215,26 @@ async fn issue_token_pair(
         .execute(pool)
         .await?;
 
-    // Keep at most 5 active tokens per user — delete oldest beyond that
+    cap_active_refresh_tokens(pool, user.id).await?;
+
+    Ok((access_token, refresh_token))
+}
+
+async fn cap_active_refresh_tokens<'e, E>(executor: E, user_id: Uuid) -> Result<(), AppError>
+where
+    E: sqlx::Executor<'e, Database = sqlx::Postgres>,
+{
     sqlx::query(
         r#"DELETE FROM refresh_tokens WHERE id IN (
             SELECT id FROM refresh_tokens
-            WHERE user_id = $1
+            WHERE user_id = $1 AND consumed_at IS NULL AND revoked_at IS NULL
             ORDER BY created_at DESC
             OFFSET 5
         )"#,
     )
-    .bind(user.id)
-    .execute(pool)
+    .bind(user_id)
+    .execute(executor)
     .await?;
 
-    Ok((access_token, refresh_token))
+    Ok(())
 }
