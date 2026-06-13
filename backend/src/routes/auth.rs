@@ -12,6 +12,7 @@ use crate::errors::AppError;
 use crate::middleware::auth::require_auth;
 use crate::middleware::rate_limit::TrustedProxyIpKeyExtractor;
 use crate::services;
+use crate::services::email::EmailService;
 
 const REFRESH_COOKIE_NAME: &str = "cinetrack_refresh";
 const REFRESH_COOKIE_PATH: &str = "/api/auth";
@@ -32,6 +33,8 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
             .route("/logout", web::post().to(logout))
             .route("/refresh", web::post().to(refresh))
             .route("/password", web::patch().to(change_password))
+            .route("/password/forgot", web::post().to(forgot_password))
+            .route("/password/reset", web::post().to(reset_password))
             .route("/me", web::get().to(me)),
     );
 }
@@ -121,6 +124,41 @@ async fn change_password(
         .json(serde_json::json!({"message": "Password changed successfully"})))
 }
 
+async fn forgot_password(
+    pool: web::Data<PgPool>,
+    config: web::Data<Config>,
+    email_service: web::Data<EmailService>,
+    body: web::Json<ForgotPasswordRequest>,
+) -> Result<HttpResponse, AppError> {
+    body.validate()?;
+    services::auth::forgot_password(
+        pool.get_ref(),
+        config.get_ref(),
+        email_service.get_ref(),
+        &body.email,
+    )
+    .await?;
+
+    // Always the same response, regardless of whether the email exists.
+    Ok(HttpResponse::Ok().json(serde_json::json!({
+        "message": "If that email is registered, a reset link has been sent"
+    })))
+}
+
+async fn reset_password(
+    pool: web::Data<PgPool>,
+    config: web::Data<Config>,
+    body: web::Json<ResetPasswordRequest>,
+) -> Result<HttpResponse, AppError> {
+    body.validate()?;
+    let data = body.into_inner();
+    services::auth::reset_password(pool.get_ref(), &data.token, &data.new_password).await?;
+
+    Ok(HttpResponse::Ok()
+        .cookie(clear_refresh_cookie(config.get_ref()))
+        .json(serde_json::json!({"message": "Password reset successfully"})))
+}
+
 fn refresh_token_from_request<T>(req: &HttpRequest, body: Option<&T>) -> Option<String>
 where
     T: RefreshTokenPayload,
@@ -189,6 +227,11 @@ mod tests {
             cors_allowed_origins: vec!["http://localhost:5173".to_string()],
             rate_limit_rps: 10,
             rate_limit_burst: 50,
+            smtp_host: None,
+            smtp_port: 587,
+            smtp_username: None,
+            smtp_password: None,
+            smtp_from: "CineTrack <noreply@localhost>".to_string(),
         }
     }
 

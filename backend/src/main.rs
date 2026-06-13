@@ -4,7 +4,7 @@ use actix_web::{middleware as actix_middleware, web, App, HttpResponse, HttpServ
 
 use cinetrack::{
     config, db, middleware::rate_limit::TrustedProxyIpKeyExtractor, routes,
-    services::tmdb::TmdbService,
+    services::email::EmailService, services::tmdb::TmdbService,
 };
 
 #[actix_web::main]
@@ -24,6 +24,7 @@ async fn main() -> std::io::Result<()> {
     log::info!("Migrations applied successfully");
 
     let tmdb_service = TmdbService::new(&config);
+    let email_service = EmailService::new(&config);
 
     let host = config.app_host.clone();
     let port = config.app_port;
@@ -85,6 +86,7 @@ async fn main() -> std::io::Result<()> {
             .app_data(web::Data::new(pool.clone()))
             .app_data(web::Data::new(config.clone()))
             .app_data(web::Data::new(tmdb_service.clone()))
+            .app_data(web::Data::new(email_service.clone()))
             .configure(routes::configure)
     })
     .bind(format!("{}:{}", host, port))?

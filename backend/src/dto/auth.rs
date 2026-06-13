@@ -120,6 +120,23 @@ pub struct ChangePasswordRequest {
     pub new_password: String,
 }
 
+#[derive(Debug, Deserialize, Validate)]
+pub struct ForgotPasswordRequest {
+    #[validate(email(message = "Invalid email address"))]
+    pub email: String,
+}
+
+#[derive(Debug, Deserialize, Validate)]
+pub struct ResetPasswordRequest {
+    #[validate(length(min = 1, message = "Reset token is required"))]
+    pub token: String,
+    #[validate(
+        length(min = 8, max = 128, message = "Password must be 8-128 characters"),
+        custom(function = "validate_password_strength")
+    )]
+    pub new_password: String,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct RefreshRequest {
     pub refresh_token: String,

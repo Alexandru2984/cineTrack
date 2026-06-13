@@ -5,7 +5,8 @@ use uuid::Uuid;
 use crate::config::Config;
 use crate::dto::auth::*;
 use crate::errors::AppError;
-use crate::models::{RefreshToken, User};
+use crate::models::{PasswordResetToken, RefreshToken, User};
+use crate::services::email::EmailService;
 use crate::utils::{jwt, password};
 
 /// Normalize an email for storage and lookup: trimmed and lowercased, so
@@ -238,6 +239,101 @@ pub async fn change_password(
     .await?;
     tx.commit().await?;
 
+    Ok(())
+}
+
+/// Start a password reset. Always succeeds from the caller's perspective so the
+/// response cannot be used to enumerate registered addresses. When the email
+/// exists, a one-time token is stored (hashed) and a reset link is emailed.
+pub async fn forgot_password(
+    pool: &PgPool,
+    config: &Config,
+    email_service: &EmailService,
+    email: &str,
+) -> Result<(), AppError> {
+    let email = normalize_email(email);
+    let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE email = $1")
+        .bind(&email)
+        .fetch_optional(pool)
+        .await?;
+
+    let Some(user) = user else {
+        return Ok(());
+    };
+
+    let token = jwt::generate_refresh_token();
+    let token_hash = jwt::hash_refresh_token(&token);
+    let expires_at = Utc::now() + Duration::hours(1);
+
+    // Invalidate any outstanding reset tokens before issuing a fresh one.
+    sqlx::query("DELETE FROM password_reset_tokens WHERE user_id = $1")
+        .bind(user.id)
+        .execute(pool)
+        .await?;
+    sqlx::query(
+        "INSERT INTO password_reset_tokens (user_id, token_hash, expires_at) VALUES ($1, $2, $3)",
+    )
+    .bind(user.id)
+    .bind(&token_hash)
+    .bind(expires_at)
+    .execute(pool)
+    .await?;
+
+    let reset_url = format!(
+        "{}/reset-password?token={}",
+        config.frontend_url.trim_end_matches('/'),
+        token
+    );
+    email_service
+        .send_password_reset(&user.email, &reset_url)
+        .await;
+
+    Ok(())
+}
+
+/// Complete a password reset using a one-time token. Consumes the token, sets
+/// the new password and revokes all refresh tokens for the account.
+pub async fn reset_password(
+    pool: &PgPool,
+    token: &str,
+    new_password: &str,
+) -> Result<(), AppError> {
+    let token_hash = jwt::hash_refresh_token(token);
+    let mut tx = pool.begin().await?;
+
+    let stored = sqlx::query_as::<_, PasswordResetToken>(
+        "SELECT * FROM password_reset_tokens WHERE token_hash = $1 FOR UPDATE",
+    )
+    .bind(&token_hash)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(|| AppError::BadRequest("Invalid or expired reset token".to_string()))?;
+
+    if stored.consumed_at.is_some() || stored.expires_at < Utc::now() {
+        return Err(AppError::BadRequest(
+            "Invalid or expired reset token".to_string(),
+        ));
+    }
+
+    let new_hash = password::hash_password(new_password)?;
+
+    sqlx::query("UPDATE password_reset_tokens SET consumed_at = NOW() WHERE id = $1")
+        .bind(stored.id)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("UPDATE users SET password_hash = $2, updated_at = NOW() WHERE id = $1")
+        .bind(stored.user_id)
+        .bind(&new_hash)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query(
+        "UPDATE refresh_tokens SET revoked_at = NOW() WHERE user_id = $1 AND revoked_at IS NULL",
+    )
+    .bind(stored.user_id)
+    .execute(&mut *tx)
+    .await?;
+
+    tx.commit().await?;
     Ok(())
 }
 

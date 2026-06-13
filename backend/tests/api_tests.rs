@@ -67,6 +67,11 @@ fn test_config() -> cinetrack::config::Config {
         cors_allowed_origins: vec!["http://localhost:5173".into()],
         rate_limit_rps: 100,
         rate_limit_burst: 200,
+        smtp_host: None,
+        smtp_port: 587,
+        smtp_username: None,
+        smtp_password: None,
+        smtp_from: "CineTrack <noreply@localhost>".into(),
     }
 }
 
@@ -83,12 +88,14 @@ fn create_app(
 > {
     let config = test_config();
     let tmdb_service = cinetrack::services::tmdb::TmdbService::new(&config);
+    let email_service = cinetrack::services::email::EmailService::new(&config);
 
     // No rate limiter in tests — actix-governor needs real peer_addr from TCP
     App::new()
         .app_data(web::Data::new(pool))
         .app_data(web::Data::new(config))
         .app_data(web::Data::new(tmdb_service))
+        .app_data(web::Data::new(email_service))
         .configure(cinetrack::routes::configure)
 }
 
@@ -110,6 +117,10 @@ async fn clean_db(pool: &PgPool) {
     sqlx::query("DELETE FROM episodes").execute(pool).await.ok();
     sqlx::query("DELETE FROM seasons").execute(pool).await.ok();
     sqlx::query("DELETE FROM media").execute(pool).await.ok();
+    sqlx::query("DELETE FROM password_reset_tokens")
+        .execute(pool)
+        .await
+        .ok();
     sqlx::query("DELETE FROM refresh_tokens")
         .execute(pool)
         .await
@@ -541,6 +552,155 @@ async fn test_change_password_revokes_refresh_tokens() {
         .to_request();
     let resp = actix_test::call_service(&app, req).await;
     assert_eq!(resp.status(), 401);
+}
+
+// ── Forgot / Reset Password Tests ─────────────────────────────
+
+/// Insert a reset token directly (hashed, like the service does) and return the
+/// raw token to use against the reset endpoint. `valid` controls expiry.
+async fn insert_reset_token(pool: &PgPool, email: &str, valid: bool) -> String {
+    let raw = cinetrack::utils::jwt::generate_refresh_token();
+    let token_hash = cinetrack::utils::jwt::hash_refresh_token(&raw);
+    let expires = if valid {
+        "NOW() + INTERVAL '1 hour'"
+    } else {
+        "NOW() - INTERVAL '1 hour'"
+    };
+    sqlx::query(&format!(
+        "INSERT INTO password_reset_tokens (user_id, token_hash, expires_at) \
+         VALUES ((SELECT id FROM users WHERE email = $1), $2, {expires})"
+    ))
+    .bind(email)
+    .bind(&token_hash)
+    .execute(pool)
+    .await
+    .expect("insert reset token");
+    raw
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn test_forgot_password_always_ok() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+
+    register_user(&app, "forgotuser", "forgot@example.com", "Pass1234").await;
+
+    // Existing email → 200
+    let req = actix_test::TestRequest::post()
+        .uri("/api/auth/password/forgot")
+        .set_json(json!({ "email": "forgot@example.com" }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+
+    // Unknown email → still 200 (no user enumeration)
+    let req = actix_test::TestRequest::post()
+        .uri("/api/auth/password/forgot")
+        .set_json(json!({ "email": "nobody@example.com" }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn test_reset_password_success() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+
+    register_user(&app, "resetuser", "reset@example.com", "Pass1234").await;
+    let token = insert_reset_token(&pool, "reset@example.com", true).await;
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/auth/password/reset")
+        .set_json(json!({ "token": token, "new_password": "NewPass5678" }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+
+    // Old password rejected
+    let req = actix_test::TestRequest::post()
+        .uri("/api/auth/login")
+        .set_json(json!({ "email": "reset@example.com", "password": "Pass1234" }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 401);
+
+    // New password works
+    login_user(&app, "reset@example.com", "NewPass5678").await;
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn test_reset_password_invalid_token() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+
+    register_user(&app, "badtoken", "badtoken@example.com", "Pass1234").await;
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/auth/password/reset")
+        .set_json(json!({ "token": "not-a-real-token", "new_password": "NewPass5678" }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 400);
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn test_reset_password_expired_token() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+
+    register_user(&app, "expuser", "exp@example.com", "Pass1234").await;
+    let token = insert_reset_token(&pool, "exp@example.com", false).await;
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/auth/password/reset")
+        .set_json(json!({ "token": token, "new_password": "NewPass5678" }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 400);
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn test_reset_password_token_single_use() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+
+    register_user(&app, "onceuser", "once@example.com", "Pass1234").await;
+    let token = insert_reset_token(&pool, "once@example.com", true).await;
+
+    // First use succeeds
+    let req = actix_test::TestRequest::post()
+        .uri("/api/auth/password/reset")
+        .set_json(json!({ "token": &token, "new_password": "NewPass5678" }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+
+    // Reusing the same token fails
+    let req = actix_test::TestRequest::post()
+        .uri("/api/auth/password/reset")
+        .set_json(json!({ "token": &token, "new_password": "AnotherPass9" }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 400);
 }
 
 // ── Access Control Tests ──────────────────────────────────────

@@ -17,6 +17,11 @@ pub struct Config {
     pub cors_allowed_origins: Vec<String>,
     pub rate_limit_rps: u32,
     pub rate_limit_burst: u32,
+    pub smtp_host: Option<String>,
+    pub smtp_port: u16,
+    pub smtp_username: Option<String>,
+    pub smtp_password: Option<String>,
+    pub smtp_from: String,
 }
 
 impl Config {
@@ -70,6 +75,15 @@ impl Config {
                 .unwrap_or_else(|_| "50".to_string())
                 .parse()
                 .expect("RATE_LIMIT_BURST_SIZE must be a number"),
+            smtp_host: env::var("SMTP_HOST").ok().filter(|s| !s.is_empty()),
+            smtp_port: env::var("SMTP_PORT")
+                .unwrap_or_else(|_| "587".to_string())
+                .parse()
+                .expect("SMTP_PORT must be a number"),
+            smtp_username: env::var("SMTP_USERNAME").ok().filter(|s| !s.is_empty()),
+            smtp_password: env::var("SMTP_PASSWORD").ok().filter(|s| !s.is_empty()),
+            smtp_from: env::var("SMTP_FROM")
+                .unwrap_or_else(|_| "CineTrack <noreply@localhost>".to_string()),
         }
     }
 
