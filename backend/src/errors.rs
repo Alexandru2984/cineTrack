@@ -49,6 +49,30 @@ impl ResponseError for AppError {
                 (actix_web::http::StatusCode::BAD_REQUEST, msg.clone())
             }
             AppError::TmdbError(msg) => (actix_web::http::StatusCode::BAD_GATEWAY, msg.clone()),
+            AppError::DatabaseError(sqlx::Error::Database(db_err)) => {
+                match db_err.code().as_deref() {
+                    Some("23505") => (
+                        actix_web::http::StatusCode::CONFLICT,
+                        "Resource already exists".to_string(),
+                    ),
+                    Some("23503") => (
+                        actix_web::http::StatusCode::BAD_REQUEST,
+                        "Referenced resource does not exist".to_string(),
+                    ),
+                    Some("23514") => (
+                        actix_web::http::StatusCode::BAD_REQUEST,
+                        "Invalid data".to_string(),
+                    ),
+                    _ => {
+                        eprintln!("Internal error: {:?}", self);
+                        log::error!("Internal error: {:?}", self);
+                        (
+                            actix_web::http::StatusCode::INTERNAL_SERVER_ERROR,
+                            "Internal server error".to_string(),
+                        )
+                    }
+                }
+            }
             AppError::InternalError(_) | AppError::DatabaseError(_) => {
                 eprintln!("Internal error: {:?}", self);
                 log::error!("Internal error: {:?}", self);

@@ -62,12 +62,23 @@ async fn get_profile(
     } else {
         false
     };
+    let can_view_private_details = user.is_public
+        || current_user_id == Some(user.id)
+        || (current_user_id.is_some() && is_following);
 
     Ok(HttpResponse::Ok().json(PublicUserProfile {
         id: user.id,
         username: user.username,
-        avatar_url: user.avatar_url,
-        bio: user.bio,
+        avatar_url: if can_view_private_details {
+            user.avatar_url
+        } else {
+            None
+        },
+        bio: if can_view_private_details {
+            user.bio
+        } else {
+            None
+        },
         is_public: user.is_public,
         followers_count,
         following_count,
@@ -233,24 +244,10 @@ async fn get_user_activity(
         .await?
         .ok_or_else(|| AppError::NotFound("User not found".to_string()))?;
 
-    // Enforce privacy: private users' activity is only visible to themselves or followers
-    if !user.is_public {
-        let allowed = match current_user_id {
-            Some(uid) if uid == user.id => true,
-            Some(uid) => sqlx::query_scalar::<_, bool>(
-                "SELECT EXISTS(SELECT 1 FROM follows WHERE follower_id = $1 AND following_id = $2)",
-            )
-            .bind(uid)
-            .bind(user.id)
-            .fetch_one(pool.get_ref())
-            .await?,
-            None => false,
-        };
-        if !allowed {
-            return Err(AppError::Forbidden(
-                "This user's activity is private".to_string(),
-            ));
-        }
+    if !can_view_private_user(pool.get_ref(), current_user_id, &user).await? {
+        return Err(AppError::Forbidden(
+            "This user's activity is private".to_string(),
+        ));
     }
 
     let activities = sqlx::query_as::<_, (Uuid, Uuid, String, Option<String>, String, String, Option<String>, chrono::DateTime<chrono::Utc>)>(
@@ -286,4 +283,32 @@ async fn get_user_activity(
         .collect();
 
     Ok(HttpResponse::Ok().json(items))
+}
+
+async fn can_view_private_user(
+    pool: &PgPool,
+    current_user_id: Option<Uuid>,
+    user: &User,
+) -> Result<bool, AppError> {
+    if user.is_public {
+        return Ok(true);
+    }
+
+    let Some(uid) = current_user_id else {
+        return Ok(false);
+    };
+
+    if uid == user.id {
+        return Ok(true);
+    }
+
+    let is_follower = sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS(SELECT 1 FROM follows WHERE follower_id = $1 AND following_id = $2)",
+    )
+    .bind(uid)
+    .bind(user.id)
+    .fetch_one(pool)
+    .await?;
+
+    Ok(is_follower)
 }

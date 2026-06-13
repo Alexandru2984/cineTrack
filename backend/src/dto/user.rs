@@ -18,9 +18,18 @@ fn validate_avatar_url(url: &str) -> Result<(), validator::ValidationError> {
     Ok(())
 }
 
+fn validate_username(username: &str) -> Result<(), validator::ValidationError> {
+    if username.trim().is_empty() {
+        let mut err = validator::ValidationError::new("blank_username");
+        err.message = Some("Username cannot be blank".into());
+        return Err(err);
+    }
+    Ok(())
+}
+
 #[derive(Debug, Deserialize, Validate)]
 pub struct UpdateProfileRequest {
-    #[validate(length(min = 3, max = 50))]
+    #[validate(length(min = 3, max = 50), custom(function = "validate_username"))]
     pub username: Option<String>,
     #[validate(length(max = 500, message = "Bio must be at most 500 characters"))]
     pub bio: Option<String>,
@@ -114,6 +123,17 @@ mod tests {
     fn test_profile_username_too_long() {
         let req = UpdateProfileRequest {
             username: Some("a".repeat(51)),
+            bio: None,
+            avatar_url: None,
+            is_public: None,
+        };
+        assert!(req.validate().is_err());
+    }
+
+    #[test]
+    fn test_profile_blank_username_rejected() {
+        let req = UpdateProfileRequest {
+            username: Some("   ".to_string()),
             bio: None,
             avatar_url: None,
             is_public: None,

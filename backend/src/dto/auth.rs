@@ -3,7 +3,10 @@ use validator::Validate;
 
 #[derive(Debug, Deserialize, Validate)]
 pub struct RegisterRequest {
-    #[validate(length(min = 3, max = 50, message = "Username must be 3-50 characters"))]
+    #[validate(
+        length(min = 3, max = 50, message = "Username must be 3-50 characters"),
+        custom(function = "validate_username")
+    )]
     pub username: String,
     #[validate(email(message = "Invalid email address"))]
     pub email: String,
@@ -14,12 +17,26 @@ pub struct RegisterRequest {
     pub password: String,
 }
 
+fn validate_username(username: &str) -> Result<(), validator::ValidationError> {
+    if username.trim().is_empty() {
+        let mut err = validator::ValidationError::new("blank_username");
+        err.message = Some("Username cannot be blank".into());
+        return Err(err);
+    }
+    Ok(())
+}
+
 fn validate_password_strength(password: &str) -> Result<(), validator::ValidationError> {
     let has_letter = password.chars().any(|c| c.is_alphabetic());
     let has_digit = password.chars().any(|c| c.is_ascii_digit());
     if !has_letter || !has_digit {
         let mut err = validator::ValidationError::new("weak_password");
         err.message = Some("Password must contain at least one letter and one digit".into());
+        return Err(err);
+    }
+    if password.is_empty() {
+        let mut err = validator::ValidationError::new("weak_password");
+        err.message = Some("Password cannot be empty".into());
         return Err(err);
     }
     let first = password.chars().next().unwrap();
@@ -31,9 +48,11 @@ fn validate_password_strength(password: &str) -> Result<(), validator::Validatio
     Ok(())
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Validate)]
 pub struct LoginRequest {
+    #[validate(email(message = "Invalid email address"))]
     pub email: String,
+    #[validate(length(min = 1, max = 128, message = "Password must be 1-128 characters"))]
     pub password: String,
 }
 
@@ -128,6 +147,11 @@ mod tests {
     }
 
     #[test]
+    fn test_password_empty_rejected_without_panic() {
+        assert!(validate_password_strength("").is_err());
+    }
+
+    #[test]
     fn test_password_all_same_char() {
         assert!(validate_password_strength("aaaaaaaa").is_err());
     }
@@ -175,6 +199,16 @@ mod tests {
     fn test_register_username_too_long() {
         let req = RegisterRequest {
             username: "a".repeat(51),
+            email: "test@example.com".to_string(),
+            password: "SecurePass1".to_string(),
+        };
+        assert!(req.validate().is_err());
+    }
+
+    #[test]
+    fn test_register_blank_username_rejected() {
+        let req = RegisterRequest {
+            username: "   ".to_string(),
             email: "test@example.com".to_string(),
             password: "SecurePass1".to_string(),
         };

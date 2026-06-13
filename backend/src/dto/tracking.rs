@@ -2,16 +2,50 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use validator::Validate;
 
-#[derive(Debug, Deserialize)]
+pub const VALID_MEDIA_TYPES: &[&str] = &["movie", "tv"];
+pub const VALID_TRACKING_STATUSES: &[&str] = &[
+    "watching",
+    "completed",
+    "plan_to_watch",
+    "dropped",
+    "on_hold",
+];
+
+fn validate_media_type(media_type: &str) -> Result<(), validator::ValidationError> {
+    if VALID_MEDIA_TYPES.contains(&media_type) {
+        Ok(())
+    } else {
+        let mut err = validator::ValidationError::new("invalid_media_type");
+        err.message = Some("Media type must be movie or tv".into());
+        Err(err)
+    }
+}
+
+fn validate_tracking_status(status: &str) -> Result<(), validator::ValidationError> {
+    if VALID_TRACKING_STATUSES.contains(&status) {
+        Ok(())
+    } else {
+        let mut err = validator::ValidationError::new("invalid_status");
+        err.message = Some("Invalid tracking status".into());
+        Err(err)
+    }
+}
+
+#[derive(Debug, Deserialize, Validate)]
 pub struct CreateTrackingRequest {
+    #[validate(range(min = 1, message = "TMDB id must be positive"))]
     pub tmdb_id: i32,
+    #[validate(custom(function = "validate_media_type"))]
     pub media_type: String,
+    #[validate(custom(function = "validate_tracking_status"))]
     pub status: String,
 }
 
 #[derive(Debug, Deserialize, Validate)]
 pub struct UpdateTrackingRequest {
+    #[validate(custom(function = "validate_tracking_status"))]
     pub status: Option<String>,
+    #[validate(range(min = 1, max = 10, message = "Rating must be between 1 and 10"))]
     pub rating: Option<i16>,
     #[validate(length(max = 5000, message = "Review must be at most 5000 characters"))]
     pub review: Option<String>,
@@ -20,8 +54,9 @@ pub struct UpdateTrackingRequest {
     pub completed_at: Option<chrono::NaiveDate>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Validate)]
 pub struct TrackingQueryParams {
+    #[validate(custom(function = "validate_tracking_status"))]
     pub status: Option<String>,
     pub page: Option<u32>,
     pub limit: Option<u32>,
@@ -117,5 +152,38 @@ mod tests {
             completed_at: None,
         };
         assert!(req.validate().is_ok());
+    }
+
+    #[test]
+    fn test_create_tracking_rejects_bad_media_type() {
+        let req = CreateTrackingRequest {
+            tmdb_id: 1,
+            media_type: "person".to_string(),
+            status: "watching".to_string(),
+        };
+        assert!(req.validate().is_err());
+    }
+
+    #[test]
+    fn test_create_tracking_rejects_non_positive_tmdb_id() {
+        let req = CreateTrackingRequest {
+            tmdb_id: 0,
+            media_type: "movie".to_string(),
+            status: "watching".to_string(),
+        };
+        assert!(req.validate().is_err());
+    }
+
+    #[test]
+    fn test_update_tracking_rejects_bad_status() {
+        let req = UpdateTrackingRequest {
+            status: Some("rewatching".to_string()),
+            rating: None,
+            review: None,
+            is_favorite: None,
+            started_at: None,
+            completed_at: None,
+        };
+        assert!(req.validate().is_err());
     }
 }

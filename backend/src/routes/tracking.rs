@@ -24,6 +24,7 @@ async fn list_tracking(
     query: web::Query<TrackingQueryParams>,
 ) -> Result<HttpResponse, AppError> {
     let user_id = require_auth(&req).await?;
+    query.validate()?;
     let params = query.into_inner();
     let limit = params.limit.unwrap_or(50).min(100) as i64;
     let offset = ((params.page.unwrap_or(1).max(1) - 1) as i64) * limit;
@@ -102,22 +103,8 @@ async fn create_tracking(
     body: web::Json<CreateTrackingRequest>,
 ) -> Result<HttpResponse, AppError> {
     let user_id = require_auth(&req).await?;
+    body.validate()?;
     let data = body.into_inner();
-
-    // Validate status
-    let valid_statuses = [
-        "watching",
-        "completed",
-        "plan_to_watch",
-        "dropped",
-        "on_hold",
-    ];
-    if !valid_statuses.contains(&data.status.as_str()) {
-        return Err(AppError::BadRequest(format!(
-            "Invalid status. Must be one of: {}",
-            valid_statuses.join(", ")
-        )));
-    }
 
     // Ensure media exists in cache
     let media = tmdb
@@ -204,27 +191,6 @@ async fn update_tracking(
     let tracking_id = path.into_inner();
     body.validate()?;
     let data = body.into_inner();
-
-    if let Some(ref status) = data.status {
-        let valid_statuses = [
-            "watching",
-            "completed",
-            "plan_to_watch",
-            "dropped",
-            "on_hold",
-        ];
-        if !valid_statuses.contains(&status.as_str()) {
-            return Err(AppError::BadRequest("Invalid status".to_string()));
-        }
-    }
-
-    if let Some(rating) = data.rating {
-        if !(1..=10).contains(&rating) {
-            return Err(AppError::BadRequest(
-                "Rating must be between 1 and 10".to_string(),
-            ));
-        }
-    }
 
     let updated = sqlx::query_as::<_, crate::models::UserMedia>(
         r#"UPDATE user_media SET

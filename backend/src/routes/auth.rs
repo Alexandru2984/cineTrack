@@ -51,6 +51,7 @@ async fn login(
     config: web::Data<Config>,
     body: web::Json<LoginRequest>,
 ) -> Result<HttpResponse, AppError> {
+    body.validate()?;
     let (resp, refresh_token) =
         services::auth::login(pool.get_ref(), config.get_ref(), body.into_inner()).await?;
     Ok(HttpResponse::Ok()

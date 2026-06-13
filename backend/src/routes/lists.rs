@@ -204,6 +204,15 @@ async fn add_item(
     .await?
     .ok_or_else(|| AppError::NotFound("List not found".to_string()))?;
 
+    let media_exists =
+        sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM media WHERE id = $1)")
+            .bind(body.media_id)
+            .fetch_one(pool.get_ref())
+            .await?;
+    if !media_exists {
+        return Err(AppError::BadRequest("Media not found".to_string()));
+    }
+
     sqlx::query(
         "INSERT INTO list_items (list_id, media_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
     )

@@ -2,6 +2,15 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use validator::Validate;
 
+fn validate_non_blank(value: &str) -> Result<(), validator::ValidationError> {
+    if value.trim().is_empty() {
+        let mut err = validator::ValidationError::new("blank_value");
+        err.message = Some("Value cannot be blank".into());
+        return Err(err);
+    }
+    Ok(())
+}
+
 #[derive(Debug, Serialize)]
 pub struct PublicUserProfile {
     pub id: Uuid,
@@ -30,7 +39,10 @@ pub struct ActivityItem {
 
 #[derive(Debug, Deserialize, Validate)]
 pub struct CreateListRequest {
-    #[validate(length(min = 1, max = 200, message = "List name must be 1-200 characters"))]
+    #[validate(
+        length(min = 1, max = 200, message = "List name must be 1-200 characters"),
+        custom(function = "validate_non_blank")
+    )]
     pub name: String,
     #[validate(length(max = 1000, message = "Description must be at most 1000 characters"))]
     pub description: Option<String>,
@@ -39,7 +51,10 @@ pub struct CreateListRequest {
 
 #[derive(Debug, Deserialize, Validate)]
 pub struct UpdateListRequest {
-    #[validate(length(min = 1, max = 200, message = "List name must be 1-200 characters"))]
+    #[validate(
+        length(min = 1, max = 200, message = "List name must be 1-200 characters"),
+        custom(function = "validate_non_blank")
+    )]
     pub name: Option<String>,
     #[validate(length(max = 1000, message = "Description must be at most 1000 characters"))]
     pub description: Option<String>,
@@ -80,6 +95,16 @@ mod tests {
     fn test_create_list_empty_name_rejected() {
         let req = CreateListRequest {
             name: "".to_string(),
+            description: None,
+            is_public: None,
+        };
+        assert!(req.validate().is_err());
+    }
+
+    #[test]
+    fn test_create_list_blank_name_rejected() {
+        let req = CreateListRequest {
+            name: "   ".to_string(),
             description: None,
             is_public: None,
         };
@@ -140,6 +165,16 @@ mod tests {
     fn test_update_list_empty_name_rejected() {
         let req = UpdateListRequest {
             name: Some("".to_string()),
+            description: None,
+            is_public: None,
+        };
+        assert!(req.validate().is_err());
+    }
+
+    #[test]
+    fn test_update_list_blank_name_rejected() {
+        let req = UpdateListRequest {
+            name: Some("   ".to_string()),
             description: None,
             is_public: None,
         };
