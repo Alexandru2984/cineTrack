@@ -12,7 +12,7 @@ pub async fn register(
     pool: &PgPool,
     config: &Config,
     req: RegisterRequest,
-) -> Result<AuthResponse, AppError> {
+) -> Result<(AuthResponse, String), AppError> {
     let existing = sqlx::query_scalar::<_, i64>(
         "SELECT COUNT(*) FROM users WHERE email = $1 OR username = $2",
     )
@@ -42,20 +42,21 @@ pub async fn register(
 
     let (access_token, refresh_token) = issue_token_pair(pool, config, &user).await?;
 
-    Ok(AuthResponse {
+    let resp = AuthResponse {
         access_token,
-        refresh_token,
         token_type: "Bearer".to_string(),
         expires_in: config.jwt_expiry_hours * 3600,
         user: UserResponse::from(user),
-    })
+    };
+
+    Ok((resp, refresh_token))
 }
 
 pub async fn login(
     pool: &PgPool,
     config: &Config,
     req: LoginRequest,
-) -> Result<AuthResponse, AppError> {
+) -> Result<(AuthResponse, String), AppError> {
     let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE email = $1")
         .bind(&req.email)
         .fetch_optional(pool)
@@ -88,21 +89,22 @@ pub async fn login(
 
     let (access_token, refresh_token) = issue_token_pair(pool, config, &user).await?;
 
-    Ok(AuthResponse {
+    let resp = AuthResponse {
         access_token,
-        refresh_token,
         token_type: "Bearer".to_string(),
         expires_in: config.jwt_expiry_hours * 3600,
         user: UserResponse::from(user),
-    })
+    };
+
+    Ok((resp, refresh_token))
 }
 
 pub async fn refresh_token(
     pool: &PgPool,
     config: &Config,
-    req: RefreshRequest,
-) -> Result<AuthResponse, AppError> {
-    let token_hash = jwt::hash_refresh_token(&req.refresh_token);
+    refresh_token: &str,
+) -> Result<(AuthResponse, String), AppError> {
+    let token_hash = jwt::hash_refresh_token(refresh_token);
     let mut tx = pool.begin().await?;
 
     let stored = sqlx::query_as::<_, RefreshToken>(
@@ -165,17 +167,18 @@ pub async fn refresh_token(
     cap_active_refresh_tokens(&mut *tx, user.id).await?;
     tx.commit().await?;
 
-    Ok(AuthResponse {
+    let resp = AuthResponse {
         access_token,
-        refresh_token: new_refresh_token,
         token_type: "Bearer".to_string(),
         expires_in: config.jwt_expiry_hours * 3600,
         user: UserResponse::from(user),
-    })
+    };
+
+    Ok((resp, new_refresh_token))
 }
 
-pub async fn logout(pool: &PgPool, req: LogoutRequest) -> Result<(), AppError> {
-    let token_hash = jwt::hash_refresh_token(&req.refresh_token);
+pub async fn logout(pool: &PgPool, refresh_token: &str) -> Result<(), AppError> {
+    let token_hash = jwt::hash_refresh_token(refresh_token);
     sqlx::query(
         "UPDATE refresh_tokens SET revoked_at = NOW() WHERE token_hash = $1 AND revoked_at IS NULL",
     )

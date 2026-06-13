@@ -34,10 +34,9 @@ describe('Type contracts', () => {
     expect(summary).not.toHaveProperty('email');
   });
 
-  it('AuthResponse has access and refresh tokens', () => {
+  it('AuthResponse has access token and user only', () => {
     const resp: AuthResponse = {
       access_token: 'at',
-      refresh_token: 'rt',
       token_type: 'Bearer',
       expires_in: 3600,
       user: {
@@ -51,7 +50,7 @@ describe('Type contracts', () => {
       },
     };
     expect(resp.access_token).toBeTruthy();
-    expect(resp.refresh_token).toBeTruthy();
+    expect(resp).not.toHaveProperty('refresh_token');
     expect(resp.token_type).toBe('Bearer');
   });
 

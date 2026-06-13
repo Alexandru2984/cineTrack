@@ -6,6 +6,7 @@ const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8080';
 const api = axios.create({
   baseURL: `${API_URL}/api`,
   headers: { 'Content-Type': 'application/json' },
+  withCredentials: true,
 });
 
 api.interceptors.request.use((config) => {
@@ -33,10 +34,7 @@ api.interceptors.response.use(
     const originalRequest = error.config;
 
     if (error.response?.status === 401 && !originalRequest._retry) {
-      const refreshToken = useAuthStore.getState().refreshToken;
-
-      // No refresh token or this was already a refresh attempt
-      if (!refreshToken || originalRequest.url === '/auth/refresh') {
+      if (originalRequest.url === '/auth/refresh') {
         useAuthStore.getState().logout();
         window.location.href = '/login';
         return Promise.reject(error);
@@ -55,11 +53,11 @@ api.interceptors.response.use(
       isRefreshing = true;
 
       try {
-        const res = await axios.post(`${API_URL}/api/auth/refresh`, {
-          refresh_token: refreshToken,
+        const res = await axios.post(`${API_URL}/api/auth/refresh`, undefined, {
+          withCredentials: true,
         });
-        const { access_token, refresh_token: newRefresh, user } = res.data;
-        useAuthStore.getState().setAuth(access_token, newRefresh, user);
+        const { access_token, user } = res.data;
+        useAuthStore.getState().setAuth(access_token, user);
         processQueue(null, access_token);
         originalRequest.headers.Authorization = `Bearer ${access_token}`;
         return api(originalRequest);

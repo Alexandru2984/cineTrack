@@ -1,3 +1,4 @@
+use actix_web::http::header;
 use actix_web::test as actix_test;
 use actix_web::{web, App};
 use serde_json::{json, Value};
@@ -7,9 +8,26 @@ use std::net::SocketAddr;
 // ── Helpers ────────────────────────────────────────────────────
 
 const PEER: &str = "127.0.0.1:12345";
+const REFRESH_COOKIE_NAME: &str = "cinetrack_refresh";
 
 fn peer_addr() -> SocketAddr {
     PEER.parse().unwrap()
+}
+
+fn refresh_cookie_from_response<B>(resp: &actix_web::dev::ServiceResponse<B>) -> String {
+    let cookie = resp
+        .headers()
+        .get_all(header::SET_COOKIE)
+        .filter_map(|value| value.to_str().ok())
+        .find(|value| value.starts_with(&format!("{REFRESH_COOKIE_NAME}=")))
+        .expect("refresh cookie should be set");
+
+    cookie
+        .split(';')
+        .next()
+        .and_then(|pair| pair.strip_prefix(&format!("{REFRESH_COOKIE_NAME}=")))
+        .expect("refresh cookie should include a value")
+        .to_string()
 }
 
 fn test_db_url() -> String {
@@ -123,11 +141,13 @@ async fn register_user(
 
     let resp = actix_test::call_service(app, req).await;
     assert_eq!(resp.status(), 201, "Register failed for {username}");
+    let refresh_token = refresh_cookie_from_response(&resp);
 
     let body: Value = actix_test::read_body_json(resp).await;
+    assert!(body.get("refresh_token").is_none());
     (
         body["access_token"].as_str().unwrap().to_string(),
-        body["refresh_token"].as_str().unwrap().to_string(),
+        refresh_token,
         body["user"]["id"].as_str().unwrap().to_string(),
     )
 }
@@ -153,11 +173,13 @@ async fn login_user(
 
     let resp = actix_test::call_service(app, req).await;
     assert_eq!(resp.status(), 200, "Login failed for {email}");
+    let refresh_token = refresh_cookie_from_response(&resp);
 
     let body: Value = actix_test::read_body_json(resp).await;
+    assert!(body.get("refresh_token").is_none());
     (
         body["access_token"].as_str().unwrap().to_string(),
-        body["refresh_token"].as_str().unwrap().to_string(),
+        refresh_token,
     )
 }
 
@@ -368,14 +390,15 @@ async fn test_refresh_token_rotation() {
 
     let resp = actix_test::call_service(&app, req).await;
     assert_eq!(resp.status(), 200);
+    let new_refresh = refresh_cookie_from_response(&resp);
 
     let body: Value = actix_test::read_body_json(resp).await;
     let new_token = body["access_token"].as_str().unwrap();
-    let new_refresh = body["refresh_token"].as_str().unwrap();
 
     assert!(!new_token.is_empty());
     assert!(!new_refresh.is_empty());
-    assert_ne!(new_refresh, &refresh, "Refresh token should rotate");
+    assert!(body.get("refresh_token").is_none());
+    assert_ne!(new_refresh, refresh, "Refresh token should rotate");
 }
 
 #[actix_web::test]
