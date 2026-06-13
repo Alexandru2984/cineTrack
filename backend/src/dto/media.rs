@@ -1,7 +1,9 @@
 use serde::{Deserialize, Serialize};
+use validator::Validate;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Validate)]
 pub struct SearchQuery {
+    #[validate(length(min = 1, max = 200, message = "Search query must be 1-200 characters"))]
     pub q: String,
     #[serde(rename = "type")]
     pub media_type: Option<String>,
@@ -135,4 +137,37 @@ pub struct TmdbEpisode {
 #[derive(Debug, Deserialize, Serialize)]
 pub struct TmdbTrendingResponse {
     pub results: Vec<TmdbSearchResult>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn query(q: &str) -> SearchQuery {
+        SearchQuery {
+            q: q.to_string(),
+            media_type: None,
+            page: None,
+        }
+    }
+
+    #[test]
+    fn test_search_query_valid() {
+        assert!(query("inception").validate().is_ok());
+    }
+
+    #[test]
+    fn test_search_query_empty_rejected() {
+        assert!(query("").validate().is_err());
+    }
+
+    #[test]
+    fn test_search_query_too_long_rejected() {
+        assert!(query(&"x".repeat(201)).validate().is_err());
+    }
+
+    #[test]
+    fn test_search_query_boundary_200() {
+        assert!(query(&"x".repeat(200)).validate().is_ok());
+    }
 }

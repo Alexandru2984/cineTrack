@@ -1,6 +1,6 @@
 use actix_cors::Cors;
 use actix_governor::{Governor, GovernorConfigBuilder};
-use actix_web::{middleware as actix_middleware, web, App, HttpServer};
+use actix_web::{middleware as actix_middleware, web, App, HttpResponse, HttpServer};
 
 use cinetrack::{
     config, db, middleware::rate_limit::TrustedProxyIpKeyExtractor, routes,
@@ -39,6 +39,29 @@ async fn main() -> std::io::Result<()> {
     log::info!("Starting server at {}:{}", host, port);
 
     HttpServer::new(move || {
+        // Cap request bodies at the application layer (defense-in-depth: nginx
+        // also limits, but this protects direct access and returns a clean 400).
+        let json_cfg = web::JsonConfig::default()
+            .limit(64 * 1024)
+            .error_handler(|_err, _req| {
+                actix_web::error::InternalError::from_response(
+                    "invalid body",
+                    HttpResponse::BadRequest().json(serde_json::json!({
+                        "error": "400 Bad Request",
+                        "message": "Invalid or oversized request body"
+                    })),
+                )
+                .into()
+            });
+
+        // Security headers at the app layer too. In production nginx strips the
+        // duplicates (proxy_hide_header) and re-adds them, so these only surface
+        // when the backend is reached without the reverse proxy.
+        let security_headers = actix_middleware::DefaultHeaders::new()
+            .add(("X-Content-Type-Options", "nosniff"))
+            .add(("X-Frame-Options", "DENY"))
+            .add(("Referrer-Policy", "strict-origin-when-cross-origin"));
+
         let mut cors = Cors::default()
             .allowed_methods(vec!["GET", "POST", "PATCH", "DELETE", "OPTIONS"])
             .allowed_headers(vec![
@@ -56,7 +79,9 @@ async fn main() -> std::io::Result<()> {
         App::new()
             .wrap(Governor::new(&governor_conf))
             .wrap(cors)
+            .wrap(security_headers)
             .wrap(actix_middleware::Logger::default())
+            .app_data(json_cfg)
             .app_data(web::Data::new(pool.clone()))
             .app_data(web::Data::new(config.clone()))
             .app_data(web::Data::new(tmdb_service.clone()))

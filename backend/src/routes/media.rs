@@ -1,6 +1,7 @@
 use actix_web::{web, HttpRequest, HttpResponse};
 use sqlx::PgPool;
 use uuid::Uuid;
+use validator::Validate;
 
 use crate::dto::media::*;
 use crate::errors::AppError;
@@ -27,6 +28,7 @@ async fn search(
     query: web::Query<SearchQuery>,
 ) -> Result<HttpResponse, AppError> {
     require_auth(&req).await?;
+    query.validate()?;
     let results = tmdb
         .search(&query.q, query.media_type.as_deref(), query.page)
         .await?;
