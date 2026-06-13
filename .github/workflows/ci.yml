@@ -40,6 +40,43 @@ jobs:
       - name: Test
         run: cargo test
 
+  integration:
+    name: Backend Integration
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: test_user
+          POSTGRES_PASSWORD: test_pass
+          POSTGRES_DB: cinetrack_test
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U test_user -d cinetrack_test"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: backend
+
+      - name: Integration tests
+        env:
+          TEST_DATABASE_URL: postgres://test_user:test_pass@localhost:5433/cinetrack_test
+        run: cargo test --test api_tests -- --ignored --test-threads=1
+
   frontend:
     name: Frontend
     runs-on: ubuntu-latest

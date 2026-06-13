@@ -103,7 +103,10 @@ async fn clean_db(pool: &PgPool) {
         .execute(pool)
         .await
         .ok();
-    sqlx::query("DELETE FROM tracking").execute(pool).await.ok();
+    sqlx::query("DELETE FROM user_media")
+        .execute(pool)
+        .await
+        .ok();
     sqlx::query("DELETE FROM episodes").execute(pool).await.ok();
     sqlx::query("DELETE FROM seasons").execute(pool).await.ok();
     sqlx::query("DELETE FROM media").execute(pool).await.ok();
