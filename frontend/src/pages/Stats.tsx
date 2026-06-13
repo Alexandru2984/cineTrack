@@ -7,6 +7,11 @@ import { Film, Tv, Clock, Flame, Trophy, Zap } from 'lucide-react';
 
 const COLORS = ['#8b5cf6', '#a78bfa', '#c4b5fd', '#ddd6fe', '#ede9fe', '#6d28d9', '#5b21b6', '#7c3aed'];
 
+function renderGenreLabel(props: unknown) {
+  const { name, percent } = props as { name?: string; percent?: number };
+  return `${name ?? ''} ${(((percent ?? 0) * 100)).toFixed(0)}%`;
+}
+
 export default function StatsPage() {
   const { data: stats, isLoading } = useMyStats();
   const { data: heatmap } = useHeatmap();
@@ -75,7 +80,7 @@ export default function StatsPage() {
             <h2 className="text-lg font-semibold mb-4">Genre Distribution</h2>
             <ResponsiveContainer width="100%" height={300}>
               <PieChart>
-                <Pie data={genres} dataKey="count" nameKey="genre" cx="50%" cy="50%" outerRadius={100} label={({ name, percent }: any) => `${name} ${(percent * 100).toFixed(0)}%`}>
+                <Pie data={genres} dataKey="count" nameKey="genre" cx="50%" cy="50%" outerRadius={100} label={renderGenreLabel}>
                   {genres.map((_, i) => (
                     <Cell key={i} fill={COLORS[i % COLORS.length]} />
                   ))}

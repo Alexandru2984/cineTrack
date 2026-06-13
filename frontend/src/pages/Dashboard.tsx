@@ -48,8 +48,8 @@ export default function Dashboard() {
               if (value.count >= 3) return 'color-scale-2';
               return 'color-scale-1';
             }}
-            tooltipDataAttrs={(value: any) => {
-              return { 'data-tooltip': value?.date ? `${value.date}: ${value.count || 0} entries` : '' } as any;
+            titleForValue={(value) => {
+              return value?.date ? `${value.date}: ${value.count || 0} entries` : '';
             }}
           />
         </div>

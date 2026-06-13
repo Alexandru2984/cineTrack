@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useRegister } from '@/hooks/useAuth';
+import { getApiErrorMessage } from '@/lib/api';
 import { Film, Loader2 } from 'lucide-react';
 
 export default function RegisterPage() {
@@ -66,7 +67,7 @@ export default function RegisterPage() {
 
           {register.error && (
             <p className="text-sm text-[hsl(var(--destructive))]">
-              {(register.error as any)?.response?.data?.message || 'Registration failed'}
+              {getApiErrorMessage(register.error, 'Registration failed')}
             </p>
           )}
 

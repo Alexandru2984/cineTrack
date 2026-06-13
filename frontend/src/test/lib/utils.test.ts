@@ -7,7 +7,8 @@ describe('cn (class merging)', () => {
   });
 
   it('handles conditional classes', () => {
-    expect(cn('base', false && 'hidden', 'extra')).toBe('base extra');
+    const hidden = Boolean(0);
+    expect(cn('base', hidden && 'hidden', 'extra')).toBe('base extra');
   });
 
   it('merges tailwind conflicting classes', () => {

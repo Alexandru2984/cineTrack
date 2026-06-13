@@ -6,6 +6,16 @@ import { LoadingSpinner } from '@/components/LoadingSpinner';
 import { getPosterUrl, getBackdropUrl, formatDate, formatRuntime } from '@/lib/utils';
 import { Star, Plus, Calendar, Clock } from 'lucide-react';
 import { useState } from 'react';
+import type { Media } from '@/types';
+
+type Genre = NonNullable<Media['genres']>[number];
+type SeasonSummary = {
+  id: string;
+  name: string | null;
+  season_number: number;
+  episode_count: number | null;
+  air_date: string | null;
+};
 
 export default function MediaDetail() {
   const { id } = useParams<{ id: string }>();
@@ -18,6 +28,9 @@ export default function MediaDetail() {
 
   if (isLoading) return <LoadingSpinner />;
   if (!media) return <div className="text-center py-16">Media not found</div>;
+
+  const genres: Genre[] = Array.isArray(media.genres) ? media.genres : [];
+  const seasonItems: SeasonSummary[] = Array.isArray(seasons) ? (seasons as SeasonSummary[]) : [];
 
   const handleAddToList = (status: string) => {
     createTracking.mutate({
@@ -83,9 +96,9 @@ export default function MediaDetail() {
             </div>
 
             {/* Genres */}
-            {media.genres && (
+            {genres.length > 0 && (
               <div className="flex flex-wrap gap-2">
-                {(Array.isArray(media.genres) ? media.genres : []).map((g: any) => (
+                {genres.map((g) => (
                   <span key={g.id || g.name} className="rounded-full bg-[hsl(var(--secondary))] px-3 py-1 text-xs">
                     {g.name}
                   </span>
@@ -123,11 +136,11 @@ export default function MediaDetail() {
         </div>
 
         {/* Seasons */}
-        {type === 'tv' && seasons && Array.isArray(seasons) && seasons.length > 0 && (
+        {type === 'tv' && seasonItems.length > 0 && (
           <div className="mt-8">
             <h2 className="text-2xl font-bold mb-4">Seasons</h2>
             <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
-              {seasons.map((s: any) => (
+              {seasonItems.map((s) => (
                 <div key={s.id} className="rounded-lg border border-[hsl(var(--border))] p-4 bg-[hsl(var(--card))]">
                   <p className="font-medium">{s.name || `Season ${s.season_number}`}</p>
                   {s.episode_count && (

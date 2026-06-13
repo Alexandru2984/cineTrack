@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useLogin } from '@/hooks/useAuth';
+import { getApiErrorMessage } from '@/lib/api';
 import { Film, Loader2 } from 'lucide-react';
 
 export default function LoginPage() {
@@ -51,7 +52,7 @@ export default function LoginPage() {
 
           {login.error && (
             <p className="text-sm text-[hsl(var(--destructive))]">
-              {(login.error as any)?.response?.data?.message || 'Login failed'}
+              {getApiErrorMessage(login.error, 'Login failed')}
             </p>
           )}
 
