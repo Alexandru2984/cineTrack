@@ -137,6 +137,18 @@ pub struct ResetPasswordRequest {
     pub new_password: String,
 }
 
+/// A single active login (non-consumed, non-revoked, unexpired refresh token).
+#[derive(Debug, Serialize)]
+pub struct SessionResponse {
+    pub id: uuid::Uuid,
+    pub user_agent: Option<String>,
+    pub ip_address: Option<String>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub last_used_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// True for the session making the request (matched by refresh-cookie hash).
+    pub current: bool,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct RefreshRequest {
     pub refresh_token: String,

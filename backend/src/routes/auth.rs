@@ -35,6 +35,9 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
             .route("/password", web::patch().to(change_password))
             .route("/password/forgot", web::post().to(forgot_password))
             .route("/password/reset", web::post().to(reset_password))
+            .route("/sessions", web::get().to(list_sessions))
+            .route("/sessions/logout-all", web::post().to(logout_all_sessions))
+            .route("/sessions/{id}", web::delete().to(revoke_session))
             .route("/me", web::get().to(me)),
     );
 }
@@ -42,11 +45,14 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
 async fn register(
     pool: web::Data<PgPool>,
     config: web::Data<Config>,
+    req: HttpRequest,
     body: web::Json<RegisterRequest>,
 ) -> Result<HttpResponse, AppError> {
     body.validate()?;
+    let client = client_info(&req);
     let (resp, refresh_token) =
-        services::auth::register(pool.get_ref(), config.get_ref(), body.into_inner()).await?;
+        services::auth::register(pool.get_ref(), config.get_ref(), &client, body.into_inner())
+            .await?;
     Ok(HttpResponse::Created()
         .cookie(refresh_cookie(&refresh_token, config.get_ref()))
         .json(resp))
@@ -55,11 +61,13 @@ async fn register(
 async fn login(
     pool: web::Data<PgPool>,
     config: web::Data<Config>,
+    req: HttpRequest,
     body: web::Json<LoginRequest>,
 ) -> Result<HttpResponse, AppError> {
     body.validate()?;
+    let client = client_info(&req);
     let (resp, refresh_token) =
-        services::auth::login(pool.get_ref(), config.get_ref(), body.into_inner()).await?;
+        services::auth::login(pool.get_ref(), config.get_ref(), &client, body.into_inner()).await?;
     Ok(HttpResponse::Ok()
         .cookie(refresh_cookie(&refresh_token, config.get_ref()))
         .json(resp))
@@ -88,8 +96,10 @@ async fn refresh(
 ) -> Result<HttpResponse, AppError> {
     let refresh_token = refresh_token_from_request(&req, body.as_deref())
         .ok_or_else(|| AppError::Unauthorized("Missing refresh token".to_string()))?;
+    let client = client_info(&req);
     let (resp, new_refresh_token) =
-        services::auth::refresh_token(pool.get_ref(), config.get_ref(), &refresh_token).await?;
+        services::auth::refresh_token(pool.get_ref(), config.get_ref(), &client, &refresh_token)
+            .await?;
     Ok(HttpResponse::Ok()
         .cookie(refresh_cookie(&new_refresh_token, config.get_ref()))
         .json(resp))
@@ -157,6 +167,58 @@ async fn reset_password(
     Ok(HttpResponse::Ok()
         .cookie(clear_refresh_cookie(config.get_ref()))
         .json(serde_json::json!({"message": "Password reset successfully"})))
+}
+
+async fn list_sessions(
+    pool: web::Data<PgPool>,
+    req: HttpRequest,
+) -> Result<HttpResponse, AppError> {
+    let user_id = require_auth(&req).await?;
+    let current = req
+        .cookie(REFRESH_COOKIE_NAME)
+        .map(|cookie| cookie.value().to_owned())
+        .filter(|token| !token.is_empty());
+    let sessions =
+        services::auth::list_sessions(pool.get_ref(), user_id, current.as_deref()).await?;
+    Ok(HttpResponse::Ok().json(sessions))
+}
+
+async fn revoke_session(
+    pool: web::Data<PgPool>,
+    req: HttpRequest,
+    path: web::Path<uuid::Uuid>,
+) -> Result<HttpResponse, AppError> {
+    let user_id = require_auth(&req).await?;
+    services::auth::revoke_session(pool.get_ref(), user_id, path.into_inner()).await?;
+    Ok(HttpResponse::Ok().json(serde_json::json!({"message": "Session revoked"})))
+}
+
+async fn logout_all_sessions(
+    pool: web::Data<PgPool>,
+    config: web::Data<Config>,
+    req: HttpRequest,
+) -> Result<HttpResponse, AppError> {
+    let user_id = require_auth(&req).await?;
+    services::auth::logout_all_sessions(pool.get_ref(), user_id).await?;
+    Ok(HttpResponse::Ok()
+        .cookie(clear_refresh_cookie(config.get_ref()))
+        .json(serde_json::json!({"message": "Signed out of all sessions"})))
+}
+
+/// Collect best-effort client metadata (User-Agent, real IP) for session
+/// tracking. User-Agent is bounded to the column width.
+fn client_info(req: &HttpRequest) -> services::auth::ClientInfo {
+    let user_agent = req
+        .headers()
+        .get(actix_web::http::header::USER_AGENT)
+        .and_then(|value| value.to_str().ok())
+        .map(|value| value.chars().take(512).collect::<String>());
+    let ip_address = crate::middleware::rate_limit::client_ip(req).map(|ip| ip.to_string());
+
+    services::auth::ClientInfo {
+        user_agent,
+        ip_address,
+    }
 }
 
 fn refresh_token_from_request<T>(req: &HttpRequest, body: Option<&T>) -> Option<String>

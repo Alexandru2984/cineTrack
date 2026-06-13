@@ -703,6 +703,181 @@ async fn test_reset_password_token_single_use() {
     assert_eq!(resp.status(), 400);
 }
 
+// ── Session Management Tests ──────────────────────────────────
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn test_sessions_requires_auth() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+
+    let req = actix_test::TestRequest::get()
+        .uri("/api/auth/sessions")
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 401);
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn test_list_sessions_shows_current() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+
+    // Register, then log in again → two active sessions.
+    register_user(&app, "sessuser", "sess@example.com", "Pass1234").await;
+    let (token2, refresh2) = login_user(&app, "sess@example.com", "Pass1234").await;
+
+    let req = actix_test::TestRequest::get()
+        .uri("/api/auth/sessions")
+        .insert_header(("Authorization", format!("Bearer {token2}")))
+        .insert_header(("Cookie", format!("{REFRESH_COOKIE_NAME}={refresh2}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+
+    let body: Value = actix_test::read_body_json(resp).await;
+    let sessions = body.as_array().unwrap();
+    assert_eq!(sessions.len(), 2, "expected two active sessions");
+    let current = sessions.iter().filter(|s| s["current"] == true).count();
+    assert_eq!(current, 1, "exactly one session should be flagged current");
+    // Token hashes must never be exposed in the session list.
+    assert!(sessions.iter().all(|s| s.get("token_hash").is_none()));
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn test_revoke_one_session() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+
+    register_user(&app, "revuser", "rev@example.com", "Pass1234").await;
+    let (token2, _) = login_user(&app, "rev@example.com", "Pass1234").await;
+
+    // Two sessions exist; grab one id.
+    let req = actix_test::TestRequest::get()
+        .uri("/api/auth/sessions")
+        .insert_header(("Authorization", format!("Bearer {token2}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let body: Value = actix_test::read_body_json(actix_test::call_service(&app, req).await).await;
+    let session_id = body.as_array().unwrap()[0]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    // Revoke it.
+    let req = actix_test::TestRequest::delete()
+        .uri(&format!("/api/auth/sessions/{session_id}"))
+        .insert_header(("Authorization", format!("Bearer {token2}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+
+    // List now has one fewer; re-revoking the same id is a no-op 404.
+    let req = actix_test::TestRequest::get()
+        .uri("/api/auth/sessions")
+        .insert_header(("Authorization", format!("Bearer {token2}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let body: Value = actix_test::read_body_json(actix_test::call_service(&app, req).await).await;
+    assert_eq!(body.as_array().unwrap().len(), 1);
+
+    let req = actix_test::TestRequest::delete()
+        .uri(&format!("/api/auth/sessions/{session_id}"))
+        .insert_header(("Authorization", format!("Bearer {token2}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 404);
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn test_revoke_session_not_owned() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+
+    let (token_a, _, _) = register_user(&app, "owner_s", "owner_s@example.com", "Pass1234").await;
+    let (token_b, _, _) = register_user(&app, "attacker_s", "att_s@example.com", "Pass1234").await;
+
+    // A's session id
+    let req = actix_test::TestRequest::get()
+        .uri("/api/auth/sessions")
+        .insert_header(("Authorization", format!("Bearer {token_a}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let body: Value = actix_test::read_body_json(actix_test::call_service(&app, req).await).await;
+    let a_session = body.as_array().unwrap()[0]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    // B cannot revoke A's session → 404 (no enumeration)
+    let req = actix_test::TestRequest::delete()
+        .uri(&format!("/api/auth/sessions/{a_session}"))
+        .insert_header(("Authorization", format!("Bearer {token_b}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 404);
+
+    // A's session still works for refresh-derived listing
+    let req = actix_test::TestRequest::get()
+        .uri("/api/auth/sessions")
+        .insert_header(("Authorization", format!("Bearer {token_a}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let body: Value = actix_test::read_body_json(actix_test::call_service(&app, req).await).await;
+    assert_eq!(body.as_array().unwrap().len(), 1);
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn test_logout_all_sessions() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+
+    let (_, refresh1, _) = register_user(&app, "alluser", "all@example.com", "Pass1234").await;
+    let (token2, refresh2) = login_user(&app, "all@example.com", "Pass1234").await;
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/auth/sessions/logout-all")
+        .insert_header(("Authorization", format!("Bearer {token2}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+
+    // Both refresh tokens are now revoked.
+    for refresh in [refresh1, refresh2] {
+        let req = actix_test::TestRequest::post()
+            .uri("/api/auth/refresh")
+            .set_json(json!({ "refresh_token": refresh }))
+            .peer_addr(peer_addr())
+            .to_request();
+        let resp = actix_test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 401);
+    }
+
+    // No active sessions remain.
+    let req = actix_test::TestRequest::get()
+        .uri("/api/auth/sessions")
+        .insert_header(("Authorization", format!("Bearer {token2}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let body: Value = actix_test::read_body_json(actix_test::call_service(&app, req).await).await;
+    assert_eq!(body.as_array().unwrap().len(), 0);
+}
+
 // ── Access Control Tests ──────────────────────────────────────
 
 #[actix_web::test]

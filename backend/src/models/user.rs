@@ -35,6 +35,9 @@ pub struct RefreshToken {
     pub created_at: DateTime<Utc>,
     pub consumed_at: Option<DateTime<Utc>>,
     pub revoked_at: Option<DateTime<Utc>>,
+    pub user_agent: Option<String>,
+    pub ip_address: Option<String>,
+    pub last_used_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone, FromRow)]

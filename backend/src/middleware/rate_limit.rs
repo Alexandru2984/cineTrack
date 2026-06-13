@@ -34,6 +34,29 @@ fn forwarded_for_ip(req: &ServiceRequest) -> Option<IpAddr> {
         .and_then(parse_ip)
 }
 
+/// Resolve the real client IP for a plain `HttpRequest` (used outside the
+/// rate-limiter, e.g. for session metadata). Honors `X-Forwarded-For` only when
+/// the immediate peer is a trusted loopback/private proxy, mirroring the
+/// extractor above.
+pub fn client_ip(req: &actix_web::HttpRequest) -> Option<IpAddr> {
+    let peer_ip = req.peer_addr().map(|socket| socket.ip())?;
+
+    if is_trusted_proxy_peer(peer_ip) {
+        if let Some(forwarded) = req
+            .headers()
+            .get("x-forwarded-for")
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.split(',').next())
+            .map(str::trim)
+            .and_then(parse_ip)
+        {
+            return Some(forwarded);
+        }
+    }
+
+    Some(peer_ip)
+}
+
 fn parse_ip(value: &str) -> Option<IpAddr> {
     IpAddr::from_str(value)
         .ok()

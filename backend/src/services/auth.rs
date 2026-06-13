@@ -15,9 +15,18 @@ pub fn normalize_email(email: &str) -> String {
     email.trim().to_lowercase()
 }
 
+/// Best-effort client metadata attached to a refresh token so users can review
+/// their active sessions. Populated from request headers / peer address.
+#[derive(Debug, Clone, Default)]
+pub struct ClientInfo {
+    pub user_agent: Option<String>,
+    pub ip_address: Option<String>,
+}
+
 pub async fn register(
     pool: &PgPool,
     config: &Config,
+    client: &ClientInfo,
     req: RegisterRequest,
 ) -> Result<(AuthResponse, String), AppError> {
     let email = normalize_email(&req.email);
@@ -49,7 +58,7 @@ pub async fn register(
     .fetch_one(pool)
     .await?;
 
-    let (access_token, refresh_token) = issue_token_pair(pool, config, &user).await?;
+    let (access_token, refresh_token) = issue_token_pair(pool, config, client, &user).await?;
 
     let resp = AuthResponse {
         access_token,
@@ -64,6 +73,7 @@ pub async fn register(
 pub async fn login(
     pool: &PgPool,
     config: &Config,
+    client: &ClientInfo,
     req: LoginRequest,
 ) -> Result<(AuthResponse, String), AppError> {
     let email = normalize_email(&req.email);
@@ -97,7 +107,7 @@ pub async fn login(
     .execute(pool)
     .await?;
 
-    let (access_token, refresh_token) = issue_token_pair(pool, config, &user).await?;
+    let (access_token, refresh_token) = issue_token_pair(pool, config, client, &user).await?;
 
     let resp = AuthResponse {
         access_token,
@@ -112,6 +122,7 @@ pub async fn login(
 pub async fn refresh_token(
     pool: &PgPool,
     config: &Config,
+    client: &ClientInfo,
     refresh_token: &str,
 ) -> Result<(AuthResponse, String), AppError> {
     let token_hash = jwt::hash_refresh_token(refresh_token);
@@ -167,12 +178,17 @@ pub async fn refresh_token(
     let new_token_hash = jwt::hash_refresh_token(&new_refresh_token);
     let expires_at = Utc::now() + Duration::days(config.jwt_refresh_expiry_days);
 
-    sqlx::query("INSERT INTO refresh_tokens (user_id, token_hash, expires_at) VALUES ($1, $2, $3)")
-        .bind(user.id)
-        .bind(&new_token_hash)
-        .bind(expires_at)
-        .execute(&mut *tx)
-        .await?;
+    sqlx::query(
+        "INSERT INTO refresh_tokens (user_id, token_hash, expires_at, user_agent, ip_address, last_used_at)
+         VALUES ($1, $2, $3, $4, $5, NOW())",
+    )
+    .bind(user.id)
+    .bind(&new_token_hash)
+    .bind(expires_at)
+    .bind(&client.user_agent)
+    .bind(&client.ip_address)
+    .execute(&mut *tx)
+    .await?;
 
     cap_active_refresh_tokens(&mut *tx, user.id).await?;
     tx.commit().await?;
@@ -352,6 +368,7 @@ pub async fn get_current_user(pool: &PgPool, user_id: Uuid) -> Result<UserRespon
 async fn issue_token_pair(
     pool: &PgPool,
     config: &Config,
+    client: &ClientInfo,
     user: &User,
 ) -> Result<(String, String), AppError> {
     let access_token =
@@ -360,16 +377,90 @@ async fn issue_token_pair(
     let token_hash = jwt::hash_refresh_token(&refresh_token);
     let expires_at = Utc::now() + Duration::days(config.jwt_refresh_expiry_days);
 
-    sqlx::query("INSERT INTO refresh_tokens (user_id, token_hash, expires_at) VALUES ($1, $2, $3)")
-        .bind(user.id)
-        .bind(&token_hash)
-        .bind(expires_at)
-        .execute(pool)
-        .await?;
+    sqlx::query(
+        "INSERT INTO refresh_tokens (user_id, token_hash, expires_at, user_agent, ip_address, last_used_at)
+         VALUES ($1, $2, $3, $4, $5, NOW())",
+    )
+    .bind(user.id)
+    .bind(&token_hash)
+    .bind(expires_at)
+    .bind(&client.user_agent)
+    .bind(&client.ip_address)
+    .execute(pool)
+    .await?;
 
     cap_active_refresh_tokens(pool, user.id).await?;
 
     Ok((access_token, refresh_token))
+}
+
+/// List a user's active sessions (unconsumed, unrevoked, unexpired refresh
+/// tokens). The session matching `current_refresh_token` is flagged.
+pub async fn list_sessions(
+    pool: &PgPool,
+    user_id: Uuid,
+    current_refresh_token: Option<&str>,
+) -> Result<Vec<SessionResponse>, AppError> {
+    let current_hash = current_refresh_token.map(jwt::hash_refresh_token);
+
+    let tokens = sqlx::query_as::<_, RefreshToken>(
+        r#"SELECT * FROM refresh_tokens
+        WHERE user_id = $1
+          AND consumed_at IS NULL
+          AND revoked_at IS NULL
+          AND expires_at > NOW()
+        ORDER BY last_used_at DESC NULLS LAST, created_at DESC"#,
+    )
+    .bind(user_id)
+    .fetch_all(pool)
+    .await?;
+
+    Ok(tokens
+        .into_iter()
+        .map(|t| SessionResponse {
+            current: current_hash.as_deref() == Some(t.token_hash.as_str()),
+            id: t.id,
+            user_agent: t.user_agent,
+            ip_address: t.ip_address,
+            created_at: t.created_at,
+            last_used_at: t.last_used_at,
+        })
+        .collect())
+}
+
+/// Revoke a single session by id. Scoped to the owner so one user cannot revoke
+/// another's session; a missing/foreign id yields NotFound (no enumeration).
+pub async fn revoke_session(
+    pool: &PgPool,
+    user_id: Uuid,
+    session_id: Uuid,
+) -> Result<(), AppError> {
+    let result = sqlx::query(
+        "UPDATE refresh_tokens SET revoked_at = NOW()
+         WHERE id = $1 AND user_id = $2 AND revoked_at IS NULL",
+    )
+    .bind(session_id)
+    .bind(user_id)
+    .execute(pool)
+    .await?;
+
+    if result.rows_affected() == 0 {
+        return Err(AppError::NotFound("Session not found".to_string()));
+    }
+
+    Ok(())
+}
+
+/// Revoke every active session for the user ("sign out everywhere").
+pub async fn logout_all_sessions(pool: &PgPool, user_id: Uuid) -> Result<(), AppError> {
+    sqlx::query(
+        "UPDATE refresh_tokens SET revoked_at = NOW() WHERE user_id = $1 AND revoked_at IS NULL",
+    )
+    .bind(user_id)
+    .execute(pool)
+    .await?;
+
+    Ok(())
 }
 
 async fn cap_active_refresh_tokens<'e, E>(executor: E, user_id: Uuid) -> Result<(), AppError>
