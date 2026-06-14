@@ -58,6 +58,8 @@ pub async fn register(
     .fetch_one(pool)
     .await?;
 
+    log::info!("audit: account registered user_id={}", user.id);
+
     let (access_token, refresh_token) = issue_token_pair(pool, config, client, &user).await?;
 
     let resp = AuthResponse {
@@ -137,6 +139,12 @@ pub async fn refresh_token(
     .ok_or_else(|| AppError::Unauthorized("Invalid refresh token".to_string()))?;
 
     if stored.consumed_at.is_some() {
+        // Reusing an already-rotated token means it was likely stolen; nuke every
+        // session for the account and flag it loudly for monitoring.
+        log::warn!(
+            "security: refresh token reuse detected, revoking all sessions user_id={}",
+            stored.user_id
+        );
         sqlx::query("DELETE FROM refresh_tokens WHERE user_id = $1")
             .bind(stored.user_id)
             .execute(&mut *tx)
@@ -255,6 +263,8 @@ pub async fn change_password(
     .await?;
     tx.commit().await?;
 
+    log::info!("audit: password changed user_id={user_id}");
+
     Ok(())
 }
 
@@ -304,6 +314,8 @@ pub async fn forgot_password(
         .send_password_reset(&user.email, &reset_url)
         .await;
 
+    log::info!("audit: password reset requested user_id={}", user.id);
+
     Ok(())
 }
 
@@ -350,6 +362,9 @@ pub async fn reset_password(
     .await?;
 
     tx.commit().await?;
+
+    log::info!("audit: password reset completed user_id={}", stored.user_id);
+
     Ok(())
 }
 
@@ -448,6 +463,8 @@ pub async fn revoke_session(
         return Err(AppError::NotFound("Session not found".to_string()));
     }
 
+    log::info!("audit: session revoked user_id={user_id} session_id={session_id}");
+
     Ok(())
 }
 
@@ -459,6 +476,8 @@ pub async fn logout_all_sessions(pool: &PgPool, user_id: Uuid) -> Result<(), App
     .bind(user_id)
     .execute(pool)
     .await?;
+
+    log::info!("audit: all sessions revoked user_id={user_id}");
 
     Ok(())
 }

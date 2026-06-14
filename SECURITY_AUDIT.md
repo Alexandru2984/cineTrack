@@ -40,6 +40,7 @@ In runda a doua am inchis lacunele ramase pe partea de cont si operare: normaliz
 - Observability: middleware request-id (UUID per request, ignora valoarea trimisa de client, o pune in `X-Request-Id` si in access log) si endpoint `/metrics` Prometheus, servit pe portul aplicatiei si neexpus prin Nginx.
 - Supply chain: `dependabot.yml` (cargo, npm, github-actions, docker), workflow CodeQL pentru JS/TS si workflow gitleaks pentru secret scanning pe intreg istoricul.
 - Frontend conectat la noile endpoint-uri: pagini publice forgot/reset parola (cu link din login), pagina Settings cu schimbare parola, lista sesiunilor active (revocare per sesiune si sign out all) si danger zone pentru stergere cont cu confirmare prin parola.
+- Logging de securitate si audit: `WARN` pe refresh token reuse (semnal de furt token, urmat de revocarea tuturor sesiunilor) si linii `INFO` de audit pe register, schimbare/resetare parola, revocare sesiune, sign out all si stergere cont. Se logheaza doar `user_id` (UUID), fara email/token/parola.
 
 ## Riscuri reziduale
 
@@ -55,7 +56,7 @@ In runda a doua am inchis lacunele ramase pe partea de cont si operare: normaliz
 
 - Adauga CSRF token daca deployment-ul ajunge cross-site sau daca schimbi refresh cookie pe `SameSite=None`.
 - Adauga teste E2E cu Playwright pentru login, refresh dupa 401, logout, reset parola, sesiuni active si stergere cont.
-- Extinde observability: structured logs cu request-id propagat, alerte pe refresh token reuse si dashboards peste metrics-ul Prometheus.
+- Extinde observability: propaga request-id-ul si in liniile de audit/eroare (acum apare doar in access log), si conecteaza alerte pe `security: refresh token reuse` plus dashboards peste metrics-ul Prometheus.
 - Decide politicile de privacy pentru follower/following counts la profile private; momentan se ascund bio/avatar si activity, dar nu si counters.
 - Ruleaza periodic raportul gitleaks/CodeQL si trateaza PR-urile Dependabot ca parte din intretinere.
 

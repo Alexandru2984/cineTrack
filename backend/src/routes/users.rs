@@ -151,6 +151,8 @@ async fn delete_account(
         .execute(pool.get_ref())
         .await?;
 
+    log::info!("audit: account deleted user_id={user_id}");
+
     Ok(HttpResponse::Ok()
         .cookie(crate::routes::auth::clear_refresh_cookie(config.get_ref()))
         .json(serde_json::json!({"message": "Account deleted"})))
