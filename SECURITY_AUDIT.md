@@ -1,12 +1,14 @@
 # CineTrack security audit
 
-Data: 2026-06-13
+Data: 2026-06-14 (runda 2; prima trecere 2026-06-13)
 
 ## Rezumat
 
 Repo-ul era deja un MVP solid: SQL parametrizat prin `sqlx`, ownership checks pe resursele principale, Argon2 pentru parole, JWT-uri semnate, refresh token hash-uit in DB, validari de baza si teste unitare. Cele mai importante lacune erau in zona de sesiuni, dependency hygiene, hardening de deploy si contracte incomplete intre API si DB.
 
 Am remediat problemele cu risc imediat: refresh token-ul nu mai este expus in JavaScript, rotatia detecteaza reuse, JWT-ul are algoritm explicit si durata mai scurta, TMDB are timeout, rate limiter-ul tine cont de reverse proxy, Nginx trimite headere de hardening, iar CI ruleaza lint/test/audit.
+
+In runda a doua am inchis lacunele ramase pe partea de cont si operare: normalizare email, schimbare/resetare parola, gestionarea sesiunilor active, stergere de cont, CSP in Nginx, request-id plus metrics Prometheus si supply-chain scanning (Dependabot, CodeQL, gitleaks). Toate endpoint-urile noi au teste de integrare care ruleaza pe Postgres in CI.
 
 ## Schimbari aplicate
 
@@ -25,36 +27,50 @@ Am remediat problemele cu risc imediat: refresh token-ul nu mai este expus in Ja
 - Nginx are HSTS, `nosniff`, `DENY` framing, Referrer Policy, Permissions Policy, body limit si proxy timeouts.
 - CI GitHub Actions ruleaza Rust fmt/clippy/test, frontend lint/test/build, `npm audit --omit=dev` si `cargo audit`.
 
+## Schimbari aplicate (2026-06-14)
+
+- Email normalizat (trim + lowercase) la register si login, plus migratie care normalizeaza randurile existente, ca sa nu existe conturi duplicate dupa casing.
+- Endpoint autentificat `PATCH /api/auth/password` pentru schimbarea parolei cu verificarea parolei curente; revoca toate refresh token-urile si curata cookie-ul sesiunii curente.
+- Flux de resetare parola: `POST /api/auth/password/forgot` (raspuns uniform, fara user enumeration) si `POST /api/auth/password/reset`. Token-uri one-time hash-uite SHA-256, TTL 1h, consumate la folosire.
+- Trimitere email prin SMTP configurabil din env (`SMTP_HOST/PORT/USERNAME/PASSWORD/FROM`, lettre cu rustls); cand SMTP nu e configurat, link-ul de reset e doar logat, deci fluxul nu cade in dev.
+- Management de sesiuni: coloane `user_agent`, `ip_address`, `last_used_at` pe refresh tokens; `GET /api/auth/sessions` (cu flag `current`), `DELETE /api/auth/sessions/{id}` (scoped pe owner, 404 pe id strain) si `POST /api/auth/sessions/logout-all`.
+- Stergere de cont: `DELETE /api/users/me` cu confirmare prin parola; cascade pe toate tabelele legate de user si curatarea cookie-ului.
+- IP-ul real pentru sesiuni respecta acelasi trust model ca rate limiter-ul (`X-Forwarded-For` doar de la peer privat/loopback).
+- Content-Security-Policy in Nginx, plus `Cross-Origin-Opener-Policy: same-origin`. CSP permite doar same-origin plus scriptul de analytics si imaginile TMDB efectiv folosite; scripturile raman stricte, `'unsafe-inline'` ramane doar pentru stiluri.
+- Observability: middleware request-id (UUID per request, ignora valoarea trimisa de client, o pune in `X-Request-Id` si in access log) si endpoint `/metrics` Prometheus, servit pe portul aplicatiei si neexpus prin Nginx.
+- Supply chain: `dependabot.yml` (cargo, npm, github-actions, docker), workflow CodeQL pentru JS/TS si workflow gitleaks pentru secret scanning pe intreg istoricul.
+
 ## Riscuri reziduale
 
-- Access token-urile raman stateless pana expira. Durata default este 1h, dar revocarea imediata ar cere token versioning, denylist sau sesiuni server-side.
-- Cookie-ul refresh foloseste `SameSite=Lax`. Este bun pentru deploy same-site, dar daca frontend si API sunt pe site-uri complet diferite va trebui `SameSite=None; Secure` plus protectie CSRF explicita.
-- Testele de integrare cu Postgres exista, dar sunt marcate `ignored`; CI-ul actual nu porneste inca serviciul Postgres ca sa le ruleze.
-- CSP nu este activat in Nginx. Merita adaugat dupa inventarierea exacta a surselor pentru API, imagini TMDB, fonturi si eventuale scripturi third-party.
-- `cargo audit` raporteaza `RUSTSEC-2023-0071` prin metadate `sqlx-mysql` din lockfile, desi build-ul foloseste doar feature-ul `postgres`. CI il ignora explicit; trebuie revazut cand `sqlx` rezolva lockfile-ul.
+- Access token-urile raman stateless pana expira. Durata default este 1h; `logout-all` si schimbarea parolei revoca refresh token-urile, dar un access token deja emis ramane valabil pana la expirare. Revocarea instant ar cere token versioning sau denylist.
+- Cookie-ul refresh foloseste `SameSite=Lax`. Este bun pentru deploy same-site, dar daca frontend si API ajung pe site-uri complet diferite va trebui `SameSite=None; Secure` plus protectie CSRF explicita.
+- Endpoint-urile noi (schimbare/reset parola, sesiuni, stergere cont) exista doar pe backend; UI-ul din frontend inca nu le expune.
+- `current` pentru sesiuni se determina din cookie-ul de refresh; un client care apeleaza fara cookie (doar cu access token) vede toate sesiunile drept ne-curente, dar nu este o problema de securitate.
+- `/metrics` nu are autentificare; protectia e ca nu este proxat de Nginx, deci depinde de izolarea retelei de deploy. Daca portul backend devine accesibil direct, endpoint-ul trebuie restrans.
+- `cargo audit` raporteaza `RUSTSEC-2023-0071` prin metadate `sqlx-mysql` din lockfile, desi build-ul foloseste doar feature-ul `postgres`. CI il ignora explicit; de revazut cand `sqlx` rezolva lockfile-ul.
 - `validator_derive` trage `proc-macro-error2`, marcat unmaintained in `cargo audit` ca warning permis. De urmarit upgrade-ul ecosistemului `validator`.
 - Nu exista inca E2E browser tests pentru fluxuri auth reale cu cookie, refresh si logout.
-- Nu exista inca secret scanning/CodeQL/Dependabot configurat in repo.
 
 ## Recomandari urmatoare
 
-- Adauga job CI cu Postgres service si ruleaza testele ignorate prin `cargo test --test api_tests -- --ignored`.
+- Conecteaza frontend-ul la noile endpoint-uri: pagini de reset parola, ecran de sesiuni active cu revocare, si flow de stergere cont cu confirmare.
 - Adauga CSRF token daca deployment-ul ajunge cross-site sau daca schimbi refresh cookie pe `SameSite=None`.
-- Adauga CSP dupa un pass de asset inventory; incepe cu `default-src 'self'`, `img-src 'self' data: https://image.tmdb.org`, `object-src 'none'`, `base-uri 'self'`.
-- Adauga sesiuni vizibile in UI: lista de device-uri, logout all, revocare per device.
-- Adauga Dependabot pentru Cargo/npm/GitHub Actions si secret scanning in platforma GitHub.
-- Adauga teste E2E cu Playwright pentru login, refresh dupa 401, logout si pagini protejate.
-- Adauga observability minima: request id, structured logs, rate-limit metrics si alerte pe refresh token reuse.
+- Adauga teste E2E cu Playwright pentru login, refresh dupa 401, logout, reset parola si pagini protejate.
+- Extinde observability: structured logs cu request-id propagat, alerte pe refresh token reuse si dashboards peste metrics-ul Prometheus.
 - Decide politicile de privacy pentru follower/following counts la profile private; momentan se ascund bio/avatar si activity, dar nu si counters.
+- Ruleaza periodic raportul gitleaks/CodeQL si trateaza PR-urile Dependabot ca parte din intretinere.
 
 ## Verificari locale
 
 - `cargo fmt --check`
 - `cargo clippy --all-targets -- -D warnings`
 - `cargo test`
+- Teste de integrare pe Postgres: `TEST_DATABASE_URL=postgres://test_user:test_pass@127.0.0.1:5433/cinetrack_test cargo test --test api_tests -- --ignored --test-threads=1`
 - `cargo audit --ignore RUSTSEC-2023-0071`
 - `npm run lint`
 - `npm test -- --run`
 - `npm run build`
 - `npm audit --omit=dev`
+- Validare config Nginx: `nginx -t` (sau in container cu certificate dummy)
+- Secret scan: `docker run --rm -v "$PWD:/repo" zricethezav/gitleaks:v8.30.1 detect --source /repo --redact`
 
