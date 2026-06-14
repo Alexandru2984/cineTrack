@@ -5,10 +5,11 @@ import {
   useSessions,
   useRevokeSession,
   useLogoutAllSessions,
+  useDeleteAccount,
 } from '@/hooks/useAuth';
 import { getApiErrorMessage } from '@/lib/api';
 import { formatDateTime } from '@/lib/utils';
-import { KeyRound, Loader2, LogOut, Monitor, Trash2 } from 'lucide-react';
+import { AlertTriangle, KeyRound, Loader2, LogOut, Monitor, Trash2 } from 'lucide-react';
 
 function ChangePasswordCard() {
   const [current, setCurrent] = useState('');
@@ -182,12 +183,88 @@ function SessionsCard() {
   );
 }
 
+function DangerZoneCard() {
+  const navigate = useNavigate();
+  const [confirming, setConfirming] = useState(false);
+  const [password, setPassword] = useState('');
+  const deleteAccount = useDeleteAccount();
+
+  const handleDelete = (e: React.FormEvent) => {
+    e.preventDefault();
+    deleteAccount.mutate({ password }, { onSuccess: () => navigate('/login') });
+  };
+
+  return (
+    <section className="rounded-lg border border-[hsl(var(--destructive))] p-6">
+      <h2 className="flex items-center gap-2 text-lg font-semibold text-[hsl(var(--destructive))]">
+        <AlertTriangle className="h-5 w-5" /> Delete account
+      </h2>
+      <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">
+        Permanently deletes your account and all of your data. This cannot be undone.
+      </p>
+
+      {!confirming ? (
+        <button
+          onClick={() => setConfirming(true)}
+          className="mt-4 flex items-center gap-2 rounded-md bg-[hsl(var(--destructive))] px-4 py-2 text-sm font-medium text-white hover:opacity-90"
+        >
+          <Trash2 className="h-4 w-4" /> Delete my account
+        </button>
+      ) : (
+        <form onSubmit={handleDelete} className="mt-4 space-y-4 max-w-sm">
+          <div>
+            <label className="block text-sm font-medium mb-1">
+              Enter your password to confirm
+            </label>
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+              autoFocus
+              className="w-full rounded-md border border-[hsl(var(--input))] bg-transparent px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[hsl(var(--ring))]"
+            />
+          </div>
+
+          {deleteAccount.error && (
+            <p className="text-sm text-[hsl(var(--destructive))]">
+              {getApiErrorMessage(deleteAccount.error, 'Could not delete account')}
+            </p>
+          )}
+
+          <div className="flex items-center gap-3">
+            <button
+              type="submit"
+              disabled={deleteAccount.isPending}
+              className="flex items-center gap-2 rounded-md bg-[hsl(var(--destructive))] px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
+            >
+              {deleteAccount.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
+              Permanently delete
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setConfirming(false);
+                setPassword('');
+              }}
+              className="rounded-md border border-[hsl(var(--border))] px-4 py-2 text-sm hover:bg-[hsl(var(--accent))]"
+            >
+              Cancel
+            </button>
+          </div>
+        </form>
+      )}
+    </section>
+  );
+}
+
 export default function SettingsPage() {
   return (
     <div className="mx-auto max-w-3xl px-4 py-8 space-y-6">
       <h1 className="text-2xl font-bold">Settings</h1>
       <ChangePasswordCard />
       <SessionsCard />
+      <DangerZoneCard />
     </div>
   );
 }
