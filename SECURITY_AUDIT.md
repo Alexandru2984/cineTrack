@@ -39,12 +39,12 @@ In runda a doua am inchis lacunele ramase pe partea de cont si operare: normaliz
 - Content-Security-Policy in Nginx, plus `Cross-Origin-Opener-Policy: same-origin`. CSP permite doar same-origin plus scriptul de analytics si imaginile TMDB efectiv folosite; scripturile raman stricte, `'unsafe-inline'` ramane doar pentru stiluri.
 - Observability: middleware request-id (UUID per request, ignora valoarea trimisa de client, o pune in `X-Request-Id` si in access log) si endpoint `/metrics` Prometheus, servit pe portul aplicatiei si neexpus prin Nginx.
 - Supply chain: `dependabot.yml` (cargo, npm, github-actions, docker), workflow CodeQL pentru JS/TS si workflow gitleaks pentru secret scanning pe intreg istoricul.
+- Frontend conectat la noile endpoint-uri: pagini publice forgot/reset parola (cu link din login), pagina Settings cu schimbare parola, lista sesiunilor active (revocare per sesiune si sign out all) si danger zone pentru stergere cont cu confirmare prin parola.
 
 ## Riscuri reziduale
 
 - Access token-urile raman stateless pana expira. Durata default este 1h; `logout-all` si schimbarea parolei revoca refresh token-urile, dar un access token deja emis ramane valabil pana la expirare. Revocarea instant ar cere token versioning sau denylist.
 - Cookie-ul refresh foloseste `SameSite=Lax`. Este bun pentru deploy same-site, dar daca frontend si API ajung pe site-uri complet diferite va trebui `SameSite=None; Secure` plus protectie CSRF explicita.
-- Endpoint-urile noi (schimbare/reset parola, sesiuni, stergere cont) exista doar pe backend; UI-ul din frontend inca nu le expune.
 - `current` pentru sesiuni se determina din cookie-ul de refresh; un client care apeleaza fara cookie (doar cu access token) vede toate sesiunile drept ne-curente, dar nu este o problema de securitate.
 - `/metrics` nu are autentificare; protectia e ca nu este proxat de Nginx, deci depinde de izolarea retelei de deploy. Daca portul backend devine accesibil direct, endpoint-ul trebuie restrans.
 - `cargo audit` raporteaza `RUSTSEC-2023-0071` prin metadate `sqlx-mysql` din lockfile, desi build-ul foloseste doar feature-ul `postgres`. CI il ignora explicit; de revazut cand `sqlx` rezolva lockfile-ul.
@@ -53,9 +53,8 @@ In runda a doua am inchis lacunele ramase pe partea de cont si operare: normaliz
 
 ## Recomandari urmatoare
 
-- Conecteaza frontend-ul la noile endpoint-uri: pagini de reset parola, ecran de sesiuni active cu revocare, si flow de stergere cont cu confirmare.
 - Adauga CSRF token daca deployment-ul ajunge cross-site sau daca schimbi refresh cookie pe `SameSite=None`.
-- Adauga teste E2E cu Playwright pentru login, refresh dupa 401, logout, reset parola si pagini protejate.
+- Adauga teste E2E cu Playwright pentru login, refresh dupa 401, logout, reset parola, sesiuni active si stergere cont.
 - Extinde observability: structured logs cu request-id propagat, alerte pe refresh token reuse si dashboards peste metrics-ul Prometheus.
 - Decide politicile de privacy pentru follower/following counts la profile private; momentan se ascund bio/avatar si activity, dar nu si counters.
 - Ruleaza periodic raportul gitleaks/CodeQL si trateaza PR-urile Dependabot ca parte din intretinere.
