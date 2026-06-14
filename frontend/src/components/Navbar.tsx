@@ -2,7 +2,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '@/store/auth';
 import { useLogout } from '@/hooks/useAuth';
 import { useThemeStore } from '@/store/theme';
-import { Film, Search, User, LogOut, BarChart3, Menu, X, Sun, Moon } from 'lucide-react';
+import { Film, Search, User, LogOut, BarChart3, Menu, X, Sun, Moon, Settings } from 'lucide-react';
 import { useState } from 'react';
 
 export function Navbar() {
@@ -42,6 +42,9 @@ export function Navbar() {
               <Link to={`/profile/${user?.username}`} className="flex items-center gap-1 text-sm hover:text-[hsl(var(--primary))] transition-colors">
                 <User className="h-4 w-4" /> {user?.username}
               </Link>
+              <Link to="/settings" className="flex items-center gap-1 text-sm hover:text-[hsl(var(--primary))] transition-colors">
+                <Settings className="h-4 w-4" /> Settings
+              </Link>
               <button onClick={handleLogout} className="flex items-center gap-1 text-sm text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--destructive))] transition-colors">
                 <LogOut className="h-4 w-4" /> Logout
               </button>
@@ -74,6 +77,7 @@ export function Navbar() {
                 <Link to="/tracking" className="block py-2 text-sm" onClick={() => setMobileOpen(false)}>My List</Link>
                 <Link to="/stats" className="block py-2 text-sm" onClick={() => setMobileOpen(false)}>Stats</Link>
                 <Link to={`/profile/${user?.username}`} className="block py-2 text-sm" onClick={() => setMobileOpen(false)}>Profile</Link>
+                <Link to="/settings" className="block py-2 text-sm" onClick={() => setMobileOpen(false)}>Settings</Link>
                 <button onClick={handleLogout} className="block py-2 text-sm text-[hsl(var(--destructive))]">Logout</button>
                 <button onClick={toggle} className="flex items-center gap-2 py-2 text-sm">{isDark ? <><Sun className="h-4 w-4" /> Light Mode</> : <><Moon className="h-4 w-4" /> Dark Mode</>}</button>
               </>

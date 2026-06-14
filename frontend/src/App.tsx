@@ -11,6 +11,7 @@ import MediaDetail from '@/pages/MediaDetail';
 import TrackingPage from '@/pages/Tracking';
 import StatsPage from '@/pages/Stats';
 import ProfilePage from '@/pages/Profile';
+import SettingsPage from '@/pages/Settings';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated)();
@@ -39,6 +40,7 @@ export default function App() {
         <Route path="/tracking" element={<ProtectedRoute><TrackingPage /></ProtectedRoute>} />
         <Route path="/stats" element={<ProtectedRoute><StatsPage /></ProtectedRoute>} />
         <Route path="/profile/:username" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
+        <Route path="/settings" element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />
       </Routes>
     </div>
   );

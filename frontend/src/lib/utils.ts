@@ -20,6 +20,17 @@ export function formatDate(date: string | null | undefined): string {
   return new Date(date).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
+export function formatDateTime(date: string | null | undefined): string {
+  if (!date) return 'N/A';
+  return new Date(date).toLocaleString('en-US', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
 export function formatRuntime(minutes: number | null | undefined): string {
   if (!minutes) return 'N/A';
   const h = Math.floor(minutes / 60);

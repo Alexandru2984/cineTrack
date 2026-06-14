@@ -7,6 +7,7 @@ import type {
   PublicUserProfile,
   ListResponse,
   TrackingStatus,
+  Session,
 } from '@/types';
 
 describe('Type contracts', () => {
@@ -99,6 +100,19 @@ describe('Type contracts', () => {
       created_at: '2024-01-01',
     };
     expect(list.item_count).toBeGreaterThanOrEqual(0);
+  });
+
+  it('Session marks the current device and allows null metadata', () => {
+    const session: Session = {
+      id: 'uuid',
+      user_agent: null,
+      ip_address: null,
+      created_at: '2024-01-01',
+      last_used_at: null,
+      current: true,
+    };
+    expect(session.current).toBe(true);
+    expect(session).not.toHaveProperty('token_hash');
   });
 
   it('TrackingStatus type accepts valid values', () => {
