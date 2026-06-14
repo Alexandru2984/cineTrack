@@ -46,3 +46,21 @@ export function useMe() {
     enabled: !!token,
   });
 }
+
+export function useForgotPassword() {
+  return useMutation({
+    mutationFn: async (data: { email: string }) => {
+      const res = await api.post('/auth/password/forgot', data);
+      return res.data as { message: string };
+    },
+  });
+}
+
+export function useResetPassword() {
+  return useMutation({
+    mutationFn: async (data: { token: string; new_password: string }) => {
+      const res = await api.post('/auth/password/reset', data);
+      return res.data as { message: string };
+    },
+  });
+}

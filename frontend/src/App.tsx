@@ -3,6 +3,8 @@ import { useAuthStore } from '@/store/auth';
 import { Navbar } from '@/components/Navbar';
 import LoginPage from '@/pages/Login';
 import RegisterPage from '@/pages/Register';
+import ForgotPasswordPage from '@/pages/ForgotPassword';
+import ResetPasswordPage from '@/pages/ResetPassword';
 import Dashboard from '@/pages/Dashboard';
 import SearchPage from '@/pages/Search';
 import MediaDetail from '@/pages/MediaDetail';
@@ -29,6 +31,8 @@ export default function App() {
       <Routes>
         <Route path="/login" element={<PublicOnlyRoute><LoginPage /></PublicOnlyRoute>} />
         <Route path="/register" element={<PublicOnlyRoute><RegisterPage /></PublicOnlyRoute>} />
+        <Route path="/forgot-password" element={<PublicOnlyRoute><ForgotPasswordPage /></PublicOnlyRoute>} />
+        <Route path="/reset-password" element={<PublicOnlyRoute><ResetPasswordPage /></PublicOnlyRoute>} />
         <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
         <Route path="/search" element={<ProtectedRoute><SearchPage /></ProtectedRoute>} />
         <Route path="/media/:id" element={<ProtectedRoute><MediaDetail /></ProtectedRoute>} />
