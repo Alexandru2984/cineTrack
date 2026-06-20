@@ -10,6 +10,7 @@ use crate::config::Config;
 pub struct EmailService {
     transport: Option<AsyncSmtpTransport<Tokio1Executor>>,
     from: String,
+    log_reset_urls: bool,
 }
 
 impl EmailService {
@@ -26,6 +27,7 @@ impl EmailService {
         Self {
             transport,
             from: config.smtp_from.clone(),
+            log_reset_urls: !config.is_production(),
         }
     }
 
@@ -64,7 +66,13 @@ impl EmailService {
         );
 
         let Some(transport) = &self.transport else {
-            log::info!("[email:log-only] to={to} subject={subject:?} reset_url={reset_url}");
+            if self.log_reset_urls {
+                log::info!("[email:log-only] to={to} subject={subject:?} reset_url={reset_url}");
+            } else {
+                log::warn!(
+                    "SMTP not configured; password-reset email was not sent and reset URL was not logged"
+                );
+            }
             return;
         };
 
@@ -99,5 +107,48 @@ impl EmailService {
         if let Err(e) = transport.send(message).await {
             log::error!("Failed to send password-reset email: {e}");
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_config(app_env: &str) -> Config {
+        Config {
+            app_env: app_env.to_string(),
+            app_host: "127.0.0.1".to_string(),
+            app_port: 0,
+            frontend_url: "http://localhost:5173".to_string(),
+            database_url: "postgres://example".to_string(),
+            jwt_secret: "test_secret_must_be_64_chars_long_so_we_pad_it_here_abcdefghijklmnopq"
+                .to_string(),
+            jwt_expiry_hours: 1,
+            jwt_refresh_expiry_days: 30,
+            tmdb_api_key: "fake".to_string(),
+            tmdb_base_url: "https://api.themoviedb.org/3".to_string(),
+            tmdb_image_base_url: "https://image.tmdb.org/t/p".to_string(),
+            tmdb_timeout_seconds: 10,
+            cors_allowed_origins: vec!["http://localhost:5173".to_string()],
+            rate_limit_rps: 10,
+            rate_limit_burst: 50,
+            smtp_host: None,
+            smtp_port: 587,
+            smtp_username: None,
+            smtp_password: None,
+            smtp_from: "CineTrack <noreply@localhost>".to_string(),
+        }
+    }
+
+    #[test]
+    fn log_only_reset_urls_are_disabled_in_production() {
+        let service = EmailService::new(&test_config("production"));
+        assert!(!service.log_reset_urls);
+    }
+
+    #[test]
+    fn log_only_reset_urls_remain_enabled_outside_production() {
+        let service = EmailService::new(&test_config("development"));
+        assert!(service.log_reset_urls);
     }
 }
