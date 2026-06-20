@@ -1,0 +1,17 @@
+# Build artifacts — rebuilt inside the image, never ship the host copy
+target/
+
+# Secrets / local env (also covered by .gitignore, belt-and-suspenders so a
+# stray .env never lands in an image layer)
+.env
+.env.*
+!.env.example
+
+# VCS and editor noise
+.git/
+.gitignore
+**/*.swp
+**/*.swo
+
+# Docs that don't belong in the build context
+README.md

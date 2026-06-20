@@ -1,0 +1,21 @@
+# Installed inside the image via `npm ci`
+node_modules/
+
+# Build output — produced by `npm run build` in the image
+dist/
+
+# Secrets / local env (build-time vars are passed as ARG, never copied in)
+.env
+.env.*
+!.env.example
+
+# VCS and editor noise
+.git/
+.gitignore
+**/*.swp
+**/*.swo
+
+# Tooling output that isn't needed to build
+coverage/
+playwright-report/
+test-results/
