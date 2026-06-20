@@ -1,6 +1,9 @@
 services:
   db:
     image: postgres:16-alpine
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
@@ -24,6 +27,14 @@ services:
       context: ./backend
       dockerfile: Dockerfile.prod
     env_file: .env.prod
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,noexec,nosuid,nodev
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 256
     restart: unless-stopped
     depends_on:
       db:
@@ -42,6 +53,16 @@ services:
       dockerfile: Dockerfile.prod
       args:
         VITE_API_URL: ${VITE_API_URL}
+    read_only: true
+    tmpfs:
+      - /var/cache/nginx:size=32m,noexec,nosuid,nodev
+      - /var/run:size=8m,noexec,nosuid,nodev
+      - /tmp:size=32m,noexec,nosuid,nodev
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 128
     restart: unless-stopped
     ports:
       - "127.0.0.1:8091:8080"
