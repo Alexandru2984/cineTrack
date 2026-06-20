@@ -35,9 +35,25 @@ api.interceptors.response.use(
     const originalRequest = error.config;
 
     if (error.response?.status === 401 && !originalRequest._retry) {
-      if (originalRequest.url === '/auth/refresh') {
+      const url: string = originalRequest.url ?? '';
+
+      // A failed refresh means the session is truly gone — clear auth and bounce.
+      if (url.includes('/auth/refresh')) {
         useAuthStore.getState().logout();
         window.location.href = '/login';
+        return Promise.reject(error);
+      }
+
+      // 401s from auth entrypoints (login, register, password reset/change) are
+      // expected credential errors. Surfacing them to the form is the whole
+      // point — don't attempt a token refresh, which would swallow the error
+      // and redirect to /login (a user just typing a wrong password is not a
+      // case of an expired session).
+      if (
+        url.includes('/auth/login') ||
+        url.includes('/auth/register') ||
+        url.includes('/auth/password')
+      ) {
         return Promise.reject(error);
       }
 
