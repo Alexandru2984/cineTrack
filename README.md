@@ -145,7 +145,7 @@ npm run dev
 
 ### Testing
 
-The project has **213 tests** across three layers:
+The project has **213 unit & integration tests** plus **12 Playwright E2E tests** across four layers:
 
 ```bash
 # Backend unit tests (116 tests) — no external dependencies
@@ -160,6 +160,14 @@ cd backend && TEST_DATABASE_URL="postgres://test_user:test_pass@127.0.0.1:55433/
   cargo test --test api_tests -- --ignored --test-threads=1
 docker compose -f docker-compose.test.yml down
 
+# Frontend E2E — mocked backend, no DB needed (Playwright boots Vite itself)
+cd frontend && npm run test:e2e
+
+# Frontend E2E — real backend + ephemeral Postgres (Playwright boots both)
+TEST_DB_PORT=55444 docker compose -f docker-compose.test.yml -p cinetrack_e2e up -d --wait
+cd frontend && npm run test:e2e:realstack
+docker compose -f docker-compose.test.yml -p cinetrack_e2e down -v
+
 # Or run everything at once:
 ./scripts/run_tests.sh
 ```
@@ -167,7 +175,8 @@ docker compose -f docker-compose.test.yml down
 **What's tested:**
 - **Unit tests** — JWT generation/validation, Argon2id hashing, password policy, all DTO validators (boundary cases, XSS rejection), error mapping & sanitization
 - **Integration tests** — Full auth flows (register, login, refresh rotation, logout), access control (all protected endpoints return 401), IDOR protection, user enumeration prevention, profile privacy (email hidden), follow/unfollow, list CRUD
-- **Frontend tests** — Zustand stores (auth, theme), utility functions (class merging, URL builders, formatters), type contracts
+- **Frontend tests** — Zustand stores (auth, theme), utility functions (class merging, URL builders, formatters), type contracts, error-boundary fallback
+- **E2E tests (Playwright)** — route guards and login/logout/forgot-password against a mocked API, plus a real-stack suite (live backend + ephemeral Postgres) covering registration with an HttpOnly refresh cookie, real token rotation through the browser, active sessions, account deletion, and password reset via the emailed token
 
 ## Project Structure
 

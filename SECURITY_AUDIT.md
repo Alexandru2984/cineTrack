@@ -63,6 +63,7 @@ In runda a treia am verificat repo-ul direct pe VPS/prod si am inchis trei riscu
 - Teste E2E: suita Playwright (`frontend/e2e`) acopera route guards, store-ul de auth persistat, login success/fail, logout, interceptorul de refresh-on-401 pe sesiune moarta si confirmarea uniforma de forgot-password. Backend-ul e mock-uit la nivel de retea (fara DB/API), deci e determinista; ruleaza ca job separat in CI.
 - Acuratete documentatie: numerele de teste din README au fost corectate (116 unit + 44 integrare + 53 frontend), CSP-ul descris corect ca domain-allowlist, si adaugat un fisier `LICENSE` MIT in locul notei vagi "personal/educational use".
 - Reziliente frontend: adaugat un `ErrorBoundary` la nivel de aplicatie (in jurul `<Routes>`, navbar-ul ramane in afara) care prinde erorile de render si arata un fallback cu reload/home in loc sa demonteze tot SPA-ul. Se reseteaza la navigare (`key` pe pathname). Acoperit de teste unit (vitest) si E2E (un raspuns `trending` malformat duce la fallback, nu la ecran alb).
+- E2E pe stiva reala: suita Playwright `frontend/e2e-realstack` ruleaza contra unui backend pornit efectiv + Postgres efemer (fara mock), Playwright pornind singur backend-ul (`cargo run`) si vite dev. Acopera inregistrarea cu cookie refresh `HttpOnly`, rotatia reala a access token-ului prin cookie in browser, lista de sesiuni active, stergerea de cont (care blocheaza re-login) si resetarea parolei cu token-ul one-time (citit din logul backend-ului, SMTP fiind dezactivat). Ruleaza ca job CI separat (`e2e-realstack`, cu serviciu Postgres si toolchain Rust).
 
 ## Riscuri reziduale
 
@@ -72,13 +73,13 @@ In runda a treia am verificat repo-ul direct pe VPS/prod si am inchis trei riscu
 - `/metrics` nu are autentificare; protectia e ca nu este proxat de Nginx, deci depinde de izolarea retelei de deploy. Daca portul backend devine accesibil direct, endpoint-ul trebuie restrans.
 - `cargo audit` raporteaza `RUSTSEC-2023-0071` prin metadate `sqlx-mysql` din lockfile, desi build-ul foloseste doar feature-ul `postgres`. CI il ignora explicit; de revazut cand `sqlx` rezolva lockfile-ul.
 - `validator_derive` trage `proc-macro-error2`, marcat unmaintained in `cargo audit` ca warning (`RUSTSEC-2026-0173`). De urmarit upgrade-ul ecosistemului `validator`.
-- E2E browser tests exista acum (Playwright) pentru login/logout/refresh-401/forgot-password/error-boundary, dar cu backend mock-uit; nu exista inca E2E pe stiva reala (cookie HttpOnly real, rotatie refresh, reset cu token, sesiuni active, stergere cont).
+- E2E browser tests exista acum pe doua niveluri: mock-uit (login/logout/refresh-401/forgot-password/error-boundary) si stiva reala (cookie HttpOnly, rotatie refresh, sesiuni, stergere cont, reset cu token). Raman neacoperite de E2E fluxurile de tracking/episoade/liste (acoperite doar de testele de integrare backend).
 - Secretele din `.env.prod` trebuie rotate daca au fost afisate in terminal, loguri sau transcript de audit. In special, evita `docker compose config` fara `--no-env-resolution` pe masini sau sesiuni care pot persista output-ul.
 
 ## Recomandari urmatoare
 
 - Adauga CSRF token daca deployment-ul ajunge cross-site sau daca schimbi refresh cookie pe `SameSite=None`.
-- Extinde E2E-ul Playwright catre stiva reala (backend + Postgres efemer in CI) pentru reset parola cu token, sesiuni active si stergere cont, pe langa fluxurile mock-uite existente.
+- Extinde E2E-ul catre fluxurile de continut (tracking, episoade, liste) daca devin critice, pe langa fluxurile de auth deja acoperite mock + real-stack.
 - Extinde observability: propaga request-id-ul si in liniile de audit/eroare (acum apare doar in access log), si conecteaza alerte pe `security: refresh token reuse` plus dashboards peste metrics-ul Prometheus.
 - Decide politicile de privacy pentru follower/following counts la profile private; momentan se ascund bio/avatar si activity, dar nu si counters.
 - Ruleaza periodic raportul gitleaks/CodeQL si trateaza PR-urile Dependabot ca parte din intretinere.
