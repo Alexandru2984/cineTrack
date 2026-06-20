@@ -1,6 +1,6 @@
 # CineTrack security audit
 
-Data: 2026-06-14 (runda 2; prima trecere 2026-06-13)
+Data: 2026-06-20 (runda 3; runde anterioare 2026-06-14 si 2026-06-13)
 
 ## Rezumat
 
@@ -9,6 +9,8 @@ Repo-ul era deja un MVP solid: SQL parametrizat prin `sqlx`, ownership checks pe
 Am remediat problemele cu risc imediat: refresh token-ul nu mai este expus in JavaScript, rotatia detecteaza reuse, JWT-ul are algoritm explicit si durata mai scurta, TMDB are timeout, rate limiter-ul tine cont de reverse proxy, Nginx trimite headere de hardening, iar CI ruleaza lint/test/audit.
 
 In runda a doua am inchis lacunele ramase pe partea de cont si operare: normalizare email, schimbare/resetare parola, gestionarea sesiunilor active, stergere de cont, CSP in Nginx, request-id plus metrics Prometheus si supply-chain scanning (Dependabot, CodeQL, gitleaks). Toate endpoint-urile noi au teste de integrare care ruleaza pe Postgres in CI.
+
+In runda a treia am verificat repo-ul direct pe VPS/prod si am inchis trei riscuri concrete: vulnerabilitatea npm high din `form-data` (prin lockfile), logarea URL-ului de resetare parola cand SMTP lipseste in productie si hardening-ul runtime pentru containere/Nginx. Am verificat si faptul ca `.env.prod` este netracked si `chmod 600`, iar porturile publicate in Compose sunt bind-uite pe `127.0.0.1`.
 
 ## Schimbari aplicate
 
@@ -42,6 +44,15 @@ In runda a doua am inchis lacunele ramase pe partea de cont si operare: normaliz
 - Frontend conectat la noile endpoint-uri: pagini publice forgot/reset parola (cu link din login), pagina Settings cu schimbare parola, lista sesiunilor active (revocare per sesiune si sign out all) si danger zone pentru stergere cont cu confirmare prin parola.
 - Logging de securitate si audit: `WARN` pe refresh token reuse (semnal de furt token, urmat de revocarea tuturor sesiunilor) si linii `INFO` de audit pe register, schimbare/resetare parola, revocare sesiune, sign out all si stergere cont. Se logheaza doar `user_id` (UUID), fara email/token/parola.
 
+## Schimbari aplicate (2026-06-20)
+
+- Frontend supply-chain: `npm audit --omit=dev` raporta vulnerabilitate high in `form-data` 4.0.0-4.0.5 via `axios`; lockfile-ul a fost actualizat astfel incat `form-data` sa rezolve la 4.0.6, iar auditul npm este acum curat.
+- Reset password logging: in productie, daca SMTP nu este configurat, backend-ul nu mai logheaza `reset_url` (care contine token one-time). In dev ramane log-only pentru debugging.
+- Observability: logurile aplicatiei folosesc task-local request id si sunt corelate cu `X-Request-Id`/access log, fara sa accepte valori spoofed de client.
+- Runtime container hardening: `backend` si `frontend` in `docker-compose.prod.yml` ruleaza cu `read_only`, `tmpfs` pentru directoarele de write necesare, `no-new-privileges`, `cap_drop: ALL` si `pids_limit`; Postgres primeste `no-new-privileges` si `pids_limit`.
+- Nginx hardening: `server_tokens off`, TLS limitat la 1.2/1.3, session cache/timeout explicit si `server_tokens off` si pentru Nginx-ul SPA intern.
+- Validare operationala fara leak de secrete: pentru Compose se foloseste `docker compose config --no-env-resolution --no-interpolate --quiet`, nu `docker compose config` simplu, deoarece acesta poate expune valorile din `env_file`.
+
 ## Riscuri reziduale
 
 - Access token-urile raman stateless pana expira. Durata default este 1h; `logout-all` si schimbarea parolei revoca refresh token-urile, dar un access token deja emis ramane valabil pana la expirare. Revocarea instant ar cere token versioning sau denylist.
@@ -49,8 +60,9 @@ In runda a doua am inchis lacunele ramase pe partea de cont si operare: normaliz
 - `current` pentru sesiuni se determina din cookie-ul de refresh; un client care apeleaza fara cookie (doar cu access token) vede toate sesiunile drept ne-curente, dar nu este o problema de securitate.
 - `/metrics` nu are autentificare; protectia e ca nu este proxat de Nginx, deci depinde de izolarea retelei de deploy. Daca portul backend devine accesibil direct, endpoint-ul trebuie restrans.
 - `cargo audit` raporteaza `RUSTSEC-2023-0071` prin metadate `sqlx-mysql` din lockfile, desi build-ul foloseste doar feature-ul `postgres`. CI il ignora explicit; de revazut cand `sqlx` rezolva lockfile-ul.
-- `validator_derive` trage `proc-macro-error2`, marcat unmaintained in `cargo audit` ca warning permis. De urmarit upgrade-ul ecosistemului `validator`.
+- `validator_derive` trage `proc-macro-error2`, marcat unmaintained in `cargo audit` ca warning (`RUSTSEC-2026-0173`). De urmarit upgrade-ul ecosistemului `validator`.
 - Nu exista inca E2E browser tests pentru fluxuri auth reale cu cookie, refresh si logout.
+- Secretele din `.env.prod` trebuie rotate daca au fost afisate in terminal, loguri sau transcript de audit. In special, evita `docker compose config` fara `--no-env-resolution` pe masini sau sesiuni care pot persista output-ul.
 
 ## Recomandari urmatoare
 
@@ -59,6 +71,7 @@ In runda a doua am inchis lacunele ramase pe partea de cont si operare: normaliz
 - Extinde observability: propaga request-id-ul si in liniile de audit/eroare (acum apare doar in access log), si conecteaza alerte pe `security: refresh token reuse` plus dashboards peste metrics-ul Prometheus.
 - Decide politicile de privacy pentru follower/following counts la profile private; momentan se ascund bio/avatar si activity, dar nu si counters.
 - Ruleaza periodic raportul gitleaks/CodeQL si trateaza PR-urile Dependabot ca parte din intretinere.
+- Roteaza JWT secret, parola DB si cheia TMDB dupa sesiuni de audit in care valorile au fost afisate accidental. Rotatia parolei DB trebuie facuta atomic: `ALTER USER`, update `.env.prod`, apoi recreate/restart backend.
 
 ## Verificari locale
 
@@ -71,6 +84,7 @@ In runda a doua am inchis lacunele ramase pe partea de cont si operare: normaliz
 - `npm test -- --run`
 - `npm run build`
 - `npm audit --omit=dev`
+- `docker compose -f docker-compose.prod.yml config --no-env-resolution --no-interpolate --quiet`
+- `docker run --rm --add-host backend:127.0.0.1 --add-host frontend:127.0.0.1 -v "$PWD/nginx/nginx.conf:/etc/nginx/nginx.conf:ro" -v /tmp/cinetrack-nginx-ssl:/etc/nginx/ssl:ro nginx:alpine nginx -t`
 - Validare config Nginx: `nginx -t` (sau in container cu certificate dummy)
 - Secret scan: `docker run --rm -v "$PWD:/repo" zricethezav/gitleaks:v8.30.1 detect --source /repo --redact`
-
