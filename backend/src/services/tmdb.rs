@@ -11,22 +11,57 @@ use crate::models::Media;
 pub struct TmdbService {
     client: reqwest::Client,
     api_key: String,
+    /// When set, the v4 Read Access Token is sent as a Bearer header and the
+    /// `api_key` query param is omitted, keeping the credential out of URLs/logs.
+    use_bearer_auth: bool,
     base_url: String,
 }
 
 impl TmdbService {
     pub fn new(config: &Config) -> Self {
-        let client = reqwest::Client::builder()
+        let mut builder = reqwest::Client::builder()
             .timeout(Duration::from_secs(config.tmdb_timeout_seconds))
             .connect_timeout(Duration::from_secs(5))
-            .user_agent("cinetrack/0.1")
-            .build()
-            .expect("Failed to build TMDB HTTP client");
+            .user_agent("cinetrack/0.1");
+
+        // Prefer the v4 Read Access Token via an Authorization header so the
+        // secret never lands in a request URL or access log. Fall back to the
+        // v3 api_key query param if the token is missing or not header-safe.
+        let mut use_bearer_auth = false;
+        if let Some(token) = &config.tmdb_read_access_token {
+            match reqwest::header::HeaderValue::from_str(&format!("Bearer {token}")) {
+                Ok(mut value) => {
+                    value.set_sensitive(true);
+                    let mut headers = reqwest::header::HeaderMap::new();
+                    headers.insert(reqwest::header::AUTHORIZATION, value);
+                    builder = builder.default_headers(headers);
+                    use_bearer_auth = true;
+                }
+                Err(e) => {
+                    log::error!(
+                        "TMDB_READ_ACCESS_TOKEN is not a valid header value ({e}); \
+                         falling back to api_key query param"
+                    );
+                }
+            }
+        }
+
+        let client = builder.build().expect("Failed to build TMDB HTTP client");
 
         Self {
             client,
             api_key: config.tmdb_api_key.clone(),
+            use_bearer_auth,
             base_url: config.tmdb_base_url.clone(),
+        }
+    }
+
+    /// Add the v3 `api_key` query param unless Bearer auth (v4 token) is in use.
+    fn authed(&self, rb: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+        if self.use_bearer_auth {
+            rb
+        } else {
+            rb.query(&[("api_key", self.api_key.as_str())])
         }
     }
 
@@ -42,15 +77,17 @@ impl TmdbService {
             _ => "search/multi",
         };
 
+        let page = page.unwrap_or(1).to_string();
         let resp = self
-            .client
-            .get(format!("{}/{}", self.base_url, endpoint))
-            .query(&[
-                ("api_key", self.api_key.as_str()),
-                ("query", query),
-                ("page", &page.unwrap_or(1).to_string()),
-                ("language", "en-US"),
-            ])
+            .authed(
+                self.client
+                    .get(format!("{}/{}", self.base_url, endpoint))
+                    .query(&[
+                        ("query", query),
+                        ("page", page.as_str()),
+                        ("language", "en-US"),
+                    ]),
+            )
             .send()
             .await?
             .error_for_status()?
@@ -62,12 +99,11 @@ impl TmdbService {
 
     pub async fn get_movie_detail(&self, tmdb_id: i32) -> Result<TmdbMovieDetail, AppError> {
         let resp = self
-            .client
-            .get(format!("{}/movie/{}", self.base_url, tmdb_id))
-            .query(&[
-                ("api_key", &self.api_key),
-                ("language", &"en-US".to_string()),
-            ])
+            .authed(
+                self.client
+                    .get(format!("{}/movie/{}", self.base_url, tmdb_id))
+                    .query(&[("language", "en-US")]),
+            )
             .send()
             .await?
             .error_for_status()?
@@ -79,12 +115,11 @@ impl TmdbService {
 
     pub async fn get_tv_detail(&self, tmdb_id: i32) -> Result<TmdbTvDetail, AppError> {
         let resp = self
-            .client
-            .get(format!("{}/tv/{}", self.base_url, tmdb_id))
-            .query(&[
-                ("api_key", &self.api_key),
-                ("language", &"en-US".to_string()),
-            ])
+            .authed(
+                self.client
+                    .get(format!("{}/tv/{}", self.base_url, tmdb_id))
+                    .query(&[("language", "en-US")]),
+            )
             .send()
             .await?
             .error_for_status()?
@@ -100,15 +135,14 @@ impl TmdbService {
         season_number: i32,
     ) -> Result<TmdbSeasonDetail, AppError> {
         let resp = self
-            .client
-            .get(format!(
-                "{}/tv/{}/season/{}",
-                self.base_url, tmdb_id, season_number
-            ))
-            .query(&[
-                ("api_key", &self.api_key),
-                ("language", &"en-US".to_string()),
-            ])
+            .authed(
+                self.client
+                    .get(format!(
+                        "{}/tv/{}/season/{}",
+                        self.base_url, tmdb_id, season_number
+                    ))
+                    .query(&[("language", "en-US")]),
+            )
             .send()
             .await?
             .error_for_status()?
@@ -120,12 +154,11 @@ impl TmdbService {
 
     pub async fn get_trending(&self) -> Result<TmdbTrendingResponse, AppError> {
         let resp = self
-            .client
-            .get(format!("{}/trending/all/week", self.base_url))
-            .query(&[
-                ("api_key", &self.api_key),
-                ("language", &"en-US".to_string()),
-            ])
+            .authed(
+                self.client
+                    .get(format!("{}/trending/all/week", self.base_url))
+                    .query(&[("language", "en-US")]),
+            )
             .send()
             .await?
             .error_for_status()?
@@ -319,5 +352,57 @@ impl TmdbService {
         .await?;
 
         Ok(episodes)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn config_with_token(read_access_token: Option<&str>) -> Config {
+        Config {
+            app_env: "test".to_string(),
+            app_host: "127.0.0.1".to_string(),
+            app_port: 0,
+            frontend_url: "http://localhost:5173".to_string(),
+            database_url: "postgres://example".to_string(),
+            jwt_secret: "test_secret_must_be_64_chars_long_so_we_pad_it_here_abcdefghijklmnopq"
+                .to_string(),
+            jwt_expiry_hours: 1,
+            jwt_refresh_expiry_days: 30,
+            tmdb_api_key: "fake_v3_key".to_string(),
+            tmdb_read_access_token: read_access_token.map(str::to_string),
+            tmdb_base_url: "https://api.themoviedb.org/3".to_string(),
+            tmdb_image_base_url: "https://image.tmdb.org/t/p".to_string(),
+            tmdb_timeout_seconds: 10,
+            cors_allowed_origins: vec!["http://localhost:5173".to_string()],
+            rate_limit_rps: 10,
+            rate_limit_burst: 50,
+            smtp_host: None,
+            smtp_port: 587,
+            smtp_username: None,
+            smtp_password: None,
+            smtp_from: "CineTrack <noreply@localhost>".to_string(),
+        }
+    }
+
+    #[test]
+    fn uses_bearer_auth_when_read_access_token_present() {
+        let service = TmdbService::new(&config_with_token(Some("v4-read-access-token")));
+        assert!(service.use_bearer_auth);
+    }
+
+    #[test]
+    fn falls_back_to_api_key_without_read_access_token() {
+        let service = TmdbService::new(&config_with_token(None));
+        assert!(!service.use_bearer_auth);
+    }
+
+    #[test]
+    fn falls_back_to_api_key_when_token_is_not_header_safe() {
+        // A control character cannot be encoded as a header value, so the client
+        // must degrade to the api_key query param rather than panic.
+        let service = TmdbService::new(&config_with_token(Some("bad\ntoken")));
+        assert!(!service.use_bearer_auth);
     }
 }

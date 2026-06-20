@@ -11,6 +11,7 @@ pub struct Config {
     pub jwt_expiry_hours: i64,
     pub jwt_refresh_expiry_days: i64,
     pub tmdb_api_key: String,
+    pub tmdb_read_access_token: Option<String>,
     pub tmdb_base_url: String,
     pub tmdb_image_base_url: String,
     pub tmdb_timeout_seconds: u64,
@@ -54,6 +55,12 @@ impl Config {
             tmdb_api_key: env::var("TMDB_API_KEY").unwrap_or_else(|_| {
                 env::var("API_KEY").expect("TMDB_API_KEY or API_KEY must be set")
             }),
+            // TMDB v4 Read Access Token. When present it is sent as a Bearer
+            // header so the credential never appears in request URLs or logs;
+            // otherwise the client falls back to the v3 `api_key` query param.
+            tmdb_read_access_token: env::var("TMDB_READ_ACCESS_TOKEN")
+                .ok()
+                .filter(|s| !s.trim().is_empty()),
             tmdb_base_url: env::var("TMDB_BASE_URL")
                 .unwrap_or_else(|_| "https://api.themoviedb.org/3".to_string()),
             tmdb_image_base_url: env::var("TMDB_IMAGE_BASE_URL")

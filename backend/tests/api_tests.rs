@@ -61,6 +61,7 @@ fn test_config() -> cinetrack::config::Config {
         jwt_expiry_hours: 1,
         jwt_refresh_expiry_days: 30,
         tmdb_api_key: "fake_tmdb_key".into(),
+        tmdb_read_access_token: None,
         tmdb_base_url: "https://api.themoviedb.org/3".into(),
         tmdb_image_base_url: "https://image.tmdb.org/t/p".into(),
         tmdb_timeout_seconds: 10,

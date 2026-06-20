@@ -126,6 +126,7 @@ mod tests {
             jwt_expiry_hours: 1,
             jwt_refresh_expiry_days: 30,
             tmdb_api_key: "fake".to_string(),
+            tmdb_read_access_token: None,
             tmdb_base_url: "https://api.themoviedb.org/3".to_string(),
             tmdb_image_base_url: "https://image.tmdb.org/t/p".to_string(),
             tmdb_timeout_seconds: 10,
