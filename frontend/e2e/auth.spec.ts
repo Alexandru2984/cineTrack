@@ -135,6 +135,23 @@ test('logs the user out when the token refresh fails', async ({ page }) => {
   await expect(page).toHaveURL(/\/login$/);
 });
 
+test('contains a page crash in a fallback and keeps the navbar', async ({ page }) => {
+  await seedAuth(page);
+  // A malformed trending payload (missing `results`) makes the Dashboard throw
+  // during render. The error boundary must show the fallback instead of letting
+  // the whole SPA unmount to a white screen, and the navbar must survive.
+  await page.route('**/api/**', (route) => {
+    const url = route.request().url();
+    if (url.includes('/api/auth/me')) return route.fulfill({ json: TEST_USER });
+    if (url.includes('/api/media/trending')) return route.fulfill({ json: {} });
+    return route.fulfill({ json: [] });
+  });
+
+  await page.goto('/');
+  await expect(page.getByText('Something went wrong')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Logout' })).toBeVisible();
+});
+
 test('forgot password shows a uniform confirmation', async ({ page }) => {
   await page.route('**/api/auth/password/forgot', (route) =>
     route.fulfill({ json: { message: 'If that email is registered, a reset link has been sent' } })

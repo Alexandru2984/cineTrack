@@ -61,7 +61,8 @@ In runda a treia am verificat repo-ul direct pe VPS/prod si am inchis trei riscu
 - TMDB credential scos din URL-uri: cand `TMDB_READ_ACCESS_TOKEN` (v4) este setat, clientul il trimite ca header `Authorization: Bearer` marcat sensitive si renunta la `api_key` din query string; fallback la `api_key` cand token-ul lipseste sau nu e header-safe, deci deploy-urile existente raman functionale. Pentru a-l activa in productie trebuie adaugat `TMDB_READ_ACCESS_TOKEN` in `.env.prod` si rebuild.
 - Bug de UX in fluxul de login reparat (descoperit prin E2E): interceptorul axios trata orice 401 ca access token expirat si incerca refresh; la o parola gresita refresh-ul (fara sesiune) raspundea tot 401, ceea ce facea logout si redirect la `/login`, inghitind mesajul "Invalid email or password". Acum 401-urile de la endpoint-urile de auth (login/register/password) sunt respinse direct, ca formularul sa afiseze eroarea; refresh-ul ramane doar pentru token expirat pe alte requesturi.
 - Teste E2E: suita Playwright (`frontend/e2e`) acopera route guards, store-ul de auth persistat, login success/fail, logout, interceptorul de refresh-on-401 pe sesiune moarta si confirmarea uniforma de forgot-password. Backend-ul e mock-uit la nivel de retea (fara DB/API), deci e determinista; ruleaza ca job separat in CI.
-- Acuratete documentatie: numerele de teste din README au fost corectate (113 unit + 44 integrare + 51 frontend), CSP-ul descris corect ca domain-allowlist, si adaugat un fisier `LICENSE` MIT in locul notei vagi "personal/educational use".
+- Acuratete documentatie: numerele de teste din README au fost corectate (116 unit + 44 integrare + 53 frontend), CSP-ul descris corect ca domain-allowlist, si adaugat un fisier `LICENSE` MIT in locul notei vagi "personal/educational use".
+- Reziliente frontend: adaugat un `ErrorBoundary` la nivel de aplicatie (in jurul `<Routes>`, navbar-ul ramane in afara) care prinde erorile de render si arata un fallback cu reload/home in loc sa demonteze tot SPA-ul. Se reseteaza la navigare (`key` pe pathname). Acoperit de teste unit (vitest) si E2E (un raspuns `trending` malformat duce la fallback, nu la ecran alb).
 
 ## Riscuri reziduale
 
@@ -71,15 +72,13 @@ In runda a treia am verificat repo-ul direct pe VPS/prod si am inchis trei riscu
 - `/metrics` nu are autentificare; protectia e ca nu este proxat de Nginx, deci depinde de izolarea retelei de deploy. Daca portul backend devine accesibil direct, endpoint-ul trebuie restrans.
 - `cargo audit` raporteaza `RUSTSEC-2023-0071` prin metadate `sqlx-mysql` din lockfile, desi build-ul foloseste doar feature-ul `postgres`. CI il ignora explicit; de revazut cand `sqlx` rezolva lockfile-ul.
 - `validator_derive` trage `proc-macro-error2`, marcat unmaintained in `cargo audit` ca warning (`RUSTSEC-2026-0173`). De urmarit upgrade-ul ecosistemului `validator`.
-- E2E browser tests exista acum (Playwright) pentru login/logout/refresh-401/forgot-password, dar cu backend mock-uit; nu exista inca E2E pe stiva reala (cookie HttpOnly real, rotatie refresh, reset cu token, sesiuni active, stergere cont).
-- Frontend-ul nu are React error boundary: un raspuns API malformat sau gol (ex: `trending` fara `results`) arunca in render si, fara boundary, demonteaza tot arborele (ecran alb, inclusiv navbar). De adaugat un error boundary la nivel de aplicatie.
+- E2E browser tests exista acum (Playwright) pentru login/logout/refresh-401/forgot-password/error-boundary, dar cu backend mock-uit; nu exista inca E2E pe stiva reala (cookie HttpOnly real, rotatie refresh, reset cu token, sesiuni active, stergere cont).
 - Secretele din `.env.prod` trebuie rotate daca au fost afisate in terminal, loguri sau transcript de audit. In special, evita `docker compose config` fara `--no-env-resolution` pe masini sau sesiuni care pot persista output-ul.
 
 ## Recomandari urmatoare
 
 - Adauga CSRF token daca deployment-ul ajunge cross-site sau daca schimbi refresh cookie pe `SameSite=None`.
 - Extinde E2E-ul Playwright catre stiva reala (backend + Postgres efemer in CI) pentru reset parola cu token, sesiuni active si stergere cont, pe langa fluxurile mock-uite existente.
-- Adauga un error boundary in frontend ca un singur raspuns API malformat sa nu doboare tot SPA-ul.
 - Extinde observability: propaga request-id-ul si in liniile de audit/eroare (acum apare doar in access log), si conecteaza alerte pe `security: refresh token reuse` plus dashboards peste metrics-ul Prometheus.
 - Decide politicile de privacy pentru follower/following counts la profile private; momentan se ascund bio/avatar si activity, dar nu si counters.
 - Ruleaza periodic raportul gitleaks/CodeQL si trateaza PR-urile Dependabot ca parte din intretinere.

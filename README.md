@@ -145,13 +145,13 @@ npm run dev
 
 ### Testing
 
-The project has **211 tests** across three layers:
+The project has **213 tests** across three layers:
 
 ```bash
 # Backend unit tests (116 tests) — no external dependencies
 cd backend && cargo test
 
-# Frontend tests (51 tests) — Vitest + jsdom
+# Frontend tests (53 tests) — Vitest + jsdom
 cd frontend && npm test
 
 # Backend integration tests (44 tests) — needs a test DB
@@ -201,7 +201,7 @@ văzute/
 │       ├── pages/          # Route pages
 │       ├── store/          # Zustand stores (auth, theme)
 │       ├── lib/            # API client with refresh interceptor
-│       ├── test/           # Vitest tests (51 tests)
+│       ├── test/           # Vitest tests (53 tests)
 │       └── types/          # TypeScript interfaces
 ├── scripts/
 │   └── run_tests.sh        # All-in-one test runner
