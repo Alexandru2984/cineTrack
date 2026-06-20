@@ -78,7 +78,7 @@ In runda a treia am verificat repo-ul direct pe VPS/prod si am inchis trei riscu
 - `cargo fmt --check`
 - `cargo clippy --all-targets -- -D warnings`
 - `cargo test`
-- Teste de integrare pe Postgres: `TEST_DATABASE_URL=postgres://test_user:test_pass@127.0.0.1:5433/cinetrack_test cargo test --test api_tests -- --ignored --test-threads=1`
+- Teste de integrare pe Postgres: `TEST_DATABASE_URL=postgres://test_user:test_pass@127.0.0.1:55433/cinetrack_test cargo test --test api_tests -- --ignored --test-threads=1`
 - `cargo audit --ignore RUSTSEC-2023-0071`
 - `npm run lint`
 - `npm test -- --run`

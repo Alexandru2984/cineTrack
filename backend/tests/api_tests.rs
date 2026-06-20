@@ -32,7 +32,7 @@ fn refresh_cookie_from_response<B>(resp: &actix_web::dev::ServiceResponse<B>) ->
 
 fn test_db_url() -> String {
     std::env::var("TEST_DATABASE_URL")
-        .unwrap_or_else(|_| "postgres://test_user:test_pass@127.0.0.1:5433/cinetrack_test".into())
+        .unwrap_or_else(|_| "postgres://test_user:test_pass@127.0.0.1:55433/cinetrack_test".into())
 }
 
 async fn setup_pool() -> PgPool {

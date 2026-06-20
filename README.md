@@ -156,7 +156,7 @@ cd frontend && npm test
 
 # Backend integration tests (26 tests) — needs a test DB
 docker compose -f docker-compose.test.yml up -d --wait
-cd backend && TEST_DATABASE_URL="postgres://test_user:test_pass@127.0.0.1:5433/cinetrack_test" \
+cd backend && TEST_DATABASE_URL="postgres://test_user:test_pass@127.0.0.1:55433/cinetrack_test" \
   cargo test --test api_tests -- --ignored --test-threads=1
 docker compose -f docker-compose.test.yml down
 
@@ -207,7 +207,7 @@ văzute/
 │   └── run_tests.sh        # All-in-one test runner
 ├── nginx/                  # Internal reverse proxy config
 ├── docker-compose.yml      # Development stack
-├── docker-compose.test.yml # Ephemeral test DB (tmpfs, port 5433)
+├── docker-compose.test.yml # Ephemeral test DB (tmpfs, port 55433 by default)
 └── docker-compose.prod.yml # Production stack (with resource limits)
 ```
 
