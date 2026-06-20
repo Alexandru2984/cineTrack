@@ -20,8 +20,6 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
             .route("/me/followers", web::get().to(my_followers))
             .route("/me/following", web::get().to(my_following))
             .route("/{username}", web::get().to(get_profile))
-            .route("/{username}/stats", web::get().to(get_user_stats))
-            .route("/{username}/heatmap", web::get().to(get_user_heatmap))
             .route("/{username}/activity", web::get().to(get_user_activity))
             .route("/{username}/follow", web::post().to(follow_user))
             .route("/{username}/follow", web::delete().to(unfollow_user)),
@@ -254,20 +252,6 @@ async fn my_following(
     let response: Vec<crate::dto::auth::UserSummary> =
         following.into_iter().map(|u| u.into()).collect();
     Ok(HttpResponse::Ok().json(response))
-}
-
-async fn get_user_stats(
-    _pool: web::Data<PgPool>,
-    _path: web::Path<String>,
-) -> Result<HttpResponse, AppError> {
-    Ok(HttpResponse::Ok().json(serde_json::json!({"message": "Use /api/stats/me"})))
-}
-
-async fn get_user_heatmap(
-    _pool: web::Data<PgPool>,
-    _path: web::Path<String>,
-) -> Result<HttpResponse, AppError> {
-    Ok(HttpResponse::Ok().json(serde_json::json!({"message": "Use /api/stats/me/heatmap"})))
 }
 
 /// Returns user's recent watch activity. Respects is_public flag:
