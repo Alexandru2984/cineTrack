@@ -56,7 +56,7 @@ The application has been through multiple security audits. Key measures include:
 - **Input Validation** — All user inputs validated with length limits (bio 500, review 5000, list names 200, etc.) and content validation
 - **Privacy** — Private profiles hide activity/followers from non-followers; public user endpoints never expose emails; no user enumeration on register
 - **Access Control** — Private lists return 404 to non-owners; all media endpoints require authentication; history entries validated against existing media
-- **Security Headers** — HSTS, X-Frame-Options (DENY), X-Content-Type-Options, Referrer-Policy, Permissions-Policy, Content-Security-Policy (strict, with script hash whitelist)
+- **Security Headers** — HSTS, X-Frame-Options (DENY), X-Content-Type-Options, Referrer-Policy, Permissions-Policy, Content-Security-Policy (strict, with an explicit script/connect domain allowlist)
 - **Container Security** — Both backend and frontend run as non-root users; Docker resource limits enforced
 - **Error Handling** — Internal errors (TMDB, JWT) sanitized before reaching client; no stack traces or implementation details leaked
 - **Secrets** — Cryptographically generated JWT secret (64 bytes) and DB password; `.env.prod` is `chmod 600` and `.gitignore`'d
@@ -145,16 +145,16 @@ npm run dev
 
 ### Testing
 
-The project has **160 tests** across three layers:
+The project has **208 tests** across three layers:
 
 ```bash
-# Backend unit tests (85 tests) — no external dependencies
+# Backend unit tests (113 tests) — no external dependencies
 cd backend && cargo test
 
-# Frontend tests (49 tests) — Vitest + jsdom
+# Frontend tests (51 tests) — Vitest + jsdom
 cd frontend && npm test
 
-# Backend integration tests (26 tests) — needs a test DB
+# Backend integration tests (44 tests) — needs a test DB
 docker compose -f docker-compose.test.yml up -d --wait
 cd backend && TEST_DATABASE_URL="postgres://test_user:test_pass@127.0.0.1:55433/cinetrack_test" \
   cargo test --test api_tests -- --ignored --test-threads=1
@@ -176,7 +176,7 @@ văzute/
 ├── backend/                # Rust + Actix-Web API
 │   ├── migrations/         # SQLx database migrations
 │   ├── tests/
-│   │   └── api_tests.rs    # Integration tests (26 tests, need test DB)
+│   │   └── api_tests.rs    # Integration tests (44 tests, need test DB)
 │   └── src/
 │       ├── config.rs       # Environment configuration
 │       ├── db.rs           # Database pool setup
@@ -201,7 +201,7 @@ văzute/
 │       ├── pages/          # Route pages
 │       ├── store/          # Zustand stores (auth, theme)
 │       ├── lib/            # API client with refresh interceptor
-│       ├── test/           # Vitest tests (49 tests)
+│       ├── test/           # Vitest tests (51 tests)
 │       └── types/          # TypeScript interfaces
 ├── scripts/
 │   └── run_tests.sh        # All-in-one test runner
@@ -227,4 +227,4 @@ All endpoints except auth (register/login/refresh) require a valid JWT access to
 
 ## License
 
-This project is for personal/educational use.
+Released under the [MIT License](LICENSE).
