@@ -2,9 +2,14 @@ use actix_cors::Cors;
 use actix_governor::{Governor, GovernorConfigBuilder};
 use actix_web::{middleware as actix_middleware, web, App, HttpResponse, HttpServer};
 
+use std::io::Write;
+
 use cinetrack::{
-    config, db, metrics, middleware::rate_limit::TrustedProxyIpKeyExtractor,
-    middleware::request_id::request_id, routes, services::email::EmailService,
+    config, db, metrics,
+    middleware::rate_limit::TrustedProxyIpKeyExtractor,
+    middleware::request_id::{current_request_id, request_id},
+    routes,
+    services::email::EmailService,
     services::tmdb::TmdbService,
 };
 
@@ -12,10 +17,40 @@ use cinetrack::{
 /// request_id middleware and echoed in the X-Request-Id response header).
 const LOG_FORMAT: &str = r#"%a "%r" %s %b "%{User-Agent}i" %T req-id=%{x-request-id}o"#;
 
+/// Initialize logging. Keeps env_logger's `RUST_LOG`-driven filtering but tags
+/// every line with the in-flight request's correlation id, so application and
+/// audit logs can be correlated with the access log and the X-Request-Id header.
+fn init_logger() {
+    env_logger::Builder::from_default_env()
+        .format(|buf, record| {
+            let ts = buf.timestamp();
+            match current_request_id() {
+                Some(id) => writeln!(
+                    buf,
+                    "[{} {} {}] [req={}] {}",
+                    ts,
+                    record.level(),
+                    record.target(),
+                    id,
+                    record.args()
+                ),
+                None => writeln!(
+                    buf,
+                    "[{} {} {}] {}",
+                    ts,
+                    record.level(),
+                    record.target(),
+                    record.args()
+                ),
+            }
+        })
+        .init();
+}
+
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     dotenvy::dotenv().ok();
-    env_logger::init();
+    init_logger();
 
     let config = config::Config::from_env();
     let pool = db::create_pool(&config.database_url).await;
