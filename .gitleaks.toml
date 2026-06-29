@@ -1,0 +1,21 @@
+# Gitleaks configuration for CineTrack.
+#
+# Extends the upstream default ruleset and adds a narrow allowlist for the
+# throwaway passwords used by the end-to-end suites. These are not real
+# credentials: every E2E account is registered against an ephemeral test
+# database and discarded once the run finishes, so the literals are test
+# fixtures rather than secrets. The allowlist is scoped to the exact spec files
+# and the exact fixture values so a genuine leak elsewhere is still caught.
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Throwaway E2E test-fixture passwords (ephemeral test DB, not real credentials)"
+condition = "AND"
+paths = [
+  '''frontend/e2e/auth\.spec\.ts''',
+  '''frontend/e2e-realstack/auth-flows\.spec\.ts''',
+]
+regexes = [
+  '''(?:New)?Passw0rd\d{3}''',
+]
