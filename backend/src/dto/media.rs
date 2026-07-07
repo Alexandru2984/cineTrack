@@ -139,6 +139,16 @@ pub struct TmdbTrendingResponse {
     pub results: Vec<TmdbSearchResult>,
 }
 
+/// `/find/{external_id}` groups matches by media type. Used to map TV Time's
+/// TVDB (shows) and IMDB (movies) ids onto TMDB ids during import.
+#[derive(Debug, Deserialize, Serialize, Default)]
+pub struct TmdbFindResponse {
+    #[serde(default)]
+    pub movie_results: Vec<TmdbSearchResult>,
+    #[serde(default)]
+    pub tv_results: Vec<TmdbSearchResult>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

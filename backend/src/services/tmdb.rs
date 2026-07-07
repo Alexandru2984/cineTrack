@@ -168,6 +168,28 @@ impl TmdbService {
         Ok(resp)
     }
 
+    /// Map an external id (TVDB/IMDB) to TMDB via `/find`. `source` is e.g.
+    /// "tvdb_id" or "imdb_id". Returns matches grouped by media type.
+    pub async fn find_by_external_id(
+        &self,
+        external_id: &str,
+        source: &str,
+    ) -> Result<TmdbFindResponse, AppError> {
+        let resp = self
+            .authed(
+                self.client
+                    .get(format!("{}/find/{}", self.base_url, external_id))
+                    .query(&[("external_source", source), ("language", "en-US")]),
+            )
+            .send()
+            .await?
+            .error_for_status()?
+            .json::<TmdbFindResponse>()
+            .await?;
+
+        Ok(resp)
+    }
+
     /// Fetch or refresh media from TMDB with 24h cache
     pub async fn get_or_cache_media(
         &self,

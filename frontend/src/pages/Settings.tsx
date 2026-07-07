@@ -7,9 +7,170 @@ import {
   useLogoutAllSessions,
   useDeleteAccount,
 } from '@/hooks/useAuth';
+import { useImportJobs, useStartImport, useImportJob } from '@/hooks/useImport';
 import { getApiErrorMessage } from '@/lib/api';
 import { formatDateTime } from '@/lib/utils';
-import { AlertTriangle, KeyRound, Loader2, LogOut, Monitor, Trash2 } from 'lucide-react';
+import type { ImportJob } from '@/types';
+import {
+  AlertTriangle,
+  CheckCircle2,
+  DownloadCloud,
+  KeyRound,
+  Loader2,
+  LogOut,
+  Monitor,
+  Trash2,
+  UploadCloud,
+} from 'lucide-react';
+
+function ImportSummary({ job }: { job: ImportJob }) {
+  if (job.status === 'failed') {
+    return (
+      <p className="mt-3 text-sm text-[hsl(var(--destructive))]">
+        Import failed: {job.error ?? 'unknown error'}. You can try again below.
+      </p>
+    );
+  }
+  if (job.status === 'pending' || job.status === 'running') {
+    const t = job.totals;
+    return (
+      <div className="mt-3 flex items-center gap-2 text-sm text-[hsl(var(--muted-foreground))]">
+        <Loader2 className="h-4 w-4 animate-spin" />
+        Importing…{' '}
+        {t && (
+          <span>
+            {t.shows} shows · {t.movies} movies · {t.episodes_linked} episodes so far
+          </span>
+        )}
+      </div>
+    );
+  }
+  // completed
+  const t = job.totals;
+  return (
+    <div className="mt-3 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--accent))]/40 p-4">
+      <p className="flex items-center gap-2 text-sm font-medium text-green-600">
+        <CheckCircle2 className="h-4 w-4" /> Import complete
+      </p>
+      {t && (
+        <ul className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-sm text-[hsl(var(--muted-foreground))] sm:grid-cols-3">
+          <li>{t.shows} shows</li>
+          <li>{t.movies} movies</li>
+          <li>{t.episodes_linked} episodes</li>
+          {t.rewatches > 0 && <li>{t.rewatches} rewatches</li>}
+          {t.episodes_date_only > 0 && <li>{t.episodes_date_only} date-only</li>}
+          {t.unresolved.length > 0 && <li>{t.unresolved.length} unresolved</li>}
+        </ul>
+      )}
+      {t && t.unresolved.length > 0 && (
+        <p className="mt-2 text-xs text-[hsl(var(--muted-foreground))]">
+          Couldn't match: {t.unresolved.slice(0, 8).join(', ')}
+          {t.unresolved.length > 8 ? '…' : ''}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function ImportCard() {
+  const { data: jobs } = useImportJobs();
+  const startImport = useStartImport();
+  const [startedJobId, setStartedJobId] = useState<string | null>(null);
+  const [shows, setShows] = useState<File | null>(null);
+  const [movies, setMovies] = useState<File | null>(null);
+  const [rewatches, setRewatches] = useState<File | null>(null);
+
+  const existing = jobs?.[0] ?? null;
+  const activeJobId = startedJobId ?? (existing && existing.status !== 'failed' ? existing.id : null);
+  const { data: polledJob } = useImportJob(activeJobId);
+  const job = polledJob ?? existing;
+  const showForm = !job || job.status === 'failed';
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    startImport.mutate(
+      { shows, movies, rewatches },
+      { onSuccess: (data) => setStartedJobId(data.job_id) }
+    );
+  };
+
+  return (
+    <section className="rounded-lg border border-[hsl(var(--border))] p-6">
+      <h2 className="flex items-center gap-2 text-lg font-semibold">
+        <DownloadCloud className="h-5 w-5 text-[hsl(var(--primary))]" /> Import from TV Time
+      </h2>
+      <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">
+        Moving from TV Time? Upload your export and we'll bring over your shows, movies,
+        episode history and ratings. Get your data from the TV Time app under Settings →
+        Export, or the browser extension (produces <code>shows.json</code> and{' '}
+        <code>movies.json</code>).
+      </p>
+
+      {job && <ImportSummary job={job} />}
+
+      {showForm && (
+        <form onSubmit={handleSubmit} className="mt-4 space-y-4 max-w-md">
+          <div>
+            <label className="block text-sm font-medium mb-1">
+              shows.json <span className="text-[hsl(var(--muted-foreground))]">(required)</span>
+            </label>
+            <input
+              type="file"
+              accept=".json,application/json"
+              onChange={(e) => setShows(e.target.files?.[0] ?? null)}
+              className="block w-full text-sm file:mr-3 file:rounded-md file:border-0 file:bg-[hsl(var(--primary))] file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-white hover:file:opacity-90"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-1">
+              movies.json <span className="text-[hsl(var(--muted-foreground))]">(optional)</span>
+            </label>
+            <input
+              type="file"
+              accept=".json,application/json"
+              onChange={(e) => setMovies(e.target.files?.[0] ?? null)}
+              className="block w-full text-sm file:mr-3 file:rounded-md file:border-0 file:bg-[hsl(var(--secondary))] file:px-3 file:py-1.5 file:text-sm file:font-medium hover:file:opacity-90"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-1">
+              rewatched_episode.csv{' '}
+              <span className="text-[hsl(var(--muted-foreground))]">(optional, from GDPR export)</span>
+            </label>
+            <input
+              type="file"
+              accept=".csv,text/csv"
+              onChange={(e) => setRewatches(e.target.files?.[0] ?? null)}
+              className="block w-full text-sm file:mr-3 file:rounded-md file:border-0 file:bg-[hsl(var(--secondary))] file:px-3 file:py-1.5 file:text-sm file:font-medium hover:file:opacity-90"
+            />
+          </div>
+
+          {startImport.error && (
+            <p className="text-sm text-[hsl(var(--destructive))]">
+              {getApiErrorMessage(startImport.error, 'Could not start import')}
+            </p>
+          )}
+          <p className="text-xs text-[hsl(var(--muted-foreground))]">
+            The import runs in the background and can take a couple of minutes. You can leave this page.
+          </p>
+
+          <button
+            type="submit"
+            disabled={startImport.isPending || !shows}
+            className="flex items-center gap-2 rounded-md bg-[hsl(var(--primary))] px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
+          >
+            {startImport.isPending ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <UploadCloud className="h-4 w-4" />
+            )}
+            Start import
+          </button>
+        </form>
+      )}
+    </section>
+  );
+}
 
 function ChangePasswordCard() {
   const [current, setCurrent] = useState('');
@@ -262,6 +423,7 @@ export default function SettingsPage() {
   return (
     <div className="mx-auto max-w-3xl px-4 py-8 space-y-6">
       <h1 className="text-2xl font-bold">Settings</h1>
+      <ImportCard />
       <ChangePasswordCard />
       <SessionsCard />
       <DangerZoneCard />

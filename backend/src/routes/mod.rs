@@ -1,6 +1,7 @@
 pub mod auth;
 pub mod health;
 pub mod history;
+pub mod import;
 pub mod lists;
 pub mod media;
 pub mod stats;
@@ -19,6 +20,7 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
             .configure(tracking::configure)
             .configure(history::configure)
             .configure(lists::configure)
-            .configure(stats::configure),
+            .configure(stats::configure)
+            .configure(import::configure),
     );
 }
