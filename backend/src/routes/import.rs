@@ -9,6 +9,7 @@ use crate::dto::import::*;
 use crate::errors::AppError;
 use crate::middleware::auth::require_auth;
 use crate::services::importer;
+use crate::services::storage::StorageService;
 use crate::services::tmdb::TmdbService;
 
 /// Max size accepted for any single uploaded export file.
@@ -82,6 +83,7 @@ async fn start_import(
     pool: web::Data<PgPool>,
     tmdb: web::Data<TmdbService>,
     config: web::Data<Config>,
+    storage: web::Data<Option<StorageService>>,
     req: HttpRequest,
     mut payload: Multipart,
 ) -> Result<HttpResponse, AppError> {
@@ -146,6 +148,23 @@ async fn start_import(
     .bind(user_id)
     .fetch_one(pool.get_ref())
     .await?;
+
+    // Archive the raw upload to R2 (best-effort) so an import can be audited or
+    // re-run later. Kept under a private prefix the public asset proxy won't serve.
+    if let Some(store) = storage.get_ref() {
+        let base = format!("imports/{user_id}/{job_id}");
+        for (name, ct, bytes) in [
+            ("shows.json", "application/json", &shows_bytes),
+            ("movies.json", "application/json", &movies_bytes),
+            ("rewatched_episode.csv", "text/csv", &rewatch_bytes),
+        ] {
+            if let Some(b) = bytes {
+                if let Err(e) = store.put(&format!("{base}/{name}"), b, ct).await {
+                    log::warn!("import archive {base}/{name} failed: {e:#}");
+                }
+            }
+        }
+    }
 
     let pool_c = pool.get_ref().clone();
     let tmdb_c = tmdb.get_ref().clone();

@@ -66,6 +66,24 @@ async fn main() -> std::io::Result<()> {
     let tmdb_service = TmdbService::new(&config);
     let email_service = EmailService::new(&config);
 
+    // Object storage (Cloudflare R2). Optional — features degrade if unset.
+    let storage_service = match &config.r2 {
+        Some(r2) => match cinetrack::services::storage::StorageService::new(r2, &config.frontend_url) {
+            Ok(s) => {
+                log::info!("R2 object storage enabled (bucket configured)");
+                Some(s)
+            }
+            Err(e) => {
+                log::error!("R2 configured but failed to init: {e}");
+                None
+            }
+        },
+        None => {
+            log::info!("R2 not configured; storage features disabled");
+            None
+        }
+    };
+
     let prometheus = metrics::build();
 
     let host = config.app_host.clone();
@@ -131,6 +149,7 @@ async fn main() -> std::io::Result<()> {
             .app_data(web::Data::new(config.clone()))
             .app_data(web::Data::new(tmdb_service.clone()))
             .app_data(web::Data::new(email_service.clone()))
+            .app_data(web::Data::new(storage_service.clone()))
             .configure(routes::configure)
     })
     .bind(format!("{}:{}", host, port))?

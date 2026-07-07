@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   useChangePassword,
@@ -6,6 +6,9 @@ import {
   useRevokeSession,
   useLogoutAllSessions,
   useDeleteAccount,
+  useMe,
+  useUploadAvatar,
+  useDeleteAvatar,
 } from '@/hooks/useAuth';
 import { useImportJobs, useStartImport, useImportJob } from '@/hooks/useImport';
 import { getApiErrorMessage } from '@/lib/api';
@@ -15,13 +18,85 @@ import {
   AlertTriangle,
   CheckCircle2,
   DownloadCloud,
+  ImageUp,
   KeyRound,
   Loader2,
   LogOut,
   Monitor,
   Trash2,
   UploadCloud,
+  UserCircle2,
 } from 'lucide-react';
+
+function ProfilePictureCard() {
+  const { data: me } = useMe();
+  const upload = useUploadAvatar();
+  const remove = useDeleteAvatar();
+  const inputRef = useRef<HTMLInputElement>(null);
+  const avatarUrl = me?.avatar_url ?? null;
+
+  const onPick = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) upload.mutate(file);
+    e.target.value = '';
+  };
+
+  return (
+    <section className="rounded-lg border border-[hsl(var(--border))] p-6">
+      <h2 className="flex items-center gap-2 text-lg font-semibold">
+        <UserCircle2 className="h-5 w-5 text-[hsl(var(--primary))]" /> Profile picture
+      </h2>
+      <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">
+        Shown on your profile and next to your activity. PNG, JPEG, WebP or GIF, up to 3 MB.
+      </p>
+
+      <div className="mt-4 flex items-center gap-5">
+        {avatarUrl ? (
+          <img
+            src={avatarUrl}
+            alt="Your avatar"
+            className="h-20 w-20 rounded-full object-cover border border-[hsl(var(--border))]"
+          />
+        ) : (
+          <div className="flex h-20 w-20 items-center justify-center rounded-full border border-[hsl(var(--border))] bg-[hsl(var(--accent))]/40 text-[hsl(var(--muted-foreground))]">
+            <UserCircle2 className="h-10 w-10" />
+          </div>
+        )}
+        <div className="flex flex-col gap-2">
+          <input
+            ref={inputRef}
+            type="file"
+            accept="image/png,image/jpeg,image/webp,image/gif"
+            onChange={onPick}
+            className="hidden"
+          />
+          <button
+            onClick={() => inputRef.current?.click()}
+            disabled={upload.isPending}
+            className="flex items-center gap-2 rounded-md bg-[hsl(var(--primary))] px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
+          >
+            {upload.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImageUp className="h-4 w-4" />}
+            {avatarUrl ? 'Change picture' : 'Upload picture'}
+          </button>
+          {avatarUrl && (
+            <button
+              onClick={() => remove.mutate()}
+              disabled={remove.isPending}
+              className="flex items-center gap-2 rounded-md border border-[hsl(var(--border))] px-4 py-2 text-sm hover:bg-[hsl(var(--accent))] disabled:opacity-50"
+            >
+              <Trash2 className="h-4 w-4" /> Remove
+            </button>
+          )}
+        </div>
+      </div>
+      {upload.error && (
+        <p className="mt-3 text-sm text-[hsl(var(--destructive))]">
+          {getApiErrorMessage(upload.error, 'Could not upload image')}
+        </p>
+      )}
+    </section>
+  );
+}
 
 function ImportSummary({ job }: { job: ImportJob }) {
   if (job.status === 'failed') {
@@ -423,6 +498,7 @@ export default function SettingsPage() {
   return (
     <div className="mx-auto max-w-3xl px-4 py-8 space-y-6">
       <h1 className="text-2xl font-bold">Settings</h1>
+      <ProfilePictureCard />
       <ImportCard />
       <ChangePasswordCard />
       <SessionsCard />

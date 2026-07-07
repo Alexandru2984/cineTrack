@@ -121,3 +121,28 @@ export function useDeleteAccount() {
     onSuccess: () => logout(),
   });
 }
+
+export function useUploadAvatar() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (file: File) => {
+      const form = new FormData();
+      form.append('avatar', file);
+      const res = await api.post<{ avatar_url: string }>('/users/me/avatar', form, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      return res.data;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['me'] }),
+  });
+}
+
+export function useDeleteAvatar() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      await api.delete('/users/me/avatar');
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['me'] }),
+  });
+}

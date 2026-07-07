@@ -5,14 +5,26 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+// When VITE_USE_R2_IMAGES is enabled, images are served through the backend's
+// write-through R2 cache (/api/img) instead of TMDB directly. Off by default.
+const USE_R2_IMAGES = import.meta.env.VITE_USE_R2_IMAGES === 'true';
+const API_URL = import.meta.env.VITE_API_URL || '';
+
+function tmdbImage(path: string, size: string): string {
+  if (USE_R2_IMAGES) {
+    return `${API_URL}/api/img/${size}${path}`;
+  }
+  return `https://image.tmdb.org/t/p/${size}${path}`;
+}
+
 export function getPosterUrl(path: string | null | undefined, size = 'w342'): string {
   if (!path) return '/placeholder-poster.svg';
-  return `https://image.tmdb.org/t/p/${size}${path}`;
+  return tmdbImage(path, size);
 }
 
 export function getBackdropUrl(path: string | null | undefined, size = 'w1280'): string {
   if (!path) return '';
-  return `https://image.tmdb.org/t/p/${size}${path}`;
+  return tmdbImage(path, size);
 }
 
 export function formatDate(date: string | null | undefined): string {

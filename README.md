@@ -104,6 +104,15 @@ The application has been through multiple security audits. Key measures include:
    RATE_LIMIT_BURST_SIZE=50
 
    VITE_API_URL=http://localhost:8080
+
+   # Cloudflare R2 object storage (optional — avatars, import archive,
+   # poster cache, DB backups). Storage features are disabled if unset.
+   R2_S3_API=https://<account-id>.r2.cloudflarestorage.com
+   R2_ACCESS_KEY_ID=<r2-access-key-id>
+   R2_SECRET_ACCESS_KEY=<r2-secret-access-key>
+   R2_BUCKET=<bucket-name>
+   # R2_PUBLIC_BASE_URL=   # set to a custom domain/CDN; unset => backend proxies assets
+   # VITE_USE_R2_IMAGES=true   # opt in to serving posters via the R2 write-through cache
    ```
 
 3. **Start the development stack**

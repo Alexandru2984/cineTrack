@@ -1,5 +1,18 @@
 use std::env;
 
+/// Cloudflare R2 (S3-compatible) object storage. Optional: when the required
+/// vars are absent the app runs with storage features disabled.
+#[derive(Clone)]
+pub struct R2Config {
+    pub endpoint: String,
+    pub access_key_id: String,
+    pub secret_access_key: String,
+    pub bucket: String,
+    /// Public base URL for objects (custom domain or r2.dev). When None, assets
+    /// are served through the backend proxy instead of a direct public URL.
+    pub public_base_url: Option<String>,
+}
+
 #[derive(Clone)]
 pub struct Config {
     pub app_env: String,
@@ -23,6 +36,7 @@ pub struct Config {
     pub smtp_username: Option<String>,
     pub smtp_password: Option<String>,
     pub smtp_from: String,
+    pub r2: Option<R2Config>,
 }
 
 impl Config {
@@ -91,10 +105,40 @@ impl Config {
             smtp_password: env::var("SMTP_PASSWORD").ok().filter(|s| !s.is_empty()),
             smtp_from: env::var("SMTP_FROM")
                 .unwrap_or_else(|_| "CineTrack <noreply@localhost>".to_string()),
+            r2: R2Config::from_env(),
         }
     }
 
     pub fn is_production(&self) -> bool {
         self.app_env == "production"
+    }
+}
+
+impl R2Config {
+    /// Build from env; returns None (storage disabled) unless endpoint, keys and
+    /// bucket are all present. Accepts the R2_S3_API or R2_ENDPOINT alias.
+    fn from_env() -> Option<R2Config> {
+        let endpoint = env::var("R2_S3_API")
+            .or_else(|_| env::var("R2_ENDPOINT"))
+            .ok()
+            .filter(|s| !s.trim().is_empty())?;
+        let access_key_id = env::var("R2_ACCESS_KEY_ID")
+            .ok()
+            .filter(|s| !s.trim().is_empty())?;
+        let secret_access_key = env::var("R2_SECRET_ACCESS_KEY")
+            .ok()
+            .filter(|s| !s.trim().is_empty())?;
+        let bucket = env::var("R2_BUCKET").ok().filter(|s| !s.trim().is_empty())?;
+        let public_base_url = env::var("R2_PUBLIC_BASE_URL")
+            .ok()
+            .filter(|s| !s.trim().is_empty())
+            .map(|s| s.trim_end_matches('/').to_string());
+        Some(R2Config {
+            endpoint: endpoint.trim_end_matches('/').to_string(),
+            access_key_id,
+            secret_access_key,
+            bucket,
+            public_base_url,
+        })
     }
 }
