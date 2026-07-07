@@ -16,6 +16,8 @@ A personal movie and TV show tracker with social features, inspired by TV Time. 
 - **Activity Heatmap** — GitHub-style contribution calendar for your viewing history
 - **Detailed Stats** — Total watch time, streak tracking, genre distribution, monthly activity charts
 - **TMDB Integration** — Search and browse movies/TV shows powered by The Movie Database API
+- **Import from TV Time** — Upload your TV Time export and bring over your whole library, episode history and rewatches (background job with progress + a matched/unmatched summary)
+- **Profile Avatars** — Upload a profile picture (stored in Cloudflare R2)
 - **Dark Mode** — Toggle between light and dark themes
 - **Social Features** — Follow other users, public/private profiles, custom lists
 - **Privacy Controls** — Toggle profile visibility; private profiles hide activity from non-followers
@@ -29,7 +31,9 @@ A personal movie and TV show tracker with social features, inspired by TV Time. 
 - **JWT** — Authentication with short-lived access tokens (1h) + refresh token rotation
 - **Argon2id** — Password hashing
 - **actix-governor** — Rate limiting (global + auth-specific)
+- **actix-multipart** — Streaming file uploads (imports, avatars)
 - **TMDB API v3** — Movie/TV show metadata
+- **Cloudflare R2** (`rust-s3`) — S3-compatible object storage for avatars, import archives, a TMDB poster cache, and DB backups (optional; features degrade cleanly when unset)
 
 ### Frontend
 - **React 19** + **TypeScript** — UI framework
@@ -44,6 +48,7 @@ A personal movie and TV show tracker with social features, inspired by TV Time. 
 ### Infrastructure
 - **Docker** + **Docker Compose** — Containerization with resource limits
 - **Nginx** — Reverse proxy with SSL termination (Let's Encrypt)
+- **Cloudflare R2** — Object storage; nightly `pg_dump` snapshots via a cron'd script
 - Non-root containers (backend + frontend)
 
 ## Security
@@ -54,6 +59,8 @@ The application has been through multiple security audits. Key measures include:
 - **Rate Limiting** — Global rate limiter (10 req/s, burst 50) + stricter auth-specific limiter (3 req/s, burst 10) to prevent brute-force
 - **Password Policy** — Minimum 8 characters, must contain at least one letter and one digit, rejects all-same-character passwords
 - **Input Validation** — All user inputs validated with length limits (bio 500, review 5000, list names 200, etc.) and content validation
+- **Upload Safety** — Avatar uploads are type- and size-checked (image types, ≤3 MB); import files are size-capped; the poster cache validates the `{size}/{path}` spec against a size allowlist and rejects traversal/host injection (no SSRF)
+- **Storage Access Control** — The public asset proxy only serves the `avatars/` and `posters/` prefixes; private objects (`imports/`, `backups/`) are never reachable through it
 - **Privacy** — Private profiles hide activity/followers from non-followers; public user endpoints never expose emails; no user enumeration on register
 - **Access Control** — Private lists return 404 to non-owners; all media endpoints require authentication; history entries validated against existing media
 - **Security Headers** — HSTS, X-Frame-Options (DENY), X-Content-Type-Options, Referrer-Policy, Permissions-Policy, Content-Security-Policy (strict, with an explicit script/connect domain allowlist)
@@ -130,11 +137,13 @@ The application has been through multiple security audits. Key measures include:
 ```bash
 # Create .env.prod with production values (use strong generated secrets!)
 # Then build and deploy:
-docker compose -f docker-compose.prod.yml --env-file .env.prod build --no-cache
+docker compose -f docker-compose.prod.yml --env-file .env.prod build backend frontend
 docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
 ```
 
-Production containers run behind a host-level Nginx reverse proxy with SSL termination.
+- Database migrations run automatically on backend startup. Because they are embedded at compile time, a new migration requires a backend rebuild.
+- The `db` service uses a named volume, so rebuilding/redeploying does not touch existing data.
+- Production containers run behind a host-level Nginx reverse proxy with SSL termination, as non-root users on a read-only root filesystem.
 
 ### Local Development (without Docker)
 
@@ -154,10 +163,10 @@ npm run dev
 
 ### Testing
 
-The project has **213 unit & integration tests** plus **12 Playwright E2E tests** across four layers:
+The project has **216 unit & integration tests** plus **12 Playwright E2E tests** across four layers:
 
 ```bash
-# Backend unit tests (116 tests) — no external dependencies
+# Backend unit tests (119 tests) — no external dependencies
 cd backend && cargo test
 
 # Frontend tests (53 tests) — Vitest + jsdom
@@ -210,7 +219,14 @@ văzute/
 │       ├── middleware/      # JWT auth extraction
 │       ├── models/         # Database models
 │       ├── routes/         # API route handlers
-│       ├── services/       # Business logic (TMDB, auth)
+│       │   ├── import.rs   # TV Time import (multipart -> background job)
+│       │   ├── assets.rs   # Avatars, R2 asset proxy, poster cache
+│       │   └── ...
+│       ├── services/       # Business logic
+│       │   ├── tmdb.rs     # TMDB client + media/season/episode caching
+│       │   ├── importer.rs # TV Time -> TMDB resolution + import pipeline
+│       │   ├── storage.rs  # Cloudflare R2 (S3) wrapper
+│       │   └── ...
 │       └── utils/          # JWT, password, refresh token helpers
 ├── frontend/               # React + Vite + TypeScript
 │   └── src/
@@ -222,7 +238,8 @@ văzute/
 │       ├── test/           # Vitest tests (53 tests)
 │       └── types/          # TypeScript interfaces
 ├── scripts/
-│   └── run_tests.sh        # All-in-one test runner
+│   ├── run_tests.sh        # All-in-one test runner
+│   └── backup_to_r2.sh     # pg_dump -> gzip -> Cloudflare R2 (with retention)
 ├── nginx/                  # Internal reverse proxy config
 ├── docker-compose.yml      # Development stack
 ├── docker-compose.test.yml # Ephemeral test DB (tmpfs, port 55433 by default)
@@ -242,6 +259,31 @@ All endpoints except auth (register/login/refresh) require a valid JWT access to
 | **Stats** | Heatmap data, watch time, streaks, genre distribution |
 | **Users** | Public profiles, follow/unfollow, activity feed |
 | **Lists** | Custom user-created lists (public/private) |
+| **Import** | Start a TV Time import (`POST /import/tvtime`, multipart); poll job status |
+| **Avatars** | Upload / remove profile picture (`POST`/`DELETE /users/me/avatar`) |
+| **Assets** | Public proxy for R2 objects (`GET /assets/{key}`); TMDB poster cache (`GET /img/{size}/{path}`) |
+
+## Importing from TV Time
+
+Users migrating from TV Time can bring their history in from **Settings → Import from TV Time**.
+
+- **Input** — the browser-extension export (`shows.json`, `movies.json`) and, optionally, the GDPR `rewatched_episode.csv`.
+- **ID resolution** — TV Time keys shows by **TVDB** id and movies by **IMDB** id; the app is **TMDB**-based, so the importer resolves each via TMDB's `/find` endpoint with a title-search fallback.
+- **Matching** — episodes link by `(season, episode)`; for shows whose numbering diverges from TMDB (e.g. anime, or shows TV Time numbers by year), it falls back to **absolute-position** matching. Watches that TMDB can't represent are still recorded by date (they count toward the heatmap) and reported as "date-only".
+- **Execution** — runs as a background job (`import_jobs` table); the UI polls for status and shows a summary (shows / movies / episodes linked / date-only / unresolved). One import per account.
+- If R2 is configured, the raw uploaded files are archived under `imports/{user}/{job}/` for audit/re-run.
+
+## Object Storage & Backups (Cloudflare R2)
+
+Object storage is **optional** — set the `R2_*` variables to enable it; without them the app runs normally and storage features are disabled. R2 is used for:
+
+- **Avatars** — `avatars/{user_id}.{ext}`, served via the asset proxy (or a public domain if `R2_PUBLIC_BASE_URL` is set).
+- **Import archive** — raw uploads under `imports/`.
+- **Poster cache** — an opt-in write-through cache (`VITE_USE_R2_IMAGES=true`) that mirrors TMDB images under `posters/` and serves them from `GET /api/img/{size}/{path}`.
+- **Database backups** — `scripts/backup_to_r2.sh` runs `pg_dump | gzip` and uploads a timestamped snapshot to `backups/`, pruning anything older than the retention window (default 14 days). Schedule it with cron:
+  ```cron
+  30 3 * * * /path/to/cineTrack/scripts/backup_to_r2.sh >> /var/log/vazute-backup.log 2>&1
+  ```
 
 ## License
 

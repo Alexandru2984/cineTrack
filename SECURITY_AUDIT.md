@@ -65,8 +65,20 @@ In runda a treia am verificat repo-ul direct pe VPS/prod si am inchis trei riscu
 - Reziliente frontend: adaugat un `ErrorBoundary` la nivel de aplicatie (in jurul `<Routes>`, navbar-ul ramane in afara) care prinde erorile de render si arata un fallback cu reload/home in loc sa demonteze tot SPA-ul. Se reseteaza la navigare (`key` pe pathname). Acoperit de teste unit (vitest) si E2E (un raspuns `trending` malformat duce la fallback, nu la ecran alb).
 - E2E pe stiva reala: suita Playwright `frontend/e2e-realstack` ruleaza contra unui backend pornit efectiv + Postgres efemer (fara mock), Playwright pornind singur backend-ul (`cargo run`) si vite dev. Acopera inregistrarea cu cookie refresh `HttpOnly`, rotatia reala a access token-ului prin cookie in browser, lista de sesiuni active, stergerea de cont (care blocheaza re-login) si resetarea parolei cu token-ul one-time (citit din logul backend-ului, SMTP fiind dezactivat). Ruleaza ca job CI separat (`e2e-realstack`, cu serviciu Postgres si toolchain Rust).
 
+## Schimbari aplicate (2026-07-07)
+
+- Import TV Time self-serve (`POST /api/import/tvtime`, multipart): fisierele incarcate sunt limitate la 32 MB/fisier; jobul ruleaza in fundal (`tokio::spawn`) cu o singura importare per cont (guard pe `import_jobs`). Rezolvarea TVDB/IMDB->TMDB si caching-ul refolosesc `TmdbService`; nu se creeaza episoade sintetice (varianta curata, product-grade).
+- Upload avatar (`POST`/`DELETE /api/users/me/avatar`): validare stricta de tip (doar `image/png|jpeg|webp|gif`) si marime (<=3 MB); cheia R2 e derivata din `user_id`, fara nume de fisier controlat de user, deci fara path traversal. `avatar_url` ramane sub constrangerea `users_avatar_url_shape` (doar http/https absolut).
+- Proxy public de assets (`GET /api/assets/{key}`): serveste DOAR prefixele `avatars/` si `posters/`; obiectele private (`imports/`, `backups/`) nu sunt accesibile prin el; respinge chei cu `..`.
+- Cache write-through de postere (`GET /api/img/{size}/{path}`): spec-ul e validat contra unei liste de dimensiuni permise si a unui path sigur (fara `..`, `:`, `//`), deci nu poate fi folosit pentru SSRF — fetch-ul se face doar spre baza TMDB fixa din config.
+- Object storage R2 (`services/storage.rs`): credentiale doar in `.env.prod` (chmod 600, gitignored); feature-urile sunt config-gated — fara `R2_*`, storage-ul e dezactivat si aplicatia ruleaza normal. DELETE se face prin URL presemnat (rust-s3 semneaza gresit DELETE prin header pe R2 -> 403).
+- Backup DB pe R2 (`scripts/backup_to_r2.sh`): `pg_dump | gzip -> R2 backups/` cu retentie (14 zile), rulat prin cron (03:30 zilnic); dump-ul e read-only fata de productie.
+- Deploy: compose adaptat pentru Docker Compose 2.40 (`deploy.resources.limits.pids` aliniat cu `pids_limit`) si tmpfs-ul frontend-ului (`/var/cache/nginx`, `/var/run`) setat writable pentru userul `nginx` (uid 101), altfel nginx read-only intra in crash-loop.
+
 ## Riscuri reziduale
 
+- Proxy-ul de assets si cache-ul de postere fac backend-ul cale de servire pentru imagini. Cache-ul de postere e off by default (`VITE_USE_R2_IMAGES`); daca se activeaza, de setat `R2_PUBLIC_BASE_URL` (domeniu/CDN) ca imaginile sa nu treaca prin backend, si de adaugat originea API in `img-src` din CSP.
+- Cheile R2 din `.env.prod` sunt long-lived; de rotit periodic si de restrans permisiunile token-ului doar la bucket-ul `vazute`.
 - Access token-urile raman stateless pana expira. Durata default este 1h; `logout-all` si schimbarea parolei revoca refresh token-urile, dar un access token deja emis ramane valabil pana la expirare. Revocarea instant ar cere token versioning sau denylist.
 - Cookie-ul refresh foloseste `SameSite=Lax`. Este bun pentru deploy same-site, dar daca frontend si API ajung pe site-uri complet diferite va trebui `SameSite=None; Secure` plus protectie CSRF explicita.
 - `current` pentru sesiuni se determina din cookie-ul de refresh; un client care apeleaza fara cookie (doar cu access token) vede toate sesiunile drept ne-curente, dar nu este o problema de securitate.
