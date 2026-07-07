@@ -59,9 +59,7 @@ impl StorageService {
 
     pub async fn get(&self, key: &str) -> anyhow::Result<Option<Vec<u8>>> {
         match self.bucket.get_object(key).await {
-            Ok(resp) if (200..300).contains(&resp.status_code()) => {
-                Ok(Some(resp.bytes().to_vec()))
-            }
+            Ok(resp) if (200..300).contains(&resp.status_code()) => Ok(Some(resp.bytes().to_vec())),
             Ok(resp) if resp.status_code() == 404 => Ok(None),
             Ok(resp) => anyhow::bail!("R2 get returned status {}", resp.status_code()),
             Err(s3::error::S3Error::HttpFailWithBody(404, _)) => Ok(None),

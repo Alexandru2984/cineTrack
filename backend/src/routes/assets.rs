@@ -198,7 +198,11 @@ async fn serve_poster(
     }
 
     // Cache miss: fetch from TMDB's public image CDN and store it.
-    let url = format!("{}/{}", config.tmdb_image_base_url.trim_end_matches('/'), spec);
+    let url = format!(
+        "{}/{}",
+        config.tmdb_image_base_url.trim_end_matches('/'),
+        spec
+    );
     let resp = reqwest::get(&url)
         .await
         .map_err(|_| AppError::TmdbError("image fetch failed".to_string()))?;

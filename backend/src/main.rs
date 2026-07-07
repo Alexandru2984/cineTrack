@@ -68,16 +68,18 @@ async fn main() -> std::io::Result<()> {
 
     // Object storage (Cloudflare R2). Optional — features degrade if unset.
     let storage_service = match &config.r2 {
-        Some(r2) => match cinetrack::services::storage::StorageService::new(r2, &config.frontend_url) {
-            Ok(s) => {
-                log::info!("R2 object storage enabled (bucket configured)");
-                Some(s)
+        Some(r2) => {
+            match cinetrack::services::storage::StorageService::new(r2, &config.frontend_url) {
+                Ok(s) => {
+                    log::info!("R2 object storage enabled (bucket configured)");
+                    Some(s)
+                }
+                Err(e) => {
+                    log::error!("R2 configured but failed to init: {e}");
+                    None
+                }
             }
-            Err(e) => {
-                log::error!("R2 configured but failed to init: {e}");
-                None
-            }
-        },
+        }
         None => {
             log::info!("R2 not configured; storage features disabled");
             None

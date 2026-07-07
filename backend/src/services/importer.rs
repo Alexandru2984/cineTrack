@@ -49,13 +49,13 @@ pub async fn run_import(
     movies: Vec<TvTimeMovie>,
     rewatches: Vec<RewatchRow>,
 ) {
-    let _ = sqlx::query("UPDATE import_jobs SET status = 'running', updated_at = NOW() WHERE id = $1")
-        .bind(job_id)
-        .execute(&pool)
-        .await;
+    let _ =
+        sqlx::query("UPDATE import_jobs SET status = 'running', updated_at = NOW() WHERE id = $1")
+            .bind(job_id)
+            .execute(&pool)
+            .await;
 
-    let result =
-        import_all(&pool, &tmdb, job_id, user_id, shows, movies, rewatches).await;
+    let result = import_all(&pool, &tmdb, job_id, user_id, shows, movies, rewatches).await;
 
     match result {
         Ok(totals) => {
@@ -119,13 +119,12 @@ async fn import_all(
         }
 
         if (idx + 1) % 25 == 0 {
-            let _ = sqlx::query(
-                "UPDATE import_jobs SET totals = $2, updated_at = NOW() WHERE id = $1",
-            )
-            .bind(job_id)
-            .bind(serde_json::to_value(&totals).unwrap_or(serde_json::Value::Null))
-            .execute(pool)
-            .await;
+            let _ =
+                sqlx::query("UPDATE import_jobs SET totals = $2, updated_at = NOW() WHERE id = $1")
+                    .bind(job_id)
+                    .bind(serde_json::to_value(&totals).unwrap_or(serde_json::Value::Null))
+                    .execute(pool)
+                    .await;
         }
     }
 
@@ -366,7 +365,9 @@ async fn import_movie(
 
 async fn resolve_show_id(tmdb: &TmdbService, show: &TvTimeShow) -> anyhow::Result<Option<i32>> {
     if let Some(tvdb) = show.id.tvdb {
-        let found = tmdb.find_by_external_id(&tvdb.to_string(), "tvdb_id").await?;
+        let found = tmdb
+            .find_by_external_id(&tvdb.to_string(), "tvdb_id")
+            .await?;
         if let Some(r) = found.tv_results.first() {
             return Ok(Some(r.id));
         }

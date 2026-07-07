@@ -64,9 +64,10 @@ fn parse_rewatches(bytes: &[u8]) -> Vec<RewatchRow> {
         if f.len() <= max_idx {
             continue;
         }
-        let (Ok(season), Ok(episode)) =
-            (f[i_season].trim().parse::<i32>(), f[i_ep].trim().parse::<i32>())
-        else {
+        let (Ok(season), Ok(episode)) = (
+            f[i_season].trim().parse::<i32>(),
+            f[i_ep].trim().parse::<i32>(),
+        ) else {
             continue;
         };
         out.push(RewatchRow {
@@ -134,7 +135,10 @@ async fn start_import(
             .map_err(|_| AppError::BadRequest("Invalid movies.json".to_string()))?,
         _ => Vec::new(),
     };
-    let rewatches = rewatch_bytes.as_deref().map(parse_rewatches).unwrap_or_default();
+    let rewatches = rewatch_bytes
+        .as_deref()
+        .map(parse_rewatches)
+        .unwrap_or_default();
 
     if shows.is_empty() && movies.is_empty() {
         return Err(AppError::BadRequest(
@@ -202,10 +206,7 @@ async fn get_job(
     }))
 }
 
-async fn list_jobs(
-    pool: web::Data<PgPool>,
-    req: HttpRequest,
-) -> Result<HttpResponse, AppError> {
+async fn list_jobs(pool: web::Data<PgPool>, req: HttpRequest) -> Result<HttpResponse, AppError> {
     let user_id = require_auth(&req).await?;
     let rows = sqlx::query_as::<_, (Uuid, String, Option<serde_json::Value>, Option<String>, chrono::DateTime<chrono::Utc>, chrono::DateTime<chrono::Utc>)>(
         "SELECT id, status, totals, error, created_at, updated_at FROM import_jobs WHERE user_id = $1 ORDER BY created_at DESC LIMIT 20",

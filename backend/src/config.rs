@@ -128,7 +128,9 @@ impl R2Config {
         let secret_access_key = env::var("R2_SECRET_ACCESS_KEY")
             .ok()
             .filter(|s| !s.trim().is_empty())?;
-        let bucket = env::var("R2_BUCKET").ok().filter(|s| !s.trim().is_empty())?;
+        let bucket = env::var("R2_BUCKET")
+            .ok()
+            .filter(|s| !s.trim().is_empty())?;
         let public_base_url = env::var("R2_PUBLIC_BASE_URL")
             .ok()
             .filter(|s| !s.trim().is_empty())

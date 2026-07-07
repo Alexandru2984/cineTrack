@@ -73,6 +73,7 @@ fn test_config() -> cinetrack::config::Config {
         smtp_username: None,
         smtp_password: None,
         smtp_from: "CineTrack <noreply@localhost>".into(),
+        r2: None,
     }
 }
 
