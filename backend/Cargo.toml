@@ -19,7 +19,7 @@ argon2 = "0.5"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 dotenvy = "0.15"
 thiserror = "2"
-validator = { version = "0.19", features = ["derive"] }
+validator = { version = "0.20", features = ["derive"] }
 actix-governor = "0.6"
 rand = "0.8"
 sha2 = "0.10"
