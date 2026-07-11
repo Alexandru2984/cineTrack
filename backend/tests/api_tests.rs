@@ -1463,7 +1463,7 @@ async fn test_update_profile() {
 
 #[actix_web::test]
 #[ignore = "requires test DB"]
-async fn test_update_profile_avatar_xss_rejected() {
+async fn test_update_profile_rejects_direct_avatar_urls() {
     let pool = setup_pool().await;
     clean_db(&pool).await;
     let app = actix_test::init_service(create_app(pool.clone())).await;
@@ -1473,7 +1473,7 @@ async fn test_update_profile_avatar_xss_rejected() {
     let req = actix_test::TestRequest::patch()
         .uri("/api/users/me")
         .insert_header(("Authorization", format!("Bearer {token}")))
-        .set_json(json!({ "avatar_url": "javascript:alert(1)" }))
+        .set_json(json!({ "avatar_url": "https://example.com/avatar.png" }))
         .peer_addr(peer_addr())
         .to_request();
 

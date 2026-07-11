@@ -116,15 +116,13 @@ async fn update_profile(
         r#"UPDATE users SET
             username = COALESCE($2, username),
             bio = COALESCE($3, bio),
-            avatar_url = COALESCE($4, avatar_url),
-            is_public = COALESCE($5, is_public),
+            is_public = COALESCE($4, is_public),
             updated_at = NOW()
         WHERE id = $1 RETURNING *"#,
     )
     .bind(user_id)
     .bind(&data.username)
     .bind(&data.bio)
-    .bind(&data.avatar_url)
     .bind(data.is_public)
     .fetch_one(&mut *tx)
     .await?;

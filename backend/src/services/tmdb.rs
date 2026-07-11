@@ -10,6 +10,7 @@ use crate::models::Media;
 #[derive(Clone)]
 pub struct TmdbService {
     client: reqwest::Client,
+    image_client: reqwest::Client,
     api_key: String,
     /// When set, the v4 Read Access Token is sent as a Bearer header and the
     /// `api_key` query param is omitted, keeping the credential out of URLs/logs.
@@ -19,6 +20,13 @@ pub struct TmdbService {
 
 impl TmdbService {
     pub fn new(config: &Config) -> Self {
+        let image_client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(config.tmdb_timeout_seconds))
+            .connect_timeout(Duration::from_secs(5))
+            .redirect(reqwest::redirect::Policy::none())
+            .user_agent("cinetrack/0.1")
+            .build()
+            .expect("Failed to build TMDB image HTTP client");
         let mut builder = reqwest::Client::builder()
             .timeout(Duration::from_secs(config.tmdb_timeout_seconds))
             .connect_timeout(Duration::from_secs(5))
@@ -50,6 +58,7 @@ impl TmdbService {
 
         Self {
             client,
+            image_client,
             api_key: config.tmdb_api_key.clone(),
             use_bearer_auth,
             base_url: config.tmdb_base_url.clone(),
@@ -63,6 +72,47 @@ impl TmdbService {
         } else {
             rb.query(&[("api_key", self.api_key.as_str())])
         }
+    }
+
+    /// Download a public TMDB image with the same connect/request timeouts as
+    /// the API client. The body is consumed incrementally so a missing or false
+    /// Content-Length header cannot make the process buffer an unbounded file.
+    pub async fn fetch_image(
+        &self,
+        image_base_url: &str,
+        spec: &str,
+        max_bytes: usize,
+    ) -> Result<Vec<u8>, AppError> {
+        let url = format!("{}/{}", image_base_url.trim_end_matches('/'), spec);
+        let mut response = self.image_client.get(url).send().await?;
+
+        if response.status() == reqwest::StatusCode::NOT_FOUND {
+            return Err(AppError::NotFound("Image not found".to_string()));
+        }
+        if !response.status().is_success() {
+            return Err(AppError::TmdbError("Image fetch failed".to_string()));
+        }
+        if response
+            .content_length()
+            .is_some_and(|length| length > max_bytes as u64)
+        {
+            return Err(AppError::TmdbError("Image is too large".to_string()));
+        }
+
+        let mut bytes = Vec::with_capacity(
+            response
+                .content_length()
+                .unwrap_or_default()
+                .min(max_bytes as u64) as usize,
+        );
+        while let Some(chunk) = response.chunk().await? {
+            if chunk.len() > max_bytes.saturating_sub(bytes.len()) {
+                return Err(AppError::TmdbError("Image is too large".to_string()));
+            }
+            bytes.extend_from_slice(&chunk);
+        }
+
+        Ok(bytes)
     }
 
     pub async fn search(
@@ -380,6 +430,8 @@ impl TmdbService {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::sync::oneshot;
 
     fn config_with_token(read_access_token: Option<&str>) -> Config {
         Config {
@@ -409,6 +461,30 @@ mod tests {
         }
     }
 
+    async fn response_server(response: Vec<u8>) -> (String, oneshot::Receiver<String>) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let (request_tx, request_rx) = oneshot::channel();
+        tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut request = Vec::new();
+            let mut chunk = [0_u8; 1024];
+            loop {
+                let read = socket.read(&mut chunk).await.unwrap();
+                if read == 0 {
+                    break;
+                }
+                request.extend_from_slice(&chunk[..read]);
+                if request.windows(4).any(|window| window == b"\r\n\r\n") {
+                    break;
+                }
+            }
+            let _ = request_tx.send(String::from_utf8_lossy(&request).into_owned());
+            socket.write_all(&response).await.unwrap();
+        });
+        (format!("http://{address}"), request_rx)
+    }
+
     #[test]
     fn uses_bearer_auth_when_read_access_token_present() {
         let service = TmdbService::new(&config_with_token(Some("v4-read-access-token")));
@@ -427,5 +503,51 @@ mod tests {
         // must degrade to the api_key query param rather than panic.
         let service = TmdbService::new(&config_with_token(Some("bad\ntoken")));
         assert!(!service.use_bearer_auth);
+    }
+
+    #[tokio::test]
+    async fn image_download_uses_an_uncredentialed_client() {
+        let (base_url, request) = response_server(
+            b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok".to_vec(),
+        )
+        .await;
+        let service = TmdbService::new(&config_with_token(Some("v4-read-access-token")));
+
+        let bytes = service
+            .fetch_image(&base_url, "image.jpg", 10)
+            .await
+            .unwrap();
+
+        assert_eq!(bytes, b"ok");
+        assert!(!request
+            .await
+            .unwrap()
+            .to_ascii_lowercase()
+            .contains("authorization:"));
+    }
+
+    #[tokio::test]
+    async fn image_download_enforces_streaming_body_limit() {
+        let (base_url, _) =
+            response_server(b"HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n01234567890".to_vec())
+                .await;
+        let service = TmdbService::new(&config_with_token(None));
+
+        let result = service.fetch_image(&base_url, "image.jpg", 10).await;
+
+        assert!(matches!(result, Err(AppError::TmdbError(_))));
+    }
+
+    #[tokio::test]
+    async fn image_download_rejects_oversized_content_length() {
+        let (base_url, _) = response_server(
+            b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\nConnection: close\r\n\r\n".to_vec(),
+        )
+        .await;
+        let service = TmdbService::new(&config_with_token(None));
+
+        let result = service.fetch_image(&base_url, "image.jpg", 10).await;
+
+        assert!(matches!(result, Err(AppError::TmdbError(_))));
     }
 }
