@@ -144,7 +144,14 @@ docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
 - Database migrations run automatically on backend startup. Because they are embedded at compile time, a new migration requires a backend rebuild.
 - The `db` service uses a named volume, so rebuilding/redeploying does not touch existing data.
 - Production containers run behind a host-level Nginx reverse proxy with SSL termination, as non-root users on a read-only root filesystem.
-- The canonical host vhost is `nginx/vazute.micutu.com.conf`. Install it under `/etc/nginx/sites-available/`, validate with `nginx -t`, then reload Nginx; do not maintain a second untracked copy by hand.
+- The canonical host vhost is `nginx/vazute.micutu.com.conf`. Activate it through a symlink so `sites-enabled` cannot drift from the tracked configuration:
+
+```bash
+sudo install -o root -g root -m 0644 nginx/vazute.micutu.com.conf /etc/nginx/sites-available/vazute.micutu.com
+sudo ln -sfn /etc/nginx/sites-available/vazute.micutu.com /etc/nginx/sites-enabled/vazute.micutu.com
+sudo nginx -t
+sudo systemctl reload nginx
+```
 
 ### Local Development (without Docker)
 
