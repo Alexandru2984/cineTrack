@@ -18,6 +18,9 @@ pub enum AppError {
     #[error("Conflict: {0}")]
     Conflict(String),
 
+    #[error("Too many requests: {0}")]
+    TooManyRequests(String),
+
     #[error("Internal server error")]
     InternalError(#[from] anyhow::Error),
 
@@ -45,6 +48,9 @@ impl ResponseError for AppError {
             AppError::Unauthorized(msg) => (actix_web::http::StatusCode::UNAUTHORIZED, msg.clone()),
             AppError::Forbidden(msg) => (actix_web::http::StatusCode::FORBIDDEN, msg.clone()),
             AppError::Conflict(msg) => (actix_web::http::StatusCode::CONFLICT, msg.clone()),
+            AppError::TooManyRequests(msg) => {
+                (actix_web::http::StatusCode::TOO_MANY_REQUESTS, msg.clone())
+            }
             AppError::ValidationError(msg) => {
                 (actix_web::http::StatusCode::BAD_REQUEST, msg.clone())
             }
@@ -162,6 +168,14 @@ mod tests {
         assert_eq!(
             status_of(&AppError::Conflict("x".into())),
             StatusCode::CONFLICT
+        );
+    }
+
+    #[test]
+    fn test_too_many_requests_is_429() {
+        assert_eq!(
+            status_of(&AppError::TooManyRequests("x".into())),
+            StatusCode::TOO_MANY_REQUESTS
         );
     }
 

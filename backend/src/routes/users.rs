@@ -140,7 +140,7 @@ async fn delete_account(
         .as_ref()
         .ok_or_else(|| AppError::BadRequest("Password login is not enabled".to_string()))?;
 
-    if !password::verify_password(&body.password, password_hash)? {
+    if !password::verify_password(&body.password, password_hash).await? {
         return Err(AppError::Unauthorized("Password is incorrect".to_string()));
     }
 

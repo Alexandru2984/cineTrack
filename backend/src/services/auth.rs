@@ -30,6 +30,9 @@ pub async fn register(
     req: RegisterRequest,
 ) -> Result<(AuthResponse, String), AppError> {
     let email = normalize_email(&req.email);
+    // Perform the expensive work for duplicate and new accounts alike so the
+    // generic conflict response does not expose account existence by timing.
+    let password_hash = password::hash_password(&req.password).await?;
 
     let existing = sqlx::query_scalar::<_, i64>(
         "SELECT COUNT(*) FROM users WHERE email = $1 OR username = $2",
@@ -44,8 +47,6 @@ pub async fn register(
             "Unable to create account. Please check your details and try again.".to_string(),
         ));
     }
-
-    let password_hash = password::hash_password(&req.password)?;
 
     let user = sqlx::query_as::<_, User>(
         r#"INSERT INTO users (username, email, password_hash)
@@ -82,19 +83,18 @@ pub async fn login(
     let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE email = $1")
         .bind(&email)
         .fetch_optional(pool)
-        .await?
-        .ok_or_else(|| AppError::Unauthorized("Invalid email or password".to_string()))?;
-
+        .await?;
     let password_hash = user
-        .password_hash
         .as_ref()
-        .ok_or_else(|| AppError::Unauthorized("Invalid email or password".to_string()))?;
+        .and_then(|candidate| candidate.password_hash.as_deref());
 
-    if !password::verify_password(&req.password, password_hash)? {
+    if !password::verify_password_or_dummy(&req.password, password_hash).await? {
         return Err(AppError::Unauthorized(
             "Invalid email or password".to_string(),
         ));
     }
+    let user =
+        user.ok_or_else(|| AppError::Unauthorized("Invalid email or password".to_string()))?;
 
     sqlx::query(
         r#"DELETE FROM refresh_tokens
@@ -241,13 +241,13 @@ pub async fn change_password(
         .as_ref()
         .ok_or_else(|| AppError::BadRequest("Password login is not enabled".to_string()))?;
 
-    if !password::verify_password(current_password, password_hash)? {
+    if !password::verify_password(current_password, password_hash).await? {
         return Err(AppError::Unauthorized(
             "Current password is incorrect".to_string(),
         ));
     }
 
-    let new_hash = password::hash_password(new_password)?;
+    let new_hash = password::hash_password(new_password).await?;
 
     let mut tx = pool.begin().await?;
     sqlx::query("UPDATE users SET password_hash = $2, updated_at = NOW() WHERE id = $1")
@@ -343,7 +343,7 @@ pub async fn reset_password(
         ));
     }
 
-    let new_hash = password::hash_password(new_password)?;
+    let new_hash = password::hash_password(new_password).await?;
 
     sqlx::query("UPDATE password_reset_tokens SET consumed_at = NOW() WHERE id = $1")
         .bind(stored.id)

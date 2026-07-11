@@ -13,6 +13,7 @@ use cinetrack::{
     routes,
     services::email::EmailService,
     services::tmdb::TmdbService,
+    utils::password,
 };
 
 /// Access-log format including the per-request correlation id (set by the
@@ -82,6 +83,10 @@ async fn main() -> std::io::Result<()> {
     init_logger();
 
     let config = config::Config::from_env();
+    password::initialize().await.map_err(|error| {
+        log::error!("Failed to initialize password verification: {error:?}");
+        std::io::Error::other("failed to initialize password verification")
+    })?;
     let pool = db::create_pool(&config.database_url).await;
 
     // Run migrations
