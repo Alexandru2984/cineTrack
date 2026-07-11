@@ -1,12 +1,24 @@
 use serde::{Deserialize, Serialize};
 use validator::Validate;
 
+fn validate_media_type(media_type: &str) -> Result<(), validator::ValidationError> {
+    if matches!(media_type, "movie" | "tv") {
+        Ok(())
+    } else {
+        let mut error = validator::ValidationError::new("invalid_media_type");
+        error.message = Some("Media type must be movie or tv".into());
+        Err(error)
+    }
+}
+
 #[derive(Debug, Deserialize, Validate)]
 pub struct SearchQuery {
     #[validate(length(min = 1, max = 200, message = "Search query must be 1-200 characters"))]
     pub q: String,
     #[serde(rename = "type")]
+    #[validate(custom(function = "validate_media_type"))]
     pub media_type: Option<String>,
+    #[validate(range(min = 1, max = 500, message = "Page must be between 1 and 500"))]
     pub page: Option<u32>,
 }
 
@@ -179,5 +191,19 @@ mod tests {
     #[test]
     fn test_search_query_boundary_200() {
         assert!(query(&"x".repeat(200)).validate().is_ok());
+    }
+
+    #[test]
+    fn test_search_query_rejects_unknown_media_type() {
+        let mut value = query("inception");
+        value.media_type = Some("person".to_string());
+        assert!(value.validate().is_err());
+    }
+
+    #[test]
+    fn test_search_query_rejects_out_of_range_page() {
+        let mut value = query("inception");
+        value.page = Some(501);
+        assert!(value.validate().is_err());
     }
 }

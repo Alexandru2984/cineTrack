@@ -1465,6 +1465,79 @@ async fn test_media_search_requires_auth() {
     assert_eq!(resp.status(), 401);
 }
 
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn test_warm_episode_cache_avoids_upstream_request() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (token, _, _) =
+        register_user(&app, "episodecache", "episodecache@example.com", "Pass1234").await;
+
+    let media_id = sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO media (tmdb_id, media_type, title)
+        VALUES (993001, 'tv', 'Cached Episode Show')
+        RETURNING id"#,
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let season_id = sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO seasons
+            (media_id, season_number, name, episode_count, episodes_cached_at)
+        VALUES ($1, 1, 'Season 1', 1, NOW())
+        RETURNING id"#,
+    )
+    .bind(media_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO episodes (season_id, episode_number, name, runtime_minutes)
+        VALUES ($1, 1, 'Cached Episode', 42)"#,
+    )
+    .bind(season_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let req = actix_test::TestRequest::get()
+        .uri(&format!("/api/media/{media_id}/seasons/1/episodes"))
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+
+    assert_eq!(resp.status(), 200);
+    let episodes: Value = actix_test::read_body_json(resp).await;
+    assert_eq!(episodes.as_array().unwrap().len(), 1);
+    assert_eq!(episodes[0]["name"], "Cached Episode");
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn test_media_rejects_invalid_upstream_parameters() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (token, _, _) =
+        register_user(&app, "mediaparams", "mediaparams@example.com", "Pass1234").await;
+
+    for uri in [
+        "/api/media/-1?type=movie",
+        "/api/media/1?type=person",
+        "/api/media/1/seasons/501/episodes",
+    ] {
+        let req = actix_test::TestRequest::get()
+            .uri(uri)
+            .insert_header(("Authorization", format!("Bearer {token}")))
+            .peer_addr(peer_addr())
+            .to_request();
+        let resp = actix_test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 400, "unexpected status for {uri}");
+    }
+}
+
 // ── User Profile Tests ────────────────────────────────────────
 
 #[actix_web::test]

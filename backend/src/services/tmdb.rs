@@ -184,6 +184,11 @@ impl TmdbService {
         tmdb_id: i32,
         season_number: i32,
     ) -> Result<TmdbSeasonDetail, AppError> {
+        if tmdb_id <= 0 || !(0..=500).contains(&season_number) {
+            return Err(AppError::BadRequest(
+                "Invalid TMDB ID or season number".to_string(),
+            ));
+        }
         let resp = self
             .authed(
                 self.client
@@ -368,7 +373,7 @@ impl TmdbService {
                 .bind(s.episode_count)
                 .bind(season_air_date)
                 .execute(pool)
-                .await;
+                .await?;
             }
         }
 
@@ -390,10 +395,24 @@ impl TmdbService {
         .await?
         .ok_or_else(|| AppError::NotFound("Season not found".to_string()))?;
 
+        if season
+            .episodes_cached_at
+            .is_some_and(|cached_at| Utc::now() - cached_at < chrono::Duration::hours(24))
+        {
+            return sqlx::query_as::<_, crate::models::Episode>(
+                "SELECT * FROM episodes WHERE season_id = $1 ORDER BY episode_number",
+            )
+            .bind(season.id)
+            .fetch_all(pool)
+            .await
+            .map_err(AppError::from);
+        }
+
         let tmdb_episodes = self
             .get_season_episodes(media.tmdb_id, season_number)
             .await?;
 
+        let mut tx = pool.begin().await?;
         for ep in &tmdb_episodes.episodes {
             let ep_air_date = ep
                 .air_date
@@ -412,16 +431,22 @@ impl TmdbService {
             .bind(ep.runtime)
             .bind(ep_air_date)
             .bind(&ep.still_path)
-            .execute(pool)
-            .await;
+            .execute(&mut *tx)
+            .await?;
         }
+
+        sqlx::query("UPDATE seasons SET episodes_cached_at = NOW() WHERE id = $1")
+            .bind(season.id)
+            .execute(&mut *tx)
+            .await?;
 
         let episodes = sqlx::query_as::<_, crate::models::Episode>(
             "SELECT * FROM episodes WHERE season_id = $1 ORDER BY episode_number",
         )
         .bind(season.id)
-        .fetch_all(pool)
+        .fetch_all(&mut *tx)
         .await?;
+        tx.commit().await?;
 
         Ok(episodes)
     }

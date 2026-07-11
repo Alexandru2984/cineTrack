@@ -29,6 +29,7 @@ pub struct Season {
     pub name: Option<String>,
     pub episode_count: Option<i32>,
     pub air_date: Option<NaiveDate>,
+    pub episodes_cached_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
