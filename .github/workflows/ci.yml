@@ -209,9 +209,4 @@ jobs:
       - name: Audit dependencies
         # RUSTSEC-2023-0071 is reported through sqlx-mysql metadata in Cargo.lock,
         # but this backend builds sqlx with only the postgres feature enabled.
-        # RUSTSEC-2026-0194/0195 are DoS issues in quick-xml when parsing
-        # attacker-controlled XML; here quick-xml (via rust-s3, pinned to ^0.38)
-        # only parses authenticated Cloudflare R2 API responses — user input
-        # never reaches it. Drop the ignores once rust-s3 moves to quick-xml
-        # >= 0.41.
-        run: cargo audit --ignore RUSTSEC-2023-0071 --ignore RUSTSEC-2026-0194 --ignore RUSTSEC-2026-0195
+        run: cargo audit --ignore RUSTSEC-2023-0071

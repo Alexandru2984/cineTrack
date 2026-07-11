@@ -21,10 +21,6 @@ const AVATAR_EXTS: &[&str] = &["png", "jpg", "webp", "gif"];
 const POSTER_SIZES: &[&str] = &[
     "w45", "w92", "w154", "w185", "w300", "w342", "w500", "w780", "w1280", "original",
 ];
-/// Prefixes the public asset proxy is allowed to serve. Private backup objects
-/// live in the same bucket and must never be reachable here.
-const PUBLIC_PREFIXES: &[&str] = &["avatars/", "posters/"];
-
 pub fn configure(cfg: &mut web::ServiceConfig) {
     cfg.service(
         web::resource("/users/me/avatar")
@@ -54,6 +50,18 @@ fn valid_poster_spec(spec: &str) -> bool {
         && path
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | '/'))
+}
+
+fn valid_public_asset_key(key: &str) -> bool {
+    if let Some(name) = key.strip_prefix("avatars/") {
+        let Some((id, extension)) = name.rsplit_once('.') else {
+            return false;
+        };
+        return !id.contains('/')
+            && Uuid::parse_str(id).is_ok()
+            && AVATAR_EXTS.contains(&extension);
+    }
+    key.strip_prefix("posters/").is_some_and(valid_poster_spec)
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -350,12 +358,17 @@ async fn serve_asset(
     path: web::Path<String>,
 ) -> Result<HttpResponse, AppError> {
     let key = path.into_inner();
-    if key.contains("..") || !PUBLIC_PREFIXES.iter().any(|p| key.starts_with(p)) {
+    if !valid_public_asset_key(&key) {
         return Err(AppError::NotFound("Asset not found".to_string()));
     }
+    let max_bytes = if key.starts_with("avatars/") {
+        MAX_AVATAR_BYTES
+    } else {
+        MAX_POSTER_BYTES
+    };
     let store = storage_or_503(storage.get_ref())?;
     let bytes = store
-        .get(&key)
+        .get(&key, max_bytes)
         .await
         .map_err(AppError::from)?
         .ok_or_else(|| AppError::NotFound("Asset not found".to_string()))?;
@@ -390,7 +403,11 @@ async fn serve_poster(
     let store = storage_or_503(storage.get_ref())?;
     let key = format!("posters/{spec}");
 
-    if let Some(bytes) = store.get(&key).await.map_err(AppError::from)? {
+    if let Some(bytes) = store
+        .get(&key, MAX_POSTER_BYTES)
+        .await
+        .map_err(AppError::from)?
+    {
         let info = inspect_image(&bytes)
             .filter(|info| dimensions_within(*info, MAX_POSTER_DIMENSION, MAX_POSTER_PIXELS))
             .ok_or_else(|| AppError::NotFound("Image not found".to_string()))?;
@@ -471,5 +488,19 @@ mod tests {
         assert!(!valid_poster_spec("w500/../../private.jpg"));
         assert!(!valid_poster_spec("w500/https://example.com/x.jpg"));
         assert!(!valid_poster_spec("giant/safe.jpg"));
+    }
+
+    #[test]
+    fn public_asset_keys_match_only_generated_objects() {
+        assert!(valid_public_asset_key(
+            "avatars/550e8400-e29b-41d4-a716-446655440000.webp"
+        ));
+        assert!(valid_public_asset_key("posters/w500/safe_path.jpg"));
+        assert!(!valid_public_asset_key("avatars/not-a-uuid.png"));
+        assert!(!valid_public_asset_key(
+            "avatars/550e8400-e29b-41d4-a716-446655440000.svg"
+        ));
+        assert!(!valid_public_asset_key("posters/../../backups/dump.gz"));
+        assert!(!valid_public_asset_key("backups/dump.gz"));
     }
 }

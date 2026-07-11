@@ -171,10 +171,10 @@ npm run dev
 
 ### Testing
 
-The project has **242 unit & integration tests** plus **15 Playwright E2E tests** across four layers:
+The project has **244 unit & integration tests** plus **15 Playwright E2E tests** across four layers:
 
 ```bash
-# Backend unit tests (131 tests) — no external dependencies
+# Backend unit tests (133 tests) — no external dependencies
 cd backend && cargo test
 
 # Frontend tests (54 tests) — Vitest + jsdom
