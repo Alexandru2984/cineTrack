@@ -8,6 +8,9 @@ use crate::dto::social::*;
 use crate::errors::AppError;
 use crate::middleware::auth::require_auth;
 
+const MAX_LISTS_PER_USER: i64 = 50;
+const MAX_ITEMS_PER_LIST: i64 = 500;
+
 pub fn configure(cfg: &mut web::ServiceConfig) {
     cfg.service(
         web::scope("/lists")
@@ -80,6 +83,21 @@ async fn create_list(
     body.validate()?;
     let data = body.into_inner();
 
+    let mut tx = pool.begin().await?;
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended('lists:' || $1::text, 0))")
+        .bind(user_id)
+        .execute(&mut *tx)
+        .await?;
+    let list_count = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM lists WHERE user_id = $1")
+        .bind(user_id)
+        .fetch_one(&mut *tx)
+        .await?;
+    if list_count >= MAX_LISTS_PER_USER {
+        return Err(AppError::Conflict(format!(
+            "An account can have at most {MAX_LISTS_PER_USER} lists"
+        )));
+    }
+
     let list = sqlx::query_as::<_, crate::models::List>(
         r#"INSERT INTO lists (user_id, name, description, is_public)
         VALUES ($1, $2, $3, $4)
@@ -88,9 +106,10 @@ async fn create_list(
     .bind(user_id)
     .bind(&data.name)
     .bind(&data.description)
-    .bind(data.is_public.unwrap_or(true))
-    .fetch_one(pool.get_ref())
+    .bind(data.is_public.unwrap_or(false))
+    .fetch_one(&mut *tx)
     .await?;
+    tx.commit().await?;
 
     Ok(HttpResponse::Created().json(list))
 }
@@ -194,20 +213,44 @@ async fn add_item(
     let user_id = require_auth(&req).await?;
     let list_id = path.into_inner();
 
-    // Verify list ownership
+    let mut tx = pool.begin().await?;
+    // The row lock serializes item-count checks for this list.
     let _list = sqlx::query_as::<_, crate::models::List>(
-        "SELECT * FROM lists WHERE id = $1 AND user_id = $2",
+        "SELECT * FROM lists WHERE id = $1 AND user_id = $2 FOR UPDATE",
     )
     .bind(list_id)
     .bind(user_id)
-    .fetch_optional(pool.get_ref())
+    .fetch_optional(&mut *tx)
     .await?
     .ok_or_else(|| AppError::NotFound("List not found".to_string()))?;
+
+    let item_exists = sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS(SELECT 1 FROM list_items WHERE list_id = $1 AND media_id = $2)",
+    )
+    .bind(list_id)
+    .bind(body.media_id)
+    .fetch_one(&mut *tx)
+    .await?;
+    if item_exists {
+        tx.commit().await?;
+        return Ok(HttpResponse::Ok().json(serde_json::json!({"message": "Item already added"})));
+    }
+
+    let item_count =
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM list_items WHERE list_id = $1")
+            .bind(list_id)
+            .fetch_one(&mut *tx)
+            .await?;
+    if item_count >= MAX_ITEMS_PER_LIST {
+        return Err(AppError::Conflict(format!(
+            "A list can have at most {MAX_ITEMS_PER_LIST} items"
+        )));
+    }
 
     let media_exists =
         sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM media WHERE id = $1)")
             .bind(body.media_id)
-            .fetch_one(pool.get_ref())
+            .fetch_one(&mut *tx)
             .await?;
     if !media_exists {
         return Err(AppError::BadRequest("Media not found".to_string()));
@@ -218,8 +261,9 @@ async fn add_item(
     )
     .bind(list_id)
     .bind(body.media_id)
-    .execute(pool.get_ref())
+    .execute(&mut *tx)
     .await?;
+    tx.commit().await?;
 
     Ok(HttpResponse::Created().json(serde_json::json!({"message": "Item added"})))
 }

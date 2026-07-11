@@ -1976,6 +1976,100 @@ async fn test_create_list() {
 
 #[actix_web::test]
 #[ignore = "requires test DB"]
+async fn test_lists_are_private_by_default_and_quota_bound() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (token, _, user_id) =
+        register_user(&app, "listquota", "listquota@example.com", "Pass1234").await;
+    let user_id = Uuid::parse_str(&user_id).unwrap();
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/lists")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .set_json(json!({ "name": "Private by default" }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 201);
+    let list: Value = actix_test::read_body_json(resp).await;
+    assert_eq!(list["is_public"], false);
+    let list_id = Uuid::parse_str(list["id"].as_str().unwrap()).unwrap();
+
+    sqlx::query(
+        r#"INSERT INTO lists (user_id, name)
+        SELECT $1, 'Quota list ' || value
+        FROM generate_series(1, 49) AS value"#,
+    )
+    .bind(user_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/lists")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .set_json(json!({ "name": "One too many" }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 409);
+
+    sqlx::query(
+        r#"INSERT INTO media (tmdb_id, media_type, title)
+        SELECT 1100000 + value, 'movie', 'Quota movie ' || value
+        FROM generate_series(1, 501) AS value"#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO list_items (list_id, media_id)
+        SELECT $1, id FROM media
+        WHERE tmdb_id BETWEEN 1100001 AND 1100500"#,
+    )
+    .bind(list_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let existing_media_id = sqlx::query_scalar::<_, Uuid>(
+        "SELECT id FROM media WHERE tmdb_id = 1100001 AND media_type = 'movie'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let new_media_id = sqlx::query_scalar::<_, Uuid>(
+        "SELECT id FROM media WHERE tmdb_id = 1100501 AND media_type = 'movie'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    let req = actix_test::TestRequest::post()
+        .uri(&format!("/api/lists/{list_id}/items"))
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .set_json(json!({ "media_id": new_media_id }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 409);
+
+    let req = actix_test::TestRequest::post()
+        .uri(&format!("/api/lists/{list_id}/items"))
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .set_json(json!({ "media_id": existing_media_id }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(
+        resp.status(),
+        200,
+        "adding an existing item remains idempotent"
+    );
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
 async fn test_list_idor_protection() {
     let pool = setup_pool().await;
     clean_db(&pool).await;

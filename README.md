@@ -171,7 +171,7 @@ npm run dev
 
 ### Testing
 
-The project has **241 unit & integration tests** plus **15 Playwright E2E tests** across four layers:
+The project has **242 unit & integration tests** plus **15 Playwright E2E tests** across four layers:
 
 ```bash
 # Backend unit tests (131 tests) — no external dependencies
@@ -180,7 +180,7 @@ cd backend && cargo test
 # Frontend tests (54 tests) — Vitest + jsdom
 cd frontend && npm test
 
-# Backend integration tests (56 tests) — needs a test DB
+# Backend integration tests (57 tests) — needs a test DB
 docker compose -p cinetrack-test -f docker-compose.test.yml up -d --wait
 cd backend && TEST_DATABASE_URL="postgres://test_user:test_pass@127.0.0.1:55433/cinetrack_test" \
   cargo test --test api_tests -- --ignored --test-threads=1
