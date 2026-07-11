@@ -97,6 +97,25 @@ async fn main() -> std::io::Result<()> {
 
     log::info!("Migrations applied successfully");
 
+    // This deployment runs a single backend process and import tasks are
+    // in-memory. Any pending/running row found at process start belongs to a
+    // task that cannot still exist after the restart, so unblock a safe retry.
+    let interrupted_imports = sqlx::query(
+        "UPDATE import_jobs
+         SET status = 'failed', error = 'Import interrupted by a service restart', updated_at = NOW()
+         WHERE status IN ('pending', 'running')",
+    )
+    .execute(&pool)
+    .await
+    .map_err(|error| {
+        log::error!("Failed to recover interrupted imports: {error}");
+        std::io::Error::other("failed to recover interrupted imports")
+    })?
+    .rows_affected();
+    if interrupted_imports > 0 {
+        log::warn!("Recovered {interrupted_imports} interrupted import job(s)");
+    }
+
     let tmdb_service = TmdbService::new(&config);
     let email_service = EmailService::new(&config);
 

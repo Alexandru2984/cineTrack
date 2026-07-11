@@ -1,4 +1,79 @@
-use serde::{Deserialize, Serialize};
+use std::fmt;
+use std::marker::PhantomData;
+
+use serde::de::{self, DeserializeOwned, SeqAccess, Visitor};
+use serde::{Deserialize, Deserializer, Serialize};
+
+pub const MAX_SEASONS_PER_SHOW: usize = 200;
+pub const MAX_EPISODES_PER_SEASON: usize = 2_000;
+
+fn deserialize_limited_vec<'de, D, T>(deserializer: D, max: usize) -> Result<Vec<T>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    struct LimitedVecVisitor<T> {
+        max: usize,
+        marker: PhantomData<T>,
+    }
+
+    impl<'de, T> Visitor<'de> for LimitedVecVisitor<T>
+    where
+        T: Deserialize<'de>,
+    {
+        type Value = Vec<T>;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(formatter, "an array with at most {} items", self.max)
+        }
+
+        fn visit_seq<A>(self, mut sequence: A) -> Result<Self::Value, A::Error>
+        where
+            A: SeqAccess<'de>,
+        {
+            let mut values = Vec::with_capacity(sequence.size_hint().unwrap_or(0).min(self.max));
+            while let Some(value) = sequence.next_element()? {
+                if values.len() == self.max {
+                    return Err(de::Error::custom(format_args!(
+                        "array exceeds {} items",
+                        self.max
+                    )));
+                }
+                values.push(value);
+            }
+            Ok(values)
+        }
+    }
+
+    deserializer.deserialize_seq(LimitedVecVisitor {
+        max,
+        marker: PhantomData,
+    })
+}
+
+pub fn parse_limited_json_array<T>(bytes: &[u8], max: usize) -> Result<Vec<T>, serde_json::Error>
+where
+    T: DeserializeOwned,
+{
+    let mut deserializer = serde_json::Deserializer::from_slice(bytes);
+    let values = deserialize_limited_vec(&mut deserializer, max)?;
+    deserializer.end()?;
+    Ok(values)
+}
+
+fn deserialize_seasons<'de, D>(deserializer: D) -> Result<Vec<TvTimeSeason>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    deserialize_limited_vec(deserializer, MAX_SEASONS_PER_SHOW)
+}
+
+fn deserialize_episodes<'de, D>(deserializer: D) -> Result<Vec<TvTimeEpisode>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    deserialize_limited_vec(deserializer, MAX_EPISODES_PER_SEASON)
+}
 
 /// TV Time external ids attached to a show/movie/episode in the browser-extension export.
 #[derive(Debug, Deserialize)]
@@ -19,7 +94,7 @@ pub struct TvTimeEpisode {
 #[derive(Debug, Deserialize)]
 pub struct TvTimeSeason {
     pub number: i32,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_episodes")]
     pub episodes: Vec<TvTimeEpisode>,
 }
 
@@ -28,7 +103,7 @@ pub struct TvTimeShow {
     pub id: TvTimeExternalId,
     #[serde(default)]
     pub title: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_seasons")]
     pub seasons: Vec<TvTimeSeason>,
     #[serde(default)]
     pub created_at: Option<String>,

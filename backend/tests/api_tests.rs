@@ -1202,6 +1202,80 @@ async fn test_history_requires_auth() {
 
 #[actix_web::test]
 #[ignore = "requires test DB"]
+async fn test_import_requires_auth() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let boundary = "cinetrack-import-boundary";
+    let payload = format!(
+        "--{boundary}\r\n\
+         Content-Disposition: form-data; name=\"movies\"; filename=\"movies.json\"\r\n\
+         Content-Type: application/json\r\n\r\n\
+         []\r\n\
+         --{boundary}--\r\n"
+    );
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/import/tvtime")
+        .insert_header((
+            header::CONTENT_TYPE,
+            format!("multipart/form-data; boundary={boundary}"),
+        ))
+        .peer_addr(peer_addr())
+        .set_payload(payload)
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 401);
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn test_import_job_reservation_is_atomic() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (token, _, user_id) =
+        register_user(&app, "importuser", "importuser@example.com", "Pass1234").await;
+    let user_id = Uuid::parse_str(&user_id).unwrap();
+    sqlx::query("INSERT INTO import_jobs (user_id, status) VALUES ($1, 'completed')")
+        .bind(user_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let boundary = "cinetrack-import-boundary";
+    let payload = format!(
+        "--{boundary}\r\n\
+         Content-Disposition: form-data; name=\"movies\"; filename=\"movies.json\"\r\n\
+         Content-Type: application/json\r\n\r\n\
+         [{{\"id\": {{\"imdb\": \"-1\"}}, \"title\": \"Import Test\"}}]\r\n\
+         --{boundary}--\r\n"
+    );
+    let req = actix_test::TestRequest::post()
+        .uri("/api/import/tvtime")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .insert_header((
+            header::CONTENT_TYPE,
+            format!("multipart/form-data; boundary={boundary}"),
+        ))
+        .peer_addr(peer_addr())
+        .set_payload(payload)
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+
+    assert_eq!(resp.status(), 409);
+    let job_count = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM import_jobs WHERE user_id = $1 AND status IN ('pending', 'running', 'completed')",
+    )
+    .bind(user_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(job_count, 1);
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
 async fn test_lists_requires_auth() {
     let pool = setup_pool().await;
     clean_db(&pool).await;

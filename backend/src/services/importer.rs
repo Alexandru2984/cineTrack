@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use chrono::{DateTime, NaiveDate, NaiveDateTime, Utc};
-use sqlx::PgPool;
+use sqlx::{PgPool, Postgres, Transaction};
 use uuid::Uuid;
 
 use crate::dto::import::*;
@@ -68,12 +68,13 @@ pub async fn run_import(
             .await;
         }
         Err(e) => {
-            log::error!("Import job {job_id} failed: {e}");
+            log::error!("Import job {job_id} failed: {e:#}");
             let _ = sqlx::query(
-                "UPDATE import_jobs SET status = 'failed', error = $2, updated_at = NOW() WHERE id = $1",
+                "UPDATE import_jobs
+                 SET status = 'failed', error = 'Import could not be completed', updated_at = NOW()
+                 WHERE id = $1",
             )
             .bind(job_id)
-            .bind(e.to_string())
             .execute(&pool)
             .await;
         }
@@ -113,7 +114,7 @@ async fn import_all(
             }
             Ok(None) => totals.unresolved.push(show.title.clone()),
             Err(e) => {
-                log::warn!("Import: show '{}' failed: {e}", show.title);
+                log::warn!("Import job {job_id}: show index {idx} failed: {e}");
                 totals.unresolved.push(show.title.clone());
             }
         }
@@ -128,7 +129,7 @@ async fn import_all(
         }
     }
 
-    for movie in &movies {
+    for (idx, movie) in movies.iter().enumerate() {
         match import_movie(pool, tmdb, movie).await {
             Ok(Some((um, row))) => {
                 totals.movies += 1;
@@ -139,7 +140,7 @@ async fn import_all(
             }
             Ok(None) => totals.unresolved.push(movie.title.clone()),
             Err(e) => {
-                log::warn!("Import: movie '{}' failed: {e}", movie.title);
+                log::warn!("Import job {job_id}: movie index {idx} failed: {e}");
                 totals.unresolved.push(movie.title.clone());
             }
         }
@@ -164,9 +165,13 @@ async fn import_all(
         }
     }
 
-    // Bulk write. user_media upsert then watch_history insert.
-    write_user_media(pool, user_id, &user_media_rows).await?;
-    write_watch_history(pool, user_id, &watch_rows).await?;
+    // The user's final tracking state and history become visible together.
+    // TMDB cache rows may persist after a failed import, but no partial user
+    // library can survive a write error.
+    let mut tx = pool.begin().await?;
+    write_user_media(&mut tx, user_id, &user_media_rows).await?;
+    write_watch_history(&mut tx, user_id, &watch_rows).await?;
+    tx.commit().await?;
 
     Ok(totals)
 }
@@ -418,7 +423,7 @@ async fn resolve_episode(
 }
 
 async fn write_user_media(
-    pool: &PgPool,
+    tx: &mut Transaction<'_, Postgres>,
     user_id: Uuid,
     rows: &[UserMediaRow],
 ) -> anyhow::Result<()> {
@@ -441,13 +446,13 @@ async fn write_user_media(
               is_favorite = EXCLUDED.is_favorite, started_at = EXCLUDED.started_at, \
               completed_at = EXCLUDED.completed_at, updated_at = EXCLUDED.updated_at",
         );
-        qb.build().execute(pool).await?;
+        qb.build().execute(&mut **tx).await?;
     }
     Ok(())
 }
 
 async fn write_watch_history(
-    pool: &PgPool,
+    tx: &mut Transaction<'_, Postgres>,
     user_id: Uuid,
     rows: &[WatchRow],
 ) -> anyhow::Result<()> {
@@ -461,7 +466,7 @@ async fn write_watch_history(
                 .push_bind(r.episode_id)
                 .push_bind(r.watched_at);
         });
-        qb.build().execute(pool).await?;
+        qb.build().execute(&mut **tx).await?;
     }
     Ok(())
 }

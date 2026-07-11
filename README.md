@@ -33,7 +33,7 @@ A personal movie and TV show tracker with social features, inspired by TV Time. 
 - **actix-governor** — Rate limiting (global + auth-specific)
 - **actix-multipart** — Streaming file uploads (imports, avatars)
 - **TMDB API v3** — Movie/TV show metadata
-- **Cloudflare R2** (`rust-s3`) — S3-compatible object storage for avatars, import archives, a TMDB poster cache, and DB backups (optional; features degrade cleanly when unset)
+- **Cloudflare R2** (`rust-s3`) — S3-compatible object storage for avatars, a TMDB poster cache, and DB backups (optional; features degrade cleanly when unset)
 
 ### Frontend
 - **React 19** + **TypeScript** — UI framework
@@ -59,8 +59,8 @@ The application has been through multiple security audits. Key measures include:
 - **Rate Limiting** — Global rate limiter (10 req/s, burst 50) + stricter auth-specific limiter (3 req/s, burst 10) to prevent brute-force
 - **Password Policy** — Minimum 8 characters, must contain at least one letter and one digit, rejects all-same-character passwords
 - **Input Validation** — All user inputs validated with length limits (bio 500, review 5000, list names 200, etc.) and content validation
-- **Upload Safety** — Avatar uploads are type- and size-checked (image types, ≤3 MB); import files are size-capped; the poster cache validates the `{size}/{path}` spec against a size allowlist and rejects traversal/host injection (no SSRF)
-- **Storage Access Control** — The public asset proxy only serves the `avatars/` and `posters/` prefixes; private objects (`imports/`, `backups/`) are never reachable through it
+- **Upload Safety** — Avatar bytes, structure, dimensions, declared type, and size are checked; imports have byte and record limits plus a two-job global concurrency cap; poster downloads are streamed through an uncredentialed, non-redirecting client with strict size limits
+- **Storage Access Control** — The public asset proxy only serves validated images under `avatars/` and `posters/`; private backup objects are never reachable through it
 - **Privacy** — Private profiles require an approved follow request before details or activity become visible; public user endpoints never expose emails; no user enumeration on register
 - **Access Control** — Private lists return 404 to non-owners; all media endpoints require authentication; history entries validated against existing media
 - **Security Headers** — HSTS, X-Frame-Options (DENY), X-Content-Type-Options, Referrer-Policy, Permissions-Policy, and a same-origin-only script/connect Content-Security-Policy
@@ -112,8 +112,8 @@ The application has been through multiple security audits. Key measures include:
 
    VITE_API_URL=http://localhost:8080
 
-   # Cloudflare R2 object storage (optional — avatars, import archive,
-   # poster cache, DB backups). Storage features are disabled if unset.
+   # Cloudflare R2 object storage (optional — avatars, poster cache,
+   # DB backups). Storage features are disabled if unset.
    R2_S3_API=https://<account-id>.r2.cloudflarestorage.com
    R2_ACCESS_KEY_ID=<r2-access-key-id>
    R2_SECRET_ACCESS_KEY=<r2-secret-access-key>
@@ -171,16 +171,16 @@ npm run dev
 
 ### Testing
 
-The project has **216 unit & integration tests** plus **12 Playwright E2E tests** across four layers:
+The project has **237 unit & integration tests** plus **15 Playwright E2E tests** across four layers:
 
 ```bash
-# Backend unit tests (119 tests) — no external dependencies
+# Backend unit tests (129 tests) — no external dependencies
 cd backend && cargo test
 
-# Frontend tests (53 tests) — Vitest + jsdom
+# Frontend tests (54 tests) — Vitest + jsdom
 cd frontend && npm test
 
-# Backend integration tests (44 tests) — needs a test DB
+# Backend integration tests (54 tests) — needs a test DB
 docker compose -p cinetrack-test -f docker-compose.test.yml up -d --wait
 cd backend && TEST_DATABASE_URL="postgres://test_user:test_pass@127.0.0.1:55433/cinetrack_test" \
   cargo test --test api_tests -- --ignored --test-threads=1
@@ -200,7 +200,7 @@ docker compose -f docker-compose.test.yml -p cinetrack_e2e down -v
 
 **What's tested:**
 - **Unit tests** — JWT generation/validation, Argon2id hashing, password policy, all DTO validators (boundary cases, XSS rejection), error mapping & sanitization
-- **Integration tests** — Full auth flows (register, login, refresh rotation, logout), access control (all protected endpoints return 401), IDOR protection, user enumeration prevention, profile privacy (email hidden), follow/unfollow, list CRUD
+- **Integration tests** — Full auth flows, access control, IDOR protection, user enumeration prevention, profile privacy and follow approvals, atomic tracking/history transitions, statistics semantics, list CRUD, and import job reservation
 - **Frontend tests** — Zustand stores (auth, theme), utility functions (class merging, URL builders, formatters), type contracts, error-boundary fallback
 - **E2E tests (Playwright)** — route guards and login/logout/forgot-password against a mocked API, plus a real-stack suite (live backend + ephemeral Postgres) covering registration with an HttpOnly refresh cookie, real token rotation through the browser, active sessions, account deletion, and password reset via the emailed token
 
@@ -278,15 +278,14 @@ Users migrating from TV Time can bring their history in from **Settings → Impo
 - **Input** — the browser-extension export (`shows.json`, `movies.json`) and, optionally, the GDPR `rewatched_episode.csv`.
 - **ID resolution** — TV Time keys shows by **TVDB** id and movies by **IMDB** id; the app is **TMDB**-based, so the importer resolves each via TMDB's `/find` endpoint with a title-search fallback.
 - **Matching** — episodes link by `(season, episode)`; for shows whose numbering diverges from TMDB (e.g. anime, or shows TV Time numbers by year), it falls back to **absolute-position** matching. Watches that TMDB can't represent are still recorded by date (they count toward the heatmap) and reported as "date-only".
-- **Execution** — runs as a background job (`import_jobs` table); the UI polls for status and shows a summary (shows / movies / episodes linked / date-only / unresolved). One import per account.
-- If R2 is configured, the raw uploaded files are archived under `imports/{user}/{job}/` for audit/re-run.
+- **Execution** — runs as a bounded background job (`import_jobs` table); the UI polls for status and shows a summary (shows / movies / episodes linked / date-only / unresolved). One non-failed import is reserved atomically per account, and final tracking/history writes commit together.
+- **Data minimization** — raw TV Time exports are parsed in memory and are not retained after the job is accepted.
 
 ## Object Storage & Backups (Cloudflare R2)
 
 Object storage is **optional** — set the `R2_*` variables to enable it; without them the app runs normally and storage features are disabled. R2 is used for:
 
 - **Avatars** — `avatars/{user_id}.{ext}`, served via the asset proxy (or a public domain if `R2_PUBLIC_BASE_URL` is set).
-- **Import archive** — raw uploads under `imports/`.
 - **Poster cache** — an opt-in write-through cache (`VITE_USE_R2_IMAGES=true`) that mirrors TMDB images under `posters/` and serves them from `GET /api/img/{size}/{path}`.
 - **Database backups** — `scripts/backup_to_r2.sh` runs `pg_dump | gzip` and uploads a timestamped snapshot to `backups/`, pruning anything older than the retention window (default 14 days). Schedule it with cron:
   ```cron

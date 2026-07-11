@@ -21,8 +21,8 @@ const AVATAR_EXTS: &[&str] = &["png", "jpg", "webp", "gif"];
 const POSTER_SIZES: &[&str] = &[
     "w45", "w92", "w154", "w185", "w300", "w342", "w500", "w780", "w1280", "original",
 ];
-/// Prefixes the public asset proxy is allowed to serve. Private objects
-/// (imports/, backups/) live in the same bucket and must never be reachable here.
+/// Prefixes the public asset proxy is allowed to serve. Private backup objects
+/// live in the same bucket and must never be reachable here.
 const PUBLIC_PREFIXES: &[&str] = &["avatars/", "posters/"];
 
 pub fn configure(cfg: &mut web::ServiceConfig) {
