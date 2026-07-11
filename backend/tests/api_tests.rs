@@ -963,6 +963,230 @@ async fn test_tracking_requires_auth() {
 
 #[actix_web::test]
 #[ignore = "requires test DB"]
+async fn test_tracking_status_transitions_only_record_completions() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (token, _, user_id) =
+        register_user(&app, "trackmovie", "trackmovie@example.com", "Pass1234").await;
+    let user_id = Uuid::parse_str(&user_id).unwrap();
+
+    let media_id = sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO media (tmdb_id, media_type, title, runtime_minutes)
+        VALUES (991001, 'movie', 'Tracking Test Movie', 120)
+        RETURNING id"#,
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/tracking")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .set_json(json!({
+            "tmdb_id": 991001,
+            "media_type": "movie",
+            "status": "plan_to_watch"
+        }))
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 201);
+    let body: Value = actix_test::read_body_json(resp).await;
+    let tracking_id = body["id"].as_str().unwrap().to_string();
+    assert!(body["completed_at"].is_null());
+
+    let history_count = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM watch_history WHERE user_id = $1 AND media_id = $2",
+    )
+    .bind(user_id)
+    .bind(media_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(history_count, 0, "planning a title is not a watch event");
+
+    let req = actix_test::TestRequest::patch()
+        .uri(&format!("/api/tracking/{tracking_id}"))
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .set_json(json!({ "status": "completed" }))
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let body: Value = actix_test::read_body_json(resp).await;
+    assert!(body["completed_at"].is_string());
+
+    let history_count = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM watch_history WHERE user_id = $1 AND media_id = $2 AND episode_id IS NULL",
+    )
+    .bind(user_id)
+    .bind(media_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(history_count, 1);
+
+    let req = actix_test::TestRequest::patch()
+        .uri(&format!("/api/tracking/{tracking_id}"))
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .set_json(json!({ "status": "watching" }))
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let body: Value = actix_test::read_body_json(resp).await;
+    assert!(body["completed_at"].is_null());
+
+    let req = actix_test::TestRequest::patch()
+        .uri(&format!("/api/tracking/{tracking_id}"))
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .set_json(json!({ "status": "completed" }))
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+
+    let history_count = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM watch_history WHERE user_id = $1 AND media_id = $2",
+    )
+    .bind(user_id)
+    .bind(media_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(history_count, 1, "re-completing must not invent a rewatch");
+
+    let tomorrow = (chrono::Utc::now().date_naive() + chrono::Duration::days(1)).to_string();
+    let req = actix_test::TestRequest::patch()
+        .uri(&format!("/api/tracking/{tracking_id}"))
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .set_json(json!({ "completed_at": tomorrow }))
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 400);
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn test_completing_show_records_cached_episodes_idempotently() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (token, _, user_id) =
+        register_user(&app, "trackshow", "trackshow@example.com", "Pass1234").await;
+    let user_id = Uuid::parse_str(&user_id).unwrap();
+
+    let media_id = sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO media (tmdb_id, media_type, title, runtime_minutes)
+        VALUES (991002, 'tv', 'Tracking Test Show', 45)
+        RETURNING id"#,
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let season_id = sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO seasons (media_id, season_number, name, episode_count)
+        VALUES ($1, 1, 'Season 1', 2)
+        RETURNING id"#,
+    )
+    .bind(media_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO episodes (season_id, episode_number, name, runtime_minutes)
+        VALUES ($1, 1, 'Episode 1', 42), ($1, 2, 'Episode 2', 44)"#,
+    )
+    .bind(season_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/tracking")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .set_json(json!({
+            "tmdb_id": 991002,
+            "media_type": "tv",
+            "status": "completed"
+        }))
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 201);
+    let body: Value = actix_test::read_body_json(resp).await;
+    let tracking_id = body["id"].as_str().unwrap().to_string();
+
+    let counts = sqlx::query_as::<_, (i64, i64)>(
+        r#"SELECT
+            COUNT(*) FILTER (WHERE episode_id IS NOT NULL),
+            COUNT(*) FILTER (WHERE episode_id IS NULL)
+        FROM watch_history WHERE user_id = $1 AND media_id = $2"#,
+    )
+    .bind(user_id)
+    .bind(media_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(counts, (2, 0));
+
+    for status in ["watching", "completed"] {
+        let req = actix_test::TestRequest::patch()
+            .uri(&format!("/api/tracking/{tracking_id}"))
+            .insert_header(("Authorization", format!("Bearer {token}")))
+            .peer_addr(peer_addr())
+            .set_json(json!({ "status": status }))
+            .to_request();
+        let resp = actix_test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 200);
+    }
+
+    let history_count = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM watch_history WHERE user_id = $1 AND media_id = $2",
+    )
+    .bind(user_id)
+    .bind(media_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(history_count, 2);
+
+    let uncached_media_id = sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO media (tmdb_id, media_type, title, runtime_minutes)
+        VALUES (991003, 'tv', 'Uncached Tracking Test Show', 30)
+        RETURNING id"#,
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let req = actix_test::TestRequest::post()
+        .uri("/api/tracking")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .set_json(json!({
+            "tmdb_id": 991003,
+            "media_type": "tv",
+            "status": "completed"
+        }))
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 201);
+
+    let marker_count = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM watch_history WHERE user_id = $1 AND media_id = $2 AND episode_id IS NULL",
+    )
+    .bind(user_id)
+    .bind(uncached_media_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(marker_count, 1);
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
 async fn test_history_requires_auth() {
     let pool = setup_pool().await;
     clean_db(&pool).await;
