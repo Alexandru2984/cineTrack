@@ -104,6 +104,9 @@ fn create_app(
         .app_data(web::Data::new(config))
         .app_data(web::Data::new(tmdb_service))
         .app_data(web::Data::new(email_service))
+        .app_data(web::Data::new(
+            None::<cinetrack::services::storage::StorageService>,
+        ))
         .configure(cinetrack::routes::configure)
 }
 
@@ -2166,6 +2169,18 @@ async fn test_metrics_endpoint_exposed() {
         .to_request();
     let _ = actix_test::call_service(&app, warm).await;
 
+    for path in [
+        "/unknown/client-controlled-a",
+        "/unknown/client-controlled-b",
+    ] {
+        let unknown = actix_test::TestRequest::get()
+            .uri(path)
+            .peer_addr(peer_addr())
+            .to_request();
+        let response = actix_test::call_service(&app, unknown).await;
+        assert_eq!(response.status(), 404);
+    }
+
     let req = actix_test::TestRequest::get()
         .uri("/metrics")
         .peer_addr(peer_addr())
@@ -2178,6 +2193,14 @@ async fn test_metrics_endpoint_exposed() {
     assert!(
         text.contains("cinetrack_http_requests_total"),
         "metrics output missing request counter:\n{text}"
+    );
+    assert!(
+        text.contains("endpoint=\"UNMATCHED\",method=\"GET\",status=\"404\"} 2"),
+        "unmatched routes should share one bounded label:\n{text}"
+    );
+    assert!(
+        !text.contains("client-controlled"),
+        "raw paths leaked into labels"
     );
 }
 

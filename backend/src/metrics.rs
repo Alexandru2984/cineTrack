@@ -7,6 +7,7 @@ use actix_web_prom::{PrometheusMetrics, PrometheusMetricsBuilder};
 pub fn build() -> PrometheusMetrics {
     PrometheusMetricsBuilder::new("cinetrack")
         .endpoint("/metrics")
+        .mask_unmatched_patterns("UNMATCHED")
         .build()
         .expect("Failed to build Prometheus metrics middleware")
 }
