@@ -1,7 +1,15 @@
-#!/bin/bash
-set -e
+#!/usr/bin/env bash
+set -euo pipefail
 
-cd "$(dirname "$0")/.."
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+TEST_PROJECT="cinetrack-test"
+
+cleanup() {
+  docker compose -p "$TEST_PROJECT" -f "$ROOT_DIR/docker-compose.test.yml" down >/dev/null 2>&1 || true
+}
+
+trap cleanup EXIT
+cd "$ROOT_DIR"
 
 echo "=== Backend Unit Tests ==="
 cd backend
@@ -16,7 +24,7 @@ echo ""
 echo "=== Backend Integration Tests ==="
 echo "Starting test database..."
 cd ..
-docker compose -f docker-compose.test.yml up -d --wait 2>/dev/null
+docker compose -p "$TEST_PROJECT" -f docker-compose.test.yml up -d --wait 2>/dev/null
 
 echo "Running integration tests..."
 cd backend
@@ -26,7 +34,8 @@ cargo test --test api_tests -- --ignored --test-threads=1 2>&1 | grep -E "test |
 echo ""
 echo "Cleaning up test database..."
 cd ..
-docker compose -f docker-compose.test.yml down 2>/dev/null
+cleanup
+trap - EXIT
 
 echo ""
 echo "=== All tests complete ==="

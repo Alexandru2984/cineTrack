@@ -2,7 +2,9 @@ use actix_cors::Cors;
 use actix_governor::{Governor, GovernorConfigBuilder};
 use actix_web::{middleware as actix_middleware, web, App, HttpResponse, HttpServer};
 
-use std::io::Write;
+use std::io::{Read, Write};
+use std::net::{SocketAddr, TcpStream};
+use std::time::Duration;
 
 use cinetrack::{
     config, db, metrics,
@@ -16,6 +18,28 @@ use cinetrack::{
 /// Access-log format including the per-request correlation id (set by the
 /// request_id middleware and echoed in the X-Request-Id response header).
 const LOG_FORMAT: &str = r#"%a "%r" %s %b "%{User-Agent}i" %T req-id=%{x-request-id}o"#;
+
+fn run_healthcheck() -> std::io::Result<()> {
+    let port = std::env::var("APP_PORT")
+        .unwrap_or_else(|_| "8080".to_string())
+        .parse::<u16>()
+        .map_err(|err| std::io::Error::new(std::io::ErrorKind::InvalidInput, err))?;
+    let address = SocketAddr::from(([127, 0, 0, 1], port));
+    let timeout = Duration::from_secs(2);
+    let mut stream = TcpStream::connect_timeout(&address, timeout)?;
+    stream.set_read_timeout(Some(timeout))?;
+    stream.set_write_timeout(Some(timeout))?;
+    stream
+        .write_all(b"GET /api/health HTTP/1.0\r\nHost: localhost\r\nConnection: close\r\n\r\n")?;
+
+    let mut status = [0_u8; 12];
+    stream.read_exact(&mut status)?;
+    if status == *b"HTTP/1.0 200" || status == *b"HTTP/1.1 200" {
+        Ok(())
+    } else {
+        Err(std::io::Error::other("health endpoint returned non-200"))
+    }
+}
 
 /// Initialize logging. Keeps env_logger's `RUST_LOG`-driven filtering but tags
 /// every line with the in-flight request's correlation id, so application and
@@ -50,6 +74,11 @@ fn init_logger() {
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     dotenvy::dotenv().ok();
+
+    if std::env::args().any(|arg| arg == "--healthcheck") {
+        return run_healthcheck();
+    }
+
     init_logger();
 
     let config = config::Config::from_env();
@@ -123,7 +152,9 @@ async fn main() -> std::io::Result<()> {
         let security_headers = actix_middleware::DefaultHeaders::new()
             .add(("X-Content-Type-Options", "nosniff"))
             .add(("X-Frame-Options", "DENY"))
-            .add(("Referrer-Policy", "strict-origin-when-cross-origin"));
+            .add(("Referrer-Policy", "strict-origin-when-cross-origin"))
+            .add(("Cache-Control", "no-store"))
+            .add(("Pragma", "no-cache"));
 
         let mut cors = Cors::default()
             .allowed_methods(vec!["GET", "POST", "PATCH", "DELETE", "OPTIONS"])

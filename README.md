@@ -144,6 +144,7 @@ docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
 - Database migrations run automatically on backend startup. Because they are embedded at compile time, a new migration requires a backend rebuild.
 - The `db` service uses a named volume, so rebuilding/redeploying does not touch existing data.
 - Production containers run behind a host-level Nginx reverse proxy with SSL termination, as non-root users on a read-only root filesystem.
+- The canonical host vhost is `nginx/vazute.micutu.com.conf`. Install it under `/etc/nginx/sites-available/`, validate with `nginx -t`, then reload Nginx; do not maintain a second untracked copy by hand.
 
 ### Local Development (without Docker)
 
@@ -173,10 +174,10 @@ cd backend && cargo test
 cd frontend && npm test
 
 # Backend integration tests (44 tests) — needs a test DB
-docker compose -f docker-compose.test.yml up -d --wait
+docker compose -p cinetrack-test -f docker-compose.test.yml up -d --wait
 cd backend && TEST_DATABASE_URL="postgres://test_user:test_pass@127.0.0.1:55433/cinetrack_test" \
   cargo test --test api_tests -- --ignored --test-threads=1
-docker compose -f docker-compose.test.yml down
+docker compose -p cinetrack-test -f docker-compose.test.yml down
 
 # Frontend E2E — mocked backend, no DB needed (Playwright boots Vite itself)
 cd frontend && npm run test:e2e

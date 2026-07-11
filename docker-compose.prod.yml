@@ -1,3 +1,9 @@
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   db:
     image: postgres:16-alpine
@@ -11,6 +17,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     restart: unless-stopped
+    logging: *default-logging
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 10s
@@ -28,6 +35,8 @@ services:
       context: ./backend
       dockerfile: Dockerfile.prod
     env_file: .env.prod
+    environment:
+      RUST_LOG: ${RUST_LOG:-cinetrack=info,actix_web=info}
     read_only: true
     tmpfs:
       - /tmp:size=64m,noexec,nosuid,nodev
@@ -36,12 +45,21 @@ services:
     cap_drop:
       - ALL
     pids_limit: 256
+    init: true
     restart: unless-stopped
+    stop_grace_period: 30s
+    logging: *default-logging
     depends_on:
       db:
         condition: service_healthy
     ports:
       - "127.0.0.1:8090:8080"
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/cinetrack", "--healthcheck"]
+      interval: 30s
+      timeout: 3s
+      start_period: 10s
+      retries: 3
     deploy:
       resources:
         limits:
@@ -68,9 +86,18 @@ services:
     cap_drop:
       - ALL
     pids_limit: 128
+    init: true
     restart: unless-stopped
+    stop_grace_period: 15s
+    logging: *default-logging
     ports:
       - "127.0.0.1:8091:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/"]
+      interval: 30s
+      timeout: 3s
+      start_period: 5s
+      retries: 3
     deploy:
       resources:
         limits:
