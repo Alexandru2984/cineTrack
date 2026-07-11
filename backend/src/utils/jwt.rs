@@ -37,6 +37,7 @@ pub fn generate_access_token(
 pub fn validate_token(token: &str, secret: &str) -> Result<Claims, AppError> {
     let mut validation = Validation::new(Algorithm::HS256);
     validation.validate_exp = true;
+    validation.set_required_spec_claims(&["exp", "sub"]);
 
     let token_data = decode::<Claims>(
         token,
@@ -103,6 +104,24 @@ mod tests {
     fn test_validate_token_rejects_garbage() {
         let result = validate_token("not.a.jwt", "secret");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_validate_token_rejects_malformed_exp_type() {
+        let secret = "test_secret_key_long_enough";
+        let claims = serde_json::json!({
+            "sub": Uuid::new_v4(),
+            "iat": Utc::now().timestamp(),
+            "exp": "never"
+        });
+        let token = encode(
+            &Header::default(),
+            &claims,
+            &EncodingKey::from_secret(secret.as_bytes()),
+        )
+        .unwrap();
+
+        assert!(validate_token(&token, secret).is_err());
     }
 
     #[test]
