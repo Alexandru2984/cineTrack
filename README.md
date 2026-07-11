@@ -19,8 +19,8 @@ A personal movie and TV show tracker with social features, inspired by TV Time. 
 - **Import from TV Time** — Upload your TV Time export and bring over your whole library, episode history and rewatches (background job with progress + a matched/unmatched summary)
 - **Profile Avatars** — Upload a profile picture (stored in Cloudflare R2)
 - **Dark Mode** — Toggle between light and dark themes
-- **Social Features** — Follow other users, public/private profiles, custom lists
-- **Privacy Controls** — Toggle profile visibility; private profiles hide activity from non-followers
+- **Social Features** — Follow other users, approve or reject requests to private profiles, and create custom lists
+- **Privacy Controls** — Toggle profile visibility; private profiles expose details and activity only to approved followers
 
 ## Tech Stack
 
@@ -61,9 +61,9 @@ The application has been through multiple security audits. Key measures include:
 - **Input Validation** — All user inputs validated with length limits (bio 500, review 5000, list names 200, etc.) and content validation
 - **Upload Safety** — Avatar uploads are type- and size-checked (image types, ≤3 MB); import files are size-capped; the poster cache validates the `{size}/{path}` spec against a size allowlist and rejects traversal/host injection (no SSRF)
 - **Storage Access Control** — The public asset proxy only serves the `avatars/` and `posters/` prefixes; private objects (`imports/`, `backups/`) are never reachable through it
-- **Privacy** — Private profiles hide activity/followers from non-followers; public user endpoints never expose emails; no user enumeration on register
+- **Privacy** — Private profiles require an approved follow request before details or activity become visible; public user endpoints never expose emails; no user enumeration on register
 - **Access Control** — Private lists return 404 to non-owners; all media endpoints require authentication; history entries validated against existing media
-- **Security Headers** — HSTS, X-Frame-Options (DENY), X-Content-Type-Options, Referrer-Policy, Permissions-Policy, Content-Security-Policy (strict, with an explicit script/connect domain allowlist)
+- **Security Headers** — HSTS, X-Frame-Options (DENY), X-Content-Type-Options, Referrer-Policy, Permissions-Policy, and a same-origin-only script/connect Content-Security-Policy
 - **Container Security** — Both backend and frontend run as non-root users; Docker resource limits enforced
 - **Error Handling** — Internal errors (TMDB, JWT) sanitized before reaching client; no stack traces or implementation details leaked
 - **Secrets** — Cryptographically generated JWT secret (64 bytes) and DB password; `.env.prod` is `chmod 600` and `.gitignore`'d

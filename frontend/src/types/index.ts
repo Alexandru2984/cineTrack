@@ -121,7 +121,16 @@ export interface PublicUserProfile {
   followers_count: number;
   following_count: number;
   is_following: boolean;
+  follow_status: 'pending' | 'accepted' | null;
+  can_view_activity: boolean;
   created_at: string;
+}
+
+export interface FollowRequest {
+  user_id: string;
+  username: string;
+  avatar_url: string | null;
+  requested_at: string;
 }
 
 export interface ActivityItem {

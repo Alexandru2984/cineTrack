@@ -9,8 +9,14 @@ import {
   useMe,
   useUploadAvatar,
   useDeleteAvatar,
+  useUpdatePrivacy,
 } from '@/hooks/useAuth';
 import { useImportJobs, useStartImport, useImportJob } from '@/hooks/useImport';
+import {
+  useAcceptFollowRequest,
+  useFollowRequests,
+  useRejectFollowRequest,
+} from '@/hooks/useSocial';
 import { getApiErrorMessage } from '@/lib/api';
 import { formatDateTime } from '@/lib/utils';
 import type { ImportJob } from '@/types';
@@ -19,6 +25,7 @@ import {
   CheckCircle2,
   DownloadCloud,
   ImageUp,
+  LockKeyhole,
   KeyRound,
   Loader2,
   LogOut,
@@ -26,7 +33,117 @@ import {
   Trash2,
   UploadCloud,
   UserCircle2,
+  UserRoundCheck,
+  X,
 } from 'lucide-react';
+
+function PrivacyCard() {
+  const { data: me } = useMe();
+  const updatePrivacy = useUpdatePrivacy();
+  const isPrivate = me ? !me.is_public : false;
+
+  return (
+    <section className="rounded-lg border border-[hsl(var(--border))] p-6">
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <h2 className="flex items-center gap-2 text-lg font-semibold">
+            <LockKeyhole className="h-5 w-5 text-[hsl(var(--primary))]" /> Profile privacy
+          </h2>
+          <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">
+            {isPrivate
+              ? 'Only approved followers can see your profile details and activity.'
+              : 'Your profile details and activity are visible to everyone.'}
+          </p>
+        </div>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={isPrivate}
+          aria-label="Private profile"
+          disabled={!me || updatePrivacy.isPending}
+          onClick={() => updatePrivacy.mutate(isPrivate)}
+          className={`relative h-6 w-11 shrink-0 rounded-full transition-colors disabled:opacity-50 ${
+            isPrivate ? 'bg-[hsl(var(--primary))]' : 'bg-[hsl(var(--muted))]'
+          }`}
+        >
+          <span
+            className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${
+              isPrivate ? 'translate-x-5' : 'translate-x-0.5'
+            }`}
+          />
+        </button>
+      </div>
+      {updatePrivacy.error && (
+        <p className="mt-3 text-sm text-[hsl(var(--destructive))]">
+          {getApiErrorMessage(updatePrivacy.error, 'Could not update profile privacy')}
+        </p>
+      )}
+    </section>
+  );
+}
+
+function FollowRequestsCard() {
+  const { data: requests, isLoading } = useFollowRequests();
+  const accept = useAcceptFollowRequest();
+  const reject = useRejectFollowRequest();
+
+  return (
+    <section className="rounded-lg border border-[hsl(var(--border))] p-6">
+      <h2 className="flex items-center gap-2 text-lg font-semibold">
+        <UserRoundCheck className="h-5 w-5 text-[hsl(var(--primary))]" /> Follow requests
+      </h2>
+      {isLoading ? (
+        <Loader2 className="mt-4 h-5 w-5 animate-spin text-[hsl(var(--muted-foreground))]" />
+      ) : !requests?.length ? (
+        <p className="mt-3 text-sm text-[hsl(var(--muted-foreground))]">No pending requests.</p>
+      ) : (
+        <div className="mt-3 divide-y divide-[hsl(var(--border))]">
+          {requests.map((request) => (
+            <div key={request.user_id} className="flex items-center gap-3 py-3 first:pt-0 last:pb-0">
+              {request.avatar_url ? (
+                <img
+                  src={request.avatar_url}
+                  alt=""
+                  className="h-10 w-10 rounded-full object-cover"
+                />
+              ) : (
+                <UserCircle2 className="h-10 w-10 text-[hsl(var(--muted-foreground))]" />
+              )}
+              <span className="min-w-0 flex-1 truncate text-sm font-medium">
+                {request.username}
+              </span>
+              <button
+                type="button"
+                title="Accept request"
+                aria-label={`Accept follow request from ${request.username}`}
+                disabled={accept.isPending || reject.isPending}
+                onClick={() => accept.mutate(request.user_id)}
+                className="rounded-md bg-[hsl(var(--primary))] p-2 text-white disabled:opacity-50"
+              >
+                <CheckCircle2 className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                title="Reject request"
+                aria-label={`Reject follow request from ${request.username}`}
+                disabled={accept.isPending || reject.isPending}
+                onClick={() => reject.mutate(request.user_id)}
+                className="rounded-md border border-[hsl(var(--border))] p-2 hover:text-[hsl(var(--destructive))] disabled:opacity-50"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+      {(accept.error || reject.error) && (
+        <p className="mt-3 text-sm text-[hsl(var(--destructive))]">
+          {getApiErrorMessage(accept.error ?? reject.error, 'Could not update follow request')}
+        </p>
+      )}
+    </section>
+  );
+}
 
 function ProfilePictureCard() {
   const { data: me } = useMe();
@@ -497,6 +614,8 @@ export default function SettingsPage() {
     <div className="mx-auto max-w-3xl px-4 py-8 space-y-6">
       <h1 className="text-2xl font-bold">Settings</h1>
       <ProfilePictureCard />
+      <PrivacyCard />
+      <FollowRequestsCard />
       <ImportCard />
       <ChangePasswordCard />
       <SessionsCard />

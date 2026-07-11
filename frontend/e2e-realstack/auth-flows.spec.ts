@@ -93,6 +93,57 @@ test('lists the current device under active sessions', async ({ page }) => {
   await expect(page.getByText('This device')).toBeVisible();
 });
 
+test('private profiles require an approved follow request', async ({ browser }) => {
+  const ownerContext = await browser.newContext({ baseURL: BASE });
+  const followerContext = await browser.newContext({ baseURL: BASE });
+  const ownerPage = await ownerContext.newPage();
+  const followerPage = await followerContext.newPage();
+
+  try {
+    const owner = uniqueAccount();
+    await registerViaUi(ownerPage, owner);
+    await ownerPage.getByRole('link', { name: 'Settings' }).click();
+
+    const privacy = ownerPage.getByRole('switch', { name: 'Private profile' });
+    await expect(privacy).toHaveAttribute('aria-checked', 'false');
+    await privacy.click();
+    await expect(privacy).toHaveAttribute('aria-checked', 'true');
+
+    const follower = uniqueAccount();
+    await registerViaUi(followerPage, follower);
+    await followerPage.goto(`/profile/${owner.username}`);
+    await expect(followerPage.getByText('Private', { exact: true })).toBeVisible();
+    await expect(followerPage.getByText(/accepted follow request is required/i)).toBeVisible();
+    await followerPage.getByRole('button', { name: 'Request to follow' }).click();
+    await expect(followerPage.getByRole('button', { name: 'Request sent' })).toBeVisible();
+
+    await ownerPage.reload();
+    await expect(ownerPage.getByText(/Follow requests/i)).toBeVisible();
+    await expect(ownerPage.getByText(follower.username, { exact: true })).toBeVisible();
+    await ownerPage
+      .getByRole('button', { name: `Reject follow request from ${follower.username}` })
+      .click();
+    await expect(ownerPage.getByText(follower.username, { exact: true })).toHaveCount(0);
+
+    await followerPage.reload();
+    await followerPage.getByRole('button', { name: 'Request to follow' }).click();
+    await expect(followerPage.getByRole('button', { name: 'Request sent' })).toBeVisible();
+
+    await ownerPage.reload();
+    await ownerPage
+      .getByRole('button', { name: `Accept follow request from ${follower.username}` })
+      .click();
+    await expect(ownerPage.getByRole('button', { name: /Accept follow request from/ })).toHaveCount(0);
+
+    await followerPage.reload();
+    await expect(followerPage.getByRole('button', { name: 'Unfollow' })).toBeVisible();
+    await expect(followerPage.getByText(/accepted follow request is required/i)).toHaveCount(0);
+  } finally {
+    await ownerContext.close();
+    await followerContext.close();
+  }
+});
+
 test('deleting the account logs out and blocks re-login', async ({ page }) => {
   const acct = uniqueAccount();
   await registerViaUi(page, acct);

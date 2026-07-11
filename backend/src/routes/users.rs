@@ -19,6 +19,15 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
             .route("/me", web::delete().to(delete_account))
             .route("/me/followers", web::get().to(my_followers))
             .route("/me/following", web::get().to(my_following))
+            .route("/me/follow-requests", web::get().to(my_follow_requests))
+            .route(
+                "/me/follow-requests/{follower_id}/accept",
+                web::post().to(accept_follow_request),
+            )
+            .route(
+                "/me/follow-requests/{follower_id}",
+                web::delete().to(reject_follow_request),
+            )
             .route("/{username}", web::get().to(get_profile))
             .route("/{username}/activity", web::get().to(get_user_activity))
             .route("/{username}/follow", web::post().to(follow_user))
@@ -40,29 +49,32 @@ async fn get_profile(
         .await?
         .ok_or_else(|| AppError::NotFound("User not found".to_string()))?;
 
-    let followers_count =
-        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM follows WHERE following_id = $1")
-            .bind(user.id)
-            .fetch_one(pool.get_ref())
-            .await?;
+    let followers_count = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM follows WHERE following_id = $1 AND status = 'accepted'",
+    )
+    .bind(user.id)
+    .fetch_one(pool.get_ref())
+    .await?;
 
-    let following_count =
-        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM follows WHERE follower_id = $1")
-            .bind(user.id)
-            .fetch_one(pool.get_ref())
-            .await?;
+    let following_count = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM follows WHERE follower_id = $1 AND status = 'accepted'",
+    )
+    .bind(user.id)
+    .fetch_one(pool.get_ref())
+    .await?;
 
-    let is_following = if let Some(uid) = current_user_id {
-        sqlx::query_scalar::<_, bool>(
-            "SELECT EXISTS(SELECT 1 FROM follows WHERE follower_id = $1 AND following_id = $2)",
+    let follow_status = if let Some(uid) = current_user_id.filter(|uid| *uid != user.id) {
+        sqlx::query_scalar::<_, String>(
+            "SELECT status FROM follows WHERE follower_id = $1 AND following_id = $2",
         )
         .bind(uid)
         .bind(user.id)
-        .fetch_one(pool.get_ref())
+        .fetch_optional(pool.get_ref())
         .await?
     } else {
-        false
+        None
     };
+    let is_following = follow_status.as_deref() == Some("accepted");
     let can_view_private_details = user.is_public
         || current_user_id == Some(user.id)
         || (current_user_id.is_some() && is_following);
@@ -84,6 +96,8 @@ async fn get_profile(
         followers_count,
         following_count,
         is_following,
+        follow_status,
+        can_view_activity: can_view_private_details,
         created_at: user.created_at,
     }))
 }
@@ -97,6 +111,7 @@ async fn update_profile(
     body.validate()?;
     let data = body.into_inner();
 
+    let mut tx = pool.begin().await?;
     let user = sqlx::query_as::<_, User>(
         r#"UPDATE users SET
             username = COALESCE($2, username),
@@ -111,8 +126,25 @@ async fn update_profile(
     .bind(&data.bio)
     .bind(&data.avatar_url)
     .bind(data.is_public)
-    .fetch_one(pool.get_ref())
+    .fetch_one(&mut *tx)
     .await?;
+
+    if data.is_public == Some(true) {
+        let accepted = sqlx::query(
+            "UPDATE follows SET status = 'accepted', updated_at = NOW()
+             WHERE following_id = $1 AND status = 'pending'",
+        )
+        .bind(user_id)
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+        if accepted > 0 {
+            log::info!(
+                "audit: accepted pending follow requests after profile became public user_id={user_id} count={accepted}"
+            );
+        }
+    }
+    tx.commit().await?;
 
     Ok(HttpResponse::Ok().json(crate::dto::auth::UserResponse::from(user)))
 }
@@ -164,25 +196,56 @@ async fn follow_user(
     let user_id = require_auth(&req).await?;
     let username = path.into_inner();
 
-    let target = sqlx::query_as::<_, User>("SELECT * FROM users WHERE LOWER(username) = LOWER($1)")
-        .bind(&username)
-        .fetch_optional(pool.get_ref())
-        .await?
-        .ok_or_else(|| AppError::NotFound("User not found".to_string()))?;
+    let mut tx = pool.begin().await?;
+    let target = sqlx::query_as::<_, User>(
+        "SELECT * FROM users WHERE LOWER(username) = LOWER($1) FOR SHARE",
+    )
+    .bind(&username)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(|| AppError::NotFound("User not found".to_string()))?;
 
     if target.id == user_id {
         return Err(AppError::BadRequest("Cannot follow yourself".to_string()));
     }
 
-    sqlx::query(
-        "INSERT INTO follows (follower_id, following_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+    let requested_status = if target.is_public {
+        "accepted"
+    } else {
+        "pending"
+    };
+    let status = sqlx::query_scalar::<_, String>(
+        r#"INSERT INTO follows (follower_id, following_id, status)
+        VALUES ($1, $2, $3)
+        ON CONFLICT (follower_id, following_id) DO UPDATE SET
+            status = CASE
+                WHEN follows.status = 'accepted' THEN 'accepted'
+                ELSE EXCLUDED.status
+            END,
+            updated_at = NOW()
+        RETURNING status"#,
     )
     .bind(user_id)
     .bind(target.id)
-    .execute(pool.get_ref())
+    .bind(requested_status)
+    .fetch_one(&mut *tx)
     .await?;
+    tx.commit().await?;
 
-    Ok(HttpResponse::Ok().json(serde_json::json!({"message": "Followed successfully"})))
+    log::info!(
+        "audit: follow relationship requested follower_id={user_id} following_id={} status={status}",
+        target.id
+    );
+    let is_pending = status == "pending";
+    let body = serde_json::json!({
+        "message": if is_pending { "Follow request sent" } else { "Followed successfully" },
+        "status": status,
+    });
+    if is_pending {
+        Ok(HttpResponse::Accepted().json(body))
+    } else {
+        Ok(HttpResponse::Ok().json(body))
+    }
 }
 
 async fn unfollow_user(
@@ -199,13 +262,105 @@ async fn unfollow_user(
         .await?
         .ok_or_else(|| AppError::NotFound("User not found".to_string()))?;
 
-    sqlx::query("DELETE FROM follows WHERE follower_id = $1 AND following_id = $2")
+    let removed_status = sqlx::query_scalar::<_, String>(
+        "DELETE FROM follows WHERE follower_id = $1 AND following_id = $2 RETURNING status",
+    )
+    .bind(user_id)
+    .bind(target.id)
+    .fetch_optional(pool.get_ref())
+    .await?;
+
+    let message = if removed_status.as_deref() == Some("pending") {
+        "Follow request canceled"
+    } else {
+        "Unfollowed successfully"
+    };
+    Ok(HttpResponse::Ok().json(serde_json::json!({"message": message})))
+}
+
+async fn my_follow_requests(
+    pool: web::Data<PgPool>,
+    req: HttpRequest,
+    pagination: web::Query<PaginationParams>,
+) -> Result<HttpResponse, AppError> {
+    let user_id = require_auth(&req).await?;
+    let requests =
+        sqlx::query_as::<_, (Uuid, String, Option<String>, chrono::DateTime<chrono::Utc>)>(
+            r#"SELECT u.id, u.username,
+            CASE WHEN u.is_public THEN u.avatar_url ELSE NULL END,
+            f.created_at
+        FROM follows f
+        JOIN users u ON u.id = f.follower_id
+        WHERE f.following_id = $1 AND f.status = 'pending'
+        ORDER BY f.created_at DESC
+        LIMIT $2 OFFSET $3"#,
+        )
         .bind(user_id)
-        .bind(target.id)
-        .execute(pool.get_ref())
+        .bind(pagination.limit_val())
+        .bind(pagination.offset())
+        .fetch_all(pool.get_ref())
         .await?;
 
-    Ok(HttpResponse::Ok().json(serde_json::json!({"message": "Unfollowed successfully"})))
+    let response: Vec<FollowRequestResponse> = requests
+        .into_iter()
+        .map(
+            |(user_id, username, avatar_url, requested_at)| FollowRequestResponse {
+                user_id,
+                username,
+                avatar_url,
+                requested_at,
+            },
+        )
+        .collect();
+    Ok(HttpResponse::Ok().json(response))
+}
+
+async fn accept_follow_request(
+    pool: web::Data<PgPool>,
+    req: HttpRequest,
+    path: web::Path<Uuid>,
+) -> Result<HttpResponse, AppError> {
+    let user_id = require_auth(&req).await?;
+    let follower_id = path.into_inner();
+    let updated = sqlx::query(
+        "UPDATE follows SET status = 'accepted', updated_at = NOW()
+         WHERE follower_id = $1 AND following_id = $2 AND status = 'pending'",
+    )
+    .bind(follower_id)
+    .bind(user_id)
+    .execute(pool.get_ref())
+    .await?
+    .rows_affected();
+
+    if updated == 0 {
+        return Err(AppError::NotFound("Follow request not found".to_string()));
+    }
+    log::info!("audit: follow request accepted follower_id={follower_id} following_id={user_id}");
+    Ok(HttpResponse::Ok().json(serde_json::json!({"message": "Follow request accepted"})))
+}
+
+async fn reject_follow_request(
+    pool: web::Data<PgPool>,
+    req: HttpRequest,
+    path: web::Path<Uuid>,
+) -> Result<HttpResponse, AppError> {
+    let user_id = require_auth(&req).await?;
+    let follower_id = path.into_inner();
+    let deleted = sqlx::query(
+        "DELETE FROM follows
+         WHERE follower_id = $1 AND following_id = $2 AND status = 'pending'",
+    )
+    .bind(follower_id)
+    .bind(user_id)
+    .execute(pool.get_ref())
+    .await?
+    .rows_affected();
+
+    if deleted == 0 {
+        return Err(AppError::NotFound("Follow request not found".to_string()));
+    }
+    log::info!("audit: follow request rejected follower_id={follower_id} following_id={user_id}");
+    Ok(HttpResponse::Ok().json(serde_json::json!({"message": "Follow request rejected"})))
 }
 
 async fn my_followers(
@@ -218,7 +373,7 @@ async fn my_followers(
     let offset = pagination.offset();
 
     let followers = sqlx::query_as::<_, User>(
-        "SELECT u.* FROM users u JOIN follows f ON u.id = f.follower_id WHERE f.following_id = $1 LIMIT $2 OFFSET $3"
+        "SELECT u.* FROM users u JOIN follows f ON u.id = f.follower_id WHERE f.following_id = $1 AND f.status = 'accepted' LIMIT $2 OFFSET $3"
     )
     .bind(user_id)
     .bind(limit)
@@ -241,7 +396,7 @@ async fn my_following(
     let offset = pagination.offset();
 
     let following = sqlx::query_as::<_, User>(
-        "SELECT u.* FROM users u JOIN follows f ON u.id = f.following_id WHERE f.follower_id = $1 LIMIT $2 OFFSET $3"
+        "SELECT u.* FROM users u JOIN follows f ON u.id = f.following_id WHERE f.follower_id = $1 AND f.status = 'accepted' LIMIT $2 OFFSET $3"
     )
     .bind(user_id)
     .bind(limit)
@@ -329,7 +484,7 @@ async fn can_view_private_user(
     }
 
     let is_follower = sqlx::query_scalar::<_, bool>(
-        "SELECT EXISTS(SELECT 1 FROM follows WHERE follower_id = $1 AND following_id = $2)",
+        "SELECT EXISTS(SELECT 1 FROM follows WHERE follower_id = $1 AND following_id = $2 AND status = 'accepted')",
     )
     .bind(uid)
     .bind(user.id)

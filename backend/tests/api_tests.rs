@@ -4,6 +4,7 @@ use actix_web::{web, App};
 use serde_json::{json, Value};
 use sqlx::PgPool;
 use std::net::SocketAddr;
+use uuid::Uuid;
 
 // ── Helpers ────────────────────────────────────────────────────
 
@@ -1207,6 +1208,8 @@ async fn test_follow_and_unfollow() {
         .to_request();
     let resp = actix_test::call_service(&app, req).await;
     assert!(resp.status().is_success());
+    let body: Value = actix_test::read_body_json(resp).await;
+    assert_eq!(body["status"], "accepted");
 
     // Check following list
     let req = actix_test::TestRequest::get()
@@ -1239,6 +1242,190 @@ async fn test_follow_and_unfollow() {
     let resp = actix_test::call_service(&app, req).await;
     let body: Value = actix_test::read_body_json(resp).await;
     assert_eq!(body.as_array().unwrap().len(), 0);
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn test_private_follow_request_requires_owner_approval() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+
+    let (follower_token, _, follower_id) =
+        register_user(&app, "requester", "requester@example.com", "Pass1234").await;
+    let (owner_token, _, _) =
+        register_user(&app, "privateuser", "private@example.com", "Pass1234").await;
+    let (other_token, _, _) =
+        register_user(&app, "otheruser", "other@example.com", "Pass1234").await;
+
+    let req = actix_test::TestRequest::patch()
+        .uri("/api/users/me")
+        .insert_header(("Authorization", format!("Bearer {owner_token}")))
+        .set_json(json!({ "is_public": false, "bio": "private bio" }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/users/privateuser/follow")
+        .insert_header(("Authorization", format!("Bearer {follower_token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 202);
+    let body: Value = actix_test::read_body_json(resp).await;
+    assert_eq!(body["status"], "pending");
+
+    let req = actix_test::TestRequest::get()
+        .uri("/api/users/privateuser")
+        .insert_header(("Authorization", format!("Bearer {follower_token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let body: Value = actix_test::read_body_json(resp).await;
+    assert_eq!(body["follow_status"], "pending");
+    assert_eq!(body["is_following"], false);
+    assert_eq!(body["can_view_activity"], false);
+    assert!(body["bio"].is_null());
+    assert_eq!(body["followers_count"], 0);
+
+    let req = actix_test::TestRequest::get()
+        .uri("/api/users/privateuser/activity")
+        .insert_header(("Authorization", format!("Bearer {follower_token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 403);
+
+    let req = actix_test::TestRequest::get()
+        .uri("/api/users/me/following")
+        .insert_header(("Authorization", format!("Bearer {follower_token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    let body: Value = actix_test::read_body_json(resp).await;
+    assert!(body.as_array().unwrap().is_empty());
+
+    // A different account cannot accept someone else's incoming request.
+    let req = actix_test::TestRequest::post()
+        .uri(&format!(
+            "/api/users/me/follow-requests/{follower_id}/accept"
+        ))
+        .insert_header(("Authorization", format!("Bearer {other_token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 404);
+
+    let req = actix_test::TestRequest::get()
+        .uri("/api/users/me/follow-requests")
+        .insert_header(("Authorization", format!("Bearer {owner_token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let body: Value = actix_test::read_body_json(resp).await;
+    let requests = body.as_array().unwrap();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0]["user_id"], follower_id);
+    assert_eq!(requests[0]["username"], "requester");
+
+    let req = actix_test::TestRequest::post()
+        .uri(&format!(
+            "/api/users/me/follow-requests/{follower_id}/accept"
+        ))
+        .insert_header(("Authorization", format!("Bearer {owner_token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+
+    let req = actix_test::TestRequest::get()
+        .uri("/api/users/privateuser")
+        .insert_header(("Authorization", format!("Bearer {follower_token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    let body: Value = actix_test::read_body_json(resp).await;
+    assert_eq!(body["follow_status"], "accepted");
+    assert_eq!(body["is_following"], true);
+    assert_eq!(body["can_view_activity"], true);
+    assert_eq!(body["bio"], "private bio");
+    assert_eq!(body["followers_count"], 1);
+
+    let req = actix_test::TestRequest::get()
+        .uri("/api/users/privateuser/activity")
+        .insert_header(("Authorization", format!("Bearer {follower_token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+
+    let req = actix_test::TestRequest::delete()
+        .uri("/api/users/privateuser/follow")
+        .insert_header(("Authorization", format!("Bearer {follower_token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+
+    let req = actix_test::TestRequest::get()
+        .uri("/api/users/privateuser")
+        .insert_header(("Authorization", format!("Bearer {follower_token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    let body: Value = actix_test::read_body_json(resp).await;
+    assert!(body["follow_status"].is_null());
+    assert_eq!(body["can_view_activity"], false);
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn test_making_profile_public_accepts_pending_requests() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+
+    let (follower_token, _, follower_id) =
+        register_user(&app, "autofollower", "autofollower@example.com", "Pass1234").await;
+    let (owner_token, _, owner_id) =
+        register_user(&app, "autoowner", "autoowner@example.com", "Pass1234").await;
+
+    sqlx::query("UPDATE users SET is_public = false WHERE id = $1")
+        .bind(Uuid::parse_str(&owner_id).unwrap())
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/users/autoowner/follow")
+        .insert_header(("Authorization", format!("Bearer {follower_token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 202);
+
+    let req = actix_test::TestRequest::patch()
+        .uri("/api/users/me")
+        .insert_header(("Authorization", format!("Bearer {owner_token}")))
+        .set_json(json!({ "is_public": true }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+
+    let status = sqlx::query_scalar::<_, String>(
+        "SELECT status FROM follows WHERE follower_id = $1 AND following_id = $2",
+    )
+    .bind(Uuid::parse_str(&follower_id).unwrap())
+    .bind(Uuid::parse_str(&owner_id).unwrap())
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(status, "accepted");
 }
 
 // ── List CRUD Tests ───────────────────────────────────────────

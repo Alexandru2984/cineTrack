@@ -21,7 +21,17 @@ pub struct PublicUserProfile {
     pub followers_count: i64,
     pub following_count: i64,
     pub is_following: bool,
+    pub follow_status: Option<String>,
+    pub can_view_activity: bool,
     pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct FollowRequestResponse {
+    pub user_id: Uuid,
+    pub username: String,
+    pub avatar_url: Option<String>,
+    pub requested_at: chrono::DateTime<chrono::Utc>,
 }
 
 #[derive(Debug, Serialize)]

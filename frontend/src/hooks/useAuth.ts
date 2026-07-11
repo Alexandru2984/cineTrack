@@ -47,6 +47,23 @@ export function useMe() {
   });
 }
 
+export function useUpdatePrivacy() {
+  const setUser = useAuthStore((state) => state.setUser);
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (isPublic: boolean) => {
+      const response = await api.patch<User>('/users/me', { is_public: isPublic });
+      return response.data;
+    },
+    onSuccess: (user) => {
+      setUser(user);
+      qc.setQueryData(['me'], user);
+      void qc.invalidateQueries({ queryKey: ['follow-requests'] });
+      void qc.invalidateQueries({ queryKey: ['user'] });
+    },
+  });
+}
+
 export function useForgotPassword() {
   return useMutation({
     mutationFn: async (data: { email: string }) => {

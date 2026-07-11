@@ -84,6 +84,8 @@ describe('Type contracts', () => {
       followers_count: 10,
       following_count: 5,
       is_following: false,
+      follow_status: null,
+      can_view_activity: true,
       created_at: '2024-01-01',
     };
     expect(profile.followers_count).toBeGreaterThanOrEqual(0);

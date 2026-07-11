@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '@/lib/api';
-import type { PublicUserProfile, ActivityItem, UserSummary } from '@/types';
+import type { PublicUserProfile, ActivityItem, UserSummary, FollowRequest } from '@/types';
 
 export function useUserProfile(username: string) {
   return useQuery<PublicUserProfile>({
@@ -13,14 +13,14 @@ export function useUserProfile(username: string) {
   });
 }
 
-export function useUserActivity(username: string) {
+export function useUserActivity(username: string, enabled = true) {
   return useQuery<ActivityItem[]>({
     queryKey: ['user', username, 'activity'],
     queryFn: async () => {
       const res = await api.get(`/users/${encodeURIComponent(username)}/activity`);
       return res.data;
     },
-    enabled: !!username,
+    enabled: !!username && enabled,
   });
 }
 
@@ -28,7 +28,10 @@ export function useFollow() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (username: string) => {
-      await api.post(`/users/${encodeURIComponent(username)}/follow`);
+      const response = await api.post<{ status: 'pending' | 'accepted' }>(
+        `/users/${encodeURIComponent(username)}/follow`
+      );
+      return response.data;
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['user'] }),
   });
@@ -60,6 +63,44 @@ export function useFollowing() {
     queryFn: async () => {
       const res = await api.get('/users/me/following');
       return res.data;
+    },
+  });
+}
+
+export function useFollowRequests() {
+  return useQuery<FollowRequest[]>({
+    queryKey: ['follow-requests'],
+    queryFn: async () => {
+      const response = await api.get('/users/me/follow-requests');
+      return response.data;
+    },
+    refetchInterval: 30_000,
+  });
+}
+
+export function useAcceptFollowRequest() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (userId: string) => {
+      await api.post(`/users/me/follow-requests/${userId}/accept`);
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['follow-requests'] });
+      void qc.invalidateQueries({ queryKey: ['followers'] });
+      void qc.invalidateQueries({ queryKey: ['user'] });
+    },
+  });
+}
+
+export function useRejectFollowRequest() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (userId: string) => {
+      await api.delete(`/users/me/follow-requests/${userId}`);
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['follow-requests'] });
+      void qc.invalidateQueries({ queryKey: ['user'] });
     },
   });
 }
