@@ -1232,6 +1232,152 @@ async fn test_stats_requires_auth() {
 
 #[actix_web::test]
 #[ignore = "requires test DB"]
+async fn test_stats_count_events_rewatches_and_completed_show_gaps() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (token, _, user_id) =
+        register_user(&app, "statsuser", "statsuser@example.com", "Pass1234").await;
+    let user_id = Uuid::parse_str(&user_id).unwrap();
+
+    let show_id = sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO media (tmdb_id, media_type, title, runtime_minutes, genres)
+        VALUES (992001, 'tv', 'Completed Stats Show', 45, '[{"id": 1, "name": "Drama"}]')
+        RETURNING id"#,
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let season_id = sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO seasons (media_id, season_number, name, episode_count)
+        VALUES ($1, 1, 'Season 1', 3)
+        RETURNING id"#,
+    )
+    .bind(show_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let episode_id = sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO episodes (season_id, episode_number, name, runtime_minutes)
+        VALUES ($1, 1, 'Episode 1', 40)
+        RETURNING id"#,
+    )
+    .bind(season_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    let planned_show_id = sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO media (tmdb_id, media_type, title, runtime_minutes, genres)
+        VALUES (992002, 'tv', 'Planned Stats Show', 30, '[{"id": 2, "name": "Comedy"}]')
+        RETURNING id"#,
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let movie_id = sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO media (tmdb_id, media_type, title, runtime_minutes, genres)
+        VALUES (992003, 'movie', 'Completed Stats Movie', 120, '[{"id": 3, "name": "Action"}]')
+        RETURNING id"#,
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    sqlx::query(
+        r#"INSERT INTO user_media
+            (user_id, media_id, status, started_at, completed_at, updated_at)
+        VALUES
+            ($1, $2, 'completed', '2026-02-01', '2026-02-03', '2026-02-03T08:00:00Z'),
+            ($1, $3, 'plan_to_watch', NULL, NULL, '2026-02-03T08:00:00Z'),
+            ($1, $4, 'completed', '2026-02-03', '2026-02-03', '2026-02-03T08:00:00Z')"#,
+    )
+    .bind(user_id)
+    .bind(show_id)
+    .bind(planned_show_id)
+    .bind(movie_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    sqlx::query(
+        r#"INSERT INTO watch_history (user_id, media_id, episode_id, watched_at)
+        VALUES
+            ($1, $2, $3, '2026-02-03T08:00:00Z'),
+            ($1, $2, $3, '2026-02-03T09:00:00Z'),
+            ($1, $2, NULL, '2026-02-03T10:00:00Z'),
+            ($1, $4, NULL, '2026-02-03T11:00:00Z')"#,
+    )
+    .bind(user_id)
+    .bind(show_id)
+    .bind(episode_id)
+    .bind(movie_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let req = actix_test::TestRequest::get()
+        .uri("/api/stats/me")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let stats: Value = actix_test::read_body_json(resp).await;
+    assert_eq!(stats["total_movies"], 1);
+    assert_eq!(stats["total_shows"], 1);
+    assert_eq!(stats["total_episodes"], 4);
+    assert!((stats["total_hours"].as_f64().unwrap() - (290.0 / 60.0)).abs() < 0.000_001);
+    assert_eq!(stats["current_streak"], 0);
+    assert_eq!(stats["longest_streak"], 1);
+
+    let req = actix_test::TestRequest::get()
+        .uri("/api/stats/me/heatmap?year=2026")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let heatmap: Value = actix_test::read_body_json(resp).await;
+    assert_eq!(heatmap.as_array().unwrap().len(), 1);
+    assert_eq!(heatmap[0]["date"], "2026-02-03");
+    assert_eq!(heatmap[0]["count"], 4);
+
+    let req = actix_test::TestRequest::get()
+        .uri("/api/stats/me/genres")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let genres: Value = actix_test::read_body_json(resp).await;
+    let genre_names: Vec<&str> = genres
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|genre| genre["genre"].as_str().unwrap())
+        .collect();
+    assert_eq!(genre_names.len(), 2);
+    assert!(genre_names.contains(&"Drama"));
+    assert!(genre_names.contains(&"Action"));
+    assert!(!genre_names.contains(&"Comedy"));
+
+    let req = actix_test::TestRequest::get()
+        .uri("/api/stats/me/monthly")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let monthly: Value = actix_test::read_body_json(resp).await;
+    assert_eq!(monthly.as_array().unwrap().len(), 1);
+    assert_eq!(monthly[0]["month"], "2026-02");
+    assert_eq!(monthly[0]["count"], 4);
+    assert!((monthly[0]["hours"].as_f64().unwrap() - (245.0 / 60.0)).abs() < 0.000_001);
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
 async fn test_media_search_requires_auth() {
     let pool = setup_pool().await;
     clean_db(&pool).await;
