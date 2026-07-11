@@ -1,17 +1,26 @@
-import { useState } from 'react';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { useResetPassword } from '@/hooks/useAuth';
 import { getApiErrorMessage } from '@/lib/api';
 import { Film, Loader2 } from 'lucide-react';
 
 export default function ResetPasswordPage() {
-  const [searchParams] = useSearchParams();
-  const token = searchParams.get('token') ?? '';
+  const [token] = useState(() => {
+    const fragmentToken = new URLSearchParams(window.location.hash.slice(1)).get('token');
+    const legacyQueryToken = new URLSearchParams(window.location.search).get('token');
+    return fragmentToken ?? legacyQueryToken ?? '';
+  });
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [mismatch, setMismatch] = useState(false);
   const reset = useResetPassword();
   const navigate = useNavigate();
+
+  useEffect(() => {
+    if (window.location.hash || window.location.search.includes('token=')) {
+      window.history.replaceState(null, '', window.location.pathname);
+    }
+  }, []);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();

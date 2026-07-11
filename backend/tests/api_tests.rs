@@ -425,6 +425,36 @@ async fn test_refresh_token_rotation() {
 
 #[actix_web::test]
 #[ignore = "requires test DB"]
+async fn test_cookie_refresh_requires_allowed_origin() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+
+    let (_, refresh, _) = register_user(&app, "originuser", "origin@example.com", "Pass1234").await;
+    let cookie = format!("{REFRESH_COOKIE_NAME}={refresh}");
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/auth/refresh")
+        .insert_header((header::COOKIE, cookie.clone()))
+        .insert_header((header::ORIGIN, "https://attacker.example"))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 403);
+
+    // The rejected request must not consume the token.
+    let req = actix_test::TestRequest::post()
+        .uri("/api/auth/refresh")
+        .insert_header((header::COOKIE, cookie))
+        .insert_header((header::ORIGIN, "http://localhost:5173"))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
 async fn test_refresh_old_token_invalid() {
     let pool = setup_pool().await;
     clean_db(&pool).await;

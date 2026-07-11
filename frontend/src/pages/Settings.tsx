@@ -248,6 +248,7 @@ function ImportCard() {
 }
 
 function ChangePasswordCard() {
+  const navigate = useNavigate();
   const [current, setCurrent] = useState('');
   const [next, setNext] = useState('');
   const [confirm, setConfirm] = useState('');
@@ -268,6 +269,7 @@ function ChangePasswordCard() {
           setCurrent('');
           setNext('');
           setConfirm('');
+          navigate('/login');
         },
       }
     );
@@ -279,7 +281,7 @@ function ChangePasswordCard() {
         <KeyRound className="h-5 w-5 text-[hsl(var(--primary))]" /> Change password
       </h2>
       <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">
-        Updating your password signs out every other device.
+        Updating your password signs out every device, including this one.
       </p>
 
       <form onSubmit={handleSubmit} className="mt-4 space-y-4 max-w-sm">
@@ -325,10 +327,6 @@ function ChangePasswordCard() {
             {getApiErrorMessage(changePassword.error, 'Could not change password')}
           </p>
         )}
-        {changePassword.isSuccess && (
-          <p className="text-sm text-green-600">Password changed successfully.</p>
-        )}
-
         <button
           type="submit"
           disabled={changePassword.isPending}

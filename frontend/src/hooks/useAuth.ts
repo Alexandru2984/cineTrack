@@ -66,15 +66,14 @@ export function useResetPassword() {
 }
 
 export function useChangePassword() {
-  const qc = useQueryClient();
+  const logout = useAuthStore((s) => s.logout);
   return useMutation({
     mutationFn: async (data: { current_password: string; new_password: string }) => {
       const res = await api.patch('/auth/password', data);
       return res.data as { message: string };
     },
-    // Changing the password revokes every refresh token server-side, so the
-    // active-session list is now stale.
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['sessions'] }),
+    // The backend revokes every refresh token and clears the current cookie.
+    onSuccess: () => logout(),
   });
 }
 

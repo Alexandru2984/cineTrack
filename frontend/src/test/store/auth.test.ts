@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { useAuthStore } from '@/store/auth';
+import { queryClient } from '@/lib/queryClient';
 import type { User } from '@/types';
 
 const mockUser: User = {
@@ -18,14 +19,17 @@ describe('useAuthStore', () => {
     useAuthStore.setState({
       token: null,
       user: null,
+      status: 'anonymous',
     });
     localStorage.clear();
+    queryClient.clear();
   });
 
   it('starts with null values', () => {
     const state = useAuthStore.getState();
     expect(state.token).toBeNull();
     expect(state.user).toBeNull();
+    expect(state.status).toBe('anonymous');
   });
 
   it('isAuthenticated returns false when no token', () => {
@@ -39,13 +43,11 @@ describe('useAuthStore', () => {
     expect(state.user).toEqual(mockUser);
   });
 
-  it('does not persist refresh tokens', () => {
+  it('does not persist credentials or user data', () => {
     useAuthStore.getState().setAuth('access-tok', mockUser);
     const persisted = localStorage.getItem('cinetrack-auth');
 
-    expect(persisted).toBeTruthy();
-    expect(persisted).not.toContain('refreshToken');
-    expect(persisted).not.toContain('refresh-tok');
+    expect(persisted).toBeNull();
   });
 
   it('isAuthenticated returns true after setAuth', () => {
@@ -62,25 +64,36 @@ describe('useAuthStore', () => {
     expect(state.token).toBe('tok');
   });
 
-  it('setToken updates only token', () => {
-    useAuthStore.getState().setAuth('old-tok', mockUser);
-    useAuthStore.getState().setToken('new-tok');
-    const state = useAuthStore.getState();
-    expect(state.token).toBe('new-tok');
-    expect(state.user).toEqual(mockUser);
-  });
-
   it('logout clears all state', () => {
     useAuthStore.getState().setAuth('tok', mockUser);
     useAuthStore.getState().logout();
     const state = useAuthStore.getState();
     expect(state.token).toBeNull();
     expect(state.user).toBeNull();
+    expect(state.status).toBe('anonymous');
   });
 
   it('isAuthenticated returns false after logout', () => {
     useAuthStore.getState().setAuth('tok', mockUser);
     useAuthStore.getState().logout();
     expect(useAuthStore.getState().isAuthenticated()).toBe(false);
+  });
+
+  it('logout clears user-scoped query data', () => {
+    useAuthStore.getState().setAuth('tok', mockUser);
+    queryClient.setQueryData(['tracking'], [{ title: 'Private title' }]);
+
+    useAuthStore.getState().logout();
+
+    expect(queryClient.getQueryData(['tracking'])).toBeUndefined();
+  });
+
+  it('switching users clears user-scoped query data', () => {
+    useAuthStore.getState().setAuth('tok-1', mockUser);
+    queryClient.setQueryData(['stats', 'me'], { total_movies: 42 });
+
+    useAuthStore.getState().setAuth('tok-2', { ...mockUser, id: 'another-user-id' });
+
+    expect(queryClient.getQueryData(['stats', 'me'])).toBeUndefined();
   });
 });

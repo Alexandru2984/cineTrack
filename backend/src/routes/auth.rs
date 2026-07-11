@@ -79,6 +79,8 @@ async fn logout(
     req: HttpRequest,
     body: Option<web::Json<LogoutRequest>>,
 ) -> Result<HttpResponse, AppError> {
+    enforce_cookie_origin(&req, config.get_ref())?;
+
     if let Some(refresh_token) = refresh_token_from_request(&req, body.as_deref()) {
         services::auth::logout(pool.get_ref(), &refresh_token).await?;
     }
@@ -94,6 +96,8 @@ async fn refresh(
     req: HttpRequest,
     body: Option<web::Json<RefreshRequest>>,
 ) -> Result<HttpResponse, AppError> {
+    enforce_cookie_origin(&req, config.get_ref())?;
+
     let refresh_token = refresh_token_from_request(&req, body.as_deref())
         .ok_or_else(|| AppError::Unauthorized("Missing refresh token".to_string()))?;
     let client = client_info(&req);
@@ -231,6 +235,31 @@ where
         .or_else(|| body.map(|payload| payload.refresh_token().to_owned()))
 }
 
+fn enforce_cookie_origin(req: &HttpRequest, config: &Config) -> Result<(), AppError> {
+    if req.cookie(REFRESH_COOKIE_NAME).is_none() {
+        return Ok(());
+    }
+
+    let origin = req
+        .headers()
+        .get(actix_web::http::header::ORIGIN)
+        .and_then(|value| value.to_str().ok())
+        .map(|value| value.trim_end_matches('/'))
+        .ok_or_else(|| AppError::Forbidden("Cookie request origin is required".to_string()))?;
+
+    let allowed = config
+        .cors_allowed_origins
+        .iter()
+        .any(|allowed| allowed.trim_end_matches('/') == origin);
+    if !allowed {
+        return Err(AppError::Forbidden(
+            "Cross-origin cookie request denied".to_string(),
+        ));
+    }
+
+    Ok(())
+}
+
 trait RefreshTokenPayload {
     fn refresh_token(&self) -> &str;
 }
@@ -251,7 +280,7 @@ fn refresh_cookie(token: &str, config: &Config) -> Cookie<'static> {
     Cookie::build(REFRESH_COOKIE_NAME, token.to_string())
         .http_only(true)
         .secure(config.is_production())
-        .same_site(SameSite::Lax)
+        .same_site(SameSite::Strict)
         .path(REFRESH_COOKIE_PATH)
         .max_age(CookieDuration::days(config.jwt_refresh_expiry_days))
         .finish()
@@ -261,7 +290,7 @@ pub(crate) fn clear_refresh_cookie(config: &Config) -> Cookie<'static> {
     Cookie::build(REFRESH_COOKIE_NAME, "")
         .http_only(true)
         .secure(config.is_production())
-        .same_site(SameSite::Lax)
+        .same_site(SameSite::Strict)
         .path(REFRESH_COOKIE_PATH)
         .max_age(CookieDuration::seconds(0))
         .finish()
@@ -300,7 +329,7 @@ mod tests {
     }
 
     #[test]
-    fn refresh_cookie_uses_http_only_lax_and_auth_path() {
+    fn refresh_cookie_uses_http_only_strict_and_auth_path() {
         let config = test_config("development");
         let cookie = refresh_cookie("refresh-token", &config);
 
@@ -309,7 +338,7 @@ mod tests {
         assert_eq!(cookie.path(), Some(REFRESH_COOKIE_PATH));
         assert_eq!(cookie.http_only(), Some(true));
         assert_eq!(cookie.secure(), Some(false));
-        assert_eq!(cookie.same_site(), Some(SameSite::Lax));
+        assert_eq!(cookie.same_site(), Some(SameSite::Strict));
     }
 
     #[test]
@@ -330,5 +359,45 @@ mod tests {
         assert_eq!(cookie.path(), Some(REFRESH_COOKIE_PATH));
         assert_eq!(cookie.http_only(), Some(true));
         assert_eq!(cookie.max_age(), Some(CookieDuration::seconds(0)));
+    }
+
+    #[test]
+    fn cookie_request_accepts_configured_origin() {
+        let config = test_config("production");
+        let req = actix_web::test::TestRequest::default()
+            .cookie(Cookie::new(REFRESH_COOKIE_NAME, "token"))
+            .insert_header(("Origin", "http://localhost:5173"))
+            .to_http_request();
+
+        assert!(enforce_cookie_origin(&req, &config).is_ok());
+    }
+
+    #[test]
+    fn cookie_request_rejects_missing_or_cross_site_origin() {
+        let config = test_config("production");
+        let missing = actix_web::test::TestRequest::default()
+            .cookie(Cookie::new(REFRESH_COOKIE_NAME, "token"))
+            .to_http_request();
+        let cross_site = actix_web::test::TestRequest::default()
+            .cookie(Cookie::new(REFRESH_COOKIE_NAME, "token"))
+            .insert_header(("Origin", "https://attacker.example"))
+            .to_http_request();
+
+        assert!(matches!(
+            enforce_cookie_origin(&missing, &config),
+            Err(AppError::Forbidden(_))
+        ));
+        assert!(matches!(
+            enforce_cookie_origin(&cross_site, &config),
+            Err(AppError::Forbidden(_))
+        ));
+    }
+
+    #[test]
+    fn non_cookie_client_does_not_require_origin() {
+        let config = test_config("production");
+        let req = actix_web::test::TestRequest::default().to_http_request();
+
+        assert!(enforce_cookie_origin(&req, &config).is_ok());
     }
 }

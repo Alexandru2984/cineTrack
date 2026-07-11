@@ -17,16 +17,12 @@ const TEST_USER = {
   created_at: '2026-01-01T00:00:00Z',
 };
 
-/** Pre-seed the persisted Zustand auth store so the app boots authenticated. */
-async function seedAuth(page: Page, token = 'seed-access-token') {
-  await page.addInitScript(
-    (arg) => {
-      localStorage.setItem(
-        'cinetrack-auth',
-        JSON.stringify({ state: { token: arg.token, user: arg.user }, version: 0 })
-      );
-    },
-    { token, user: TEST_USER }
+async function stubSession(page: Page, token = 'session-access-token') {
+  await page.unroute('**/api/auth/refresh');
+  await page.route('**/api/auth/refresh', (route) =>
+    route.fulfill({
+      json: { access_token: token, token_type: 'Bearer', expires_in: 3600, user: TEST_USER },
+    })
   );
 }
 
@@ -49,7 +45,7 @@ async function stubAuthedReads(page: Page) {
     const req = route.request();
     const url = req.url();
     if (req.method() !== 'GET') {
-      return route.fulfill({ json: { message: 'ok' } });
+      return route.fallback();
     }
     if (url.includes('/api/auth/me')) return route.fulfill({ json: TEST_USER });
     if (url.includes('/api/media/trending')) return route.fulfill({ json: { results: [] } });
@@ -60,8 +56,9 @@ async function stubAuthedReads(page: Page) {
 }
 
 test.beforeEach(async ({ page }) => {
-  // Keep tests offline and deterministic — never hit the real analytics host.
-  await page.route('https://analytics.micutu.com/**', (route) => route.abort());
+  await page.route('**/api/auth/refresh', (route) =>
+    route.fulfill({ status: 401, json: { message: 'No active session' } })
+  );
 });
 
 test('redirects unauthenticated users to the login page', async ({ page }) => {
@@ -102,10 +99,24 @@ test('logs in and lands on the dashboard', async ({ page }) => {
 
   await expect(page).toHaveURL('http://localhost:5173/');
   await expect(page.getByRole('button', { name: 'Logout' })).toBeVisible();
+  expect(await page.evaluate(() => localStorage.getItem('cinetrack-auth'))).toBeNull();
+});
+
+test('hydrates a session from the HttpOnly-cookie refresh flow after reload', async ({ page }) => {
+  await stubSession(page);
+  await stubAuthedReads(page);
+
+  await page.goto('/');
+  await expect(page.getByRole('button', { name: 'Logout' })).toBeVisible();
+  await page.reload();
+
+  await expect(page).toHaveURL('http://localhost:5173/');
+  await expect(page.getByRole('button', { name: 'Logout' })).toBeVisible();
+  expect(await page.evaluate(() => localStorage.getItem('cinetrack-auth'))).toBeNull();
 });
 
 test('logs out and returns to the login page', async ({ page }) => {
-  await seedAuth(page);
+  await stubSession(page);
   await stubAuthedReads(page);
   await page.route('**/api/auth/logout', (route) =>
     route.fulfill({ json: { message: 'Logged out successfully' } })
@@ -121,27 +132,44 @@ test('logs out and returns to the login page', async ({ page }) => {
 });
 
 test('logs the user out when the token refresh fails', async ({ page }) => {
-  await seedAuth(page, 'expired-token');
-  // Every protected read 401s and the refresh attempt also fails, so the axios
-  // interceptor must clear auth and redirect to /login.
-  await page.route('**/api/**', (route) =>
-    route.fulfill({ status: 401, json: { message: 'Unauthorized' } })
-  );
-  await page.route('**/api/auth/refresh', (route) =>
-    route.fulfill({ status: 401, json: { message: 'Invalid refresh token' } })
-  );
+  let refreshAttempts = 0;
+  await page.unroute('**/api/auth/refresh');
+  await page.route('**/api/auth/refresh', (route) => {
+    refreshAttempts += 1;
+    if (refreshAttempts === 1) {
+      return route.fulfill({
+        json: {
+          access_token: 'expired-token',
+          token_type: 'Bearer',
+          expires_in: 3600,
+          user: TEST_USER,
+        },
+      });
+    }
+    return route.fulfill({ status: 401, json: { message: 'Invalid refresh token' } });
+  });
+
+  // Hydration succeeds once, then every protected read 401s and the interceptor's
+  // second refresh attempt fails.
+  await page.route('**/api/**', (route) => {
+    if (route.request().url().includes('/api/auth/refresh')) {
+      return route.fallback();
+    }
+    return route.fulfill({ status: 401, json: { message: 'Unauthorized' } });
+  });
 
   await page.goto('/');
   await expect(page).toHaveURL(/\/login$/);
 });
 
 test('contains a page crash in a fallback and keeps the navbar', async ({ page }) => {
-  await seedAuth(page);
+  await stubSession(page);
   // A malformed trending payload (missing `results`) makes the Dashboard throw
   // during render. The error boundary must show the fallback instead of letting
   // the whole SPA unmount to a white screen, and the navbar must survive.
   await page.route('**/api/**', (route) => {
     const url = route.request().url();
+    if (url.includes('/api/auth/refresh')) return route.fallback();
     if (url.includes('/api/auth/me')) return route.fulfill({ json: TEST_USER });
     if (url.includes('/api/media/trending')) return route.fulfill({ json: {} });
     return route.fulfill({ json: [] });

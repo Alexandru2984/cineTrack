@@ -65,38 +65,25 @@ test('register issues an HttpOnly refresh cookie and reaches the dashboard', asy
   const refresh = (await context.cookies()).find((c) => c.name === 'cinetrack_refresh');
   expect(refresh, 'refresh cookie should be set').toBeTruthy();
   expect(refresh!.httpOnly).toBe(true);
+  expect(refresh!.sameSite).toBe('Strict');
 });
 
-test('refreshes an expired access token using the HttpOnly cookie', async ({ page }) => {
+test('restores a reloaded session using only the HttpOnly cookie', async ({ page, context }) => {
   const acct = uniqueAccount();
   await registerViaUi(page, acct);
 
-  // Corrupt the stored access token: the next protected request 401s and the
-  // only way back is the interceptor spending the refresh cookie.
-  await page.evaluate(() => {
-    const parsed = JSON.parse(localStorage.getItem('cinetrack-auth')!);
-    parsed.state.token = 'invalid.access.token';
-    localStorage.setItem('cinetrack-auth', JSON.stringify(parsed));
-  });
+  const before = (await context.cookies()).find((cookie) => cookie.name === 'cinetrack_refresh');
+  expect(before).toBeTruthy();
+  expect(await page.evaluate(() => localStorage.getItem('cinetrack-auth'))).toBeNull();
 
   await page.reload();
 
-  // The interceptor refreshes asynchronously, so poll until the stored token is
-  // replaced with the freshly-issued one (the navbar shows authed immediately
-  // because the corrupt token is still truthy).
-  await expect
-    .poll(
-      () => page.evaluate(() => JSON.parse(localStorage.getItem('cinetrack-auth')!).state.token),
-      { timeout: 10_000 }
-    )
-    .not.toBe('invalid.access.token');
-
   await expect(page).toHaveURL(BASE);
   await expect(page.getByRole('button', { name: 'Logout' })).toBeVisible();
-  const token = await page.evaluate(
-    () => JSON.parse(localStorage.getItem('cinetrack-auth')!).state.token as string
-  );
-  expect(token.length).toBeGreaterThan(20);
+  const after = (await context.cookies()).find((cookie) => cookie.name === 'cinetrack_refresh');
+  expect(after).toBeTruthy();
+  expect(after!.value).not.toBe(before!.value);
+  expect(await page.evaluate(() => localStorage.getItem('cinetrack-auth'))).toBeNull();
 });
 
 test('lists the current device under active sessions', async ({ page }) => {
@@ -134,7 +121,8 @@ test('resets the password with the emailed token and signs in with it', async ({
 
   const token = await waitForResetToken(acct.email);
   const newPassword = 'NewPassw0rd456';
-  await page.goto(`/reset-password?token=${token}`);
+  await page.goto(`/reset-password#token=${token}`);
+  await expect(page).toHaveURL(/\/reset-password$/);
   const passwords = page.locator('input[type="password"]');
   await passwords.nth(0).fill(newPassword);
   await passwords.nth(1).fill(newPassword);

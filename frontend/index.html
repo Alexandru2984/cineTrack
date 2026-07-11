@@ -5,17 +5,9 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Văzute</title>
-      <script defer src="https://analytics.micutu.com/script.js" data-website-id="716fee1f-f203-4d21-94a1-0de456f7d222"></script>
-</head>
+  </head>
   <body>
-    <script>
-      (function() {
-        const theme = localStorage.getItem('cinetrack-theme');
-        if (theme === 'dark' || (!theme && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
-          document.documentElement.classList.add('dark');
-        }
-      })();
-    </script>
+    <script src="/theme.js"></script>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

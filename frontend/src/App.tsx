@@ -1,5 +1,8 @@
+import { useEffect } from 'react';
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { Loader2 } from 'lucide-react';
 import { useAuthStore } from '@/store/auth';
+import { bootstrapSession } from '@/lib/api';
 import { Navbar } from '@/components/Navbar';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import LoginPage from '@/pages/Login';
@@ -30,6 +33,23 @@ export default function App() {
   // Reset the boundary on navigation so a crashed page recovers once the user
   // moves elsewhere, instead of staying stuck on the fallback.
   const location = useLocation();
+  const authStatus = useAuthStore((state) => state.status);
+
+  useEffect(() => {
+    void bootstrapSession();
+  }, []);
+
+  if (authStatus === 'loading') {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[hsl(var(--background))]">
+        <Loader2
+          className="h-6 w-6 animate-spin text-[hsl(var(--primary))]"
+          aria-label="Loading session"
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-[hsl(var(--background))] text-[hsl(var(--foreground))]">
       <Navbar />

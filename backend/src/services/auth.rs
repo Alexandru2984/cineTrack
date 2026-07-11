@@ -306,7 +306,7 @@ pub async fn forgot_password(
     .await?;
 
     let reset_url = format!(
-        "{}/reset-password?token={}",
+        "{}/reset-password#token={}",
         config.frontend_url.trim_end_matches('/'),
         token
     );
