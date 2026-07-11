@@ -34,30 +34,22 @@ pub async fn register(
     // generic conflict response does not expose account existence by timing.
     let password_hash = password::hash_password(&req.password).await?;
 
-    let existing = sqlx::query_scalar::<_, i64>(
-        "SELECT COUNT(*) FROM users WHERE email = $1 OR username = $2",
-    )
-    .bind(&email)
-    .bind(&req.username)
-    .fetch_one(pool)
-    .await?;
-
-    if existing > 0 {
-        return Err(AppError::BadRequest(
-            "Unable to create account. Please check your details and try again.".to_string(),
-        ));
-    }
-
     let user = sqlx::query_as::<_, User>(
         r#"INSERT INTO users (username, email, password_hash)
         VALUES ($1, $2, $3)
+        ON CONFLICT DO NOTHING
         RETURNING *"#,
     )
     .bind(&req.username)
     .bind(&email)
     .bind(&password_hash)
-    .fetch_one(pool)
-    .await?;
+    .fetch_optional(pool)
+    .await?
+    .ok_or_else(|| {
+        AppError::BadRequest(
+            "Unable to create account. Please check your details and try again.".to_string(),
+        )
+    })?;
 
     log::info!("audit: account registered user_id={}", user.id);
 

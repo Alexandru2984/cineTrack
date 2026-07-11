@@ -6,7 +6,7 @@ export function useUserProfile(username: string) {
   return useQuery<PublicUserProfile>({
     queryKey: ['user', username],
     queryFn: async () => {
-      const res = await api.get(`/users/${username}`);
+      const res = await api.get(`/users/${encodeURIComponent(username)}`);
       return res.data;
     },
     enabled: !!username,
@@ -17,7 +17,7 @@ export function useUserActivity(username: string) {
   return useQuery<ActivityItem[]>({
     queryKey: ['user', username, 'activity'],
     queryFn: async () => {
-      const res = await api.get(`/users/${username}/activity`);
+      const res = await api.get(`/users/${encodeURIComponent(username)}/activity`);
       return res.data;
     },
     enabled: !!username,
@@ -28,7 +28,7 @@ export function useFollow() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (username: string) => {
-      await api.post(`/users/${username}/follow`);
+      await api.post(`/users/${encodeURIComponent(username)}/follow`);
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['user'] }),
   });
@@ -38,7 +38,7 @@ export function useUnfollow() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (username: string) => {
-      await api.delete(`/users/${username}/follow`);
+      await api.delete(`/users/${encodeURIComponent(username)}/follow`);
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['user'] }),
   });

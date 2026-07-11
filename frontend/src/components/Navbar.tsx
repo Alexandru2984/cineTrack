@@ -39,7 +39,7 @@ export function Navbar() {
               <Link to="/stats" className="flex items-center gap-1 text-sm hover:text-[hsl(var(--primary))] transition-colors">
                 <BarChart3 className="h-4 w-4" /> Stats
               </Link>
-              <Link to={`/profile/${user?.username}`} className="flex items-center gap-1 text-sm hover:text-[hsl(var(--primary))] transition-colors">
+              <Link to={`/profile/${encodeURIComponent(user?.username ?? '')}`} className="flex items-center gap-1 text-sm hover:text-[hsl(var(--primary))] transition-colors">
                 <User className="h-4 w-4" /> {user?.username}
               </Link>
               <Link to="/settings" className="flex items-center gap-1 text-sm hover:text-[hsl(var(--primary))] transition-colors">
@@ -76,7 +76,7 @@ export function Navbar() {
                 <Link to="/search" className="block py-2 text-sm" onClick={() => setMobileOpen(false)}>Search</Link>
                 <Link to="/tracking" className="block py-2 text-sm" onClick={() => setMobileOpen(false)}>My List</Link>
                 <Link to="/stats" className="block py-2 text-sm" onClick={() => setMobileOpen(false)}>Stats</Link>
-                <Link to={`/profile/${user?.username}`} className="block py-2 text-sm" onClick={() => setMobileOpen(false)}>Profile</Link>
+                <Link to={`/profile/${encodeURIComponent(user?.username ?? '')}`} className="block py-2 text-sm" onClick={() => setMobileOpen(false)}>Profile</Link>
                 <Link to="/settings" className="block py-2 text-sm" onClick={() => setMobileOpen(false)}>Settings</Link>
                 <button onClick={handleLogout} className="block py-2 text-sm text-[hsl(var(--destructive))]">Logout</button>
                 <button onClick={toggle} className="flex items-center gap-2 py-2 text-sm">{isDark ? <><Sun className="h-4 w-4" /> Light Mode</> : <><Moon className="h-4 w-4" /> Dark Mode</>}</button>

@@ -1,6 +1,8 @@
 use serde::Deserialize;
 use validator::Validate;
 
+use crate::dto::validation::validate_username;
+
 fn validate_avatar_url(url: &str) -> Result<(), validator::ValidationError> {
     if url.is_empty() {
         return Ok(());
@@ -13,15 +15,6 @@ fn validate_avatar_url(url: &str) -> Result<(), validator::ValidationError> {
     if url.len() > 500 {
         let mut err = validator::ValidationError::new("url_too_long");
         err.message = Some("Avatar URL must be at most 500 characters".into());
-        return Err(err);
-    }
-    Ok(())
-}
-
-fn validate_username(username: &str) -> Result<(), validator::ValidationError> {
-    if username.trim().is_empty() {
-        let mut err = validator::ValidationError::new("blank_username");
-        err.message = Some("Username cannot be blank".into());
         return Err(err);
     }
     Ok(())

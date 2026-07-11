@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use validator::Validate;
 
+use crate::dto::validation::validate_username;
+
 #[derive(Debug, Deserialize, Validate)]
 pub struct RegisterRequest {
     #[validate(
@@ -15,15 +17,6 @@ pub struct RegisterRequest {
         custom(function = "validate_password_strength")
     )]
     pub password: String,
-}
-
-fn validate_username(username: &str) -> Result<(), validator::ValidationError> {
-    if username.trim().is_empty() {
-        let mut err = validator::ValidationError::new("blank_username");
-        err.message = Some("Username cannot be blank".into());
-        return Err(err);
-    }
-    Ok(())
 }
 
 fn validate_password_strength(password: &str) -> Result<(), validator::ValidationError> {

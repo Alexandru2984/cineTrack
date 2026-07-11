@@ -6,3 +6,4 @@ pub mod social;
 pub mod stats;
 pub mod tracking;
 pub mod user;
+pub mod validation;

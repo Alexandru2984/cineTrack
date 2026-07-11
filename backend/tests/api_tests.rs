@@ -259,6 +259,34 @@ async fn test_register_duplicate_email() {
 
 #[actix_web::test]
 #[ignore = "requires test DB"]
+async fn test_register_duplicate_username_is_case_insensitive() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+
+    register_user(&app, "CaseUser", "case-one@example.com", "Pass1234").await;
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/auth/register")
+        .set_json(json!({
+            "username": "caseuser",
+            "email": "case-two@example.com",
+            "password": "Pass1234"
+        }))
+        .peer_addr(peer_addr())
+        .to_request();
+
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 400);
+    let body: Value = actix_test::read_body_json(resp).await;
+    assert_eq!(
+        body["message"],
+        "Unable to create account. Please check your details and try again."
+    );
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
 async fn test_register_weak_password() {
     let pool = setup_pool().await;
     clean_db(&pool).await;
@@ -1017,6 +1045,26 @@ async fn test_public_profile_hides_email() {
         body.get("email").is_none() || body["email"].is_null(),
         "Public profile should not expose email"
     );
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn test_profile_lookup_is_case_insensitive() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+
+    register_user(&app, "CaseProfile", "case-profile@example.com", "Pass1234").await;
+
+    let req = actix_test::TestRequest::get()
+        .uri("/api/users/caseprofile")
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+
+    assert_eq!(resp.status(), 200);
+    let body: Value = actix_test::read_body_json(resp).await;
+    assert_eq!(body["username"], "CaseProfile");
 }
 
 #[actix_web::test]

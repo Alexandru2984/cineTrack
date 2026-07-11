@@ -34,7 +34,7 @@ async fn get_profile(
     let username = path.into_inner();
     let current_user_id = require_auth(&req).await.ok();
 
-    let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE username = $1")
+    let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE LOWER(username) = LOWER($1)")
         .bind(&username)
         .fetch_optional(pool.get_ref())
         .await?
@@ -164,7 +164,7 @@ async fn follow_user(
     let user_id = require_auth(&req).await?;
     let username = path.into_inner();
 
-    let target = sqlx::query_as::<_, User>("SELECT * FROM users WHERE username = $1")
+    let target = sqlx::query_as::<_, User>("SELECT * FROM users WHERE LOWER(username) = LOWER($1)")
         .bind(&username)
         .fetch_optional(pool.get_ref())
         .await?
@@ -193,7 +193,7 @@ async fn unfollow_user(
     let user_id = require_auth(&req).await?;
     let username = path.into_inner();
 
-    let target = sqlx::query_as::<_, User>("SELECT * FROM users WHERE username = $1")
+    let target = sqlx::query_as::<_, User>("SELECT * FROM users WHERE LOWER(username) = LOWER($1)")
         .bind(&username)
         .fetch_optional(pool.get_ref())
         .await?
@@ -264,7 +264,7 @@ async fn get_user_activity(
     let username = path.into_inner();
     let current_user_id = require_auth(&req).await.ok();
 
-    let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE username = $1")
+    let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE LOWER(username) = LOWER($1)")
         .bind(&username)
         .fetch_optional(pool.get_ref())
         .await?

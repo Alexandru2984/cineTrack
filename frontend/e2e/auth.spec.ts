@@ -133,6 +133,7 @@ test('logs out and returns to the login page', async ({ page }) => {
 
 test('logs the user out when the token refresh fails', async ({ page }) => {
   let refreshAttempts = 0;
+  let rejectProtectedRequests = false;
   await page.unroute('**/api/auth/refresh');
   await page.route('**/api/auth/refresh', (route) => {
     refreshAttempts += 1;
@@ -149,17 +150,26 @@ test('logs the user out when the token refresh fails', async ({ page }) => {
     return route.fulfill({ status: 401, json: { message: 'Invalid refresh token' } });
   });
 
-  // Hydration succeeds once, then every protected read 401s and the interceptor's
-  // second refresh attempt fails.
+  await stubAuthedReads(page);
   await page.route('**/api/**', (route) => {
     if (route.request().url().includes('/api/auth/refresh')) {
+      return route.fallback();
+    }
+    if (!rejectProtectedRequests) {
       return route.fallback();
     }
     return route.fulfill({ status: 401, json: { message: 'Unauthorized' } });
   });
 
   await page.goto('/');
+  await expect(page.getByRole('button', { name: 'Logout' })).toBeVisible();
+
+  // Expire the access token only after cookie hydration has completed, then
+  // trigger a fresh protected query from a real navigation.
+  rejectProtectedRequests = true;
+  await page.getByRole('link', { name: 'Settings' }).click();
   await expect(page).toHaveURL(/\/login$/);
+  expect(refreshAttempts).toBe(2);
 });
 
 test('contains a page crash in a fallback and keeps the navbar', async ({ page }) => {
