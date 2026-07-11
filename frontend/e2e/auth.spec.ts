@@ -84,6 +84,25 @@ test('shows an error message on invalid credentials', async ({ page }) => {
   await expect(page).toHaveURL(/\/login$/);
 });
 
+test('blocks path-unsafe usernames before registration reaches the API', async ({ page }) => {
+  let registrationRequests = 0;
+  await page.route('**/api/auth/register', (route) => {
+    registrationRequests += 1;
+    return route.fulfill({ status: 500, json: { message: 'should not be called' } });
+  });
+
+  await page.goto('/register');
+  const username = page.locator('input[type="text"]');
+  await username.fill('bad user');
+  await page.locator('input[type="email"]').fill('safe@example.com');
+  await page.locator('input[type="password"]').fill('Password1');
+  await page.getByRole('button', { name: 'Create account' }).click();
+
+  expect(await username.evaluate((input) => input.checkValidity())).toBe(false);
+  expect(registrationRequests).toBe(0);
+  await expect(page).toHaveURL(/\/register$/);
+});
+
 test('logs in and lands on the dashboard', async ({ page }) => {
   await stubAuthedReads(page);
   await page.route('**/api/auth/login', (route) =>

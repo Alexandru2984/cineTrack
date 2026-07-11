@@ -37,7 +37,7 @@ export default function RegisterPage() {
               required
               minLength={3}
               maxLength={50}
-              pattern="[A-Za-z0-9][A-Za-z0-9_-]*[A-Za-z0-9]"
+              pattern={'[A-Za-z0-9][A-Za-z0-9_\\-]*[A-Za-z0-9]'}
               title="Use letters, numbers, underscores, or hyphens; start and end with a letter or number"
               autoComplete="username"
               autoCapitalize="none"
