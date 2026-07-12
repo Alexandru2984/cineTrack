@@ -28,3 +28,22 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
             .configure(import::configure),
     );
 }
+
+pub fn configure_with_auth_rate_limit(
+    cfg: &mut web::ServiceConfig,
+    auth_rate_limiter: &auth::AuthGovernorConfig,
+) {
+    cfg.service(
+        web::scope("/api")
+            .configure(health::configure)
+            .configure(|cfg| auth::configure_rate_limited(cfg, auth_rate_limiter))
+            .configure(assets::configure)
+            .configure(users::configure)
+            .configure(media::configure)
+            .configure(tracking::configure)
+            .configure(history::configure)
+            .configure(lists::configure)
+            .configure(stats::configure)
+            .configure(import::configure),
+    );
+}

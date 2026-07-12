@@ -1,4 +1,5 @@
-use actix_governor::{Governor, GovernorConfigBuilder};
+use actix_governor::governor::middleware::NoOpMiddleware;
+use actix_governor::{Governor, GovernorConfig, GovernorConfigBuilder};
 use actix_web::{
     cookie::{time::Duration as CookieDuration, Cookie, SameSite},
     web, HttpRequest, HttpResponse,
@@ -17,29 +18,38 @@ use crate::services::email::EmailService;
 const REFRESH_COOKIE_NAME: &str = "cinetrack_refresh";
 const REFRESH_COOKIE_PATH: &str = "/api/auth";
 
-pub fn configure(cfg: &mut web::ServiceConfig) {
-    let auth_governor = GovernorConfigBuilder::default()
+pub type AuthGovernorConfig = GovernorConfig<TrustedProxyIpKeyExtractor, NoOpMiddleware>;
+
+pub fn build_rate_limiter() -> AuthGovernorConfig {
+    GovernorConfigBuilder::default()
         .requests_per_second(3)
         .burst_size(10)
         .key_extractor(TrustedProxyIpKeyExtractor)
         .finish()
-        .expect("Failed to build auth rate limiter");
+        .expect("Failed to build auth rate limiter")
+}
 
-    cfg.service(
-        web::scope("/auth")
-            .wrap(Governor::new(&auth_governor))
-            .route("/register", web::post().to(register))
-            .route("/login", web::post().to(login))
-            .route("/logout", web::post().to(logout))
-            .route("/refresh", web::post().to(refresh))
-            .route("/password", web::patch().to(change_password))
-            .route("/password/forgot", web::post().to(forgot_password))
-            .route("/password/reset", web::post().to(reset_password))
-            .route("/sessions", web::get().to(list_sessions))
-            .route("/sessions/logout-all", web::post().to(logout_all_sessions))
-            .route("/sessions/{id}", web::delete().to(revoke_session))
-            .route("/me", web::get().to(me)),
-    );
+fn scope() -> actix_web::Scope {
+    web::scope("/auth")
+        .route("/register", web::post().to(register))
+        .route("/login", web::post().to(login))
+        .route("/logout", web::post().to(logout))
+        .route("/refresh", web::post().to(refresh))
+        .route("/password", web::patch().to(change_password))
+        .route("/password/forgot", web::post().to(forgot_password))
+        .route("/password/reset", web::post().to(reset_password))
+        .route("/sessions", web::get().to(list_sessions))
+        .route("/sessions/logout-all", web::post().to(logout_all_sessions))
+        .route("/sessions/{id}", web::delete().to(revoke_session))
+        .route("/me", web::get().to(me))
+}
+
+pub fn configure(cfg: &mut web::ServiceConfig) {
+    cfg.service(scope());
+}
+
+pub fn configure_rate_limited(cfg: &mut web::ServiceConfig, rate_limiter: &AuthGovernorConfig) {
+    cfg.service(scope().wrap(Governor::new(rate_limiter)));
 }
 
 async fn register(
@@ -299,6 +309,7 @@ pub(crate) fn clear_refresh_cookie(config: &Config) -> Cookie<'static> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use actix_web::{http::StatusCode, test as actix_test, App};
 
     fn test_config(app_env: &str) -> Config {
         Config {
@@ -399,5 +410,47 @@ mod tests {
         let req = actix_web::test::TestRequest::default().to_http_request();
 
         assert!(enforce_cookie_origin(&req, &config).is_ok());
+    }
+
+    #[actix_web::test]
+    async fn auth_rate_limiter_is_shared_between_app_workers() {
+        async fn ok() -> HttpResponse {
+            HttpResponse::Ok().finish()
+        }
+
+        let limiter = build_rate_limiter();
+        let app_one = actix_test::init_service(
+            App::new()
+                .wrap(Governor::new(&limiter))
+                .route("/", web::get().to(ok)),
+        )
+        .await;
+        let app_two = actix_test::init_service(
+            App::new()
+                .wrap(Governor::new(&limiter))
+                .route("/", web::get().to(ok)),
+        )
+        .await;
+        let peer = "198.51.100.10:4321".parse().unwrap();
+
+        for index in 0..10 {
+            let request = actix_test::TestRequest::get()
+                .uri("/")
+                .peer_addr(peer)
+                .to_request();
+            let response = if index % 2 == 0 {
+                actix_test::call_service(&app_one, request).await
+            } else {
+                actix_test::call_service(&app_two, request).await
+            };
+            assert_eq!(response.status(), StatusCode::OK);
+        }
+
+        let request = actix_test::TestRequest::get()
+            .uri("/")
+            .peer_addr(peer)
+            .to_request();
+        let response = actix_test::call_service(&app_two, request).await;
+        assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
     }
 }

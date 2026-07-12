@@ -160,10 +160,14 @@ async fn main() -> std::io::Result<()> {
         .key_extractor(TrustedProxyIpKeyExtractor)
         .finish()
         .expect("Failed to build rate limiter config");
+    // Built once and cloned through Arc into every Actix worker. Building this
+    // inside route configuration would multiply the auth burst by worker count.
+    let auth_governor_conf = routes::auth::build_rate_limiter();
 
     log::info!("Starting server at {}:{}", host, port);
 
     HttpServer::new(move || {
+        let auth_governor_conf = auth_governor_conf.clone();
         // Cap request bodies at the application layer (defense-in-depth: nginx
         // also limits, but this protects direct access and returns a clean 400).
         let json_cfg = web::JsonConfig::default()
@@ -216,7 +220,7 @@ async fn main() -> std::io::Result<()> {
             .app_data(web::Data::new(tmdb_service.clone()))
             .app_data(web::Data::new(email_service.clone()))
             .app_data(web::Data::new(storage_service.clone()))
-            .configure(routes::configure)
+            .configure(move |cfg| routes::configure_with_auth_rate_limit(cfg, &auth_governor_conf))
     })
     .bind(format!("{}:{}", host, port))?
     .run()
