@@ -1991,6 +1991,116 @@ async fn test_warm_episode_cache_avoids_upstream_request() {
 
 #[actix_web::test]
 #[ignore = "requires test DB"]
+async fn test_mark_episode_watched_is_idempotent_and_creates_tracking() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (token, _, user_id) =
+        register_user(&app, "episodewatch", "episodewatch@example.com", "Pass1234").await;
+    let user_id = Uuid::parse_str(&user_id).unwrap();
+
+    let media_id = sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO media (tmdb_id, media_type, title, runtime_minutes)
+        VALUES (991101, 'tv', 'Episode Watch Test', 45)
+        RETURNING id"#,
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let season_id = sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO seasons
+            (media_id, season_number, name, episode_count, episodes_cached_at)
+        VALUES ($1, 1, 'Season 1', 2, NOW())
+        RETURNING id"#,
+    )
+    .bind(media_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO episodes (season_id, episode_number, name, runtime_minutes)
+        VALUES ($1, 1, 'Pilot', 42), ($1, 2, 'Second', 44)"#,
+    )
+    .bind(season_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let uri = "/api/history/tv/991101/seasons/1/episodes/2/watched";
+    let first_req = actix_test::TestRequest::post()
+        .uri(uri)
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let second_req = actix_test::TestRequest::post()
+        .uri(uri)
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let (first_resp, second_resp) = futures_util::future::join(
+        actix_test::call_service(&app, first_req),
+        actix_test::call_service(&app, second_req),
+    )
+    .await;
+    let statuses = [first_resp.status(), second_resp.status()];
+    assert_eq!(
+        statuses
+            .iter()
+            .filter(|status| status.as_u16() == 201)
+            .count(),
+        1
+    );
+    assert_eq!(
+        statuses
+            .iter()
+            .filter(|status| status.as_u16() == 200)
+            .count(),
+        1
+    );
+
+    let counts = sqlx::query_as::<_, (i64, i64)>(
+        r#"SELECT
+            (SELECT COUNT(*) FROM user_media WHERE user_id = $1 AND media_id = $2),
+            (SELECT COUNT(*) FROM watch_history WHERE user_id = $1 AND media_id = $2)"#,
+    )
+    .bind(user_id)
+    .bind(media_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(counts, (1, 1));
+
+    let status = sqlx::query_scalar::<_, String>(
+        "SELECT status FROM user_media WHERE user_id = $1 AND media_id = $2",
+    )
+    .bind(user_id)
+    .bind(media_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(status, "watching");
+
+    let req = actix_test::TestRequest::get()
+        .uri("/api/history/tv/991101/seasons/1/episodes")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let body: Value = actix_test::read_body_json(resp).await;
+    assert_eq!(body, json!([2]));
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/history/tv/0/seasons/1/episodes/1/watched")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 400);
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
 async fn test_media_rejects_invalid_upstream_parameters() {
     let pool = setup_pool().await;
     clean_db(&pool).await;
