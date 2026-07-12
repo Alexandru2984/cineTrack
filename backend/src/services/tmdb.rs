@@ -1,7 +1,10 @@
 use chrono::{NaiveDate, Utc};
 use serde::de::DeserializeOwned;
 use sqlx::PgPool;
+use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
+use tokio::time::timeout;
 
 use crate::config::Config;
 use crate::dto::media::*;
@@ -9,6 +12,9 @@ use crate::errors::AppError;
 use crate::models::Media;
 
 const MAX_API_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
+const MAX_CONCURRENT_API_REQUESTS: usize = 16;
+const MAX_CONCURRENT_IMAGE_REQUESTS: usize = 8;
+const OUTBOUND_PERMIT_WAIT: Duration = Duration::from_secs(1);
 
 pub(crate) fn is_valid_external_lookup_id(external_id: &str, source: &str) -> bool {
     match source {
@@ -29,10 +35,27 @@ pub struct TmdbService {
     /// `api_key` query param is omitted, keeping the credential out of URLs/logs.
     use_bearer_auth: bool,
     base_url: String,
+    api_requests: Arc<Semaphore>,
+    image_requests: Arc<Semaphore>,
+    permit_wait: Duration,
 }
 
 impl TmdbService {
     pub fn new(config: &Config) -> Self {
+        Self::with_concurrency_limits(
+            config,
+            MAX_CONCURRENT_API_REQUESTS,
+            MAX_CONCURRENT_IMAGE_REQUESTS,
+            OUTBOUND_PERMIT_WAIT,
+        )
+    }
+
+    fn with_concurrency_limits(
+        config: &Config,
+        max_api_requests: usize,
+        max_image_requests: usize,
+        permit_wait: Duration,
+    ) -> Self {
         let image_client = reqwest::Client::builder()
             .timeout(Duration::from_secs(config.tmdb_timeout_seconds))
             .connect_timeout(Duration::from_secs(5))
@@ -76,6 +99,29 @@ impl TmdbService {
             api_key: config.tmdb_api_key.clone(),
             use_bearer_auth,
             base_url: config.tmdb_base_url.clone(),
+            api_requests: Arc::new(Semaphore::new(max_api_requests)),
+            image_requests: Arc::new(Semaphore::new(max_image_requests)),
+            permit_wait,
+        }
+    }
+
+    async fn acquire_api_permit(&self) -> Result<OwnedSemaphorePermit, AppError> {
+        self.acquire_permit(&self.api_requests).await
+    }
+
+    async fn acquire_image_permit(&self) -> Result<OwnedSemaphorePermit, AppError> {
+        self.acquire_permit(&self.image_requests).await
+    }
+
+    async fn acquire_permit(
+        &self,
+        semaphore: &Arc<Semaphore>,
+    ) -> Result<OwnedSemaphorePermit, AppError> {
+        match timeout(self.permit_wait, semaphore.clone().acquire_owned()).await {
+            Ok(Ok(permit)) => Ok(permit),
+            Ok(Err(_)) | Err(_) => Err(AppError::ServiceUnavailable(
+                "External media service is busy".to_string(),
+            )),
         }
     }
 
@@ -142,6 +188,7 @@ impl TmdbService {
         spec: &str,
         max_bytes: usize,
     ) -> Result<Vec<u8>, AppError> {
+        let _permit = self.acquire_image_permit().await?;
         let url = format!("{}/{}", image_base_url.trim_end_matches('/'), spec);
         let response = self.image_client.get(url).send().await?;
 
@@ -160,6 +207,7 @@ impl TmdbService {
         media_type: Option<&str>,
         page: Option<u32>,
     ) -> Result<TmdbSearchResponse, AppError> {
+        let _permit = self.acquire_api_permit().await?;
         let endpoint = match media_type {
             Some("movie") => "search/movie",
             Some("tv") => "search/tv",
@@ -183,6 +231,7 @@ impl TmdbService {
     }
 
     pub async fn get_movie_detail(&self, tmdb_id: i32) -> Result<TmdbMovieDetail, AppError> {
+        let _permit = self.acquire_api_permit().await?;
         let response = self
             .authed(
                 self.client
@@ -195,6 +244,7 @@ impl TmdbService {
     }
 
     pub async fn get_tv_detail(&self, tmdb_id: i32) -> Result<TmdbTvDetail, AppError> {
+        let _permit = self.acquire_api_permit().await?;
         let response = self
             .authed(
                 self.client
@@ -216,6 +266,7 @@ impl TmdbService {
                 "Invalid TMDB ID or season number".to_string(),
             ));
         }
+        let _permit = self.acquire_api_permit().await?;
         let response = self
             .authed(
                 self.client
@@ -231,6 +282,7 @@ impl TmdbService {
     }
 
     pub async fn get_trending(&self) -> Result<TmdbTrendingResponse, AppError> {
+        let _permit = self.acquire_api_permit().await?;
         let response = self
             .authed(
                 self.client
@@ -262,6 +314,7 @@ impl TmdbService {
             .map_err(|_| AppError::TmdbError("External API URL is invalid".to_string()))?
             .push(external_id);
 
+        let _permit = self.acquire_api_permit().await?;
         let response = self
             .authed(
                 self.client
@@ -586,6 +639,31 @@ mod tests {
         let result = service.get_trending().await;
 
         assert!(matches!(result, Err(AppError::TmdbError(_))));
+    }
+
+    #[tokio::test]
+    async fn concurrency_limits_are_shared_and_shed_waiters() {
+        let service = TmdbService::with_concurrency_limits(
+            &config_with_token(None),
+            1,
+            1,
+            Duration::from_millis(20),
+        );
+
+        let api_permit = service.acquire_api_permit().await.unwrap();
+        let result = service.clone().get_trending().await;
+        assert!(matches!(result, Err(AppError::ServiceUnavailable(_))));
+        drop(api_permit);
+        assert!(service.acquire_api_permit().await.is_ok());
+
+        let image_permit = service.acquire_image_permit().await.unwrap();
+        let result = service
+            .clone()
+            .fetch_image("http://127.0.0.1:9", "image.jpg", 10)
+            .await;
+        assert!(matches!(result, Err(AppError::ServiceUnavailable(_))));
+        drop(image_permit);
+        assert!(service.acquire_image_permit().await.is_ok());
     }
 
     #[tokio::test]

@@ -21,6 +21,9 @@ pub enum AppError {
     #[error("Too many requests: {0}")]
     TooManyRequests(String),
 
+    #[error("Service unavailable: {0}")]
+    ServiceUnavailable(String),
+
     #[error("Internal server error")]
     InternalError(#[from] anyhow::Error),
 
@@ -51,6 +54,10 @@ impl ResponseError for AppError {
             AppError::TooManyRequests(msg) => {
                 (actix_web::http::StatusCode::TOO_MANY_REQUESTS, msg.clone())
             }
+            AppError::ServiceUnavailable(msg) => (
+                actix_web::http::StatusCode::SERVICE_UNAVAILABLE,
+                msg.clone(),
+            ),
             AppError::ValidationError(msg) => {
                 (actix_web::http::StatusCode::BAD_REQUEST, msg.clone())
             }
@@ -176,6 +183,14 @@ mod tests {
         assert_eq!(
             status_of(&AppError::TooManyRequests("x".into())),
             StatusCode::TOO_MANY_REQUESTS
+        );
+    }
+
+    #[test]
+    fn test_service_unavailable_is_503() {
+        assert_eq!(
+            status_of(&AppError::ServiceUnavailable("x".into())),
+            StatusCode::SERVICE_UNAVAILABLE
         );
     }
 
