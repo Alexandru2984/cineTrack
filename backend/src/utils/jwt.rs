@@ -53,6 +53,10 @@ pub fn generate_refresh_token() -> String {
     hex::encode(bytes)
 }
 
+pub fn is_valid_refresh_token(token: &str) -> bool {
+    token.len() == 128 && token.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
 /// SHA-256 hash for refresh token storage (fast, secure for high-entropy tokens)
 pub fn hash_refresh_token(token: &str) -> String {
     let mut hasher = Sha256::new();
@@ -142,6 +146,14 @@ mod tests {
     fn test_generate_refresh_token_is_hex() {
         let token = generate_refresh_token();
         assert!(token.chars().all(|c| c.is_ascii_hexdigit()));
+        assert!(is_valid_refresh_token(&token));
+    }
+
+    #[test]
+    fn test_refresh_token_shape_rejects_bad_input() {
+        assert!(!is_valid_refresh_token(&"a".repeat(127)));
+        assert!(!is_valid_refresh_token(&"a".repeat(129)));
+        assert!(!is_valid_refresh_token(&"z".repeat(128)));
     }
 
     #[test]

@@ -18,7 +18,7 @@ pub struct UpdateProfileRequest {
 /// alone, since the access token is required separately).
 #[derive(Debug, Deserialize, Validate)]
 pub struct DeleteAccountRequest {
-    #[validate(length(min = 1, message = "Password is required"))]
+    #[validate(length(min = 1, max = 128, message = "Password must be 1-128 characters"))]
     pub password: String,
 }
 
@@ -95,5 +95,19 @@ mod tests {
             is_public: Some(true),
         };
         assert!(req.validate().is_ok());
+    }
+
+    #[test]
+    fn test_delete_account_password_is_bounded() {
+        assert!(DeleteAccountRequest {
+            password: "x".repeat(128),
+        }
+        .validate()
+        .is_ok());
+        assert!(DeleteAccountRequest {
+            password: "x".repeat(129),
+        }
+        .validate()
+        .is_err());
     }
 }

@@ -119,6 +119,9 @@ pub async fn refresh_token(
     client: &ClientInfo,
     refresh_token: &str,
 ) -> Result<(AuthResponse, String), AppError> {
+    if !jwt::is_valid_refresh_token(refresh_token) {
+        return Err(AppError::Unauthorized("Invalid refresh token".to_string()));
+    }
     let token_hash = jwt::hash_refresh_token(refresh_token);
     let mut tx = pool.begin().await?;
 
@@ -204,6 +207,9 @@ pub async fn refresh_token(
 }
 
 pub async fn logout(pool: &PgPool, refresh_token: &str) -> Result<(), AppError> {
+    if !jwt::is_valid_refresh_token(refresh_token) {
+        return Ok(());
+    }
     let token_hash = jwt::hash_refresh_token(refresh_token);
     sqlx::query(
         "UPDATE refresh_tokens SET revoked_at = NOW() WHERE token_hash = $1 AND revoked_at IS NULL",
@@ -318,6 +324,11 @@ pub async fn reset_password(
     token: &str,
     new_password: &str,
 ) -> Result<(), AppError> {
+    if !jwt::is_valid_refresh_token(token) {
+        return Err(AppError::BadRequest(
+            "Invalid or expired reset token".to_string(),
+        ));
+    }
     let token_hash = jwt::hash_refresh_token(token);
     let mut tx = pool.begin().await?;
 

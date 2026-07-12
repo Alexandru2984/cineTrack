@@ -2,6 +2,17 @@ use serde::{Deserialize, Serialize};
 use validator::Validate;
 
 use crate::dto::validation::validate_username;
+use crate::utils::jwt::is_valid_refresh_token;
+
+fn validate_refresh_token(token: &str) -> Result<(), validator::ValidationError> {
+    if is_valid_refresh_token(token) {
+        return Ok(());
+    }
+
+    let mut err = validator::ValidationError::new("invalid_token");
+    err.message = Some("Invalid token".into());
+    Err(err)
+}
 
 #[derive(Debug, Deserialize, Validate)]
 pub struct RegisterRequest {
@@ -10,7 +21,10 @@ pub struct RegisterRequest {
         custom(function = "validate_username")
     )]
     pub username: String,
-    #[validate(email(message = "Invalid email address"))]
+    #[validate(
+        length(max = 254, message = "Email must be at most 254 characters"),
+        email(message = "Invalid email address")
+    )]
     pub email: String,
     #[validate(
         length(min = 8, max = 128, message = "Password must be 8-128 characters"),
@@ -43,7 +57,10 @@ fn validate_password_strength(password: &str) -> Result<(), validator::Validatio
 
 #[derive(Debug, Deserialize, Validate)]
 pub struct LoginRequest {
-    #[validate(email(message = "Invalid email address"))]
+    #[validate(
+        length(max = 254, message = "Email must be at most 254 characters"),
+        email(message = "Invalid email address")
+    )]
     pub email: String,
     #[validate(length(min = 1, max = 128, message = "Password must be 1-128 characters"))]
     pub password: String,
@@ -104,7 +121,11 @@ impl From<crate::models::User> for UserSummary {
 
 #[derive(Debug, Deserialize, Validate)]
 pub struct ChangePasswordRequest {
-    #[validate(length(min = 1, message = "Current password is required"))]
+    #[validate(length(
+        min = 1,
+        max = 128,
+        message = "Current password must be 1-128 characters"
+    ))]
     pub current_password: String,
     #[validate(
         length(min = 8, max = 128, message = "Password must be 8-128 characters"),
@@ -115,13 +136,16 @@ pub struct ChangePasswordRequest {
 
 #[derive(Debug, Deserialize, Validate)]
 pub struct ForgotPasswordRequest {
-    #[validate(email(message = "Invalid email address"))]
+    #[validate(
+        length(max = 254, message = "Email must be at most 254 characters"),
+        email(message = "Invalid email address")
+    )]
     pub email: String,
 }
 
 #[derive(Debug, Deserialize, Validate)]
 pub struct ResetPasswordRequest {
-    #[validate(length(min = 1, message = "Reset token is required"))]
+    #[validate(custom(function = "validate_refresh_token"))]
     pub token: String,
     #[validate(
         length(min = 8, max = 128, message = "Password must be 8-128 characters"),
@@ -156,6 +180,15 @@ pub struct LogoutRequest {
 mod tests {
     use super::*;
     use validator::Validate;
+
+    fn email_with_domain_labels(label_lengths: &[usize]) -> String {
+        let domain = label_lengths
+            .iter()
+            .map(|length| "b".repeat(*length))
+            .collect::<Vec<_>>()
+            .join(".");
+        format!("{}@{domain}", "a".repeat(64))
+    }
 
     // --- Password strength validator tests ---
 
@@ -326,5 +359,68 @@ mod tests {
             password: "Abcdef1x".to_string(), // exactly 8
         };
         assert!(req.validate().is_ok());
+    }
+
+    #[test]
+    fn test_register_email_boundary_254_chars() {
+        let email = email_with_domain_labels(&[63, 63, 61]);
+        assert_eq!(email.chars().count(), 254);
+        let req = RegisterRequest {
+            username: "testuser".to_string(),
+            email,
+            password: "SecurePass1".to_string(),
+        };
+        assert!(req.validate().is_ok());
+    }
+
+    #[test]
+    fn test_auth_requests_reject_email_over_254_chars() {
+        let email = email_with_domain_labels(&[63, 63, 62]);
+        assert_eq!(email.chars().count(), 255);
+
+        assert!(RegisterRequest {
+            username: "testuser".to_string(),
+            email: email.clone(),
+            password: "SecurePass1".to_string(),
+        }
+        .validate()
+        .is_err());
+        assert!(LoginRequest {
+            email: email.clone(),
+            password: "SecurePass1".to_string(),
+        }
+        .validate()
+        .is_err());
+        assert!(ForgotPasswordRequest { email }.validate().is_err());
+    }
+
+    #[test]
+    fn test_change_password_caps_current_password() {
+        let req = ChangePasswordRequest {
+            current_password: "x".repeat(129),
+            new_password: "SecurePass1".to_string(),
+        };
+        assert!(req.validate().is_err());
+    }
+
+    #[test]
+    fn test_reset_password_requires_generated_token_shape() {
+        let valid = ResetPasswordRequest {
+            token: "a".repeat(128),
+            new_password: "SecurePass1".to_string(),
+        };
+        assert!(valid.validate().is_ok());
+
+        let short = ResetPasswordRequest {
+            token: "a".repeat(127),
+            new_password: "SecurePass1".to_string(),
+        };
+        assert!(short.validate().is_err());
+
+        let non_hex = ResetPasswordRequest {
+            token: "z".repeat(128),
+            new_password: "SecurePass1".to_string(),
+        };
+        assert!(non_hex.validate().is_err());
     }
 }
