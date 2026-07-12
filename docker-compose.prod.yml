@@ -1,3 +1,5 @@
+name: cinetrack
+
 x-logging: &default-logging
   driver: json-file
   options:
@@ -6,7 +8,7 @@ x-logging: &default-logging
 
 services:
   db:
-    image: postgres:16-alpine
+    image: postgres:16-alpine@sha256:e013e867e712fec275706a6c51c966f0bb0c93cfa8f51000f85a15f9865a28cb
     security_opt:
       - no-new-privileges:true
     pids_limit: 256
