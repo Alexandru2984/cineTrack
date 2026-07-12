@@ -63,6 +63,7 @@ The application has been through multiple security audits. Key measures include:
 - **Storage Access Control** — The public asset proxy only serves validated images under `avatars/` and `posters/`; private backup objects are never reachable through it
 - **Privacy** — Private profiles require an approved follow request before details or activity become visible; public user endpoints never expose emails; no user enumeration on register
 - **Access Control** — Private lists return 404 to non-owners; all media endpoints require authentication; history entries validated against existing media
+- **Storage Quotas** — Per-account limits of 10,000 tracked titles and 100,000 watch events are enforced atomically across API requests and imports
 - **Security Headers** — HSTS, X-Frame-Options (DENY), X-Content-Type-Options, Referrer-Policy, Permissions-Policy, and a same-origin-only script/connect Content-Security-Policy
 - **Container Security** — Both backend and frontend run as non-root users; Docker resource limits enforced
 - **Error Handling** — Internal errors (TMDB, JWT) sanitized before reaching client; no stack traces or implementation details leaked
@@ -287,7 +288,7 @@ Users migrating from TV Time can bring their history in from **Settings → Impo
 - **Input** — the browser-extension export (`shows.json`, `movies.json`) and, optionally, the GDPR `rewatched_episode.csv`.
 - **ID resolution** — TV Time keys shows by **TVDB** id and movies by **IMDB** id; the app is **TMDB**-based, so the importer resolves each via TMDB's `/find` endpoint with a title-search fallback.
 - **Matching** — episodes link by `(season, episode)`; for shows whose numbering diverges from TMDB (e.g. anime, or shows TV Time numbers by year), it falls back to **absolute-position** matching. Watches that TMDB can't represent are still recorded by date (they count toward the heatmap) and reported as "date-only".
-- **Execution** — runs as a bounded background job (`import_jobs` table); the UI polls for status and shows a summary (shows / movies / episodes linked / date-only / unresolved). One non-failed import is reserved atomically per account, and final tracking/history writes commit together.
+- **Execution** — runs as a bounded background job (`import_jobs` table); the UI polls for status and shows a summary (shows / movies / episodes linked / date-only / unresolved). One non-failed import is reserved atomically per account, at most 100,000 watch events are accepted, and final tracking/history writes commit together under the same per-account quotas as the API.
 - **Data minimization** — raw TV Time exports are parsed in memory and are not retained after the job is accepted.
 
 ## Object Storage & Backups (Cloudflare R2)

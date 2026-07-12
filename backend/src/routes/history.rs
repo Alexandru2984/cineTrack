@@ -6,6 +6,7 @@ use crate::dto::common::PaginationParams;
 use crate::dto::tracking::*;
 use crate::errors::AppError;
 use crate::middleware::auth::require_auth;
+use crate::services::quota;
 
 pub fn configure(cfg: &mut web::ServiceConfig) {
     cfg.service(
@@ -112,6 +113,10 @@ async fn create_history(
         .unwrap_or_else(chrono::Utc::now)
         .min(chrono::Utc::now());
 
+    let mut tx = pool.begin().await?;
+    let history_count = quota::lock_and_count_history(&mut tx, user_id).await?;
+    quota::ensure_history_capacity(history_count, 1)?;
+
     let history = sqlx::query_as::<_, crate::models::WatchHistory>(
         r#"INSERT INTO watch_history (user_id, media_id, episode_id, watched_at)
         VALUES ($1, $2, $3, $4)
@@ -121,8 +126,9 @@ async fn create_history(
     .bind(data.media_id)
     .bind(data.episode_id)
     .bind(watched_at)
-    .fetch_one(pool.get_ref())
+    .fetch_one(&mut *tx)
     .await?;
+    tx.commit().await?;
 
     Ok(HttpResponse::Created().json(history))
 }
@@ -135,15 +141,18 @@ async fn delete_history(
     let user_id = require_auth(&req).await?;
     let history_id = path.into_inner();
 
+    let mut tx = pool.begin().await?;
+    quota::lock_history_writes(&mut tx, user_id).await?;
     let result = sqlx::query("DELETE FROM watch_history WHERE id = $1 AND user_id = $2")
         .bind(history_id)
         .bind(user_id)
-        .execute(pool.get_ref())
+        .execute(&mut *tx)
         .await?;
 
     if result.rows_affected() == 0 {
         return Err(AppError::NotFound("History entry not found".to_string()));
     }
+    tx.commit().await?;
 
     Ok(HttpResponse::Ok().json(serde_json::json!({"message": "Deleted"})))
 }

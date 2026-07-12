@@ -7,6 +7,7 @@ use validator::Validate;
 use crate::dto::tracking::*;
 use crate::errors::AppError;
 use crate::middleware::auth::require_auth;
+use crate::services::quota;
 use crate::services::tmdb::TmdbService;
 
 pub fn configure(cfg: &mut web::ServiceConfig) {
@@ -107,6 +108,25 @@ async fn create_tracking(
     body.validate()?;
     let data = body.into_inner();
 
+    // Reject obviously full libraries before an upstream lookup can populate
+    // the shared TMDB cache. The transaction below repeats this atomically.
+    let (tracking_count, already_tracked) = sqlx::query_as::<_, (i64, bool)>(
+        r#"SELECT
+            (SELECT COUNT(*) FROM user_media WHERE user_id = $1),
+            EXISTS(
+                SELECT 1
+                FROM user_media um
+                JOIN media m ON m.id = um.media_id
+                WHERE um.user_id = $1 AND m.tmdb_id = $2 AND m.media_type = $3
+            )"#,
+    )
+    .bind(user_id)
+    .bind(data.tmdb_id)
+    .bind(&data.media_type)
+    .fetch_one(pool.get_ref())
+    .await?;
+    quota::ensure_tracking_capacity(tracking_count, if already_tracked { 0 } else { 1 })?;
+
     let media = tmdb
         .get_or_cache_media(pool.get_ref(), data.tmdb_id, &data.media_type)
         .await?;
@@ -118,6 +138,7 @@ async fn create_tracking(
         .execute(&mut *tx)
         .await?;
 
+    let tracking_count = quota::lock_and_count_tracking(&mut tx, user_id).await?;
     let previous_status = sqlx::query_scalar::<_, String>(
         "SELECT status FROM user_media WHERE user_id = $1 AND media_id = $2",
     )
@@ -125,6 +146,10 @@ async fn create_tracking(
     .bind(media.id)
     .fetch_optional(&mut *tx)
     .await?;
+    quota::ensure_tracking_capacity(
+        tracking_count,
+        if previous_status.is_some() { 0 } else { 1 },
+    )?;
 
     let user_media = sqlx::query_as::<_, crate::models::UserMedia>(
         r#"INSERT INTO user_media (user_id, media_id, status, started_at, completed_at)
@@ -182,6 +207,9 @@ async fn update_tracking(
     validate_supplied_dates(data.started_at, data.completed_at, today)?;
 
     let mut tx = pool.begin().await?;
+    // All tracking mutations use the same first lock. In particular, this
+    // keeps row locks and history quota locks ordered consistently with imports.
+    quota::lock_tracking_writes(&mut tx, user_id).await?;
     let current = sqlx::query_as::<_, crate::models::UserMedia>(
         "SELECT * FROM user_media WHERE id = $1 AND user_id = $2 FOR UPDATE",
     )
@@ -288,7 +316,21 @@ async fn record_completion_history(
     media_id: Uuid,
     media_type: &str,
 ) -> Result<(), AppError> {
+    let history_count = quota::lock_and_count_history(tx, user_id).await?;
+
     if media_type == "movie" {
+        let already_recorded = sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS(
+                SELECT 1 FROM watch_history
+                WHERE user_id = $1 AND media_id = $2 AND episode_id IS NULL
+            )",
+        )
+        .bind(user_id)
+        .bind(media_id)
+        .fetch_one(&mut **tx)
+        .await?;
+        quota::ensure_history_capacity(history_count, if already_recorded { 0 } else { 1 })?;
+
         sqlx::query(
             r#"INSERT INTO watch_history (user_id, media_id, watched_at)
             SELECT $1, $2, NOW()
@@ -303,6 +345,36 @@ async fn record_completion_history(
         .await?;
         return Ok(());
     }
+
+    let missing_episodes = sqlx::query_scalar::<_, i64>(
+        r#"SELECT COUNT(*)
+        FROM episodes e
+        JOIN seasons s ON e.season_id = s.id
+        WHERE s.media_id = $2 AND s.season_number > 0
+        AND NOT EXISTS (
+            SELECT 1 FROM watch_history wh
+            WHERE wh.user_id = $1 AND wh.media_id = $2 AND wh.episode_id = e.id
+        )"#,
+    )
+    .bind(user_id)
+    .bind(media_id)
+    .fetch_one(&mut **tx)
+    .await?;
+    let has_title_history = sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS(
+            SELECT 1 FROM watch_history WHERE user_id = $1 AND media_id = $2
+        )",
+    )
+    .bind(user_id)
+    .bind(media_id)
+    .fetch_one(&mut **tx)
+    .await?;
+    let fallback_rows = if missing_episodes == 0 && !has_title_history {
+        1
+    } else {
+        0
+    };
+    quota::ensure_history_capacity(history_count, missing_episodes + fallback_rows)?;
 
     let inserted = sqlx::query(
         r#"INSERT INTO watch_history (user_id, media_id, episode_id, watched_at)
@@ -347,15 +419,18 @@ async fn delete_tracking(
     let user_id = require_auth(&req).await?;
     let tracking_id = path.into_inner();
 
+    let mut tx = pool.begin().await?;
+    quota::lock_tracking_writes(&mut tx, user_id).await?;
     let result = sqlx::query("DELETE FROM user_media WHERE id = $1 AND user_id = $2")
         .bind(tracking_id)
         .bind(user_id)
-        .execute(pool.get_ref())
+        .execute(&mut *tx)
         .await?;
 
     if result.rows_affected() == 0 {
         return Err(AppError::NotFound("Tracking entry not found".to_string()));
     }
+    tx.commit().await?;
 
     Ok(HttpResponse::Ok().json(serde_json::json!({"message": "Deleted successfully"})))
 }

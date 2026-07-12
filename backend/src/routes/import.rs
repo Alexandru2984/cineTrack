@@ -11,6 +11,7 @@ use crate::dto::import::*;
 use crate::errors::AppError;
 use crate::middleware::auth::require_auth;
 use crate::services::importer;
+use crate::services::quota;
 use crate::services::tmdb::TmdbService;
 
 /// Max size accepted for any single uploaded export file.
@@ -19,6 +20,7 @@ const MAX_UPLOAD_BYTES: usize = 24 * 1024 * 1024;
 const MAX_TITLES: usize = 5_000;
 const MAX_EPISODE_RECORDS: usize = 100_000;
 const MAX_REWATCH_ROWS: usize = 100_000;
+const MAX_HISTORY_EVENTS_PER_IMPORT: usize = quota::MAX_HISTORY_EVENTS_PER_USER as usize;
 const MAX_TITLE_BYTES: usize = 200;
 const MAX_DATE_BYTES: usize = 64;
 const MAX_CONCURRENT_IMPORTS: usize = 2;
@@ -106,7 +108,7 @@ fn validate_import_payload(
     shows: &[TvTimeShow],
     movies: &[TvTimeMovie],
     rewatches: &[RewatchRow],
-) -> Result<(), AppError> {
+) -> Result<usize, AppError> {
     if shows.len().saturating_add(movies.len()) > MAX_TITLES {
         return Err(AppError::BadRequest(
             "Import contains too many titles".to_string(),
@@ -114,6 +116,7 @@ fn validate_import_payload(
     }
 
     let mut episode_records = 0_usize;
+    let mut history_events = rewatches.len();
     for show in shows {
         validate_external_id(&show.id)?;
         validate_text(&show.title, MAX_TITLE_BYTES, "Show title is too long")?;
@@ -143,6 +146,11 @@ fn validate_import_payload(
                     MAX_DATE_BYTES,
                     "Episode date is too long",
                 )?;
+                if episode.is_watched {
+                    history_events = history_events
+                        .checked_add(1)
+                        .ok_or_else(|| AppError::BadRequest("Import is too large".to_string()))?;
+                }
             }
         }
     }
@@ -152,6 +160,11 @@ fn validate_import_payload(
         validate_text(&movie.title, MAX_TITLE_BYTES, "Movie title is too long")?;
         validate_optional_text(&movie.watched_at, MAX_DATE_BYTES, "Movie date is too long")?;
         validate_optional_text(&movie.created_at, MAX_DATE_BYTES, "Movie date is too long")?;
+        if movie.is_watched {
+            history_events = history_events
+                .checked_add(1)
+                .ok_or_else(|| AppError::BadRequest("Import is too large".to_string()))?;
+        }
     }
 
     for rewatch in rewatches {
@@ -174,6 +187,16 @@ fn validate_import_payload(
         }
     }
 
+    validate_import_history_count(history_events)?;
+    Ok(history_events)
+}
+
+fn validate_import_history_count(history_events: usize) -> Result<(), AppError> {
+    if history_events > MAX_HISTORY_EVENTS_PER_IMPORT {
+        return Err(AppError::BadRequest(format!(
+            "Import can contain at most {MAX_HISTORY_EVENTS_PER_IMPORT} watch events"
+        )));
+    }
     Ok(())
 }
 
@@ -274,7 +297,25 @@ async fn start_import(
             "Upload at least shows.json or movies.json".to_string(),
         ));
     }
-    validate_import_payload(&shows, &movies, &rewatches)?;
+    let incoming_history_events = validate_import_payload(&shows, &movies, &rewatches)?;
+
+    // Conservative preflight checks avoid doing thousands of TMDB lookups for
+    // an import that cannot fit. Exact de-duplicated counts are checked again
+    // in the import transaction.
+    let (tracking_count, history_count) = sqlx::query_as::<_, (i64, i64)>(
+        "SELECT
+            (SELECT COUNT(*) FROM user_media WHERE user_id = $1),
+            (SELECT COUNT(*) FROM watch_history WHERE user_id = $1)",
+    )
+    .bind(user_id)
+    .fetch_one(pool.get_ref())
+    .await?;
+    let incoming_titles = i64::try_from(shows.len().saturating_add(movies.len()))
+        .map_err(|_| AppError::BadRequest("Import is too large".to_string()))?;
+    let incoming_history_events = i64::try_from(incoming_history_events)
+        .map_err(|_| AppError::BadRequest("Import is too large".to_string()))?;
+    quota::ensure_tracking_capacity(tracking_count, incoming_titles)?;
+    quota::ensure_history_capacity(history_count, incoming_history_events)?;
 
     let permit = Arc::clone(&IMPORT_SLOTS).try_acquire_owned().map_err(|_| {
         AppError::TooManyRequests("The import service is busy; try again later".to_string())
@@ -451,6 +492,12 @@ mod tests {
         }];
 
         assert!(validate_import_payload(&shows, &[], &[]).is_ok());
+    }
+
+    #[test]
+    fn import_watch_event_limit_has_an_exact_boundary() {
+        assert!(validate_import_history_count(MAX_HISTORY_EVENTS_PER_IMPORT).is_ok());
+        assert!(validate_import_history_count(MAX_HISTORY_EVENTS_PER_IMPORT + 1).is_err());
     }
 
     #[test]

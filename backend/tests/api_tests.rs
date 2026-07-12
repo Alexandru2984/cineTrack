@@ -1205,6 +1205,225 @@ async fn test_history_requires_auth() {
 
 #[actix_web::test]
 #[ignore = "requires test DB"]
+async fn test_persistent_storage_quotas_release_deleted_slots() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (token, _, user_id) =
+        register_user(&app, "storagequota", "storagequota@example.com", "Pass1234").await;
+    let user_id = Uuid::parse_str(&user_id).unwrap();
+    let tracking_max = cinetrack::services::quota::MAX_TRACKING_ITEMS_PER_USER;
+    let history_max = cinetrack::services::quota::MAX_HISTORY_EVENTS_PER_USER;
+    const TMDB_BASE: i32 = 1_200_000;
+
+    sqlx::query(
+        r#"INSERT INTO media (tmdb_id, media_type, title)
+        SELECT $1 + value::integer, 'movie', 'Quota movie ' || value
+        FROM generate_series(1, $2::bigint) AS value"#,
+    )
+    .bind(TMDB_BASE)
+    .bind(tracking_max + 2)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO user_media (user_id, media_id, status)
+        SELECT $1, id, 'plan_to_watch'
+        FROM media
+        WHERE tmdb_id > $2 AND tmdb_id <= $2 + $3::integer"#,
+    )
+    .bind(user_id)
+    .bind(TMDB_BASE)
+    .bind(i32::try_from(tracking_max).unwrap())
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let existing_tmdb_id = TMDB_BASE + 1;
+    let new_tmdb_id = TMDB_BASE + i32::try_from(tracking_max).unwrap() + 1;
+    let second_new_tmdb_id = new_tmdb_id + 1;
+    let req = actix_test::TestRequest::post()
+        .uri("/api/tracking")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .set_json(json!({
+            "tmdb_id": new_tmdb_id,
+            "media_type": "movie",
+            "status": "plan_to_watch"
+        }))
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 409);
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/tracking")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .set_json(json!({
+            "tmdb_id": existing_tmdb_id,
+            "media_type": "movie",
+            "status": "watching"
+        }))
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 201, "updates remain allowed at the quota");
+
+    let tracking_id = sqlx::query_scalar::<_, Uuid>(
+        r#"SELECT um.id FROM user_media um
+        JOIN media m ON m.id = um.media_id
+        WHERE um.user_id = $1 AND m.tmdb_id = $2 AND m.media_type = 'movie'"#,
+    )
+    .bind(user_id)
+    .bind(existing_tmdb_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let req = actix_test::TestRequest::delete()
+        .uri(&format!("/api/tracking/{tracking_id}"))
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+
+    let first_req = actix_test::TestRequest::post()
+        .uri("/api/tracking")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .set_json(json!({
+            "tmdb_id": new_tmdb_id,
+            "media_type": "movie",
+            "status": "plan_to_watch"
+        }))
+        .to_request();
+    let second_req = actix_test::TestRequest::post()
+        .uri("/api/tracking")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .set_json(json!({
+            "tmdb_id": second_new_tmdb_id,
+            "media_type": "movie",
+            "status": "plan_to_watch"
+        }))
+        .to_request();
+    let (first_resp, second_resp) = futures_util::future::join(
+        actix_test::call_service(&app, first_req),
+        actix_test::call_service(&app, second_req),
+    )
+    .await;
+    let tracking_statuses = [first_resp.status(), second_resp.status()];
+    assert_eq!(
+        tracking_statuses
+            .iter()
+            .filter(|status| status.as_u16() == 201)
+            .count(),
+        1,
+        "exactly one concurrent title can claim the released slot"
+    );
+    assert_eq!(
+        tracking_statuses
+            .iter()
+            .filter(|status| status.as_u16() == 409)
+            .count(),
+        1,
+        "the competing title must be rejected at the quota"
+    );
+
+    let tracking_count =
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM user_media WHERE user_id = $1")
+            .bind(user_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(tracking_count, tracking_max);
+
+    let history_media_id = sqlx::query_scalar::<_, Uuid>(
+        "SELECT id FROM media WHERE tmdb_id = $1 AND media_type = 'movie'",
+    )
+    .bind(new_tmdb_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO watch_history (user_id, media_id, watched_at)
+        SELECT $1, $2, NOW() FROM generate_series(1, $3::bigint)"#,
+    )
+    .bind(user_id)
+    .bind(history_media_id)
+    .bind(history_max)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/history")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .set_json(json!({ "media_id": history_media_id }))
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 409);
+
+    let history_id =
+        sqlx::query_scalar::<_, Uuid>("SELECT id FROM watch_history WHERE user_id = $1 LIMIT 1")
+            .bind(user_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    let req = actix_test::TestRequest::delete()
+        .uri(&format!("/api/history/{history_id}"))
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+
+    let first_req = actix_test::TestRequest::post()
+        .uri("/api/history")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .set_json(json!({ "media_id": history_media_id }))
+        .to_request();
+    let second_req = actix_test::TestRequest::post()
+        .uri("/api/history")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .set_json(json!({ "media_id": history_media_id }))
+        .to_request();
+    let (first_resp, second_resp) = futures_util::future::join(
+        actix_test::call_service(&app, first_req),
+        actix_test::call_service(&app, second_req),
+    )
+    .await;
+    let history_statuses = [first_resp.status(), second_resp.status()];
+    assert_eq!(
+        history_statuses
+            .iter()
+            .filter(|status| status.as_u16() == 201)
+            .count(),
+        1,
+        "exactly one concurrent history event can claim the released slot"
+    );
+    assert_eq!(
+        history_statuses
+            .iter()
+            .filter(|status| status.as_u16() == 409)
+            .count(),
+        1,
+        "the competing history event must be rejected at the quota"
+    );
+
+    let history_count =
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM watch_history WHERE user_id = $1")
+            .bind(user_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(history_count, history_max);
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
 async fn test_import_requires_auth() {
     let pool = setup_pool().await;
     clean_db(&pool).await;

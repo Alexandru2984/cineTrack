@@ -1,10 +1,11 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use chrono::{DateTime, NaiveDate, NaiveDateTime, Utc};
 use sqlx::{PgPool, Postgres, Transaction};
 use uuid::Uuid;
 
 use crate::dto::import::*;
+use crate::services::quota;
 use crate::services::tmdb::TmdbService;
 
 /// One watch to be written to `watch_history` (episode_id None = date-only, i.e.
@@ -165,10 +166,45 @@ async fn import_all(
         }
     }
 
+    // Duplicate export titles can resolve to the same TMDB record. Collapse
+    // those tracking rows before the bulk upsert (history events stay distinct).
+    let mut unique_user_media = HashMap::with_capacity(user_media_rows.len());
+    for row in user_media_rows {
+        unique_user_media.insert(row.media_id, row);
+    }
+    let user_media_rows: Vec<UserMediaRow> = unique_user_media.into_values().collect();
+
     // The user's final tracking state and history become visible together.
     // TMDB cache rows may persist after a failed import, but no partial user
     // library can survive a write error.
     let mut tx = pool.begin().await?;
+    let tracking_count = quota::lock_and_count_tracking(&mut tx, user_id).await?;
+    let media_ids: Vec<Uuid> = user_media_rows
+        .iter()
+        .map(|row| row.media_id)
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect();
+    let existing_tracking = if media_ids.is_empty() {
+        0
+    } else {
+        sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM user_media WHERE user_id = $1 AND media_id = ANY($2)",
+        )
+        .bind(user_id)
+        .bind(&media_ids)
+        .fetch_one(&mut *tx)
+        .await?
+    };
+    let requested_tracking = i64::try_from(media_ids.len())
+        .map_err(|_| anyhow::anyhow!("tracking import is too large"))?;
+    quota::ensure_tracking_capacity(tracking_count, requested_tracking - existing_tracking)?;
+
+    let history_count = quota::lock_and_count_history(&mut tx, user_id).await?;
+    let requested_history = i64::try_from(watch_rows.len())
+        .map_err(|_| anyhow::anyhow!("history import is too large"))?;
+    quota::ensure_history_capacity(history_count, requested_history)?;
+
     write_user_media(&mut tx, user_id, &user_media_rows).await?;
     write_watch_history(&mut tx, user_id, &watch_rows).await?;
     tx.commit().await?;
