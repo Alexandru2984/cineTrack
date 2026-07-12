@@ -1,21 +1,33 @@
-import { useEffect } from 'react';
+import { lazy, Suspense, useEffect } from 'react';
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { Loader2 } from 'lucide-react';
 import { useAuthStore } from '@/store/auth';
 import { bootstrapSession } from '@/lib/api';
 import { Navbar } from '@/components/Navbar';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
-import LoginPage from '@/pages/Login';
-import RegisterPage from '@/pages/Register';
-import ForgotPasswordPage from '@/pages/ForgotPassword';
-import ResetPasswordPage from '@/pages/ResetPassword';
-import Dashboard from '@/pages/Dashboard';
-import SearchPage from '@/pages/Search';
-import MediaDetail from '@/pages/MediaDetail';
-import TrackingPage from '@/pages/Tracking';
-import StatsPage from '@/pages/Stats';
-import ProfilePage from '@/pages/Profile';
-import SettingsPage from '@/pages/Settings';
+
+const LoginPage = lazy(() => import('@/pages/Login'));
+const RegisterPage = lazy(() => import('@/pages/Register'));
+const ForgotPasswordPage = lazy(() => import('@/pages/ForgotPassword'));
+const ResetPasswordPage = lazy(() => import('@/pages/ResetPassword'));
+const Dashboard = lazy(() => import('@/pages/Dashboard'));
+const SearchPage = lazy(() => import('@/pages/Search'));
+const MediaDetail = lazy(() => import('@/pages/MediaDetail'));
+const TrackingPage = lazy(() => import('@/pages/Tracking'));
+const StatsPage = lazy(() => import('@/pages/Stats'));
+const ProfilePage = lazy(() => import('@/pages/Profile'));
+const SettingsPage = lazy(() => import('@/pages/Settings'));
+
+function PageLoader() {
+  return (
+    <div className="flex min-h-[calc(100vh-4rem)] items-center justify-center">
+      <Loader2
+        className="h-6 w-6 animate-spin text-[hsl(var(--primary))]"
+        aria-label="Loading page"
+      />
+    </div>
+  );
+}
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated)();
@@ -54,19 +66,21 @@ export default function App() {
     <div className="min-h-screen bg-[hsl(var(--background))] text-[hsl(var(--foreground))]">
       <Navbar />
       <ErrorBoundary key={location.pathname}>
-        <Routes>
-          <Route path="/login" element={<PublicOnlyRoute><LoginPage /></PublicOnlyRoute>} />
-          <Route path="/register" element={<PublicOnlyRoute><RegisterPage /></PublicOnlyRoute>} />
-          <Route path="/forgot-password" element={<PublicOnlyRoute><ForgotPasswordPage /></PublicOnlyRoute>} />
-          <Route path="/reset-password" element={<PublicOnlyRoute><ResetPasswordPage /></PublicOnlyRoute>} />
-          <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
-          <Route path="/search" element={<ProtectedRoute><SearchPage /></ProtectedRoute>} />
-          <Route path="/media/:id" element={<ProtectedRoute><MediaDetail /></ProtectedRoute>} />
-          <Route path="/tracking" element={<ProtectedRoute><TrackingPage /></ProtectedRoute>} />
-          <Route path="/stats" element={<ProtectedRoute><StatsPage /></ProtectedRoute>} />
-          <Route path="/profile/:username" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
-          <Route path="/settings" element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />
-        </Routes>
+        <Suspense fallback={<PageLoader />}>
+          <Routes>
+            <Route path="/login" element={<PublicOnlyRoute><LoginPage /></PublicOnlyRoute>} />
+            <Route path="/register" element={<PublicOnlyRoute><RegisterPage /></PublicOnlyRoute>} />
+            <Route path="/forgot-password" element={<PublicOnlyRoute><ForgotPasswordPage /></PublicOnlyRoute>} />
+            <Route path="/reset-password" element={<PublicOnlyRoute><ResetPasswordPage /></PublicOnlyRoute>} />
+            <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+            <Route path="/search" element={<ProtectedRoute><SearchPage /></ProtectedRoute>} />
+            <Route path="/media/:id" element={<ProtectedRoute><MediaDetail /></ProtectedRoute>} />
+            <Route path="/tracking" element={<ProtectedRoute><TrackingPage /></ProtectedRoute>} />
+            <Route path="/stats" element={<ProtectedRoute><StatsPage /></ProtectedRoute>} />
+            <Route path="/profile/:username" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
+            <Route path="/settings" element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />
+          </Routes>
+        </Suspense>
       </ErrorBoundary>
     </div>
   );
