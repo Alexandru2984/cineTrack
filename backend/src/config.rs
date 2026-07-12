@@ -41,6 +41,8 @@ pub struct Config {
 
 impl Config {
     pub fn from_env() -> Self {
+        let app_env =
+            validate_app_env(env::var("APP_ENV").unwrap_or_else(|_| "development".to_string()));
         let jwt_secret = env::var("JWT_SECRET").expect("JWT_SECRET must be set");
         assert!(
             jwt_secret.len() >= 32,
@@ -48,7 +50,7 @@ impl Config {
         );
 
         Self {
-            app_env: env::var("APP_ENV").unwrap_or_else(|_| "development".to_string()),
+            app_env,
             app_host: env::var("APP_HOST").unwrap_or_else(|_| "0.0.0.0".to_string()),
             app_port: env::var("APP_PORT")
                 .unwrap_or_else(|_| "8080".to_string())
@@ -114,6 +116,14 @@ impl Config {
     }
 }
 
+fn validate_app_env(value: String) -> String {
+    assert!(
+        matches!(value.as_str(), "development" | "test" | "production"),
+        "APP_ENV must be development, test, or production"
+    );
+    value
+}
+
 impl R2Config {
     /// Build from env; returns None (storage disabled) unless endpoint, keys and
     /// bucket are all present. Accepts the R2_S3_API or R2_ENDPOINT alias.
@@ -142,5 +152,23 @@ impl R2Config {
             bucket,
             public_base_url,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn accepts_known_application_environments() {
+        for value in ["development", "test", "production"] {
+            assert_eq!(validate_app_env(value.to_string()), value);
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "APP_ENV must be development, test, or production")]
+    fn rejects_unknown_application_environment() {
+        validate_app_env("prod".to_string());
     }
 }

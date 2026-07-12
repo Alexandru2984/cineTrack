@@ -3,9 +3,8 @@ use lettre::{AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor};
 
 use crate::config::Config;
 
-/// Sends transactional email over SMTP. When SMTP is not configured the service
-/// degrades gracefully: it logs what it would have sent (useful in dev) instead
-/// of failing, so flows like password reset never break on a missing mailer.
+/// Sends transactional email over SMTP. When SMTP is unavailable the service
+/// logs reset URLs only outside production; production never exposes them.
 #[derive(Clone)]
 pub struct EmailService {
     transport: Option<AsyncSmtpTransport<Tokio1Executor>>,
@@ -21,7 +20,11 @@ impl EmailService {
             .and_then(|host| Self::build_transport(host, config));
 
         if transport.is_none() {
-            log::warn!("SMTP not configured; emails will be logged instead of sent");
+            if config.is_production() {
+                log::warn!("SMTP unavailable; password-reset emails cannot be delivered");
+            } else {
+                log::warn!("SMTP unavailable; password-reset URLs will be logged for development");
+            }
         }
 
         Self {
@@ -70,7 +73,7 @@ impl EmailService {
                 log::info!("[email:log-only] to={to} subject={subject:?} reset_url={reset_url}");
             } else {
                 log::warn!(
-                    "SMTP not configured; password-reset email was not sent and reset URL was not logged"
+                    "SMTP unavailable; password-reset email was not sent and reset URL was not logged"
                 );
             }
             return;
