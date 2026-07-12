@@ -157,9 +157,13 @@ export interface ActivityItem {
   username: string;
   avatar_url: string | null;
   action: string;
+  tmdb_id: number;
   media_title: string;
   media_type: string;
   poster_path: string | null;
+  episode_name: string | null;
+  season_number: number | null;
+  episode_number: number | null;
   timestamp: string;
 }
 

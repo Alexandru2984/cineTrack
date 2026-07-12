@@ -1,15 +1,20 @@
 import { useParams } from 'react-router-dom';
 import { useUserProfile, useUserActivity, useFollow, useUnfollow } from '@/hooks/useSocial';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
+import { ActivityList } from '@/components/ActivityList';
 import { useAuthStore } from '@/store/auth';
-import { getPosterUrl, formatDate } from '@/lib/utils';
+import { formatDate } from '@/lib/utils';
 import { getApiErrorMessage } from '@/lib/api';
 import { User, UserPlus, UserMinus, Calendar, Clock3, LockKeyhole } from 'lucide-react';
 
 export default function ProfilePage() {
   const { username } = useParams<{ username: string }>();
   const { data: profile, isLoading } = useUserProfile(username!);
-  const { data: activity } = useUserActivity(username!, profile?.can_view_activity ?? false);
+  const {
+    data: activity,
+    isLoading: activityLoading,
+    isError: activityError,
+  } = useUserActivity(username!, profile?.can_view_activity ?? false);
   const currentUser = useAuthStore((s) => s.user);
   const follow = useFollow();
   const unfollow = useUnfollow();
@@ -88,29 +93,13 @@ export default function ProfilePage() {
             <LockKeyhole className="h-5 w-5" />
             This activity is private. An accepted follow request is required.
           </div>
-        ) : (!activity || activity.length === 0) ? (
-          <p className="text-[hsl(var(--muted-foreground))]">No activity yet</p>
         ) : (
-          <div className="space-y-3">
-            {activity.map((item) => (
-              <div key={item.id} className="flex items-center gap-3 rounded-lg border border-[hsl(var(--border))] p-3">
-                <img
-                  src={getPosterUrl(item.poster_path, 'w92')}
-                  alt=""
-                  className="h-16 w-11 rounded object-cover"
-                />
-                <div className="flex-1">
-                  <p className="text-sm">
-                    <span className="font-medium">{item.username}</span> {item.action}{' '}
-                    <span className="font-medium">{item.media_title}</span>
-                  </p>
-                  <p className="text-xs text-[hsl(var(--muted-foreground))] mt-1">
-                    {formatDate(item.timestamp)} · {item.media_type}
-                  </p>
-                </div>
-              </div>
-            ))}
-          </div>
+          <ActivityList
+            items={activity}
+            isLoading={activityLoading}
+            isError={activityError}
+            showUser={false}
+          />
         )}
       </div>
     </div>

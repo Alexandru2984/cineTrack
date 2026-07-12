@@ -134,6 +134,45 @@ test('hydrates a session from the HttpOnly-cookie refresh flow after reload', as
   expect(await page.evaluate(() => localStorage.getItem('cinetrack-auth'))).toBeNull();
 });
 
+test('shows followed episode activity on the dashboard', async ({ page }) => {
+  await stubSession(page);
+  await stubAuthedReads(page);
+  await page.route('**/api/users/me/feed**', (route) =>
+    route.fulfill({
+      json: [
+        {
+          id: '00000000-0000-4000-8000-000000000010',
+          user_id: '00000000-0000-4000-8000-000000000011',
+          username: 'followed_user',
+          avatar_url: null,
+          action: 'watched',
+          tmdb_id: 502,
+          media_title: 'Followed Show',
+          media_type: 'tv',
+          poster_path: null,
+          episode_name: 'The Reveal',
+          season_number: 2,
+          episode_number: 3,
+          timestamp: '2026-07-12T12:00:00Z',
+        },
+      ],
+    })
+  );
+
+  await page.goto('/');
+
+  await expect(page.getByRole('heading', { name: 'Recent Activity' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'followed_user' })).toHaveAttribute(
+    'href',
+    '/profile/followed_user'
+  );
+  await expect(page.getByRole('link', { name: 'Open Followed Show' })).toHaveAttribute(
+    'href',
+    '/media/502?type=tv'
+  );
+  await expect(page.getByText('S2 E3 · The Reveal')).toBeVisible();
+});
+
 test('logs out and returns to the login page', async ({ page }) => {
   await stubSession(page);
   await stubAuthedReads(page);

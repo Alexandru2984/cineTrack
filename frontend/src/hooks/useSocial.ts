@@ -15,12 +15,23 @@ export function useUserProfile(username: string) {
 
 export function useUserActivity(username: string, enabled = true) {
   return useQuery<ActivityItem[]>({
-    queryKey: ['user', username, 'activity'],
+    queryKey: ['activity', 'user', username],
     queryFn: async () => {
       const res = await api.get(`/users/${encodeURIComponent(username)}/activity`);
       return res.data;
     },
     enabled: !!username && enabled,
+  });
+}
+
+export function useActivityFeed(limit = 10) {
+  return useQuery<ActivityItem[]>({
+    queryKey: ['activity', 'feed', limit],
+    queryFn: async () => {
+      const response = await api.get('/users/me/feed', { params: { limit } });
+      return response.data;
+    },
+    staleTime: 30_000,
   });
 }
 
@@ -33,7 +44,10 @@ export function useFollow() {
       );
       return response.data;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['user'] }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['user'] });
+      void qc.invalidateQueries({ queryKey: ['activity', 'feed'] });
+    },
   });
 }
 
@@ -43,7 +57,10 @@ export function useUnfollow() {
     mutationFn: async (username: string) => {
       await api.delete(`/users/${encodeURIComponent(username)}/follow`);
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['user'] }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['user'] });
+      void qc.invalidateQueries({ queryKey: ['activity', 'feed'] });
+    },
   });
 }
 

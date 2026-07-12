@@ -1,17 +1,24 @@
 import { useTrending } from '@/hooks/useMedia';
 import { useMyStats, useHeatmap } from '@/hooks/useStats';
+import { useActivityFeed } from '@/hooks/useSocial';
 import { useAuthStore } from '@/store/auth';
 import { MediaCard } from '@/components/MediaCard';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
+import { ActivityList } from '@/components/ActivityList';
 import CalendarHeatmap from 'react-calendar-heatmap';
 import 'react-calendar-heatmap/dist/styles.css';
-import { Film, Tv, Clock, Flame } from 'lucide-react';
+import { Film, Tv, Clock, Flame, Activity } from 'lucide-react';
 
 export default function Dashboard() {
   const user = useAuthStore((s) => s.user);
   const { data: trending, isLoading: trendingLoading } = useTrending();
   const { data: stats } = useMyStats();
   const { data: heatmap } = useHeatmap();
+  const {
+    data: activity,
+    isLoading: activityLoading,
+    isError: activityError,
+  } = useActivityFeed();
 
   const today = new Date();
   const startDate = new Date(today.getFullYear(), 0, 1);
@@ -54,6 +61,18 @@ export default function Dashboard() {
           />
         </div>
       </div>
+
+      <section aria-labelledby="recent-activity-heading">
+        <h2 id="recent-activity-heading" className="mb-4 flex items-center gap-2 text-xl font-bold">
+          <Activity className="h-5 w-5 text-[hsl(var(--primary))]" aria-hidden="true" />
+          Recent Activity
+        </h2>
+        <ActivityList
+          items={activity}
+          isLoading={activityLoading}
+          isError={activityError}
+        />
+      </section>
 
       {/* Trending */}
       <div>
