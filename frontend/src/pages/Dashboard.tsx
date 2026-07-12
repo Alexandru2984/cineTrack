@@ -26,7 +26,9 @@ export default function Dashboard() {
   return (
     <div className="mx-auto max-w-7xl px-4 py-8 space-y-8">
       <div>
-        <h1 className="text-3xl font-bold">Welcome back, {user?.username}!</h1>
+        <h1 className="text-3xl font-bold">
+          Welcome back, <span className="break-all">{user?.username}</span>!
+        </h1>
         <p className="text-[hsl(var(--muted-foreground))] mt-1">Here's your watching overview</p>
       </div>
 

@@ -17,11 +17,11 @@ const TEST_USER = {
   created_at: '2026-01-01T00:00:00Z',
 };
 
-async function stubSession(page: Page, token = 'session-access-token') {
+async function stubSession(page: Page, token = 'session-access-token', user = TEST_USER) {
   await page.unroute('**/api/auth/refresh');
   await page.route('**/api/auth/refresh', (route) =>
     route.fulfill({
-      json: { access_token: token, token_type: 'Bearer', expires_in: 3600, user: TEST_USER },
+      json: { access_token: token, token_type: 'Bearer', expires_in: 3600, user },
     })
   );
 }
@@ -135,7 +135,10 @@ test('hydrates a session from the HttpOnly-cookie refresh flow after reload', as
 });
 
 test('shows followed episode activity on the dashboard', async ({ page }) => {
-  await stubSession(page);
+  await stubSession(page, 'session-access-token', {
+    ...TEST_USER,
+    username: 'dashboard_user_with_a_maximum_length_identifier_12',
+  });
   await stubAuthedReads(page);
   await page.route('**/api/users/me/feed**', (route) =>
     route.fulfill({
@@ -171,6 +174,13 @@ test('shows followed episode activity on the dashboard', async ({ page }) => {
     '/media/502?type=tv'
   );
   await expect(page.getByText('S2 E3 · The Reveal')).toBeVisible();
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= document.documentElement.clientWidth
+    )
+  ).toBe(true);
 });
 
 test('logs out and returns to the login page', async ({ page }) => {
