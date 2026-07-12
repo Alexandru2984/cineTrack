@@ -120,6 +120,8 @@ services:
     logging: *default-logging
     ports:
       - "127.0.0.1:8091:8080"
+    networks:
+      - frontend
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/"]
       interval: 30s
@@ -132,6 +134,9 @@ services:
           memory: 128M
           cpus: "0.5"
           pids: 128
+
+networks:
+  frontend:
 
 volumes:
   postgres_data:
