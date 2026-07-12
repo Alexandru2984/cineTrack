@@ -303,10 +303,11 @@ function ImportCard() {
       {showForm && (
         <form onSubmit={handleSubmit} className="mt-4 space-y-4 max-w-md">
           <div>
-            <label className="block text-sm font-medium mb-1">
+            <label htmlFor="import-shows" className="block text-sm font-medium mb-1">
               shows.json <span className="text-[hsl(var(--muted-foreground))]">(required)</span>
             </label>
             <input
+              id="import-shows"
               type="file"
               accept=".json,application/json"
               onChange={(e) => setShows(e.target.files?.[0] ?? null)}
@@ -314,10 +315,11 @@ function ImportCard() {
             />
           </div>
           <div>
-            <label className="block text-sm font-medium mb-1">
+            <label htmlFor="import-movies" className="block text-sm font-medium mb-1">
               movies.json <span className="text-[hsl(var(--muted-foreground))]">(optional)</span>
             </label>
             <input
+              id="import-movies"
               type="file"
               accept=".json,application/json"
               onChange={(e) => setMovies(e.target.files?.[0] ?? null)}
@@ -325,11 +327,12 @@ function ImportCard() {
             />
           </div>
           <div>
-            <label className="block text-sm font-medium mb-1">
+            <label htmlFor="import-rewatches" className="block text-sm font-medium mb-1">
               rewatched_episode.csv{' '}
               <span className="text-[hsl(var(--muted-foreground))]">(optional, from GDPR export)</span>
             </label>
             <input
+              id="import-rewatches"
               type="file"
               accept=".csv,text/csv"
               onChange={(e) => setRewatches(e.target.files?.[0] ?? null)}
@@ -403,9 +406,11 @@ function ChangePasswordCard() {
 
       <form onSubmit={handleSubmit} className="mt-4 space-y-4 max-w-sm">
         <div>
-          <label className="block text-sm font-medium mb-1">Current password</label>
+          <label htmlFor="change-current-password" className="block text-sm font-medium mb-1">Current password</label>
           <input
+            id="change-current-password"
             type="password"
+            autoComplete="current-password"
             value={current}
             onChange={(e) => setCurrent(e.target.value)}
             required
@@ -413,9 +418,11 @@ function ChangePasswordCard() {
           />
         </div>
         <div>
-          <label className="block text-sm font-medium mb-1">New password</label>
+          <label htmlFor="change-new-password" className="block text-sm font-medium mb-1">New password</label>
           <input
+            id="change-new-password"
             type="password"
+            autoComplete="new-password"
             value={next}
             onChange={(e) => setNext(e.target.value)}
             required
@@ -425,9 +432,11 @@ function ChangePasswordCard() {
           />
         </div>
         <div>
-          <label className="block text-sm font-medium mb-1">Confirm new password</label>
+          <label htmlFor="change-confirm-password" className="block text-sm font-medium mb-1">Confirm new password</label>
           <input
+            id="change-confirm-password"
             type="password"
+            autoComplete="new-password"
             value={confirm}
             onChange={(e) => setConfirm(e.target.value)}
             required
@@ -564,11 +573,13 @@ function DangerZoneCard() {
       ) : (
         <form onSubmit={handleDelete} className="mt-4 space-y-4 max-w-sm">
           <div>
-            <label className="block text-sm font-medium mb-1">
+            <label htmlFor="delete-account-password" className="block text-sm font-medium mb-1">
               Enter your password to confirm
             </label>
             <input
+              id="delete-account-password"
               type="password"
+              autoComplete="current-password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required

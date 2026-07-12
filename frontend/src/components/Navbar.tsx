@@ -64,13 +64,20 @@ export function Navbar() {
             </div>
           )}
 
-          <button className="md:hidden" onClick={() => setMobileOpen(!mobileOpen)}>
+          <button
+            type="button"
+            className="md:hidden"
+            aria-label={mobileOpen ? 'Close navigation' : 'Open navigation'}
+            aria-expanded={mobileOpen}
+            aria-controls="mobile-navigation"
+            onClick={() => setMobileOpen(!mobileOpen)}
+          >
             {mobileOpen ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
           </button>
         </div>
 
         {mobileOpen && (
-          <div className="md:hidden pb-4 space-y-2">
+          <div id="mobile-navigation" className="md:hidden pb-4 space-y-2">
             {authed ? (
               <>
                 <Link to="/search" className="block py-2 text-sm" onClick={() => setMobileOpen(false)}>Search</Link>

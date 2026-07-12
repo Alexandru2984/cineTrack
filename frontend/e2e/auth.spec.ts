@@ -76,8 +76,8 @@ test('shows an error message on invalid credentials', async ({ page }) => {
   );
 
   await page.goto('/login');
-  await page.locator('input[type="email"]').fill('e2e@example.com');
-  await page.locator('input[type="password"]').fill('WrongPass1');
+  await page.getByLabel('Email').fill('e2e@example.com');
+  await page.getByLabel('Password').fill('WrongPass1');
   await page.getByRole('button', { name: 'Sign in' }).click();
 
   await expect(page.getByText('Invalid email or password')).toBeVisible();
@@ -92,10 +92,10 @@ test('blocks path-unsafe usernames before registration reaches the API', async (
   });
 
   await page.goto('/register');
-  const username = page.locator('input[type="text"]');
+  const username = page.getByLabel('Username');
   await username.fill('bad user');
-  await page.locator('input[type="email"]').fill('safe@example.com');
-  await page.locator('input[type="password"]').fill('Password1');
+  await page.getByLabel('Email').fill('safe@example.com');
+  await page.getByLabel('Password').fill('Password1');
   await page.getByRole('button', { name: 'Create account' }).click();
 
   expect(await username.evaluate((input) => input.checkValidity())).toBe(false);
@@ -112,8 +112,8 @@ test('logs in and lands on the dashboard', async ({ page }) => {
   );
 
   await page.goto('/login');
-  await page.locator('input[type="email"]').fill('e2e@example.com');
-  await page.locator('input[type="password"]').fill('Password1');
+  await page.getByLabel('Email').fill('e2e@example.com');
+  await page.getByLabel('Password').fill('Password1');
   await page.getByRole('button', { name: 'Sign in' }).click();
 
   await expect(page).toHaveURL('http://localhost:5173/');
@@ -215,7 +215,7 @@ test('forgot password shows a uniform confirmation', async ({ page }) => {
   );
 
   await page.goto('/forgot-password');
-  await page.locator('input[type="email"]').fill('whoever@example.com');
+  await page.getByLabel('Email').fill('whoever@example.com');
   await page.getByRole('button', { name: 'Send reset link' }).click();
 
   await expect(page.getByText(/reset link is on its way/i)).toBeVisible();

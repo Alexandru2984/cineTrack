@@ -74,6 +74,7 @@ export default function TrackingPage() {
             <div className="flex items-center gap-2 shrink-0">
               {/* Quick rating */}
               <select
+                aria-label={`Status for ${item.title}`}
                 value={item.status}
                 onChange={(e) => updateTracking.mutate({ id: item.id, status: e.target.value })}
                 className="rounded border border-[hsl(var(--input))] bg-transparent px-2 py-1 text-xs"
@@ -83,12 +84,18 @@ export default function TrackingPage() {
                 ))}
               </select>
               <button
+                type="button"
+                title={item.is_favorite ? `Remove ${item.title} from favorites` : `Add ${item.title} to favorites`}
+                aria-label={item.is_favorite ? `Remove ${item.title} from favorites` : `Add ${item.title} to favorites`}
                 onClick={() => updateTracking.mutate({ id: item.id, is_favorite: !item.is_favorite })}
                 className="p-1"
               >
                 <Heart className={`h-4 w-4 ${item.is_favorite ? 'fill-red-500 text-red-500' : 'text-[hsl(var(--muted-foreground))]'}`} />
               </button>
               <button
+                type="button"
+                title={`Remove ${item.title} from your list`}
+                aria-label={`Remove ${item.title} from your list`}
                 onClick={() => { if (confirm('Remove from list?')) deleteTracking.mutate(item.id); }}
                 className="p-1 text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--destructive))]"
               >
