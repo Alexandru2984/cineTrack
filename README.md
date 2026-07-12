@@ -61,6 +61,7 @@ The application has been through multiple security audits. Key measures include:
 - **Input Validation** — All user inputs validated with length limits (bio 500, review 5000, list names 200, etc.) and content validation
 - **Upload Safety** — Avatar bytes, structure, dimensions, declared type, and size are checked; imports have byte and record limits plus a two-job global concurrency cap; poster downloads are streamed through an uncredentialed, non-redirecting client with strict size limits
 - **Storage Access Control** — The public asset proxy only serves validated images under `avatars/` and `posters/`; private backup objects are never reachable through it
+- **Cache Discipline** — Browsing TMDB details, seasons, and episodes is read-only; persistent media rows are created only for tracking and imports
 - **Privacy** — Private profiles require an approved follow request before details or activity become visible; public user endpoints never expose emails; no user enumeration on register
 - **Access Control** — Private lists return 404 to non-owners; all media endpoints require authentication; history entries validated against existing media
 - **Storage Quotas** — Per-account limits of 10,000 tracked titles and 100,000 watch events are enforced atomically across API requests and imports

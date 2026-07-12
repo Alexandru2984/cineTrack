@@ -89,7 +89,21 @@ fn create_app(
         InitError = (),
     >,
 > {
-    let config = test_config();
+    create_app_with_config(pool, test_config())
+}
+
+fn create_app_with_config(
+    pool: PgPool,
+    config: cinetrack::config::Config,
+) -> App<
+    impl actix_web::dev::ServiceFactory<
+        actix_web::dev::ServiceRequest,
+        Config = (),
+        Response = actix_web::dev::ServiceResponse<impl actix_web::body::MessageBody>,
+        Error = actix_web::Error,
+        InitError = (),
+    >,
+> {
     let tmdb_service = cinetrack::services::tmdb::TmdbService::new(&config);
     let email_service = cinetrack::services::email::EmailService::new(&config);
 
@@ -1685,6 +1699,128 @@ async fn test_media_search_requires_auth() {
         .to_request();
     let resp = actix_test::call_service(&app, req).await;
     assert_eq!(resp.status(), 401);
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn test_browsing_tmdb_detail_does_not_persist_cache() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let upstream = actix_web::rt::spawn(async move {
+        for _ in 0..3 {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = vec![0_u8; 4096];
+            let read = stream.read(&mut request).await.unwrap();
+            let request = String::from_utf8_lossy(&request[..read]);
+            let body = if request.starts_with("GET /movie/424242?") {
+                r#"{
+                    "id": 424242,
+                    "title": "Read Only Detail",
+                    "original_title": "Read Only Detail",
+                    "overview": "Fetched without persistence",
+                    "poster_path": "/poster.jpg",
+                    "backdrop_path": "/backdrop.jpg",
+                    "release_date": "2026-07-12",
+                    "status": "Released",
+                    "genres": [{"id": 18, "name": "Drama"}],
+                    "runtime": 123,
+                    "vote_average": 8.5
+                }"#
+            } else if request.starts_with("GET /tv/515151/season/1?") {
+                r#"{
+                    "episodes": [{
+                        "episode_number": 1,
+                        "name": "Pilot",
+                        "overview": "Read-only episode",
+                        "runtime": 47,
+                        "air_date": "2026-07-12",
+                        "still_path": "/still.jpg"
+                    }]
+                }"#
+            } else {
+                assert!(request.starts_with("GET /tv/515151?"));
+                r#"{
+                    "id": 515151,
+                    "name": "Read Only Show",
+                    "seasons": [{
+                        "id": 9001,
+                        "season_number": 1,
+                        "name": "Season 1",
+                        "episode_count": 8,
+                        "air_date": "2026-07-12"
+                    }]
+                }"#
+            };
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            stream.write_all(response.as_bytes()).await.unwrap();
+        }
+    });
+
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let mut config = test_config();
+    config.tmdb_base_url = format!("http://{address}");
+    let app = actix_test::init_service(create_app_with_config(pool.clone(), config)).await;
+    let (token, _, _) = register_user(
+        &app,
+        "readonlymedia",
+        "readonlymedia@example.com",
+        "Pass1234",
+    )
+    .await;
+
+    let before = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM media")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let req = actix_test::TestRequest::get()
+        .uri("/api/media/424242?type=movie")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let body: Value = actix_test::read_body_json(resp).await;
+    assert_eq!(body["id"], "424242");
+    assert_eq!(body["tmdb_id"], 424242);
+    assert_eq!(body["media_type"], "movie");
+    assert_eq!(body["runtime_minutes"], 123);
+    assert_eq!(body["vote_average"], 8.5);
+
+    let req = actix_test::TestRequest::get()
+        .uri("/api/media/515151/seasons")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let body: Value = actix_test::read_body_json(resp).await;
+    assert_eq!(body[0]["id"], "9001");
+    assert_eq!(body[0]["episode_count"], 8);
+
+    let req = actix_test::TestRequest::get()
+        .uri("/api/media/515151/seasons/1/episodes")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let body: Value = actix_test::read_body_json(resp).await;
+    assert_eq!(body[0]["id"], "515151:1:1");
+    assert_eq!(body[0]["runtime_minutes"], 47);
+
+    let after = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM media")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(after, before, "browsing must not populate persistent cache");
+    upstream.await.unwrap();
 }
 
 #[actix_web::test]

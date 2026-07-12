@@ -75,7 +75,7 @@ export default function MediaDetail() {
               {media.vote_average != null && (
                 <span className="flex items-center gap-1">
                   <Star className="h-4 w-4 fill-yellow-400 text-yellow-400" />
-                  {Number(media.vote_average || media.tmdb_vote_average).toFixed(1)}
+                  {Number(media.vote_average).toFixed(1)}
                 </span>
               )}
               {media.release_date && (

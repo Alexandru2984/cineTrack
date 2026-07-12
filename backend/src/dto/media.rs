@@ -24,7 +24,7 @@ pub struct SearchQuery {
 
 #[derive(Debug, Serialize)]
 pub struct MediaResponse {
-    pub id: uuid::Uuid,
+    pub id: String,
     pub tmdb_id: i32,
     pub media_type: String,
     pub title: String,
@@ -41,7 +41,7 @@ pub struct MediaResponse {
 
 #[derive(Debug, Serialize)]
 pub struct SeasonResponse {
-    pub id: uuid::Uuid,
+    pub id: String,
     pub season_number: i32,
     pub name: Option<String>,
     pub episode_count: Option<i32>,
@@ -50,7 +50,7 @@ pub struct SeasonResponse {
 
 #[derive(Debug, Serialize)]
 pub struct EpisodeResponse {
-    pub id: uuid::Uuid,
+    pub id: String,
     pub episode_number: i32,
     pub name: Option<String>,
     pub overview: Option<String>,

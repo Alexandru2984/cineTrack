@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import api from '@/lib/api';
-import type { TmdbSearchResponse, TmdbSearchResult } from '@/types';
+import type { Media, TmdbSearchResponse, TmdbSearchResult } from '@/types';
 
 export function useSearch(query: string, type?: string, page = 1) {
   return useQuery<TmdbSearchResponse>({
@@ -27,7 +27,7 @@ export function useTrending() {
 }
 
 export function useMediaDetail(id: string, type: string) {
-  return useQuery({
+  return useQuery<Media>({
     queryKey: ['media', id, type],
     queryFn: async () => {
       const res = await api.get(`/media/${id}`, { params: { type } });
