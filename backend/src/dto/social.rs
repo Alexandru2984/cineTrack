@@ -41,9 +41,13 @@ pub struct ActivityItem {
     pub username: String,
     pub avatar_url: Option<String>,
     pub action: String,
+    pub tmdb_id: i32,
     pub media_title: String,
     pub media_type: String,
     pub poster_path: Option<String>,
+    pub episode_name: Option<String>,
+    pub season_number: Option<i32>,
+    pub episode_number: Option<i32>,
     pub timestamp: chrono::DateTime<chrono::Utc>,
 }
 

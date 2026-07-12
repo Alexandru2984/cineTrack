@@ -13,6 +13,65 @@ use crate::models::User;
 use crate::services::quota;
 use crate::utils::password;
 
+#[derive(sqlx::FromRow)]
+struct ActivityRow {
+    id: Uuid,
+    user_id: Uuid,
+    username: String,
+    avatar_url: Option<String>,
+    tmdb_id: i32,
+    media_title: String,
+    media_type: String,
+    poster_path: Option<String>,
+    episode_name: Option<String>,
+    season_number: Option<i32>,
+    episode_number: Option<i32>,
+    timestamp: chrono::DateTime<chrono::Utc>,
+}
+
+impl From<ActivityRow> for ActivityItem {
+    fn from(row: ActivityRow) -> Self {
+        Self {
+            id: row.id,
+            user_id: row.user_id,
+            username: row.username,
+            avatar_url: row.avatar_url,
+            action: "watched".to_string(),
+            tmdb_id: row.tmdb_id,
+            media_title: row.media_title,
+            media_type: row.media_type,
+            poster_path: row.poster_path,
+            episode_name: row.episode_name,
+            season_number: row.season_number,
+            episode_number: row.episode_number,
+            timestamp: row.timestamp,
+        }
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct ActivityFeedParams {
+    limit: Option<u32>,
+    before: Option<chrono::DateTime<chrono::Utc>>,
+    before_id: Option<Uuid>,
+}
+
+impl ActivityFeedParams {
+    fn limit(&self) -> i64 {
+        self.limit.unwrap_or(20).clamp(1, 100) as i64
+    }
+
+    fn cursor(&self) -> Result<Option<(chrono::DateTime<chrono::Utc>, Uuid)>, AppError> {
+        match (self.before, self.before_id) {
+            (Some(timestamp), Some(id)) => Ok(Some((timestamp, id))),
+            (None, None) => Ok(None),
+            _ => Err(AppError::BadRequest(
+                "Both before and before_id are required for activity pagination".to_string(),
+            )),
+        }
+    }
+}
+
 pub fn configure(cfg: &mut web::ServiceConfig) {
     cfg.service(
         web::scope("/users")
@@ -20,6 +79,7 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
             .route("/me", web::delete().to(delete_account))
             .route("/me/followers", web::get().to(my_followers))
             .route("/me/following", web::get().to(my_following))
+            .route("/me/feed", web::get().to(my_activity_feed))
             .route("/me/follow-requests", web::get().to(my_follow_requests))
             .route(
                 "/me/follow-requests/{follower_id}/accept",
@@ -467,6 +527,7 @@ async fn get_user_activity(
     pool: web::Data<PgPool>,
     req: HttpRequest,
     path: web::Path<String>,
+    pagination: web::Query<PaginationParams>,
 ) -> Result<HttpResponse, AppError> {
     let username = path.into_inner();
     let current_user_id = require_auth(&req).await.ok();
@@ -483,38 +544,84 @@ async fn get_user_activity(
         ));
     }
 
-    let activities = sqlx::query_as::<_, (Uuid, Uuid, String, Option<String>, String, String, Option<String>, chrono::DateTime<chrono::Utc>)>(
-        r#"SELECT wh.id, wh.user_id, u.username, u.avatar_url, m.title, m.media_type, m.poster_path, wh.watched_at
+    let activities = sqlx::query_as::<_, ActivityRow>(
+        r#"SELECT wh.id, wh.user_id, u.username, u.avatar_url, m.tmdb_id,
+            m.title AS media_title, m.media_type, m.poster_path,
+            e.name AS episode_name, s.season_number, e.episode_number,
+            wh.watched_at AS timestamp
         FROM watch_history wh
         JOIN users u ON wh.user_id = u.id
         JOIN media m ON wh.media_id = m.id
+        LEFT JOIN episodes e ON wh.episode_id = e.id
+        LEFT JOIN seasons s ON e.season_id = s.id
         WHERE wh.user_id = $1
-        ORDER BY wh.watched_at DESC
-        LIMIT 50"#
+        ORDER BY wh.watched_at DESC, wh.id DESC
+        LIMIT $2 OFFSET $3"#,
     )
     .bind(user.id)
+    .bind(pagination.limit_val())
+    .bind(pagination.offset())
     .fetch_all(pool.get_ref())
     .await?;
 
-    let items: Vec<ActivityItem> = activities
-        .into_iter()
-        .map(
-            |(id, user_id, username, avatar_url, title, media_type, poster_path, timestamp)| {
-                ActivityItem {
-                    id,
-                    user_id,
-                    username,
-                    avatar_url,
-                    action: "watched".to_string(),
-                    media_title: title,
-                    media_type,
-                    poster_path,
-                    timestamp,
-                }
-            },
-        )
-        .collect();
+    let items: Vec<ActivityItem> = activities.into_iter().map(Into::into).collect();
 
+    Ok(HttpResponse::Ok().json(items))
+}
+
+/// Returns the authenticated user's activity and activity from accounts they
+/// currently follow. Pending requests never grant access to private activity.
+async fn my_activity_feed(
+    pool: web::Data<PgPool>,
+    req: HttpRequest,
+    params: web::Query<ActivityFeedParams>,
+) -> Result<HttpResponse, AppError> {
+    let user_id = require_auth(&req).await?;
+    let limit = params.limit();
+    let cursor = params.cursor()?;
+    let (before, before_id) = cursor.unzip();
+
+    // Limiting each visible account before the final merge keeps the amount of
+    // history considered proportional to the requested page and follow count.
+    let activities = sqlx::query_as::<_, ActivityRow>(
+        r#"WITH visible_users AS (
+            SELECT $1::uuid AS user_id
+            UNION ALL
+            SELECT following_id
+            FROM follows
+            WHERE follower_id = $1 AND status = 'accepted'
+        )
+        SELECT recent.id, recent.user_id, u.username, u.avatar_url, m.tmdb_id,
+            m.title AS media_title, m.media_type, m.poster_path,
+            e.name AS episode_name, s.season_number, e.episode_number,
+            recent.watched_at AS timestamp
+        FROM visible_users visible
+        CROSS JOIN LATERAL (
+            SELECT wh.id, wh.user_id, wh.media_id, wh.episode_id, wh.watched_at
+            FROM watch_history wh
+            WHERE wh.user_id = visible.user_id
+              AND (
+                $3::timestamptz IS NULL
+                OR (wh.watched_at, wh.id) < ($3::timestamptz, $4::uuid)
+              )
+            ORDER BY wh.watched_at DESC, wh.id DESC
+            LIMIT $2
+        ) recent
+        JOIN users u ON recent.user_id = u.id
+        JOIN media m ON recent.media_id = m.id
+        LEFT JOIN episodes e ON recent.episode_id = e.id
+        LEFT JOIN seasons s ON e.season_id = s.id
+        ORDER BY recent.watched_at DESC, recent.id DESC
+        LIMIT $2"#,
+    )
+    .bind(user_id)
+    .bind(limit)
+    .bind(before)
+    .bind(before_id)
+    .fetch_all(pool.get_ref())
+    .await?;
+
+    let items: Vec<ActivityItem> = activities.into_iter().map(Into::into).collect();
     Ok(HttpResponse::Ok().json(items))
 }
 

@@ -2293,6 +2293,163 @@ async fn test_delete_account_success() {
 
 #[actix_web::test]
 #[ignore = "requires test DB"]
+async fn test_activity_feed_only_includes_self_and_accepted_follows() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+
+    let (viewer_token, _, viewer_id) =
+        register_user(&app, "feedviewer", "feedviewer@example.com", "Pass1234").await;
+    let (_, _, followed_id) =
+        register_user(&app, "feedfollowed", "feedfollowed@example.com", "Pass1234").await;
+    let (_, _, pending_id) =
+        register_user(&app, "feedpending", "feedpending@example.com", "Pass1234").await;
+    let (_, _, stranger_id) =
+        register_user(&app, "feedstranger", "feedstranger@example.com", "Pass1234").await;
+
+    sqlx::query("UPDATE users SET is_public = false WHERE id = $1")
+        .bind(Uuid::parse_str(&pending_id).unwrap())
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    for username in ["feedfollowed", "feedpending"] {
+        let req = actix_test::TestRequest::post()
+            .uri(&format!("/api/users/{username}/follow"))
+            .insert_header(("Authorization", format!("Bearer {viewer_token}")))
+            .peer_addr(peer_addr())
+            .to_request();
+        let resp = actix_test::call_service(&app, req).await;
+        assert!(resp.status().is_success());
+    }
+
+    let viewer_media_id = sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO media (tmdb_id, media_type, title)
+        VALUES (501, 'movie', 'Viewer Movie') RETURNING id"#,
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let followed_media_id = sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO media (tmdb_id, media_type, title)
+        VALUES (502, 'tv', 'Followed Show') RETURNING id"#,
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let hidden_media_id = sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO media (tmdb_id, media_type, title)
+        VALUES (503, 'movie', 'Hidden Movie') RETURNING id"#,
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let season_id = sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO seasons (media_id, season_number, name)
+        VALUES ($1, 2, 'Season 2') RETURNING id"#,
+    )
+    .bind(followed_media_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let episode_id = sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO episodes (season_id, episode_number, name)
+        VALUES ($1, 3, 'The Reveal') RETURNING id"#,
+    )
+    .bind(season_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    let watched_at = chrono::DateTime::parse_from_rfc3339("2026-07-12T12:00:00Z")
+        .unwrap()
+        .with_timezone(&chrono::Utc);
+    let viewer_event_id = Uuid::parse_str("ffffffff-ffff-4fff-8fff-ffffffffffff").unwrap();
+    let followed_event_id = Uuid::parse_str("eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee").unwrap();
+    for (event_id, user_id, media_id, event_episode_id) in [
+        (viewer_event_id, &viewer_id, viewer_media_id, None),
+        (
+            followed_event_id,
+            &followed_id,
+            followed_media_id,
+            Some(episode_id),
+        ),
+        (
+            Uuid::parse_str("dddddddd-dddd-4ddd-8ddd-dddddddddddd").unwrap(),
+            &pending_id,
+            hidden_media_id,
+            None,
+        ),
+        (
+            Uuid::parse_str("cccccccc-cccc-4ccc-8ccc-cccccccccccc").unwrap(),
+            &stranger_id,
+            hidden_media_id,
+            None,
+        ),
+    ] {
+        sqlx::query(
+            r#"INSERT INTO watch_history (id, user_id, media_id, episode_id, watched_at)
+            VALUES ($1, $2, $3, $4, $5)"#,
+        )
+        .bind(event_id)
+        .bind(Uuid::parse_str(user_id).unwrap())
+        .bind(media_id)
+        .bind(event_episode_id)
+        .bind(watched_at)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+
+    let req = actix_test::TestRequest::get()
+        .uri("/api/users/me/feed?limit=1")
+        .insert_header(("Authorization", format!("Bearer {viewer_token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let first_page: Value = actix_test::read_body_json(resp).await;
+    assert_eq!(first_page.as_array().unwrap().len(), 1);
+    assert_eq!(first_page[0]["id"], viewer_event_id.to_string());
+    assert_eq!(first_page[0]["tmdb_id"], 501);
+
+    let req = actix_test::TestRequest::get()
+        .uri(&format!(
+            "/api/users/me/feed?limit=10&before=2026-07-12T12%3A00%3A00Z&before_id={viewer_event_id}"
+        ))
+        .insert_header(("Authorization", format!("Bearer {viewer_token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let second_page: Value = actix_test::read_body_json(resp).await;
+    let events = second_page.as_array().unwrap();
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0]["id"], followed_event_id.to_string());
+    assert_eq!(events[0]["username"], "feedfollowed");
+    assert_eq!(events[0]["tmdb_id"], 502);
+    assert_eq!(events[0]["season_number"], 2);
+    assert_eq!(events[0]["episode_number"], 3);
+    assert_eq!(events[0]["episode_name"], "The Reveal");
+
+    let req = actix_test::TestRequest::get()
+        .uri("/api/users/me/feed?before=2026-07-12T12%3A00%3A00Z")
+        .insert_header(("Authorization", format!("Bearer {viewer_token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 400);
+
+    let req = actix_test::TestRequest::get()
+        .uri("/api/users/me/feed")
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 401);
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
 async fn test_follow_and_unfollow() {
     let pool = setup_pool().await;
     clean_db(&pool).await;
