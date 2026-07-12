@@ -5,6 +5,8 @@ use crate::errors::AppError;
 
 pub const MAX_TRACKING_ITEMS_PER_USER: i64 = 10_000;
 pub const MAX_HISTORY_EVENTS_PER_USER: i64 = 100_000;
+pub const MAX_SOCIAL_RELATIONSHIPS_PER_USER: i64 = 5_000;
+pub const MAX_PENDING_FOLLOW_REQUESTS_PER_USER: i64 = 5_000;
 
 pub async fn lock_and_count_tracking(
     tx: &mut Transaction<'_, Postgres>,
@@ -56,6 +58,28 @@ pub async fn lock_history_writes(
     Ok(())
 }
 
+pub async fn lock_social_relationship_writes(
+    tx: &mut Transaction<'_, Postgres>,
+    first_user_id: Uuid,
+    second_user_id: Uuid,
+) -> Result<(), AppError> {
+    let (first, second) = if first_user_id.as_bytes() <= second_user_id.as_bytes() {
+        (first_user_id, second_user_id)
+    } else {
+        (second_user_id, first_user_id)
+    };
+
+    for user_id in [first, second] {
+        sqlx::query(
+            "SELECT pg_advisory_xact_lock(hashtextextended('social-quota:' || $1::text, 0))",
+        )
+        .bind(user_id)
+        .execute(&mut **tx)
+        .await?;
+    }
+    Ok(())
+}
+
 pub fn ensure_tracking_capacity(current: i64, additional: i64) -> Result<(), AppError> {
     ensure_capacity(
         current,
@@ -71,6 +95,27 @@ pub fn ensure_history_capacity(current: i64, additional: i64) -> Result<(), AppE
         additional,
         MAX_HISTORY_EVENTS_PER_USER,
         "history events",
+    )
+}
+
+pub fn ensure_social_relationship_capacity(current: i64, additional: i64) -> Result<(), AppError> {
+    ensure_capacity(
+        current,
+        additional,
+        MAX_SOCIAL_RELATIONSHIPS_PER_USER,
+        "social relationships",
+    )
+}
+
+pub fn ensure_pending_follow_request_capacity(
+    current: i64,
+    additional: i64,
+) -> Result<(), AppError> {
+    ensure_capacity(
+        current,
+        additional,
+        MAX_PENDING_FOLLOW_REQUESTS_PER_USER,
+        "pending follow requests",
     )
 }
 
@@ -126,6 +171,19 @@ mod tests {
         assert!(matches!(
             ensure_history_capacity(i64::MAX, 1),
             Err(AppError::InternalError(_))
+        ));
+    }
+
+    #[test]
+    fn social_quotas_allow_existing_relationships_but_not_new_rows_at_limit() {
+        assert!(ensure_social_relationship_capacity(MAX_SOCIAL_RELATIONSHIPS_PER_USER, 0).is_ok());
+        assert!(matches!(
+            ensure_social_relationship_capacity(MAX_SOCIAL_RELATIONSHIPS_PER_USER, 1),
+            Err(AppError::Conflict(_))
+        ));
+        assert!(matches!(
+            ensure_pending_follow_request_capacity(MAX_PENDING_FOLLOW_REQUESTS_PER_USER, 1),
+            Err(AppError::Conflict(_))
         ));
     }
 }

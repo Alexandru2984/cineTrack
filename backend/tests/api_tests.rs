@@ -2188,9 +2188,18 @@ async fn test_follow_and_unfollow() {
     clean_db(&pool).await;
     let app = actix_test::init_service(create_app(pool.clone())).await;
 
-    let (token_a, _, _) = register_user(&app, "follower", "follower@example.com", "Pass1234").await;
-    let (_, _, _user_b_id) =
+    let (token_a, _, user_a_id) =
+        register_user(&app, "follower", "follower@example.com", "Pass1234").await;
+    let (token_b, _, _user_b_id) =
         register_user(&app, "followed", "followed@example.com", "Pass1234").await;
+
+    sqlx::query("UPDATE users SET is_public = false, avatar_url = $2, bio = $3 WHERE id = $1")
+        .bind(Uuid::parse_str(&user_a_id).unwrap())
+        .bind("https://example.com/private-avatar.jpg")
+        .bind("private follower bio")
+        .execute(&pool)
+        .await
+        .unwrap();
 
     // Follow (route takes username, not id)
     let req = actix_test::TestRequest::post()
@@ -2215,6 +2224,22 @@ async fn test_follow_and_unfollow() {
     let following = body.as_array().unwrap();
     assert_eq!(following.len(), 1);
     assert_eq!(following[0]["username"], "followed");
+
+    // Following a public account does not grant that account access to the
+    // private follower's profile details.
+    let req = actix_test::TestRequest::get()
+        .uri("/api/users/me/followers")
+        .insert_header(("Authorization", format!("Bearer {token_b}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let body: Value = actix_test::read_body_json(resp).await;
+    let followers = body.as_array().unwrap();
+    assert_eq!(followers.len(), 1);
+    assert_eq!(followers[0]["username"], "follower");
+    assert!(followers[0]["avatar_url"].is_null());
+    assert!(followers[0]["bio"].is_null());
 
     // Unfollow
     let req = actix_test::TestRequest::delete()
@@ -2418,6 +2443,143 @@ async fn test_making_profile_public_accepts_pending_requests() {
     .await
     .unwrap();
     assert_eq!(status, "accepted");
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn test_social_relationship_quotas_are_atomic_and_bound_pending_requests() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+
+    let (token, _, user_id) =
+        register_user(&app, "socialquota", "socialquota@example.com", "Pass1234").await;
+    let user_id = Uuid::parse_str(&user_id).unwrap();
+    let relationship_max = cinetrack::services::quota::MAX_SOCIAL_RELATIONSHIPS_PER_USER;
+    let pending_max = cinetrack::services::quota::MAX_PENDING_FOLLOW_REQUESTS_PER_USER;
+    let seeded_user_count = relationship_max.max(pending_max) + 2;
+
+    sqlx::query(
+        r#"INSERT INTO users (username, email)
+        SELECT 'socialtarget' || value, 'socialtarget' || value || '@example.com'
+        FROM generate_series(1, $1::bigint) AS value"#,
+    )
+    .bind(seeded_user_count)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO follows (follower_id, following_id, status)
+        SELECT $1, u.id, 'accepted'
+        FROM generate_series(1, $2::bigint) AS value
+        JOIN users u ON u.username = 'socialtarget' || value"#,
+    )
+    .bind(user_id)
+    .bind(relationship_max)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/users/socialtarget1/follow")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(
+        resp.status(),
+        200,
+        "an existing relationship stays idempotent"
+    );
+
+    let first_new_username = format!("socialtarget{}", relationship_max + 1);
+    let second_new_username = format!("socialtarget{}", relationship_max + 2);
+    let req = actix_test::TestRequest::post()
+        .uri(&format!("/api/users/{first_new_username}/follow"))
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 409);
+
+    let req = actix_test::TestRequest::delete()
+        .uri("/api/users/socialtarget1/follow")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+
+    let first_req = actix_test::TestRequest::post()
+        .uri(&format!("/api/users/{first_new_username}/follow"))
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let second_req = actix_test::TestRequest::post()
+        .uri(&format!("/api/users/{second_new_username}/follow"))
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let (first_resp, second_resp) = futures_util::future::join(
+        actix_test::call_service(&app, first_req),
+        actix_test::call_service(&app, second_req),
+    )
+    .await;
+    let statuses = [first_resp.status(), second_resp.status()];
+    assert_eq!(
+        statuses
+            .iter()
+            .filter(|status| status.as_u16() == 200)
+            .count(),
+        1,
+        "exactly one concurrent follow can claim the released slot"
+    );
+    assert_eq!(
+        statuses
+            .iter()
+            .filter(|status| status.as_u16() == 409)
+            .count(),
+        1,
+        "the competing follow must be rejected at the quota"
+    );
+
+    let outgoing_count =
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM follows WHERE follower_id = $1")
+            .bind(user_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(outgoing_count, relationship_max);
+
+    let (_, _, owner_id) =
+        register_user(&app, "pendingowner", "pendingowner@example.com", "Pass1234").await;
+    let owner_id = Uuid::parse_str(&owner_id).unwrap();
+    sqlx::query("UPDATE users SET is_public = false WHERE id = $1")
+        .bind(owner_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        r#"INSERT INTO follows (follower_id, following_id, status)
+        SELECT u.id, $1, 'pending'
+        FROM generate_series(1, $2::bigint) AS value
+        JOIN users u ON u.username = 'socialtarget' || value"#,
+    )
+    .bind(owner_id)
+    .bind(pending_max)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let (requester_token, _, _) =
+        register_user(&app, "newrequester", "newrequester@example.com", "Pass1234").await;
+    let req = actix_test::TestRequest::post()
+        .uri("/api/users/pendingowner/follow")
+        .insert_header(("Authorization", format!("Bearer {requester_token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 409);
 }
 
 // ── List CRUD Tests ───────────────────────────────────────────

@@ -10,6 +10,7 @@ use crate::dto::user::*;
 use crate::errors::AppError;
 use crate::middleware::auth::require_auth;
 use crate::models::User;
+use crate::services::quota;
 use crate::utils::password;
 
 pub fn configure(cfg: &mut web::ServiceConfig) {
@@ -212,6 +213,35 @@ async fn follow_user(
     } else {
         "pending"
     };
+    quota::lock_social_relationship_writes(&mut tx, user_id, target.id).await?;
+
+    let existing_status = sqlx::query_scalar::<_, String>(
+        "SELECT status FROM follows WHERE follower_id = $1 AND following_id = $2",
+    )
+    .bind(user_id)
+    .bind(target.id)
+    .fetch_optional(&mut *tx)
+    .await?;
+
+    if existing_status.is_none() {
+        let outgoing_count =
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM follows WHERE follower_id = $1")
+                .bind(user_id)
+                .fetch_one(&mut *tx)
+                .await?;
+        quota::ensure_social_relationship_capacity(outgoing_count, 1)?;
+
+        if requested_status == "pending" {
+            let pending_count = sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM follows WHERE following_id = $1 AND status = 'pending'",
+            )
+            .bind(target.id)
+            .fetch_one(&mut *tx)
+            .await?;
+            quota::ensure_pending_follow_request_capacity(pending_count, 1)?;
+        }
+    }
+
     let status = sqlx::query_scalar::<_, String>(
         r#"INSERT INTO follows (follower_id, following_id, status)
         VALUES ($1, $2, $3)
@@ -290,7 +320,7 @@ async fn my_follow_requests(
         FROM follows f
         JOIN users u ON u.id = f.follower_id
         WHERE f.following_id = $1 AND f.status = 'pending'
-        ORDER BY f.created_at DESC
+        ORDER BY f.created_at DESC, f.follower_id
         LIMIT $2 OFFSET $3"#,
         )
         .bind(user_id)
@@ -370,8 +400,19 @@ async fn my_followers(
     let limit = pagination.limit_val();
     let offset = pagination.offset();
 
-    let followers = sqlx::query_as::<_, User>(
-        "SELECT u.* FROM users u JOIN follows f ON u.id = f.follower_id WHERE f.following_id = $1 AND f.status = 'accepted' LIMIT $2 OFFSET $3"
+    let followers = sqlx::query_as::<_, (Uuid, String, Option<String>, Option<String>)>(
+        r#"SELECT u.id, u.username,
+            CASE WHEN u.is_public OR reciprocal.follower_id IS NOT NULL THEN u.avatar_url ELSE NULL END,
+            CASE WHEN u.is_public OR reciprocal.follower_id IS NOT NULL THEN u.bio ELSE NULL END
+        FROM users u
+        JOIN follows f ON u.id = f.follower_id
+        LEFT JOIN follows reciprocal
+            ON reciprocal.follower_id = $1
+            AND reciprocal.following_id = u.id
+            AND reciprocal.status = 'accepted'
+        WHERE f.following_id = $1 AND f.status = 'accepted'
+        ORDER BY f.created_at DESC, f.follower_id
+        LIMIT $2 OFFSET $3"#,
     )
     .bind(user_id)
     .bind(limit)
@@ -379,8 +420,17 @@ async fn my_followers(
     .fetch_all(pool.get_ref())
     .await?;
 
-    let response: Vec<crate::dto::auth::UserSummary> =
-        followers.into_iter().map(|u| u.into()).collect();
+    let response: Vec<crate::dto::auth::UserSummary> = followers
+        .into_iter()
+        .map(
+            |(id, username, avatar_url, bio)| crate::dto::auth::UserSummary {
+                id,
+                username,
+                avatar_url,
+                bio,
+            },
+        )
+        .collect();
     Ok(HttpResponse::Ok().json(response))
 }
 
@@ -394,7 +444,11 @@ async fn my_following(
     let offset = pagination.offset();
 
     let following = sqlx::query_as::<_, User>(
-        "SELECT u.* FROM users u JOIN follows f ON u.id = f.following_id WHERE f.follower_id = $1 AND f.status = 'accepted' LIMIT $2 OFFSET $3"
+        r#"SELECT u.* FROM users u
+        JOIN follows f ON u.id = f.following_id
+        WHERE f.follower_id = $1 AND f.status = 'accepted'
+        ORDER BY f.created_at DESC, f.following_id
+        LIMIT $2 OFFSET $3"#,
     )
     .bind(user_id)
     .bind(limit)
