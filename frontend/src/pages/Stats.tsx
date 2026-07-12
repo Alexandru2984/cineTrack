@@ -91,15 +91,6 @@ export default function StatsPage() {
           </div>
         )}
       </div>
-
-      <style>{`
-        .react-calendar-heatmap .color-empty { fill: hsl(var(--muted)); }
-        .react-calendar-heatmap .color-scale-1 { fill: hsl(262 83% 58% / 0.25); }
-        .react-calendar-heatmap .color-scale-2 { fill: hsl(262 83% 58% / 0.5); }
-        .react-calendar-heatmap .color-scale-3 { fill: hsl(262 83% 58% / 0.75); }
-        .react-calendar-heatmap .color-scale-4 { fill: hsl(var(--primary)); }
-        .react-calendar-heatmap text { fill: hsl(var(--muted-foreground)); font-size: 8px; }
-      `}</style>
     </div>
   );
 }
