@@ -1,4 +1,5 @@
 use chrono::{NaiveDate, Utc};
+use serde::de::DeserializeOwned;
 use sqlx::PgPool;
 use std::time::Duration;
 
@@ -6,6 +7,18 @@ use crate::config::Config;
 use crate::dto::media::*;
 use crate::errors::AppError;
 use crate::models::Media;
+
+const MAX_API_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
+
+pub(crate) fn is_valid_external_lookup_id(external_id: &str, source: &str) -> bool {
+    match source {
+        "tvdb_id" => external_id.parse::<u64>().is_ok_and(|value| value > 0),
+        "imdb_id" => external_id.strip_prefix("tt").is_some_and(|digits| {
+            (7..=12).contains(&digits.len()) && digits.bytes().all(|byte| byte.is_ascii_digit())
+        }),
+        _ => false,
+    }
+}
 
 #[derive(Clone)]
 pub struct TmdbService {
@@ -30,6 +43,7 @@ impl TmdbService {
         let mut builder = reqwest::Client::builder()
             .timeout(Duration::from_secs(config.tmdb_timeout_seconds))
             .connect_timeout(Duration::from_secs(5))
+            .redirect(reqwest::redirect::Policy::none())
             .user_agent("cinetrack/0.1");
 
         // Prefer the v4 Read Access Token via an Authorization header so the
@@ -74,29 +88,16 @@ impl TmdbService {
         }
     }
 
-    /// Download a public TMDB image with the same connect/request timeouts as
-    /// the API client. The body is consumed incrementally so a missing or false
-    /// Content-Length header cannot make the process buffer an unbounded file.
-    pub async fn fetch_image(
-        &self,
-        image_base_url: &str,
-        spec: &str,
+    async fn read_bounded_body(
+        mut response: reqwest::Response,
         max_bytes: usize,
+        too_large_message: &'static str,
     ) -> Result<Vec<u8>, AppError> {
-        let url = format!("{}/{}", image_base_url.trim_end_matches('/'), spec);
-        let mut response = self.image_client.get(url).send().await?;
-
-        if response.status() == reqwest::StatusCode::NOT_FOUND {
-            return Err(AppError::NotFound("Image not found".to_string()));
-        }
-        if !response.status().is_success() {
-            return Err(AppError::TmdbError("Image fetch failed".to_string()));
-        }
         if response
             .content_length()
             .is_some_and(|length| length > max_bytes as u64)
         {
-            return Err(AppError::TmdbError("Image is too large".to_string()));
+            return Err(AppError::TmdbError(too_large_message.to_string()));
         }
 
         let mut bytes = Vec::with_capacity(
@@ -107,12 +108,50 @@ impl TmdbService {
         );
         while let Some(chunk) = response.chunk().await? {
             if chunk.len() > max_bytes.saturating_sub(bytes.len()) {
-                return Err(AppError::TmdbError("Image is too large".to_string()));
+                return Err(AppError::TmdbError(too_large_message.to_string()));
             }
             bytes.extend_from_slice(&chunk);
         }
 
         Ok(bytes)
+    }
+
+    async fn decode_api_response<T: DeserializeOwned>(
+        response: reqwest::Response,
+    ) -> Result<T, AppError> {
+        let response = response.error_for_status()?;
+        let bytes = Self::read_bounded_body(
+            response,
+            MAX_API_RESPONSE_BYTES,
+            "External API response is too large",
+        )
+        .await?;
+
+        serde_json::from_slice(&bytes).map_err(|error| {
+            log::warn!("TMDB returned invalid JSON: {error}");
+            AppError::TmdbError("External API returned invalid data".to_string())
+        })
+    }
+
+    /// Download a public TMDB image with the same connect/request timeouts as
+    /// the API client. The body is consumed incrementally so a missing or false
+    /// Content-Length header cannot make the process buffer an unbounded file.
+    pub async fn fetch_image(
+        &self,
+        image_base_url: &str,
+        spec: &str,
+        max_bytes: usize,
+    ) -> Result<Vec<u8>, AppError> {
+        let url = format!("{}/{}", image_base_url.trim_end_matches('/'), spec);
+        let response = self.image_client.get(url).send().await?;
+
+        if response.status() == reqwest::StatusCode::NOT_FOUND {
+            return Err(AppError::NotFound("Image not found".to_string()));
+        }
+        if !response.status().is_success() {
+            return Err(AppError::TmdbError("Image fetch failed".to_string()));
+        }
+        Self::read_bounded_body(response, max_bytes, "Image is too large").await
     }
 
     pub async fn search(
@@ -128,7 +167,7 @@ impl TmdbService {
         };
 
         let page = page.unwrap_or(1).to_string();
-        let resp = self
+        let response = self
             .authed(
                 self.client
                     .get(format!("{}/{}", self.base_url, endpoint))
@@ -139,44 +178,32 @@ impl TmdbService {
                     ]),
             )
             .send()
-            .await?
-            .error_for_status()?
-            .json::<TmdbSearchResponse>()
             .await?;
-
-        Ok(resp)
+        Self::decode_api_response(response).await
     }
 
     pub async fn get_movie_detail(&self, tmdb_id: i32) -> Result<TmdbMovieDetail, AppError> {
-        let resp = self
+        let response = self
             .authed(
                 self.client
                     .get(format!("{}/movie/{}", self.base_url, tmdb_id))
                     .query(&[("language", "en-US")]),
             )
             .send()
-            .await?
-            .error_for_status()?
-            .json::<TmdbMovieDetail>()
             .await?;
-
-        Ok(resp)
+        Self::decode_api_response(response).await
     }
 
     pub async fn get_tv_detail(&self, tmdb_id: i32) -> Result<TmdbTvDetail, AppError> {
-        let resp = self
+        let response = self
             .authed(
                 self.client
                     .get(format!("{}/tv/{}", self.base_url, tmdb_id))
                     .query(&[("language", "en-US")]),
             )
             .send()
-            .await?
-            .error_for_status()?
-            .json::<TmdbTvDetail>()
             .await?;
-
-        Ok(resp)
+        Self::decode_api_response(response).await
     }
 
     pub async fn get_season_episodes(
@@ -189,7 +216,7 @@ impl TmdbService {
                 "Invalid TMDB ID or season number".to_string(),
             ));
         }
-        let resp = self
+        let response = self
             .authed(
                 self.client
                     .get(format!(
@@ -199,28 +226,20 @@ impl TmdbService {
                     .query(&[("language", "en-US")]),
             )
             .send()
-            .await?
-            .error_for_status()?
-            .json::<TmdbSeasonDetail>()
             .await?;
-
-        Ok(resp)
+        Self::decode_api_response(response).await
     }
 
     pub async fn get_trending(&self) -> Result<TmdbTrendingResponse, AppError> {
-        let resp = self
+        let response = self
             .authed(
                 self.client
                     .get(format!("{}/trending/all/week", self.base_url))
                     .query(&[("language", "en-US")]),
             )
             .send()
-            .await?
-            .error_for_status()?
-            .json::<TmdbTrendingResponse>()
             .await?;
-
-        Ok(resp)
+        Self::decode_api_response(response).await
     }
 
     /// Map an external id (TVDB/IMDB) to TMDB via `/find`. `source` is e.g.
@@ -230,19 +249,28 @@ impl TmdbService {
         external_id: &str,
         source: &str,
     ) -> Result<TmdbFindResponse, AppError> {
-        let resp = self
+        if !is_valid_external_lookup_id(external_id, source) {
+            return Err(AppError::BadRequest(
+                "Invalid external media ID".to_string(),
+            ));
+        }
+
+        let mut url =
+            reqwest::Url::parse(&format!("{}/find/", self.base_url.trim_end_matches('/')))
+                .map_err(|_| AppError::TmdbError("External API URL is invalid".to_string()))?;
+        url.path_segments_mut()
+            .map_err(|_| AppError::TmdbError("External API URL is invalid".to_string()))?
+            .push(external_id);
+
+        let response = self
             .authed(
                 self.client
-                    .get(format!("{}/find/{}", self.base_url, external_id))
+                    .get(url)
                     .query(&[("external_source", source), ("language", "en-US")]),
             )
             .send()
-            .await?
-            .error_for_status()?
-            .json::<TmdbFindResponse>()
             .await?;
-
-        Ok(resp)
+        Self::decode_api_response(response).await
     }
 
     /// Fetch or refresh media from TMDB with 24h cache
@@ -528,6 +556,64 @@ mod tests {
         // must degrade to the api_key query param rather than panic.
         let service = TmdbService::new(&config_with_token(Some("bad\ntoken")));
         assert!(!service.use_bearer_auth);
+    }
+
+    #[test]
+    fn external_lookup_ids_are_strictly_validated() {
+        assert!(is_valid_external_lookup_id("123456", "tvdb_id"));
+        assert!(is_valid_external_lookup_id("tt1234567", "imdb_id"));
+        assert!(!is_valid_external_lookup_id("0", "tvdb_id"));
+        assert!(!is_valid_external_lookup_id("-1", "tvdb_id"));
+        assert!(!is_valid_external_lookup_id("../../account", "imdb_id"));
+        assert!(!is_valid_external_lookup_id("tt123", "imdb_id"));
+        assert!(!is_valid_external_lookup_id("tt1234567", "unknown"));
+    }
+
+    #[tokio::test]
+    async fn api_response_rejects_oversized_content_length() {
+        let (base_url, _) = response_server(
+            format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                MAX_API_RESPONSE_BYTES + 1
+            )
+            .into_bytes(),
+        )
+        .await;
+        let mut config = config_with_token(None);
+        config.tmdb_base_url = base_url;
+        let service = TmdbService::new(&config);
+
+        let result = service.get_trending().await;
+
+        assert!(matches!(result, Err(AppError::TmdbError(_))));
+    }
+
+    #[tokio::test]
+    async fn api_client_does_not_follow_redirects() {
+        let (redirect_target, target_request) = response_server(
+            b"HTTP/1.1 200 OK\r\nContent-Length: 29\r\nConnection: close\r\n\r\n{\"results\":[],\"page\":1}\n"
+                .to_vec(),
+        )
+        .await;
+        let (base_url, _) = response_server(
+            format!(
+                "HTTP/1.1 302 Found\r\nLocation: {redirect_target}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+            )
+            .into_bytes(),
+        )
+        .await;
+        let mut config = config_with_token(Some("v4-read-access-token"));
+        config.tmdb_base_url = base_url;
+        let service = TmdbService::new(&config);
+
+        let result = service.get_trending().await;
+
+        assert!(matches!(result, Err(AppError::TmdbError(_))));
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), target_request)
+                .await
+                .is_err()
+        );
     }
 
     #[tokio::test]

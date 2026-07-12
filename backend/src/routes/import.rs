@@ -178,7 +178,13 @@ fn validate_import_payload(
 }
 
 fn validate_external_id(id: &TvTimeExternalId) -> Result<(), AppError> {
-    if id.imdb.as_ref().is_some_and(|value| value.len() > 32) {
+    let invalid_tvdb = id.tvdb.is_some_and(|value| value <= 0);
+    let invalid_imdb = id.imdb.as_ref().is_some_and(|value| {
+        !value.is_empty()
+            && value != "-1"
+            && !crate::services::tmdb::is_valid_external_lookup_id(value, "imdb_id")
+    });
+    if invalid_tvdb || invalid_imdb {
         return Err(AppError::BadRequest(
             "Invalid external ID in import".to_string(),
         ));
@@ -445,5 +451,36 @@ mod tests {
         }];
 
         assert!(validate_import_payload(&shows, &[], &[]).is_ok());
+    }
+
+    #[test]
+    fn payload_validation_rejects_path_like_imdb_ids() {
+        let movies = vec![TvTimeMovie {
+            id: TvTimeExternalId {
+                tvdb: None,
+                imdb: Some("../../account".to_string()),
+            },
+            title: "Example".to_string(),
+            is_watched: false,
+            watched_at: None,
+            created_at: None,
+        }];
+
+        assert!(validate_import_payload(&[], &movies, &[]).is_err());
+    }
+
+    #[test]
+    fn payload_validation_rejects_non_positive_tvdb_ids() {
+        let shows = vec![TvTimeShow {
+            id: TvTimeExternalId {
+                tvdb: Some(-1),
+                imdb: None,
+            },
+            title: "Example".to_string(),
+            seasons: Vec::new(),
+            created_at: None,
+        }];
+
+        assert!(validate_import_payload(&shows, &[], &[]).is_err());
     }
 }
