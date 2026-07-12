@@ -20,8 +20,13 @@ api.interceptors.request.use((config) => {
 });
 
 let refreshPromise: Promise<string> | null = null;
+let refreshUnavailable = false;
 
 function refreshAccessToken(): Promise<string> {
+  if (refreshUnavailable) {
+    return Promise.reject(new Error('Session refresh is unavailable'));
+  }
+
   if (!refreshPromise) {
     refreshPromise = axios
       .post(`${API_URL}/api/auth/refresh`, undefined, {
@@ -30,8 +35,15 @@ function refreshAccessToken(): Promise<string> {
       })
       .then((response) => {
         const { access_token, user } = response.data;
+        refreshUnavailable = false;
         useAuthStore.getState().setAuth(access_token, user);
         return access_token as string;
+      })
+      .catch((error) => {
+        // Once rotation fails, later 401s from the same page must not fan out
+        // into more refresh attempts. A successful login/register resets this.
+        refreshUnavailable = true;
+        throw error;
       })
       .finally(() => {
         refreshPromise = null;
@@ -50,7 +62,13 @@ export async function bootstrapSession(): Promise<void> {
 }
 
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    const url: string = response.config.url ?? '';
+    if (url.includes('/auth/login') || url.includes('/auth/register')) {
+      refreshUnavailable = false;
+    }
+    return response;
+  },
   async (error) => {
     const originalRequest = error.config;
 
@@ -60,7 +78,6 @@ api.interceptors.response.use(
       // A failed refresh means the session is truly gone — clear auth and bounce.
       if (url.includes('/auth/refresh')) {
         useAuthStore.getState().logout();
-        window.location.href = '/login';
         return Promise.reject(error);
       }
 
@@ -77,6 +94,10 @@ api.interceptors.response.use(
         return Promise.reject(error);
       }
 
+      if (refreshUnavailable || useAuthStore.getState().status === 'anonymous') {
+        return Promise.reject(error);
+      }
+
       originalRequest._retry = true;
 
       try {
@@ -85,7 +106,6 @@ api.interceptors.response.use(
         return api(originalRequest);
       } catch (refreshError) {
         useAuthStore.getState().logout();
-        window.location.href = '/login';
         return Promise.reject(refreshError);
       }
     }
