@@ -1825,6 +1825,123 @@ async fn test_browsing_tmdb_detail_does_not_persist_cache() {
 
 #[actix_web::test]
 #[ignore = "requires test DB"]
+async fn test_orphan_media_pruner_preserves_references_and_active_imports() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (_, _, user_id) =
+        register_user(&app, "cachepruner", "cachepruner@example.com", "Pass1234").await;
+    let user_id = Uuid::parse_str(&user_id).unwrap();
+
+    let rows = sqlx::query_as::<_, (Uuid, i32)>(
+        r#"INSERT INTO media (tmdb_id, media_type, title, tmdb_cached_at)
+        VALUES
+            (994001, 'tv', 'Old orphan', NOW() - INTERVAL '10 minutes'),
+            (994002, 'movie', 'Recent orphan', NOW()),
+            (994003, 'movie', 'Tracked media', NOW() - INTERVAL '10 minutes'),
+            (994004, 'movie', 'History media', NOW() - INTERVAL '10 minutes'),
+            (994005, 'movie', 'Listed media', NOW() - INTERVAL '10 minutes')
+        RETURNING id, tmdb_id"#,
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    let media_id = |tmdb_id| {
+        rows.iter()
+            .find(|(_, candidate)| *candidate == tmdb_id)
+            .unwrap()
+            .0
+    };
+
+    let orphan_season_id = sqlx::query_scalar::<_, Uuid>(
+        "INSERT INTO seasons (media_id, season_number, name) VALUES ($1, 1, 'Season 1') RETURNING id",
+    )
+    .bind(media_id(994001))
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO episodes (season_id, episode_number, name) VALUES ($1, 1, 'Episode 1')",
+    )
+    .bind(orphan_season_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO user_media (user_id, media_id, status) VALUES ($1, $2, 'watching')")
+        .bind(user_id)
+        .bind(media_id(994003))
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO watch_history (user_id, media_id) VALUES ($1, $2)")
+        .bind(user_id)
+        .bind(media_id(994004))
+        .execute(&pool)
+        .await
+        .unwrap();
+    let list_id = sqlx::query_scalar::<_, Uuid>(
+        "INSERT INTO lists (user_id, name) VALUES ($1, 'Pruner list') RETURNING id",
+    )
+    .bind(user_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO list_items (list_id, media_id) VALUES ($1, $2)")
+        .bind(list_id)
+        .bind(media_id(994005))
+        .execute(&pool)
+        .await
+        .unwrap();
+    let job_id = sqlx::query_scalar::<_, Uuid>(
+        "INSERT INTO import_jobs (user_id, status) VALUES ($1, 'running') RETURNING id",
+    )
+    .bind(user_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    let deleted = cinetrack::services::media_cache::prune_orphaned_media(&pool)
+        .await
+        .unwrap();
+    assert_eq!(deleted, 0, "active imports pause orphan cleanup");
+
+    sqlx::query("UPDATE import_jobs SET status = 'failed' WHERE id = $1")
+        .bind(job_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let deleted = cinetrack::services::media_cache::prune_orphaned_media(&pool)
+        .await
+        .unwrap();
+    assert_eq!(deleted, 1);
+
+    let remaining = sqlx::query_scalar::<_, i32>(
+        "SELECT tmdb_id FROM media WHERE tmdb_id BETWEEN 994001 AND 994005 ORDER BY tmdb_id",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(remaining, vec![994002, 994003, 994004, 994005]);
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM seasons WHERE id = $1")
+            .bind(orphan_season_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM episodes WHERE season_id = $1")
+            .bind(orphan_season_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+        0
+    );
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
 async fn test_warm_episode_cache_avoids_upstream_request() {
     let pool = setup_pool().await;
     clean_db(&pool).await;

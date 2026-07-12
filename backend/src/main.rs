@@ -125,6 +125,13 @@ async fn main() -> std::io::Result<()> {
         log::warn!("Recovered {interrupted_imports} interrupted import job(s)");
     }
 
+    match cinetrack::services::media_cache::prune_orphaned_media(&pool).await {
+        Ok(0) => {}
+        Ok(deleted) => log::info!("Pruned {deleted} orphaned media cache row(s) at startup"),
+        Err(error) => log::error!("Failed to prune orphaned media cache at startup: {error}"),
+    }
+    cinetrack::services::media_cache::start_orphan_pruner(pool.clone());
+
     let tmdb_service = TmdbService::new(&config);
     let email_service = EmailService::new(&config);
 
