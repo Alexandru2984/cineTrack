@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import api from '@/lib/api';
-import type { Media, TmdbSearchResponse, TmdbSearchResult } from '@/types';
+import type { Episode, Media, Season, TmdbSearchResponse, TmdbSearchResult } from '@/types';
 
 export function useSearch(query: string, type?: string, page = 1) {
   return useQuery<TmdbSearchResponse>({
@@ -38,7 +38,7 @@ export function useMediaDetail(id: string, type: string) {
 }
 
 export function useSeasons(id: string) {
-  return useQuery({
+  return useQuery<Season[]>({
     queryKey: ['seasons', id],
     queryFn: async () => {
       const res = await api.get(`/media/${id}/seasons`);
@@ -48,13 +48,13 @@ export function useSeasons(id: string) {
   });
 }
 
-export function useEpisodes(id: string, seasonNumber: number) {
-  return useQuery({
+export function useEpisodes(id: string, seasonNumber: number | null) {
+  return useQuery<Episode[]>({
     queryKey: ['episodes', id, seasonNumber],
     queryFn: async () => {
       const res = await api.get(`/media/${id}/seasons/${seasonNumber}/episodes`);
       return res.data;
     },
-    enabled: !!id && seasonNumber > 0,
+    enabled: !!id && seasonNumber !== null && seasonNumber >= 0,
   });
 }

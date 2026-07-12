@@ -38,6 +38,24 @@ export interface Media {
   vote_average: number | null;
 }
 
+export interface Season {
+  id: string;
+  season_number: number;
+  name: string | null;
+  episode_count: number | null;
+  air_date: string | null;
+}
+
+export interface Episode {
+  id: string;
+  episode_number: number;
+  name: string | null;
+  overview: string | null;
+  runtime_minutes: number | null;
+  air_date: string | null;
+  still_path: string | null;
+}
+
 export interface TmdbSearchResult {
   id: number;
   title?: string;

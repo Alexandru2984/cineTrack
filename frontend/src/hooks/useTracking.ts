@@ -74,3 +74,44 @@ export function useCreateHistory() {
     },
   });
 }
+
+export function useWatchedEpisodes(tmdbId: number | undefined, seasonNumber: number | null) {
+  return useQuery<number[]>({
+    queryKey: ['watched-episodes', tmdbId, seasonNumber],
+    queryFn: async () => {
+      const res = await api.get(
+        `/history/tv/${tmdbId}/seasons/${seasonNumber}/episodes`
+      );
+      return res.data;
+    },
+    enabled: !!tmdbId && seasonNumber !== null && seasonNumber >= 0,
+  });
+}
+
+export function useMarkEpisodeWatched() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      tmdbId,
+      seasonNumber,
+      episodeNumber,
+    }: {
+      tmdbId: number;
+      seasonNumber: number;
+      episodeNumber: number;
+    }) => {
+      const res = await api.post(
+        `/history/tv/${tmdbId}/seasons/${seasonNumber}/episodes/${episodeNumber}/watched`
+      );
+      return res.data;
+    },
+    onSuccess: (_data, variables) => {
+      void qc.invalidateQueries({
+        queryKey: ['watched-episodes', variables.tmdbId, variables.seasonNumber],
+      });
+      void qc.invalidateQueries({ queryKey: ['history'] });
+      void qc.invalidateQueries({ queryKey: ['tracking'] });
+      void qc.invalidateQueries({ queryKey: ['stats'] });
+    },
+  });
+}

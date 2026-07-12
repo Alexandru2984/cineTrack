@@ -1,44 +1,62 @@
 import { useSearchParams } from 'react-router-dom';
 import { useParams } from 'react-router-dom';
-import { useMediaDetail, useSeasons } from '@/hooks/useMedia';
-import { useCreateTracking } from '@/hooks/useTracking';
+import { useEpisodes, useMediaDetail, useSeasons } from '@/hooks/useMedia';
+import { useCreateTracking, useMarkEpisodeWatched, useWatchedEpisodes } from '@/hooks/useTracking';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
 import { getPosterUrl, getBackdropUrl, formatDate, formatRuntime } from '@/lib/utils';
-import { Star, Plus, Calendar, Clock } from 'lucide-react';
+import { getApiErrorMessage } from '@/lib/api';
+import { Calendar, Check, CheckCircle2, Clock, Plus, Star } from 'lucide-react';
 import { useState } from 'react';
 import type { Media } from '@/types';
 
 type Genre = NonNullable<Media['genres']>[number];
-type SeasonSummary = {
-  id: string;
-  name: string | null;
-  season_number: number;
-  episode_count: number | null;
-  air_date: string | null;
-};
 
 export default function MediaDetail() {
   const { id } = useParams<{ id: string }>();
   const [searchParams] = useSearchParams();
   const type = searchParams.get('type') || 'movie';
   const { data: media, isLoading } = useMediaDetail(id!, type);
-  const { data: seasons } = useSeasons(type === 'tv' ? id! : '');
+  const [seasonSelection, setSeasonSelection] = useState<{
+    mediaId: string;
+    seasonNumber: number;
+  } | null>(null);
+  const { data: seasons = [] } = useSeasons(type === 'tv' ? id! : '');
+  const explicitlySelectedSeason = seasonSelection && seasonSelection.mediaId === id
+    ? seasonSelection.seasonNumber
+    : null;
+  const selectedSeason = explicitlySelectedSeason !== null
+    && seasons.some((season) => season.season_number === explicitlySelectedSeason)
+      ? explicitlySelectedSeason
+      : seasons.find((season) => season.season_number > 0)?.season_number
+        ?? seasons[0]?.season_number
+        ?? null;
+  const { data: episodes = [], isLoading: episodesLoading } = useEpisodes(
+    type === 'tv' ? id! : '',
+    selectedSeason
+  );
+  const { data: watchedEpisodes = [] } = useWatchedEpisodes(
+    media?.tmdb_id,
+    selectedSeason
+  );
   const createTracking = useCreateTracking();
+  const markEpisodeWatched = useMarkEpisodeWatched();
   const [trackingStatus, setTrackingStatus] = useState('');
 
   if (isLoading) return <LoadingSpinner />;
   if (!media) return <div className="text-center py-16">Media not found</div>;
 
   const genres: Genre[] = Array.isArray(media.genres) ? media.genres : [];
-  const seasonItems: SeasonSummary[] = Array.isArray(seasons) ? (seasons as SeasonSummary[]) : [];
+  const watchedEpisodeSet = new Set(watchedEpisodes);
 
   const handleAddToList = (status: string) => {
-    createTracking.mutate({
-      tmdb_id: media.tmdb_id,
-      media_type: media.media_type || type,
-      status,
-    });
-    setTrackingStatus(status);
+    createTracking.mutate(
+      {
+        tmdb_id: media.tmdb_id,
+        media_type: media.media_type || type,
+        status,
+      },
+      { onSuccess: () => setTrackingStatus(status) }
+    );
   };
 
   const backdrop = getBackdropUrl(media.backdrop_path);
@@ -54,7 +72,7 @@ export default function MediaDetail() {
       )}
 
       <div className="mx-auto max-w-7xl px-4 py-8">
-        <div className="flex flex-col md:flex-row gap-8 -mt-32 relative z-10">
+        <div className={`relative z-10 flex flex-col gap-8 md:flex-row ${backdrop ? '-mt-32' : ''}`}>
           {/* Poster */}
           <div className="shrink-0">
             <img
@@ -124,6 +142,11 @@ export default function MediaDetail() {
                 </button>
               ))}
             </div>
+            {createTracking.error && (
+              <p className="text-sm text-[hsl(var(--destructive))]">
+                {getApiErrorMessage(createTracking.error, 'Could not update your list')}
+              </p>
+            )}
 
             {/* Overview */}
             {media.overview && (
@@ -136,23 +159,90 @@ export default function MediaDetail() {
         </div>
 
         {/* Seasons */}
-        {type === 'tv' && seasonItems.length > 0 && (
-          <div className="mt-8">
+        {type === 'tv' && seasons.length > 0 && (
+          <section className="mt-10">
             <h2 className="text-2xl font-bold mb-4">Seasons</h2>
-            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
-              {seasonItems.map((s) => (
-                <div key={s.id} className="rounded-lg border border-[hsl(var(--border))] p-4 bg-[hsl(var(--card))]">
-                  <p className="font-medium">{s.name || `Season ${s.season_number}`}</p>
-                  {s.episode_count && (
-                    <p className="text-xs text-[hsl(var(--muted-foreground))] mt-1">{s.episode_count} episodes</p>
+            <div className="flex gap-2 overflow-x-auto border-b border-[hsl(var(--border))] pb-3" role="tablist">
+              {seasons.map((season) => (
+                <button
+                  key={season.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={selectedSeason === season.season_number}
+                  onClick={() => setSeasonSelection({
+                    mediaId: id!,
+                    seasonNumber: season.season_number,
+                  })}
+                  className={`min-h-10 shrink-0 rounded-md px-3 text-sm font-medium transition-colors ${
+                    selectedSeason === season.season_number
+                      ? 'bg-[hsl(var(--primary))] text-white'
+                      : 'border border-[hsl(var(--border))] hover:bg-[hsl(var(--secondary))]'
+                  }`}
+                >
+                  {season.season_number === 0 ? 'Specials' : `Season ${season.season_number}`}
+                  {season.episode_count != null && (
+                    <span className="ml-2 opacity-70">{season.episode_count}</span>
                   )}
-                  {s.air_date && (
-                    <p className="text-xs text-[hsl(var(--muted-foreground))]">{formatDate(s.air_date)}</p>
-                  )}
-                </div>
+                </button>
               ))}
             </div>
-          </div>
+
+            <div className="mt-5">
+              {episodesLoading ? (
+                <LoadingSpinner />
+              ) : episodes.length === 0 ? (
+                <p className="py-8 text-[hsl(var(--muted-foreground))]">No episodes available</p>
+              ) : (
+                <div className="divide-y divide-[hsl(var(--border))]">
+                  {episodes.map((episode) => {
+                    const watched = watchedEpisodeSet.has(episode.episode_number);
+                    return (
+                      <div key={episode.id} className="flex min-h-24 items-start gap-3 py-4 sm:gap-4">
+                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-[hsl(var(--secondary))] text-sm font-semibold">
+                          {episode.episode_number}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <h3 className="font-medium">{episode.name || `Episode ${episode.episode_number}`}</h3>
+                          <div className="mt-1 flex flex-wrap gap-x-3 text-xs text-[hsl(var(--muted-foreground))]">
+                            {episode.air_date && <span>{formatDate(episode.air_date)}</span>}
+                            {episode.runtime_minutes != null && <span>{formatRuntime(episode.runtime_minutes)}</span>}
+                          </div>
+                          {episode.overview && (
+                            <p className="mt-2 line-clamp-2 text-sm leading-relaxed text-[hsl(var(--muted-foreground))]">
+                              {episode.overview}
+                            </p>
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          title={watched ? 'Watched' : 'Mark watched'}
+                          disabled={watched || markEpisodeWatched.isPending}
+                          onClick={() => markEpisodeWatched.mutate({
+                            tmdbId: media.tmdb_id,
+                            seasonNumber: selectedSeason!,
+                            episodeNumber: episode.episode_number,
+                          })}
+                          className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-md border transition-colors sm:w-32 sm:gap-2 ${
+                            watched
+                              ? 'border-emerald-600 text-emerald-600'
+                              : 'border-[hsl(var(--border))] hover:border-[hsl(var(--primary))] hover:text-[hsl(var(--primary))]'
+                          } disabled:cursor-default disabled:opacity-70`}
+                        >
+                          {watched ? <CheckCircle2 className="h-4 w-4" /> : <Check className="h-4 w-4" />}
+                          <span className="hidden text-sm sm:inline">{watched ? 'Watched' : 'Mark watched'}</span>
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              {markEpisodeWatched.error && (
+                <p className="mt-3 text-sm text-[hsl(var(--destructive))]">
+                  {getApiErrorMessage(markEpisodeWatched.error, 'Could not mark this episode')}
+                </p>
+              )}
+            </div>
+          </section>
         )}
       </div>
     </div>
