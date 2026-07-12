@@ -127,10 +127,16 @@ The application has been through multiple security audits. Key measures include:
    docker compose up -d
    ```
 
+   The development stack uses the isolated `cinetrack-dev` Compose project and
+   binds every published port to localhost. Start the optional DB UI separately:
+   ```bash
+   docker compose --profile tools up -d adminer
+   ```
+
 4. **Access the app**
    - Frontend: http://localhost:5173
    - Backend API: http://localhost:8080/api
-   - Adminer (DB GUI): http://localhost:8081
+   - Adminer (optional DB GUI): http://localhost:8081
 
 ### Production Deployment
 

@@ -1,6 +1,11 @@
+name: cinetrack-test
+
 services:
   test-db:
-    image: postgres:16-alpine
+    image: postgres:16-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
     environment:
       POSTGRES_USER: test_user
       POSTGRES_PASSWORD: test_pass

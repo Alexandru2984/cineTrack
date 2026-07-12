@@ -1,7 +1,11 @@
-version: '3.9'
+name: cinetrack-dev
+
 services:
   db:
-    image: postgres:16-alpine
+    image: postgres:16-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
@@ -9,7 +13,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
-      - "5434:5432"
+      - "127.0.0.1:5434:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 5s
@@ -22,13 +26,21 @@ services:
       dockerfile: Dockerfile.dev
     env_file: .env
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 512
     depends_on:
       db:
         condition: service_healthy
     volumes:
-      - ./backend:/app
+      - ./backend:/app:ro
       - cargo_cache:/usr/local/cargo/registry
+      - cargo_git:/usr/local/cargo/git
+      - backend_target:/app/target
 
   frontend:
     build:
@@ -36,19 +48,32 @@ services:
       dockerfile: Dockerfile.dev
     env_file: .env
     ports:
-      - "5173:5173"
+      - "127.0.0.1:5173:5173"
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 256
     volumes:
-      - ./frontend:/app
+      - ./frontend:/app:ro
       - node_modules:/app/node_modules
 
   adminer:
-    image: adminer
+    image: adminer:5-standalone@sha256:983261ecc40a4aaf11e25aeda8ef821f5a43a9f024b3967c81cbcc0e6ce43ba3
+    profiles:
+      - tools
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
     ports:
-      - "8081:8080"
+      - "127.0.0.1:8081:8080"
     depends_on:
       - db
 
 volumes:
   postgres_data:
   cargo_cache:
+  cargo_git:
+  backend_target:
   node_modules:
