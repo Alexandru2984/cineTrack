@@ -89,6 +89,15 @@ async fn main() -> std::io::Result<()> {
     })?;
     let pool = db::create_pool(&config.database_url).await;
 
+    if config.is_production() {
+        db::ensure_runtime_role_is_restricted(&pool)
+            .await
+            .map_err(|error| {
+                log::error!("Refusing privileged production database role: {error}");
+                std::io::Error::other("production database role is overprivileged")
+            })?;
+    }
+
     // Run migrations
     sqlx::migrate!("./migrations")
         .run(&pool)

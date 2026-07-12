@@ -142,12 +142,15 @@ The application has been through multiple security audits. Key measures include:
 
 ```bash
 # Create .env.prod with production values (use strong generated secrets!)
-# Then build and deploy:
+# Start PostgreSQL, provision the restricted runtime role, then deploy:
+docker compose -f docker-compose.prod.yml --env-file .env.prod up -d db
+./scripts/provision_db_role.sh .env.prod
 docker compose -f docker-compose.prod.yml --env-file .env.prod build backend frontend
 docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
 ```
 
 - Database migrations run automatically on backend startup. Because they are embedded at compile time, a new migration requires a backend rebuild.
+- The backend connects as `cinetrack_app`, a non-superuser database owner. The bootstrap `POSTGRES_USER` credential is never passed to the application container.
 - The `db` service uses a named volume, so rebuilding/redeploying does not touch existing data.
 - Production containers run behind a host-level Nginx reverse proxy with SSL termination, as non-root users on a read-only root filesystem.
 - The canonical host vhost is `nginx/vazute.micutu.com.conf`. Activate it through a symlink so `sites-enabled` cannot drift from the tracked configuration:
