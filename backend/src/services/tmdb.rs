@@ -2,8 +2,8 @@ use chrono::{DateTime, NaiveDate, Utc};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
-use sqlx::PgPool;
-use std::collections::HashMap;
+use sqlx::{PgPool, Postgres, QueryBuilder, Transaction};
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::{Mutex, OwnedMutexGuard, OwnedSemaphorePermit, Semaphore};
@@ -22,6 +22,7 @@ const SEARCH_CACHE_FRESH_HOURS: i64 = 24;
 const SEARCH_CACHE_STALE_DAYS: i64 = 30;
 const TRENDING_CACHE_FRESH_MINUTES: i64 = 30;
 const TRENDING_CACHE_STALE_HOURS: i64 = 24;
+const MAX_TITLE_ALIASES_PER_MEDIA: usize = 500;
 
 #[derive(sqlx::FromRow)]
 struct ProviderCacheRow {
@@ -34,6 +35,13 @@ struct CachedProviderResponse<T> {
     value: T,
     expires_at: DateTime<Utc>,
     stale_until: DateTime<Utc>,
+}
+
+struct TitleAlias {
+    kind: &'static str,
+    language_code: String,
+    region_code: String,
+    title: String,
 }
 
 pub(crate) fn is_valid_external_lookup_id(external_id: &str, source: &str) -> bool {
@@ -272,6 +280,140 @@ impl TmdbService {
             .to_lowercase()
     }
 
+    fn canonical_language(language: Option<&str>) -> String {
+        let Some(value) = language else {
+            return "en-US".to_string();
+        };
+        let bytes = value.as_bytes();
+        if bytes.len() == 2 && bytes.iter().all(u8::is_ascii_alphabetic) {
+            return value.to_ascii_lowercase();
+        }
+        if bytes.len() == 5
+            && bytes[2] == b'-'
+            && bytes[..2].iter().all(u8::is_ascii_alphabetic)
+            && bytes[3..].iter().all(u8::is_ascii_alphabetic)
+        {
+            return format!(
+                "{}-{}",
+                value[..2].to_ascii_lowercase(),
+                value[3..].to_ascii_uppercase()
+            );
+        }
+        "en-US".to_string()
+    }
+
+    fn normalize_alias_title(value: &str) -> Option<String> {
+        let sanitized = value
+            .chars()
+            .map(|character| {
+                if character.is_control() {
+                    ' '
+                } else {
+                    character
+                }
+            })
+            .collect::<String>();
+        let title = sanitized.split_whitespace().collect::<Vec<_>>().join(" ");
+        (!title.is_empty() && title.chars().count() <= 500).then_some(title)
+    }
+
+    fn normalize_language_code(value: &str) -> String {
+        let value = value.trim();
+        if value.len() == 2 && value.bytes().all(|byte| byte.is_ascii_alphabetic()) {
+            value.to_ascii_lowercase()
+        } else {
+            String::new()
+        }
+    }
+
+    fn normalize_region_code(value: &str) -> String {
+        let value = value.trim();
+        if value.len() == 2 && value.bytes().all(|byte| byte.is_ascii_alphabetic()) {
+            value.to_ascii_uppercase()
+        } else {
+            String::new()
+        }
+    }
+
+    fn collect_title_aliases(
+        media_type: &str,
+        alternative_titles: &TmdbAlternativeTitles,
+        translations: &TmdbTranslations,
+    ) -> Vec<TitleAlias> {
+        fn push_alias(
+            aliases: &mut Vec<TitleAlias>,
+            seen: &mut HashSet<(String, String, String, String)>,
+            kind: &'static str,
+            language_code: String,
+            region_code: String,
+            value: &str,
+        ) {
+            if aliases.len() >= MAX_TITLE_ALIASES_PER_MEDIA {
+                return;
+            }
+            let Some(title) = TmdbService::normalize_alias_title(value) else {
+                return;
+            };
+            let key = (
+                kind.to_string(),
+                language_code.clone(),
+                region_code.clone(),
+                title.clone(),
+            );
+            if seen.insert(key) {
+                aliases.push(TitleAlias {
+                    kind,
+                    language_code,
+                    region_code,
+                    title,
+                });
+            }
+        }
+
+        let mut aliases = Vec::new();
+        let mut seen = HashSet::new();
+        for translation in &translations.translations {
+            let title = if media_type == "movie" {
+                translation
+                    .data
+                    .title
+                    .as_deref()
+                    .or(translation.data.name.as_deref())
+            } else {
+                translation
+                    .data
+                    .name
+                    .as_deref()
+                    .or(translation.data.title.as_deref())
+            };
+            if let Some(title) = title {
+                push_alias(
+                    &mut aliases,
+                    &mut seen,
+                    "translation",
+                    Self::normalize_language_code(&translation.iso_639_1),
+                    Self::normalize_region_code(&translation.iso_3166_1),
+                    title,
+                );
+            }
+        }
+        for alternative in alternative_titles
+            .titles
+            .iter()
+            .chain(&alternative_titles.results)
+        {
+            push_alias(
+                &mut aliases,
+                &mut seen,
+                "alternative",
+                String::new(),
+                Self::normalize_region_code(&alternative.iso_3166_1),
+                &alternative.title,
+            );
+        }
+        aliases
+    }
+
     async fn load_provider_response<T: DeserializeOwned>(
         pool: &PgPool,
         cache_key: &str,
@@ -417,6 +559,7 @@ impl TmdbService {
         query: &str,
         media_type: Option<&str>,
         page: Option<u32>,
+        language: Option<&str>,
     ) -> Result<TmdbSearchResponse, AppError> {
         let endpoint = match media_type {
             Some("movie") => "search/movie",
@@ -425,13 +568,14 @@ impl TmdbService {
         };
 
         let page = page.unwrap_or(1).to_string();
+        let language = Self::canonical_language(language);
         let request = self.authed(
             self.client
                 .get(format!("{}/{}", self.base_url, endpoint))
                 .query(&[
                     ("query", query),
                     ("page", page.as_str()),
-                    ("language", "en-US"),
+                    ("language", language.as_str()),
                     ("include_adult", "false"),
                 ]),
         );
@@ -444,12 +588,14 @@ impl TmdbService {
         query: &str,
         media_type: Option<&str>,
         page: Option<u32>,
+        language: Option<&str>,
     ) -> Result<TmdbSearchResponse, AppError> {
         let normalized_query = Self::normalize_search_query(query);
         let media_type = media_type.unwrap_or("multi");
         let page = page.unwrap_or(1).to_string();
+        let language = Self::canonical_language(language);
         let cache_key =
-            Self::provider_cache_key("search", &["en-US", media_type, &page, &normalized_query]);
+            Self::provider_cache_key("search", &[&language, media_type, &page, &normalized_query]);
         let cached =
             match Self::load_provider_response::<TmdbSearchResponse>(pool, &cache_key).await {
                 Ok(cached) => cached,
@@ -486,7 +632,7 @@ impl TmdbService {
         crate::metrics::record_tmdb_cache("search", "miss");
 
         match self
-            .search(query, Some(media_type), page.parse().ok())
+            .search(query, Some(media_type), page.parse().ok(), Some(&language))
             .await
         {
             Ok(response) => {
@@ -522,7 +668,10 @@ impl TmdbService {
         let request = self.authed(
             self.client
                 .get(format!("{}/movie/{}", self.base_url, tmdb_id))
-                .query(&[("language", "en-US")]),
+                .query(&[
+                    ("language", "en-US"),
+                    ("append_to_response", "alternative_titles,translations"),
+                ]),
         );
         self.send_api("movie_detail", request).await
     }
@@ -531,7 +680,10 @@ impl TmdbService {
         let request = self.authed(
             self.client
                 .get(format!("{}/tv/{}", self.base_url, tmdb_id))
-                .query(&[("language", "en-US")]),
+                .query(&[
+                    ("language", "en-US"),
+                    ("append_to_response", "alternative_titles,translations"),
+                ]),
         );
         self.send_api("tv_detail", request).await
     }
@@ -777,6 +929,50 @@ impl TmdbService {
         }
     }
 
+    async fn replace_title_aliases(
+        tx: &mut Transaction<'_, Postgres>,
+        media: &Media,
+        alternative_titles: Option<&TmdbAlternativeTitles>,
+        translations: Option<&TmdbTranslations>,
+    ) -> Result<(), AppError> {
+        let (Some(alternative_titles), Some(translations)) = (alternative_titles, translations)
+        else {
+            return Ok(());
+        };
+        let aliases =
+            Self::collect_title_aliases(&media.media_type, alternative_titles, translations);
+
+        sqlx::query("DELETE FROM media_title_aliases WHERE media_id = $1")
+            .bind(media.id)
+            .execute(&mut **tx)
+            .await?;
+
+        if !aliases.is_empty() {
+            let mut query = QueryBuilder::<Postgres>::new(
+                "INSERT INTO media_title_aliases \
+                 (media_id, kind, language_code, region_code, title) ",
+            );
+            query.push_values(&aliases, |mut row, alias| {
+                row.push_bind(media.id)
+                    .push_bind(alias.kind)
+                    .push_bind(&alias.language_code)
+                    .push_bind(&alias.region_code)
+                    .push_bind(&alias.title);
+            });
+            query
+                .push(" ON CONFLICT DO NOTHING")
+                .build()
+                .execute(&mut **tx)
+                .await?;
+        }
+
+        sqlx::query("UPDATE media SET title_aliases_cached_at = NOW() WHERE id = $1")
+            .bind(media.id)
+            .execute(&mut **tx)
+            .await?;
+        Ok(())
+    }
+
     async fn upsert_movie(
         &self,
         pool: &PgPool,
@@ -791,6 +987,7 @@ impl TmdbService {
             .as_ref()
             .map(|g| serde_json::to_value(g).unwrap_or_default());
 
+        let mut tx = pool.begin().await?;
         let media = sqlx::query_as::<_, Media>(
             r#"INSERT INTO media (tmdb_id, media_type, title, original_title, overview, poster_path, backdrop_path, release_date, status, genres, runtime_minutes, tmdb_vote_average, tmdb_cached_at, last_accessed_at, metadata_level)
             VALUES ($1, 'movie', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW(), NOW(), 'detail')
@@ -809,9 +1006,17 @@ impl TmdbService {
         .bind(&genres_json)
         .bind(detail.runtime)
         .bind(detail.vote_average)
-        .fetch_one(pool)
+        .fetch_one(&mut *tx)
         .await?;
 
+        Self::replace_title_aliases(
+            &mut tx,
+            &media,
+            detail.alternative_titles.as_ref(),
+            detail.translations.as_ref(),
+        )
+        .await?;
+        tx.commit().await?;
         Ok(media)
     }
 
@@ -849,6 +1054,14 @@ impl TmdbService {
         .bind(runtime)
         .bind(detail.vote_average)
         .fetch_one(&mut *tx)
+        .await?;
+
+        Self::replace_title_aliases(
+            &mut tx,
+            &media,
+            detail.alternative_titles.as_ref(),
+            detail.translations.as_ref(),
+        )
         .await?;
 
         // Also cache seasons
@@ -1065,6 +1278,17 @@ mod tests {
         assert_eq!(first, second);
         assert_eq!(first.len(), 64);
         assert!(first.bytes().all(|byte| byte.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn title_alias_inputs_are_canonical_and_bounded() {
+        assert_eq!(TmdbService::canonical_language(Some("ro-ro")), "ro-RO");
+        assert_eq!(TmdbService::canonical_language(Some("invalid")), "en-US");
+        assert_eq!(
+            TmdbService::normalize_alias_title("  Film\u{0096}\nRomânesc  "),
+            Some("Film Românesc".to_string())
+        );
+        assert!(TmdbService::normalize_alias_title(&"x".repeat(501)).is_none());
     }
 
     #[tokio::test]

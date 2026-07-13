@@ -1863,9 +1863,18 @@ async fn test_local_catalog_search_skips_or_replaces_unavailable_provider() {
     .execute(&pool)
     .await
     .unwrap();
-    sqlx::query(
-        "INSERT INTO media (tmdb_id, media_type, title, metadata_level) VALUES (620100, 'movie', 'Fallback Film', 'summary')",
+    let fallback_media_id = sqlx::query_scalar::<_, Uuid>(
+        "INSERT INTO media (tmdb_id, media_type, title, metadata_level) VALUES (620100, 'movie', 'Fallback Film', 'summary') RETURNING id",
     )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO media_title_aliases
+            (media_id, kind, language_code, region_code, title)
+        VALUES ($1, 'translation', 'ro', 'RO', 'Film de Rezerva')"#,
+    )
+    .bind(fallback_media_id)
     .execute(&pool)
     .await
     .unwrap();
@@ -1910,6 +1919,16 @@ async fn test_local_catalog_search_skips_or_replaces_unavailable_provider() {
     let fallback: Value = actix_test::read_body_json(fallback).await;
     assert_eq!(fallback["results"][0]["title"], "Fallback Film");
 
+    let localized = actix_test::call_service(
+        &app,
+        request("/api/media/search?q=Film%20de%20Rezerva&type=movie&page=1&language=ro-RO"),
+    )
+    .await;
+    assert_eq!(localized.status(), 200);
+    let localized: Value = actix_test::read_body_json(localized).await;
+    assert_eq!(localized["results"][0]["id"], 620100);
+    assert_eq!(localized["results"][0]["title"], "Film de Rezerva");
+
     let inventory = actix_test::call_service(
         &app,
         request("/api/media/search?q=Archive%20Needle&type=tv&page=1"),
@@ -1948,7 +1967,9 @@ async fn test_summary_media_is_hydrated_before_detail_response() {
         let (mut stream, _) = listener.accept().await.unwrap();
         let mut request = vec![0_u8; 4096];
         let read = stream.read(&mut request).await.unwrap();
-        assert!(String::from_utf8_lossy(&request[..read]).starts_with("GET /movie/630001?"));
+        let request = String::from_utf8_lossy(&request[..read]);
+        assert!(request.starts_with("GET /movie/630001?"));
+        assert!(request.contains("append_to_response=alternative_titles%2Ctranslations"));
         let body = r#"{
             "id": 630001,
             "title": "Hydrated Film",
@@ -1957,7 +1978,17 @@ async fn test_summary_media_is_hydrated_before_detail_response() {
             "status": "Released",
             "genres": [],
             "runtime": 101,
-            "vote_average": 8.1
+            "vote_average": 8.1,
+            "alternative_titles": {
+                "titles": [{"iso_3166_1": "RO", "title": "Filmul Hidratat"}]
+            },
+            "translations": {
+                "translations": [{
+                    "iso_3166_1": "RO",
+                    "iso_639_1": "ro",
+                    "data": {"title": "Film Hidratat"}
+                }]
+            }
         }"#;
         let response = format!(
             "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
@@ -1981,13 +2012,14 @@ async fn test_summary_media_is_hydrated_before_detail_response() {
     let (token, _, _) = register_user(&app, "hydrate", "hydrate@example.com", "Pass1234").await;
 
     let req = actix_test::TestRequest::get()
-        .uri("/api/media/630001?type=movie")
+        .uri("/api/media/630001?type=movie&language=ro-RO")
         .insert_header(("Authorization", format!("Bearer {token}")))
         .peer_addr(peer_addr())
         .to_request();
     let response = actix_test::call_service(&app, req).await;
     assert_eq!(response.status(), 200);
     let detail: Value = actix_test::read_body_json(response).await;
+    assert_eq!(detail["title"], "Film Hidratat");
     assert_eq!(detail["overview"], "Complete detail");
     assert_eq!(detail["runtime_minutes"], 101);
     assert_eq!(
@@ -1996,6 +2028,20 @@ async fn test_summary_media_is_hydrated_before_detail_response() {
             .await
             .unwrap(),
         "detail"
+    );
+    assert_eq!(
+        sqlx::query_as::<_, (String, bool, i64)>(
+            r#"SELECT
+                title,
+                title_aliases_cached_at IS NOT NULL,
+                (SELECT COUNT(*) FROM media_title_aliases WHERE media_id = media.id)
+            FROM media
+            WHERE tmdb_id = 630001"#,
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap(),
+        ("Hydrated Film".to_string(), true, 2)
     );
     upstream.await.unwrap();
 }
@@ -2362,6 +2408,21 @@ async fn test_catalog_inventory_is_compact_and_constrained() {
     .execute(&pool)
     .await;
     assert!(invalid_title.is_err());
+    let media_id = sqlx::query_scalar::<_, Uuid>(
+        "INSERT INTO media (tmdb_id, media_type, title) VALUES (640010, 'movie', 'Alias Fixture') RETURNING id",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let invalid_alias = sqlx::query(
+        r#"INSERT INTO media_title_aliases
+            (media_id, kind, language_code, region_code, title)
+        VALUES ($1, 'translation', 'RO', 'ro', E'Bad\nAlias')"#,
+    )
+    .bind(media_id)
+    .execute(&pool)
+    .await;
+    assert!(invalid_alias.is_err());
     assert_eq!(
         sqlx::query_scalar::<_, String>(
             "SELECT relpersistence::text FROM pg_class WHERE oid = 'catalog_external_ids_staging'::regclass",
@@ -2398,7 +2459,17 @@ async fn test_popular_catalog_hydration_is_bounded_and_persistent() {
             "status": "Released",
             "genres": [],
             "runtime": 99,
-            "vote_average": 7.5
+            "vote_average": 7.5,
+            "alternative_titles": {
+                "titles": [{"iso_3166_1": "RO", "title": "Cel Mai Popular"}]
+            },
+            "translations": {
+                "translations": [{
+                    "iso_3166_1": "RO",
+                    "iso_639_1": "ro",
+                    "data": {"title": "Cel mai popular film"}
+                }]
+            }
         }"#;
         let response = format!(
             "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
@@ -2468,6 +2539,18 @@ async fn test_popular_catalog_hydration_is_bounded_and_persistent() {
             .await
             .unwrap(),
         650001
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            r#"SELECT COUNT(*)
+            FROM media_title_aliases aliases
+            JOIN media ON media.id = aliases.media_id
+            WHERE media.tmdb_id = 650001"#,
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap(),
+        2
     );
     assert!(sqlx::query_scalar::<_, bool>(
         r#"SELECT outcome = 'success'

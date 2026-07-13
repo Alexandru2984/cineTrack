@@ -158,6 +158,7 @@ pub async fn hydrate_popular_catalog(
               media.id IS NULL
               OR media.metadata_level <> 'detail'
               OR media.tmdb_cached_at < NOW() - INTERVAL '30 days'
+              OR media.title_aliases_cached_at IS NULL
           )
         ORDER BY ids.popularity DESC, ids.media_type, ids.tmdb_id
         LIMIT $1"#,

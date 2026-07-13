@@ -1,5 +1,6 @@
 use chrono::NaiveDate;
 use sqlx::{FromRow, PgPool};
+use uuid::Uuid;
 
 use crate::dto::media::{TmdbSearchResponse, TmdbSearchResult};
 
@@ -37,23 +38,59 @@ fn empty_response(page: u32) -> TmdbSearchResponse {
     }
 }
 
+fn locale_parts(language: Option<&str>) -> (Option<String>, Option<String>) {
+    let Some(language) = language else {
+        return (None, None);
+    };
+    let mut parts = language.split('-');
+    let code = parts.next().unwrap_or_default();
+    if code.len() != 2 || !code.bytes().all(|byte| byte.is_ascii_alphabetic()) {
+        return (None, None);
+    }
+    let region = parts.next().and_then(|value| {
+        (parts.next().is_none()
+            && value.len() == 2
+            && value.bytes().all(|byte| byte.is_ascii_alphabetic()))
+        .then(|| value.to_ascii_uppercase())
+    });
+    (Some(code.to_ascii_lowercase()), region)
+}
+
 pub async fn search_local(
     pool: &PgPool,
     query: &str,
     media_type: Option<&str>,
     page: u32,
+    language: Option<&str>,
 ) -> Result<TmdbSearchResponse, sqlx::Error> {
     let normalized = normalize_query(query);
     if normalized.chars().count() < MIN_LOCAL_QUERY_CHARS {
         return Ok(empty_response(page));
     }
     let offset = i64::from(page.saturating_sub(1)) * SEARCH_PAGE_SIZE;
+    let (language_code, region_code) = locale_parts(language);
     let rows = sqlx::query_as::<_, LocalSearchRow>(
-        r#"WITH raw_candidates AS (
+        r#"WITH localized_media AS MATERIALIZED (
+            SELECT DISTINCT ON (aliases.media_id)
+                aliases.media_id,
+                aliases.title
+            FROM media_title_aliases aliases
+            WHERE $5::text IS NOT NULL
+              AND aliases.kind = 'translation'
+              AND aliases.language_code = $5
+            ORDER BY
+                aliases.media_id,
+                CASE
+                    WHEN $6::text IS NOT NULL AND aliases.region_code = $6 THEN 0
+                    WHEN aliases.region_code = '' THEN 1
+                    ELSE 2
+                END,
+                aliases.title
+        ), raw_candidates AS (
             SELECT
                 ids.tmdb_id,
                 ids.media_type,
-                COALESCE(media.title, titles.title) AS title,
+                COALESCE(localized.title, media.title, titles.title) AS title,
                 COALESCE(media.original_title, titles.title) AS original_title,
                 media.overview,
                 media.poster_path,
@@ -77,6 +114,8 @@ pub async fn search_local(
             LEFT JOIN media
               ON media.tmdb_id = ids.tmdb_id
              AND media.media_type = ids.media_type
+            LEFT JOIN localized_media localized
+              ON localized.media_id = media.id
             WHERE ids.adult = FALSE
               AND ids.video = FALSE
               AND ($2::text IS NULL OR ids.media_type = $2)
@@ -88,7 +127,7 @@ pub async fn search_local(
             SELECT
                 media.tmdb_id,
                 media.media_type,
-                media.title,
+                COALESCE(localized.title, media.title) AS title,
                 media.original_title,
                 media.overview,
                 media.poster_path,
@@ -111,6 +150,8 @@ pub async fn search_local(
             LEFT JOIN catalog_external_ids ids
               ON ids.tmdb_id = media.tmdb_id
              AND ids.media_type = media.media_type
+            LEFT JOIN localized_media localized
+              ON localized.media_id = media.id
             WHERE (ids.tmdb_id IS NULL OR (ids.adult = FALSE AND ids.video = FALSE))
               AND ($2::text IS NULL OR media.media_type = $2)
               AND (
@@ -118,6 +159,42 @@ pub async fn search_local(
                   OR lower(media.original_title) % $1
                   OR lower(media.title) LIKE $1 || '%'
                   OR lower(media.original_title) LIKE $1 || '%'
+              )
+            UNION ALL
+            SELECT
+                media.tmdb_id,
+                media.media_type,
+                COALESCE(localized.title, media.title) AS title,
+                media.original_title,
+                media.overview,
+                media.poster_path,
+                media.backdrop_path,
+                media.release_date,
+                media.tmdb_vote_average AS vote_average,
+                CASE
+                    WHEN lower(aliases.title) = $1 THEN 103.0
+                    WHEN lower(aliases.title) LIKE $1 || '%' THEN 83.0
+                    ELSE 53.0
+                END
+                + similarity(lower(aliases.title), $1) * 10
+                + LEAST(
+                    LN(1.0 + GREATEST(COALESCE(ids.popularity, 0)::double precision, 0.0)),
+                    10.0
+                ) AS rank,
+                3 AS source_priority
+            FROM media_title_aliases aliases
+            JOIN media
+              ON media.id = aliases.media_id
+            LEFT JOIN catalog_external_ids ids
+              ON ids.tmdb_id = media.tmdb_id
+             AND ids.media_type = media.media_type
+            LEFT JOIN localized_media localized
+              ON localized.media_id = media.id
+            WHERE (ids.tmdb_id IS NULL OR (ids.adult = FALSE AND ids.video = FALSE))
+              AND ($2::text IS NULL OR media.media_type = $2)
+              AND (
+                  lower(aliases.title) % $1
+                  OR lower(aliases.title) LIKE $1 || '%'
               )
         ), deduplicated AS (
             SELECT DISTINCT ON (tmdb_id, media_type)
@@ -153,6 +230,8 @@ pub async fn search_local(
     .bind(media_type)
     .bind(SEARCH_PAGE_SIZE)
     .bind(offset)
+    .bind(language_code.as_deref())
+    .bind(region_code.as_deref())
     .fetch_all(pool)
     .await?;
 
@@ -206,6 +285,36 @@ pub async fn search_local(
         total_results,
         results,
     })
+}
+
+pub async fn localized_title(
+    pool: &PgPool,
+    media_id: Uuid,
+    language: Option<&str>,
+) -> Result<Option<String>, sqlx::Error> {
+    let (Some(language_code), region_code) = locale_parts(language) else {
+        return Ok(None);
+    };
+    sqlx::query_scalar::<_, String>(
+        r#"SELECT title
+        FROM media_title_aliases
+        WHERE media_id = $1
+          AND kind = 'translation'
+          AND language_code = $2
+        ORDER BY
+            CASE
+                WHEN $3::text IS NOT NULL AND region_code = $3 THEN 0
+                WHEN region_code = '' THEN 1
+                ELSE 2
+            END,
+            title
+        LIMIT 1"#,
+    )
+    .bind(media_id)
+    .bind(language_code)
+    .bind(region_code.as_deref())
+    .fetch_optional(pool)
+    .await
 }
 
 pub async fn cache_search_results(
@@ -287,6 +396,15 @@ mod tests {
     #[test]
     fn local_queries_are_normalized() {
         assert_eq!(normalize_query("  The   Matrix "), "the matrix");
+    }
+
+    #[test]
+    fn requested_locales_are_canonicalized() {
+        assert_eq!(
+            locale_parts(Some("ro-ro")),
+            (Some("ro".to_string()), Some("RO".to_string()))
+        );
+        assert_eq!(locale_parts(Some("invalid")), (None, None));
     }
 
     #[test]

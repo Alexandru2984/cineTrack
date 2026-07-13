@@ -414,7 +414,7 @@ async fn resolve_show_id(tmdb: &TmdbService, show: &TvTimeShow) -> anyhow::Resul
         }
     }
     if !show.title.is_empty() {
-        let res = tmdb.search(&show.title, Some("tv"), Some(1)).await?;
+        let res = tmdb.search(&show.title, Some("tv"), Some(1), None).await?;
         if let Some(r) = res.results.first() {
             return Ok(Some(r.id));
         }
@@ -432,7 +432,9 @@ async fn resolve_movie_id(tmdb: &TmdbService, movie: &TvTimeMovie) -> anyhow::Re
         }
     }
     if !movie.title.is_empty() {
-        let res = tmdb.search(&movie.title, Some("movie"), Some(1)).await?;
+        let res = tmdb
+            .search(&movie.title, Some("movie"), Some(1), None)
+            .await?;
         if let Some(r) = res.results.first() {
             return Ok(Some(r.id));
         }

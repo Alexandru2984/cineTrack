@@ -34,16 +34,6 @@ fn parse_tmdb_id(value: &str) -> Result<i32, AppError> {
     Ok(id)
 }
 
-fn validate_media_type(media_type: &str) -> Result<(), AppError> {
-    if matches!(media_type, "movie" | "tv") {
-        Ok(())
-    } else {
-        Err(AppError::BadRequest(
-            "Media type must be movie or tv".to_string(),
-        ))
-    }
-}
-
 fn validate_season_number(season_number: i32) -> Result<(), AppError> {
     if (0..=500).contains(&season_number) {
         Ok(())
@@ -103,16 +93,21 @@ async fn search(
     require_auth(&req).await?;
     query.validate()?;
     let page = query.page.unwrap_or(1);
-    let local =
-        match catalog::search_local(pool.get_ref(), &query.q, query.media_type.as_deref(), page)
-            .await
-        {
-            Ok(response) => Some(response),
-            Err(error) => {
-                log::warn!("Local catalog search failed: {error}");
-                None
-            }
-        };
+    let local = match catalog::search_local(
+        pool.get_ref(),
+        &query.q,
+        query.media_type.as_deref(),
+        page,
+        query.language.as_deref(),
+    )
+    .await
+    {
+        Ok(response) => Some(response),
+        Err(error) => {
+            log::warn!("Local catalog search failed: {error}");
+            None
+        }
+    };
     if let Some(response) = local
         .as_ref()
         .filter(|response| catalog::has_local_results(response))
@@ -127,15 +122,24 @@ async fn search(
             &query.q,
             query.media_type.as_deref(),
             Some(page),
+            query.language.as_deref(),
         )
         .await;
     let results = match provider {
         Ok(results) => {
-            if let Err(error) =
-                catalog::cache_search_results(pool.get_ref(), &results, query.media_type.as_deref())
-                    .await
-            {
-                log::warn!("Could not cache TMDB search summaries: {error}");
+            let cache_english_summaries = query.language.as_deref().is_none_or(|language| {
+                language.eq_ignore_ascii_case("en") || language.eq_ignore_ascii_case("en-US")
+            });
+            if cache_english_summaries {
+                if let Err(error) = catalog::cache_search_results(
+                    pool.get_ref(),
+                    &results,
+                    query.media_type.as_deref(),
+                )
+                .await
+                {
+                    log::warn!("Could not cache TMDB search summaries: {error}");
+                }
             }
             results
         }
@@ -168,12 +172,13 @@ async fn get_detail(
     tmdb: web::Data<TmdbService>,
     req: HttpRequest,
     path: web::Path<String>,
-    query: web::Query<std::collections::HashMap<String, String>>,
+    query: web::Query<MediaDetailQuery>,
 ) -> Result<HttpResponse, AppError> {
     require_auth(&req).await?;
+    query.validate()?;
     let id_str = path.into_inner();
-    let media_type = query.get("type").map(|s| s.as_str()).unwrap_or("movie");
-    validate_media_type(media_type)?;
+    let media_type = query.media_type.as_deref().unwrap_or("movie");
+    let language = query.language.as_deref();
 
     // Try UUID first (local media), then TMDB ID.
     if let Ok(uuid) = id_str.parse::<Uuid>() {
@@ -185,14 +190,23 @@ async fn get_detail(
         let media = tmdb
             .get_or_cache_media(pool.get_ref(), media.tmdb_id, &media.media_type)
             .await?;
-        return Ok(HttpResponse::Ok().json(cached_media_response(media)));
+        let localized_title = catalog::localized_title(pool.get_ref(), media.id, language).await?;
+        let mut response = cached_media_response(media);
+        if let Some(title) = localized_title {
+            response.title = title;
+        }
+        return Ok(HttpResponse::Ok().json(response));
     }
 
     let tmdb_id = parse_tmdb_id(&id_str)?;
     let media = tmdb
         .get_or_cache_media(pool.get_ref(), tmdb_id, media_type)
         .await?;
+    let localized_title = catalog::localized_title(pool.get_ref(), media.id, language).await?;
     let mut response = cached_media_response(media);
+    if let Some(title) = localized_title {
+        response.title = title;
+    }
     // Keep the existing response contract for numeric detail URLs.
     response.id = tmdb_id.to_string();
     Ok(HttpResponse::Ok().json(response))

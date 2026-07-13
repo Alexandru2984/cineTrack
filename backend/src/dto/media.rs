@@ -11,6 +11,22 @@ fn validate_media_type(media_type: &str) -> Result<(), validator::ValidationErro
     }
 }
 
+fn validate_language(language: &str) -> Result<(), validator::ValidationError> {
+    let bytes = language.as_bytes();
+    let valid = (bytes.len() == 2 && bytes.iter().all(u8::is_ascii_alphabetic))
+        || (bytes.len() == 5
+            && bytes[2] == b'-'
+            && bytes[..2].iter().all(u8::is_ascii_alphabetic)
+            && bytes[3..].iter().all(u8::is_ascii_alphabetic));
+    if valid {
+        Ok(())
+    } else {
+        let mut error = validator::ValidationError::new("invalid_language");
+        error.message = Some("Language must use an ISO code such as ro or ro-RO".into());
+        Err(error)
+    }
+}
+
 #[derive(Debug, Deserialize, Validate)]
 pub struct SearchQuery {
     #[validate(length(min = 1, max = 200, message = "Search query must be 1-200 characters"))]
@@ -20,6 +36,17 @@ pub struct SearchQuery {
     pub media_type: Option<String>,
     #[validate(range(min = 1, max = 500, message = "Page must be between 1 and 500"))]
     pub page: Option<u32>,
+    #[validate(custom(function = "validate_language"))]
+    pub language: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Validate)]
+pub struct MediaDetailQuery {
+    #[serde(rename = "type")]
+    #[validate(custom(function = "validate_media_type"))]
+    pub media_type: Option<String>,
+    #[validate(custom(function = "validate_language"))]
+    pub language: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -98,12 +125,52 @@ pub struct TmdbMovieDetail {
     pub genres: Option<Vec<TmdbGenre>>,
     pub runtime: Option<i32>,
     pub vote_average: Option<f64>,
+    #[serde(default)]
+    pub alternative_titles: Option<TmdbAlternativeTitles>,
+    #[serde(default)]
+    pub translations: Option<TmdbTranslations>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct TmdbGenre {
     pub id: i32,
     pub name: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TmdbAlternativeTitles {
+    #[serde(default)]
+    pub titles: Vec<TmdbAlternativeTitle>,
+    #[serde(default)]
+    pub results: Vec<TmdbAlternativeTitle>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TmdbAlternativeTitle {
+    #[serde(default)]
+    pub iso_3166_1: String,
+    pub title: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TmdbTranslations {
+    #[serde(default)]
+    pub translations: Vec<TmdbTranslation>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TmdbTranslation {
+    #[serde(default)]
+    pub iso_3166_1: String,
+    #[serde(default)]
+    pub iso_639_1: String,
+    pub data: TmdbTranslationData,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TmdbTranslationData {
+    pub title: Option<String>,
+    pub name: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -120,6 +187,10 @@ pub struct TmdbTvDetail {
     pub episode_run_time: Option<Vec<i32>>,
     pub vote_average: Option<f64>,
     pub seasons: Option<Vec<TmdbSeason>>,
+    #[serde(default)]
+    pub alternative_titles: Option<TmdbAlternativeTitles>,
+    #[serde(default)]
+    pub translations: Option<TmdbTranslations>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -170,6 +241,7 @@ mod tests {
             q: q.to_string(),
             media_type: None,
             page: None,
+            language: None,
         }
     }
 
@@ -204,6 +276,15 @@ mod tests {
     fn test_search_query_rejects_out_of_range_page() {
         let mut value = query("inception");
         value.page = Some(501);
+        assert!(value.validate().is_err());
+    }
+
+    #[test]
+    fn test_search_query_validates_language() {
+        let mut value = query("inception");
+        value.language = Some("ro-RO".to_string());
+        assert!(value.validate().is_ok());
+        value.language = Some("romanian".to_string());
         assert!(value.validate().is_err());
     }
 }

@@ -2,11 +2,17 @@ import { useQuery } from '@tanstack/react-query';
 import api from '@/lib/api';
 import type { Episode, Media, Season, TmdbSearchResponse, TmdbSearchResult } from '@/types';
 
+function preferredLanguage() {
+  const language = typeof navigator === 'undefined' ? '' : navigator.language;
+  return /^[A-Za-z]{2}(?:-[A-Za-z]{2})?$/.test(language) ? language : 'en-US';
+}
+
 export function useSearch(query: string, type?: string, page = 1) {
+  const language = preferredLanguage();
   return useQuery<TmdbSearchResponse>({
-    queryKey: ['search', query, type, page],
+    queryKey: ['search', query, type, page, language],
     queryFn: async () => {
-      const params: Record<string, string> = { q: query, page: String(page) };
+      const params: Record<string, string> = { q: query, page: String(page), language };
       if (type) params.type = type;
       const res = await api.get('/media/search', { params });
       return res.data;
@@ -27,10 +33,11 @@ export function useTrending() {
 }
 
 export function useMediaDetail(id: string, type: string) {
+  const language = preferredLanguage();
   return useQuery<Media>({
-    queryKey: ['media', id, type],
+    queryKey: ['media', id, type, language],
     queryFn: async () => {
-      const res = await api.get(`/media/${id}`, { params: { type } });
+      const res = await api.get(`/media/${id}`, { params: { type, language } });
       return res.data;
     },
     enabled: !!id,
