@@ -79,6 +79,14 @@ export interface TmdbSearchResponse {
   results: TmdbSearchResult[];
 }
 
+export interface DiscoveryResponse {
+  recommendations: TmdbSearchResult[];
+  personalized: boolean;
+  recommendation_basis: string[];
+  popular_movies: TmdbSearchResult[];
+  popular_shows: TmdbSearchResult[];
+}
+
 export interface TrackingItem {
   id: string;
   media_id: string;

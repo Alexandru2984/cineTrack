@@ -24,6 +24,7 @@ export function useCreateTracking() {
       qc.invalidateQueries({ queryKey: ['tracking'] });
       qc.invalidateQueries({ queryKey: ['stats'] });
       qc.invalidateQueries({ queryKey: ['activity'] });
+      qc.invalidateQueries({ queryKey: ['discovery'] });
     },
   });
 }
@@ -39,6 +40,7 @@ export function useUpdateTracking() {
       qc.invalidateQueries({ queryKey: ['tracking'] });
       qc.invalidateQueries({ queryKey: ['stats'] });
       qc.invalidateQueries({ queryKey: ['activity'] });
+      qc.invalidateQueries({ queryKey: ['discovery'] });
     },
   });
 }
@@ -49,7 +51,10 @@ export function useDeleteTracking() {
     mutationFn: async (id: string) => {
       await api.delete(`/tracking/${id}`);
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['tracking'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['tracking'] });
+      qc.invalidateQueries({ queryKey: ['discovery'] });
+    },
   });
 }
 
@@ -116,6 +121,7 @@ export function useMarkEpisodeWatched() {
       void qc.invalidateQueries({ queryKey: ['tracking'] });
       void qc.invalidateQueries({ queryKey: ['stats'] });
       void qc.invalidateQueries({ queryKey: ['activity'] });
+      void qc.invalidateQueries({ queryKey: ['discovery'] });
     },
   });
 }

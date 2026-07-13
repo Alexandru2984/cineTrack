@@ -1,6 +1,12 @@
 import { useQuery } from '@tanstack/react-query';
 import api from '@/lib/api';
-import type { Episode, Media, Season, TmdbSearchResponse, TmdbSearchResult } from '@/types';
+import type {
+  DiscoveryResponse,
+  Episode,
+  Media,
+  Season,
+  TmdbSearchResponse,
+} from '@/types';
 
 function preferredLanguage() {
   const language = typeof navigator === 'undefined' ? '' : navigator.language;
@@ -21,11 +27,12 @@ export function useSearch(query: string, type?: string, page = 1) {
   });
 }
 
-export function useTrending() {
-  return useQuery<{ results: TmdbSearchResult[] }>({
-    queryKey: ['trending'],
+export function useDiscovery() {
+  const language = preferredLanguage();
+  return useQuery<DiscoveryResponse>({
+    queryKey: ['discovery', language],
     queryFn: async () => {
-      const res = await api.get('/media/trending');
+      const res = await api.get('/media/discovery', { params: { language } });
       return res.data;
     },
     staleTime: 10 * 60 * 1000,

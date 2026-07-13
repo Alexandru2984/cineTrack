@@ -35,12 +35,19 @@ const EMPTY_STATS = {
   longest_streak: 0,
 };
 
+const EMPTY_DISCOVERY = {
+  recommendations: [],
+  personalized: false,
+  recommendation_basis: [],
+  popular_movies: [],
+  popular_shows: [],
+};
+
 /**
  * Make every authenticated read succeed with a correctly *shaped* payload so
- * protected pages (Dashboard) render without crashing — the app has no error
- * boundary, so a malformed response would unmount the whole tree.
+ * protected pages (Dashboard) render with the response contracts they expect.
  */
-async function stubAuthedReads(page: Page) {
+async function stubAuthedReads(page: Page, discovery = EMPTY_DISCOVERY) {
   await page.route('**/api/**', (route) => {
     const req = route.request();
     const url = req.url();
@@ -51,7 +58,7 @@ async function stubAuthedReads(page: Page) {
     if (url.includes('/api/notifications')) {
       return route.fulfill({ json: { items: [], unread_count: 0, has_more: false } });
     }
-    if (url.includes('/api/media/trending')) return route.fulfill({ json: { results: [] } });
+    if (url.includes('/api/media/discovery')) return route.fulfill({ json: discovery });
     if (url.includes('/api/stats/me/heatmap')) return route.fulfill({ json: [] });
     if (url.includes('/api/stats/me')) return route.fulfill({ json: EMPTY_STATS });
     return route.fulfill({ json: [] });
@@ -179,6 +186,41 @@ test('shows followed episode activity on the dashboard', async ({ page }) => {
   await expect(page.getByText('S2 E3 · The Reveal')).toBeVisible();
 
   await page.setViewportSize({ width: 390, height: 844 });
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= document.documentElement.clientWidth
+    )
+  ).toBe(true);
+});
+
+test('renders local discovery shelves without viewport overflow', async ({ page }) => {
+  await stubSession(page);
+  const recommendations = Array.from({ length: 12 }, (_, index) => ({
+    id: 700000 + index,
+    media_type: index % 3 === 0 ? 'tv' : 'movie',
+    title: index % 3 === 0 ? undefined : `Localized recommendation title ${index + 1}`,
+    name: index % 3 === 0 ? `Localized series title ${index + 1}` : undefined,
+    poster_path: null,
+    vote_average: 8.1,
+  }));
+  await stubAuthedReads(page, {
+    recommendations,
+    personalized: true,
+    recommendation_basis: ['Drama', 'Thriller'],
+    popular_movies: recommendations.filter((item) => item.media_type === 'movie'),
+    popular_shows: recommendations.filter((item) => item.media_type === 'tv'),
+  });
+
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('/');
+  await expect(page.getByRole('heading', { name: 'For You' })).toBeVisible();
+  await expect(page.getByText('Drama · Thriller')).toBeVisible();
+  const shelf = page.getByRole('list', { name: 'For You titles' });
+  await expect(shelf).toBeVisible();
+  expect(await shelf.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.getByRole('heading', { name: 'Popular Movies' })).toBeVisible();
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= document.documentElement.clientWidth
@@ -346,7 +388,7 @@ test('logs the user out when the token refresh fails', async ({ page }) => {
 
 test('contains a page crash in a fallback and keeps the navbar', async ({ page }) => {
   await stubSession(page);
-  // A malformed trending payload (missing `results`) makes the Dashboard throw
+  // A malformed discovery list makes the Dashboard throw
   // during render. The error boundary must show the fallback instead of letting
   // the whole SPA unmount to a white screen, and the navbar must survive.
   await page.route('**/api/**', (route) => {
@@ -356,7 +398,11 @@ test('contains a page crash in a fallback and keeps the navbar', async ({ page }
     if (url.includes('/api/notifications')) {
       return route.fulfill({ json: { items: [], unread_count: 0, has_more: false } });
     }
-    if (url.includes('/api/media/trending')) return route.fulfill({ json: {} });
+    if (url.includes('/api/stats/me/heatmap')) return route.fulfill({ json: [] });
+    if (url.includes('/api/stats/me')) return route.fulfill({ json: EMPTY_STATS });
+    if (url.includes('/api/media/discovery')) {
+      return route.fulfill({ json: { ...EMPTY_DISCOVERY, recommendations: 'invalid' } });
+    }
     return route.fulfill({ json: [] });
   });
 
