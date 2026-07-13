@@ -29,6 +29,31 @@ struct ActivityRow {
     timestamp: chrono::DateTime<chrono::Utc>,
 }
 
+#[derive(sqlx::FromRow)]
+struct UserSearchRow {
+    id: Uuid,
+    username: String,
+    avatar_url: Option<String>,
+    bio: Option<String>,
+    is_public: bool,
+    followers_count: i64,
+    follow_status: Option<String>,
+}
+
+impl From<UserSearchRow> for UserSearchResult {
+    fn from(row: UserSearchRow) -> Self {
+        Self {
+            id: row.id,
+            username: row.username,
+            avatar_url: row.avatar_url,
+            bio: row.bio,
+            is_public: row.is_public,
+            followers_count: row.followers_count,
+            follow_status: row.follow_status,
+        }
+    }
+}
+
 impl From<ActivityRow> for ActivityItem {
     fn from(row: ActivityRow) -> Self {
         Self {
@@ -89,11 +114,80 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
                 "/me/follow-requests/{follower_id}",
                 web::delete().to(reject_follow_request),
             )
+            .route("/search", web::get().to(search_users))
             .route("/{username}", web::get().to(get_profile))
             .route("/{username}/activity", web::get().to(get_user_activity))
             .route("/{username}/follow", web::post().to(follow_user))
             .route("/{username}/follow", web::delete().to(unfollow_user)),
     );
+}
+
+fn escaped_prefix_pattern(fragment: &str) -> String {
+    let mut pattern = String::with_capacity(fragment.len() + 1);
+    for character in fragment.chars() {
+        if matches!(character, '\\' | '%' | '_') {
+            pattern.push('\\');
+        }
+        pattern.push(character.to_ascii_lowercase());
+    }
+    pattern.push('%');
+    pattern
+}
+
+async fn search_users(
+    pool: web::Data<PgPool>,
+    req: HttpRequest,
+    params: web::Query<UserSearchParams>,
+) -> Result<HttpResponse, AppError> {
+    let user_id = require_auth(&req).await?;
+    params.validate()?;
+
+    let query = params.q.trim().to_ascii_lowercase();
+    let pattern = escaped_prefix_pattern(&query);
+    let limit = params.limit_val();
+    let mut rows = sqlx::query_as::<_, UserSearchRow>(
+        r#"SELECT u.id, u.username,
+            CASE
+                WHEN u.is_public OR u.id = $1 OR relationship.status = 'accepted'
+                THEN u.avatar_url
+                ELSE NULL
+            END AS avatar_url,
+            CASE
+                WHEN u.is_public OR u.id = $1 OR relationship.status = 'accepted'
+                THEN u.bio
+                ELSE NULL
+            END AS bio,
+            u.is_public,
+            COALESCE(follower_count.total, 0) AS followers_count,
+            relationship.status AS follow_status
+        FROM users u
+        LEFT JOIN follows relationship
+            ON relationship.follower_id = $1
+            AND relationship.following_id = u.id
+        LEFT JOIN LATERAL (
+            SELECT COUNT(*) AS total
+            FROM follows follower
+            WHERE follower.following_id = u.id AND follower.status = 'accepted'
+        ) follower_count ON TRUE
+        WHERE LOWER(u.username) LIKE $2 ESCAPE '\'
+        ORDER BY (LOWER(u.username) = $3) DESC, LOWER(u.username), u.id
+        LIMIT $4 OFFSET $5"#,
+    )
+    .bind(user_id)
+    .bind(pattern)
+    .bind(query)
+    .bind(limit + 1)
+    .bind(params.offset())
+    .fetch_all(pool.get_ref())
+    .await?;
+
+    let has_more = rows.len() > limit as usize;
+    rows.truncate(limit as usize);
+    Ok(HttpResponse::Ok().json(UserSearchResponse {
+        results: rows.into_iter().map(Into::into).collect(),
+        page: params.page_val(),
+        has_more,
+    }))
 }
 
 async fn get_profile(

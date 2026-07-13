@@ -11,6 +11,21 @@ fn validate_non_blank(value: &str) -> Result<(), validator::ValidationError> {
     Ok(())
 }
 
+fn validate_username_search_fragment(value: &str) -> Result<(), validator::ValidationError> {
+    let value = value.trim();
+    if (2..=50).contains(&value.len())
+        && value
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '_' | '-'))
+    {
+        return Ok(());
+    }
+
+    let mut err = validator::ValidationError::new("invalid_username_search");
+    err.message = Some("Search must be 2-50 username characters".into());
+    Err(err)
+}
+
 #[derive(Debug, Serialize)]
 pub struct PublicUserProfile {
     pub id: Uuid,
@@ -32,6 +47,48 @@ pub struct FollowRequestResponse {
     pub username: String,
     pub avatar_url: Option<String>,
     pub requested_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Debug, Deserialize, Validate)]
+pub struct UserSearchParams {
+    #[validate(custom(function = "validate_username_search_fragment"))]
+    pub q: String,
+    #[validate(range(min = 1, max = 1000, message = "Page must be between 1 and 1000"))]
+    pub page: Option<u32>,
+    #[validate(range(min = 1, max = 50, message = "Limit must be between 1 and 50"))]
+    pub limit: Option<u32>,
+}
+
+impl UserSearchParams {
+    pub fn page_val(&self) -> u32 {
+        self.page.unwrap_or(1)
+    }
+
+    pub fn limit_val(&self) -> i64 {
+        self.limit.unwrap_or(20) as i64
+    }
+
+    pub fn offset(&self) -> i64 {
+        (self.page_val() as i64 - 1) * self.limit_val()
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct UserSearchResult {
+    pub id: Uuid,
+    pub username: String,
+    pub avatar_url: Option<String>,
+    pub bio: Option<String>,
+    pub is_public: bool,
+    pub followers_count: i64,
+    pub follow_status: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct UserSearchResponse {
+    pub results: Vec<UserSearchResult>,
+    pub page: u32,
+    pub has_more: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -193,5 +250,35 @@ mod tests {
             is_public: None,
         };
         assert!(req.validate().is_err());
+    }
+
+    #[test]
+    fn user_search_accepts_literal_username_fragments() {
+        let params = UserSearchParams {
+            q: "some_user-2".to_string(),
+            page: Some(2),
+            limit: Some(10),
+        };
+        assert!(params.validate().is_ok());
+        assert_eq!(params.offset(), 10);
+    }
+
+    #[test]
+    fn user_search_rejects_short_wildcard_and_unbounded_inputs() {
+        for query in ["a", "%admin", "two words"] {
+            let params = UserSearchParams {
+                q: query.to_string(),
+                page: None,
+                limit: None,
+            };
+            assert!(params.validate().is_err(), "query should fail: {query}");
+        }
+
+        let params = UserSearchParams {
+            q: "valid".to_string(),
+            page: Some(1001),
+            limit: Some(51),
+        };
+        assert!(params.validate().is_err());
     }
 }

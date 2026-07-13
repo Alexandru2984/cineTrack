@@ -2293,6 +2293,141 @@ async fn test_delete_account_success() {
 
 #[actix_web::test]
 #[ignore = "requires test DB"]
+async fn test_user_search_is_literal_paginated_and_privacy_safe() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+
+    let (viewer_token, _, viewer_id) =
+        register_user(&app, "searchviewer", "searchviewer@example.com", "Pass1234").await;
+    let (_, _, public_id) =
+        register_user(&app, "alpha_public", "alpha_public@example.com", "Pass1234").await;
+    let (_, _, pending_id) = register_user(
+        &app,
+        "alpha_private",
+        "alpha_private@example.com",
+        "Pass1234",
+    )
+    .await;
+    let (friend_token, _, friend_id) =
+        register_user(&app, "alpha_friend", "alpha_friend@example.com", "Pass1234").await;
+    register_user(&app, "alphaxother", "alphaxother@example.com", "Pass1234").await;
+
+    sqlx::query("UPDATE users SET avatar_url = $2, bio = $3 WHERE id = $1")
+        .bind(Uuid::parse_str(&public_id).unwrap())
+        .bind("https://example.com/public.jpg")
+        .bind("public bio")
+        .execute(&pool)
+        .await
+        .unwrap();
+    for (id, avatar, bio) in [
+        (
+            &pending_id,
+            "https://example.com/pending.jpg",
+            "pending bio",
+        ),
+        (&friend_id, "https://example.com/friend.jpg", "friend bio"),
+    ] {
+        sqlx::query("UPDATE users SET is_public = false, avatar_url = $2, bio = $3 WHERE id = $1")
+            .bind(Uuid::parse_str(id).unwrap())
+            .bind(avatar)
+            .bind(bio)
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+
+    for username in ["alpha_private", "alpha_friend"] {
+        let req = actix_test::TestRequest::post()
+            .uri(&format!("/api/users/{username}/follow"))
+            .insert_header(("Authorization", format!("Bearer {viewer_token}")))
+            .peer_addr(peer_addr())
+            .to_request();
+        let resp = actix_test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 202);
+    }
+    let req = actix_test::TestRequest::post()
+        .uri(&format!("/api/users/me/follow-requests/{viewer_id}/accept"))
+        .insert_header(("Authorization", format!("Bearer {friend_token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+
+    let req = actix_test::TestRequest::get()
+        .uri("/api/users/search?q=alpha_")
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 401);
+
+    let req = actix_test::TestRequest::get()
+        .uri("/api/users/search?q=%25admin")
+        .insert_header(("Authorization", format!("Bearer {viewer_token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 400);
+
+    let req = actix_test::TestRequest::get()
+        .uri("/api/users/search?q=alpha_&limit=2")
+        .insert_header(("Authorization", format!("Bearer {viewer_token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let first_page: Value = actix_test::read_body_json(resp).await;
+    assert_eq!(first_page["page"], 1);
+    assert_eq!(first_page["has_more"], true);
+    assert_eq!(first_page["results"].as_array().unwrap().len(), 2);
+
+    let req = actix_test::TestRequest::get()
+        .uri("/api/users/search?q=alpha_&limit=2&page=2")
+        .insert_header(("Authorization", format!("Bearer {viewer_token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let second_page: Value = actix_test::read_body_json(resp).await;
+    assert_eq!(second_page["page"], 2);
+    assert_eq!(second_page["has_more"], false);
+
+    let mut results = first_page["results"].as_array().unwrap().clone();
+    results.extend(second_page["results"].as_array().unwrap().clone());
+    assert_eq!(results.len(), 3);
+    assert!(!results
+        .iter()
+        .any(|result| result["username"] == "alphaxother"));
+
+    let public = results
+        .iter()
+        .find(|result| result["username"] == "alpha_public")
+        .unwrap();
+    assert_eq!(public["avatar_url"], "https://example.com/public.jpg");
+    assert_eq!(public["bio"], "public bio");
+    assert!(public["follow_status"].is_null());
+
+    let pending = results
+        .iter()
+        .find(|result| result["username"] == "alpha_private")
+        .unwrap();
+    assert_eq!(pending["follow_status"], "pending");
+    assert!(pending["avatar_url"].is_null());
+    assert!(pending["bio"].is_null());
+    assert_eq!(pending["followers_count"], 0);
+
+    let friend = results
+        .iter()
+        .find(|result| result["username"] == "alpha_friend")
+        .unwrap();
+    assert_eq!(friend["follow_status"], "accepted");
+    assert_eq!(friend["avatar_url"], "https://example.com/friend.jpg");
+    assert_eq!(friend["bio"], "friend bio");
+    assert_eq!(friend["followers_count"], 1);
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
 async fn test_activity_feed_only_includes_self_and_accepted_follows() {
     let pool = setup_pool().await;
     clean_db(&pool).await;
