@@ -2511,6 +2511,26 @@ async fn test_popular_catalog_hydration_is_bounded_and_persistent() {
     .execute(&pool)
     .await
     .unwrap();
+    sqlx::query(
+        r#"INSERT INTO media
+            (tmdb_id, media_type, title, metadata_level, tmdb_cached_at)
+        VALUES
+            (650001, 'movie', 'Most Popular Fixture', 'detail', NOW())"#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO catalog_hydration_state
+            (media_type, tmdb_id, outcome, consecutive_failures,
+             last_attempt_at, next_attempt_at, last_success_at)
+        VALUES
+            ('movie', 650001, 'success', 0,
+             NOW(), NOW() + INTERVAL '30 days', NOW())"#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
 
     let mut config = test_config();
     config.tmdb_base_url = format!("http://{address}");

@@ -153,7 +153,14 @@ pub async fn hydrate_popular_catalog(
          AND state.tmdb_id = ids.tmdb_id
         WHERE ids.adult = FALSE
           AND ids.video = FALSE
-          AND (state.next_attempt_at IS NULL OR state.next_attempt_at <= NOW())
+          AND (
+              state.next_attempt_at IS NULL
+              OR state.next_attempt_at <= NOW()
+              OR (
+                  state.outcome = 'success'
+                  AND media.title_aliases_cached_at IS NULL
+              )
+          )
           AND (
               media.id IS NULL
               OR media.metadata_level <> 'detail'
