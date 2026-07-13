@@ -1,116 +1,124 @@
-# CineTrack security audit
+# CineTrack Security Audit
 
-Data: 2026-06-20 (rundele 3-4; runde anterioare 2026-06-14 si 2026-06-13)
+Date: 2026-07-13 (earlier rounds 2026-06-13 through 2026-07-07)
 
-## Rezumat
+## Summary
 
-Repo-ul era deja un MVP solid: SQL parametrizat prin `sqlx`, ownership checks pe resursele principale, Argon2 pentru parole, JWT-uri semnate, refresh token hash-uit in DB, validari de baza si teste unitare. Cele mai importante lacune erau in zona de sesiuni, dependency hygiene, hardening de deploy si contracte incomplete intre API si DB.
+The repo was already a solid MVP: parameterized SQL through `sqlx`, ownership checks on the main resources, Argon2 for passwords, signed JWTs, refresh tokens hashed in the DB, basic validation, and unit tests. The most significant gaps were around session handling, dependency hygiene, deployment hardening, and incomplete contracts between the API and the DB.
 
-Am remediat problemele cu risc imediat: refresh token-ul nu mai este expus in JavaScript, rotatia detecteaza reuse, JWT-ul are algoritm explicit si durata mai scurta, TMDB are timeout, rate limiter-ul tine cont de reverse proxy, Nginx trimite headere de hardening, iar CI ruleaza lint/test/audit.
+We fixed the issues carrying immediate risk: the refresh token is no longer exposed to JavaScript, rotation detects reuse, the JWT uses an explicit algorithm and a shorter lifetime, TMDB has a timeout, the rate limiter accounts for the reverse proxy, Nginx sends hardening headers, and CI runs lint/test/audit.
 
-In runda a doua am inchis lacunele ramase pe partea de cont si operare: normalizare email, schimbare/resetare parola, gestionarea sesiunilor active, stergere de cont, CSP in Nginx, request-id plus metrics Prometheus si supply-chain scanning (Dependabot, CodeQL, gitleaks). Toate endpoint-urile noi au teste de integrare care ruleaza pe Postgres in CI.
+In the second round we closed the remaining gaps on the account and operations side: email normalization, password change/reset, active-session management, account deletion, CSP in Nginx, request-id plus Prometheus metrics, and supply-chain scanning (Dependabot, CodeQL, gitleaks). All new endpoints have integration tests that run against Postgres in CI.
 
-In runda a treia am verificat repo-ul direct pe VPS/prod si am inchis trei riscuri concrete: vulnerabilitatea npm high din `form-data` (prin lockfile), logarea URL-ului de resetare parola cand SMTP lipseste in productie si hardening-ul runtime pentru containere/Nginx. Am verificat si faptul ca `.env.prod` este netracked si `chmod 600`, iar porturile publicate in Compose sunt bind-uite pe `127.0.0.1`.
+In the third round we reviewed the repo directly on the VPS/prod host and closed three concrete risks: the npm high-severity vulnerability in `form-data` (via the lockfile), logging of the password-reset URL when SMTP is missing in production, and runtime hardening for the containers and Nginx. We also confirmed that `.env.prod` is untracked and `chmod 600`, and that the ports published in Compose are bound to `127.0.0.1`.
 
-## Schimbari aplicate
+## Changes applied
 
-- Backend Rust curatat pentru `cargo clippy --all-targets -- -D warnings`.
-- Dependinte reduse si `npm audit --omit=dev` adus la 0 vulnerabilitati.
-- Refresh token rotation intarita cu `consumed_at`, `revoked_at`, lock tranzactional si invalidare pe reuse.
-- Refresh token mutat in cookie `HttpOnly`, `SameSite=Lax`, `Secure` in productie, cu path limitat la `/api/auth`.
-- Frontend-ul nu mai persista refresh token in `localStorage`.
-- Validari API extinse pentru login, tracking, media type, rating, nume goale, profil si liste.
-- Constrangeri DB adaugate pentru statusuri, media type, lungimi, valori pozitive si ordine de date.
-- Profilurile private nu mai expun `bio` si `avatar_url` catre utilizatori neautorizati.
-- Erorile DB comune sunt mapate la 400/409 fara detalii interne.
-- TMDB client are timeout, connect timeout, user agent si `error_for_status`.
-- Logarea erorilor TMDB evita URL-ul complet, ca sa nu scurga API key-ul.
-- Rate limiter-ul foloseste `X-Forwarded-For` doar cand peer-ul este proxy privat/loopback.
-- Nginx are HSTS, `nosniff`, `DENY` framing, Referrer Policy, Permissions Policy, body limit si proxy timeouts.
-- CI GitHub Actions ruleaza Rust fmt/clippy/test, frontend lint/test/build, `npm audit --omit=dev` si `cargo audit`.
+- Rust backend cleaned up to pass `cargo clippy --all-targets -- -D warnings`.
+- Dependencies reduced and `npm audit --omit=dev` brought down to 0 vulnerabilities.
+- Refresh token rotation hardened with `consumed_at`, `revoked_at`, a transactional lock, and invalidation on reuse.
+- Refresh token moved into an `HttpOnly`, `SameSite=Lax`, `Secure` (in production) cookie, with its path scoped to `/api/auth`.
+- The frontend no longer persists the refresh token in `localStorage`.
+- API validation extended for login, tracking, media type, rating, empty names, profiles, and lists.
+- DB constraints added for statuses, media type, lengths, positive values, and date ordering.
+- Private profiles no longer expose `bio` or `avatar_url` to unauthorized users.
+- Common DB errors are mapped to 400/409 without leaking internal details.
+- The TMDB client has a request timeout, connect timeout, user agent, and `error_for_status`.
+- TMDB error logging avoids the full URL so the API key can't leak.
+- The rate limiter uses `X-Forwarded-For` only when the peer is a private/loopback proxy.
+- Nginx sends HSTS, `nosniff`, `DENY` framing, Referrer Policy, Permissions Policy, a body-size limit, and proxy timeouts.
+- CI on GitHub Actions runs Rust fmt/clippy/test, frontend lint/test/build, `npm audit --omit=dev`, and `cargo audit`.
 
-## Schimbari aplicate (2026-06-14)
+## Changes applied (2026-06-14)
 
-- Email normalizat (trim + lowercase) la register si login, plus migratie care normalizeaza randurile existente, ca sa nu existe conturi duplicate dupa casing.
-- Endpoint autentificat `PATCH /api/auth/password` pentru schimbarea parolei cu verificarea parolei curente; revoca toate refresh token-urile si curata cookie-ul sesiunii curente.
-- Flux de resetare parola: `POST /api/auth/password/forgot` (raspuns uniform, fara user enumeration) si `POST /api/auth/password/reset`. Token-uri one-time hash-uite SHA-256, TTL 1h, consumate la folosire.
-- Trimitere email prin SMTP configurabil din env (`SMTP_HOST/PORT/USERNAME/PASSWORD/FROM`, lettre cu rustls); cand SMTP nu e configurat, link-ul de reset e doar logat, deci fluxul nu cade in dev.
-- Management de sesiuni: coloane `user_agent`, `ip_address`, `last_used_at` pe refresh tokens; `GET /api/auth/sessions` (cu flag `current`), `DELETE /api/auth/sessions/{id}` (scoped pe owner, 404 pe id strain) si `POST /api/auth/sessions/logout-all`.
-- Stergere de cont: `DELETE /api/users/me` cu confirmare prin parola; cascade pe toate tabelele legate de user si curatarea cookie-ului.
-- IP-ul real pentru sesiuni respecta acelasi trust model ca rate limiter-ul (`X-Forwarded-For` doar de la peer privat/loopback).
-- Content-Security-Policy in Nginx, plus `Cross-Origin-Opener-Policy: same-origin`. CSP permite doar same-origin plus scriptul de analytics si imaginile TMDB efectiv folosite; scripturile raman stricte, `'unsafe-inline'` ramane doar pentru stiluri.
-- Observability: middleware request-id (UUID per request, ignora valoarea trimisa de client, o pune in `X-Request-Id` si in access log) si endpoint `/metrics` Prometheus, servit pe portul aplicatiei si neexpus prin Nginx.
-- Supply chain: `dependabot.yml` (cargo, npm, github-actions, docker), workflow CodeQL pentru JS/TS si workflow gitleaks pentru secret scanning pe intreg istoricul.
-- Frontend conectat la noile endpoint-uri: pagini publice forgot/reset parola (cu link din login), pagina Settings cu schimbare parola, lista sesiunilor active (revocare per sesiune si sign out all) si danger zone pentru stergere cont cu confirmare prin parola.
-- Logging de securitate si audit: `WARN` pe refresh token reuse (semnal de furt token, urmat de revocarea tuturor sesiunilor) si linii `INFO` de audit pe register, schimbare/resetare parola, revocare sesiune, sign out all si stergere cont. Se logheaza doar `user_id` (UUID), fara email/token/parola.
+- Email normalized (trim + lowercase) on register and login, plus a migration that normalizes existing rows so no duplicate accounts remain after a casing change.
+- Authenticated endpoint `PATCH /api/auth/password` for changing the password with verification of the current password; it revokes all refresh tokens and clears the current session cookie.
+- Password-reset flow: `POST /api/auth/password/forgot` (uniform response, no user enumeration) and `POST /api/auth/password/reset`. One-time tokens hashed with SHA-256, 1h TTL, consumed on use.
+- Email delivery over SMTP configurable from env (`SMTP_HOST/PORT/USERNAME/PASSWORD/FROM`, using lettre with rustls); when SMTP is not configured, the reset link is only logged, so the flow doesn't break in dev.
+- Session management: `user_agent`, `ip_address`, and `last_used_at` columns on refresh tokens; `GET /api/auth/sessions` (with a `current` flag), `DELETE /api/auth/sessions/{id}` (scoped to the owner, 404 on a foreign id), and `POST /api/auth/sessions/logout-all`.
+- Account deletion: `DELETE /api/users/me` with password confirmation; cascades across all user-related tables and clears the cookie.
+- The real IP used for sessions follows the same trust model as the rate limiter (`X-Forwarded-For` only from a private/loopback peer).
+- Content-Security-Policy in Nginx, plus `Cross-Origin-Opener-Policy: same-origin`. The CSP allows only same-origin plus the analytics script and the TMDB images actually used; scripts stay strict, and `'unsafe-inline'` remains only for styles.
+- Observability: a request-id middleware (a UUID per request; it ignores the value sent by the client, sets it in `X-Request-Id`, and includes it in the access log) and a Prometheus `/metrics` endpoint, served on the application port and not exposed through Nginx.
+- Supply chain: `dependabot.yml` (cargo, npm, github-actions, docker), a CodeQL workflow for JS/TS, and a gitleaks workflow for secret scanning across the entire history.
+- Frontend wired up to the new endpoints: public forgot/reset password pages (with a link from login), a Settings page for changing the password, an active-sessions list (per-session revocation and sign out all), and a danger zone for account deletion with password confirmation.
+- Security and audit logging: `WARN` on refresh-token reuse (a signal of token theft, followed by revoking all sessions) and `INFO` audit lines on register, password change/reset, session revocation, sign out all, and account deletion. Only the `user_id` (UUID) is logged — no email/token/password.
 
-## Schimbari aplicate (2026-06-20)
+## Changes applied (2026-06-20)
 
-- Frontend supply-chain: `npm audit --omit=dev` raporta vulnerabilitate high in `form-data` 4.0.0-4.0.5 via `axios`; lockfile-ul a fost actualizat astfel incat `form-data` sa rezolve la 4.0.6, iar auditul npm este acum curat.
-- Reset password logging: in productie, daca SMTP nu este configurat, backend-ul nu mai logheaza `reset_url` (care contine token one-time). In dev ramane log-only pentru debugging.
-- Observability: logurile aplicatiei folosesc task-local request id si sunt corelate cu `X-Request-Id`/access log, fara sa accepte valori spoofed de client.
-- Runtime container hardening: `backend` si `frontend` in `docker-compose.prod.yml` ruleaza cu `read_only`, `tmpfs` pentru directoarele de write necesare, `no-new-privileges`, `cap_drop: ALL` si `pids_limit`; Postgres primeste `no-new-privileges` si `pids_limit`.
-- Nginx hardening: `server_tokens off`, TLS limitat la 1.2/1.3, session cache/timeout explicit si `server_tokens off` si pentru Nginx-ul SPA intern.
-- Validare operationala fara leak de secrete: pentru Compose se foloseste `docker compose config --no-env-resolution --no-interpolate --quiet`, nu `docker compose config` simplu, deoarece acesta poate expune valorile din `env_file`.
+- Frontend supply chain: `npm audit --omit=dev` reported a high-severity vulnerability in `form-data` 4.0.0–4.0.5 via `axios`; the lockfile was updated so that `form-data` resolves to 4.0.6, and the npm audit is now clean.
+- Reset-password logging: in production, if SMTP is not configured, the backend no longer logs `reset_url` (which contains the one-time token). In dev it stays log-only for debugging.
+- Observability: the application logs use a task-local request id and are correlated with `X-Request-Id`/the access log, without accepting client-spoofed values.
+- Runtime container hardening: `backend` and `frontend` in `docker-compose.prod.yml` run with `read_only`, `tmpfs` for the write directories they need, `no-new-privileges`, `cap_drop: ALL`, and `pids_limit`; Postgres gets `no-new-privileges` and `pids_limit`.
+- Nginx hardening: `server_tokens off`, TLS limited to 1.2/1.3, explicit session cache/timeout, and `server_tokens off` on the internal SPA Nginx as well.
+- Operational validation without leaking secrets: for Compose we use `docker compose config --no-env-resolution --no-interpolate --quiet` rather than plain `docker compose config`, because the latter can expose the values from `env_file`.
 
-## Schimbari aplicate (2026-06-20, runda 4)
+## Changes applied (2026-06-20, round 4)
 
-- Build hygiene / secret-in-layer: adaugate `.dockerignore` pentru `backend` si `frontend`. Ambele Dockerfile faceau `COPY . .` fara ignore, deci contextul includea `target/`, `node_modules/`, `dist/` si orice `.env` local; acum contextele sunt curate si un `.env` ratacit nu mai poate ajunge intr-un layer de imagine.
-- Onboarding fara copy-paste din README: adaugat `.env.example` tracked, care documenteaza fiecare variabila citita de backend si de fisierele compose (cu placeholdere, nu valori reale).
-- Cod mort eliminat: `GET /api/users/{username}/stats` si `/heatmap` erau stub-uri care ignorau username-ul si intorceau un mesaj hardcodat catre `/api/stats/me`; nefolosite de frontend si neacoperite de teste, deci scoase (statisticile raman self-only).
-- TMDB credential scos din URL-uri: cand `TMDB_READ_ACCESS_TOKEN` (v4) este setat, clientul il trimite ca header `Authorization: Bearer` marcat sensitive si renunta la `api_key` din query string; fallback la `api_key` cand token-ul lipseste sau nu e header-safe, deci deploy-urile existente raman functionale. Pentru a-l activa in productie trebuie adaugat `TMDB_READ_ACCESS_TOKEN` in `.env.prod` si rebuild.
-- Bug de UX in fluxul de login reparat (descoperit prin E2E): interceptorul axios trata orice 401 ca access token expirat si incerca refresh; la o parola gresita refresh-ul (fara sesiune) raspundea tot 401, ceea ce facea logout si redirect la `/login`, inghitind mesajul "Invalid email or password". Acum 401-urile de la endpoint-urile de auth (login/register/password) sunt respinse direct, ca formularul sa afiseze eroarea; refresh-ul ramane doar pentru token expirat pe alte requesturi.
-- Teste E2E: suita Playwright (`frontend/e2e`) acopera route guards, store-ul de auth persistat, login success/fail, logout, interceptorul de refresh-on-401 pe sesiune moarta si confirmarea uniforma de forgot-password. Backend-ul e mock-uit la nivel de retea (fara DB/API), deci e determinista; ruleaza ca job separat in CI.
-- Acuratete documentatie: numerele de teste din README au fost corectate (116 unit + 44 integrare + 53 frontend), CSP-ul descris corect ca domain-allowlist, si adaugat un fisier `LICENSE` MIT in locul notei vagi "personal/educational use".
-- Reziliente frontend: adaugat un `ErrorBoundary` la nivel de aplicatie (in jurul `<Routes>`, navbar-ul ramane in afara) care prinde erorile de render si arata un fallback cu reload/home in loc sa demonteze tot SPA-ul. Se reseteaza la navigare (`key` pe pathname). Acoperit de teste unit (vitest) si E2E (un raspuns `trending` malformat duce la fallback, nu la ecran alb).
-- E2E pe stiva reala: suita Playwright `frontend/e2e-realstack` ruleaza contra unui backend pornit efectiv + Postgres efemer (fara mock), Playwright pornind singur backend-ul (`cargo run`) si vite dev. Acopera inregistrarea cu cookie refresh `HttpOnly`, rotatia reala a access token-ului prin cookie in browser, lista de sesiuni active, stergerea de cont (care blocheaza re-login) si resetarea parolei cu token-ul one-time (citit din logul backend-ului, SMTP fiind dezactivat). Ruleaza ca job CI separat (`e2e-realstack`, cu serviciu Postgres si toolchain Rust).
+- Build hygiene / secret-in-layer: added `.dockerignore` files for `backend` and `frontend`. Both Dockerfiles did `COPY . .` with no ignore, so the build context included `target/`, `node_modules/`, `dist/`, and any local `.env`; the contexts are now clean and a stray `.env` can no longer end up in an image layer.
+- Onboarding without copy-pasting from the README: added a tracked `.env.example` that documents every variable read by the backend and by the compose files (with placeholders, not real values).
+- Dead code removed: `GET /api/users/{username}/stats` and `/heatmap` were stubs that ignored the username and returned a hardcoded message pointing at `/api/stats/me`; unused by the frontend and not covered by tests, so they were removed (stats stay self-only).
+- TMDB credential taken out of URLs: when `TMDB_READ_ACCESS_TOKEN` (v4) is set, the client sends it as an `Authorization: Bearer` header marked sensitive and drops `api_key` from the query string; it falls back to `api_key` when the token is missing or not header-safe, so existing deploys keep working. To enable it in production, add `TMDB_READ_ACCESS_TOKEN` to `.env.prod` and rebuild.
+- Login-flow UX bug fixed (found via E2E): the axios interceptor treated any 401 as an expired access token and tried to refresh; on a wrong password the refresh (with no session) also responded 401, which logged the user out and redirected to `/login`, swallowing the "Invalid email or password" message. Now 401s from the auth endpoints (login/register/password) are surfaced directly so the form can display the error; refresh stays reserved for an expired token on other requests.
+- E2E tests: the Playwright suite (`frontend/e2e`) covers route guards, the persisted auth store, login success/failure, logout, the refresh-on-401 interceptor against a dead session, and the uniform forgot-password confirmation. The backend is mocked at the network layer (no DB/API), so it's deterministic; it runs as a separate CI job.
+- Documentation accuracy: the test counts in the README were corrected (116 unit + 44 integration + 53 frontend), the CSP is described correctly as a domain allowlist, and an MIT `LICENSE` file was added in place of the vague "personal/educational use" note.
+- Frontend resilience: added an application-level `ErrorBoundary` (around `<Routes>`, leaving the navbar outside) that catches render errors and shows a fallback with reload/home instead of tearing down the whole SPA. It resets on navigation (`key` on the pathname). Covered by unit tests (vitest) and E2E (a malformed `trending` response leads to the fallback, not a blank screen).
+- Real-stack E2E: the Playwright suite `frontend/e2e-realstack` runs against an actually-running backend + an ephemeral Postgres (no mocking), with Playwright starting the backend itself (`cargo run`) and vite dev. It covers registration with an `HttpOnly` refresh cookie, real access-token rotation through the cookie in the browser, the active-sessions list, account deletion (which blocks re-login), and password reset with the one-time token (read from the backend log, since SMTP is disabled). It runs as a separate CI job (`e2e-realstack`, with a Postgres service and the Rust toolchain).
 
-## Schimbari aplicate (2026-07-07)
+## Changes applied (2026-07-07)
 
-- Import TV Time self-serve (`POST /api/import/tvtime`, multipart): fisierele incarcate sunt limitate la 32 MB/fisier; jobul ruleaza in fundal (`tokio::spawn`) cu o singura importare per cont (guard pe `import_jobs`). Rezolvarea TVDB/IMDB->TMDB si caching-ul refolosesc `TmdbService`; nu se creeaza episoade sintetice (varianta curata, product-grade).
-- Upload avatar (`POST`/`DELETE /api/users/me/avatar`): validare stricta de tip (doar `image/png|jpeg|webp|gif`) si marime (<=3 MB); cheia R2 e derivata din `user_id`, fara nume de fisier controlat de user, deci fara path traversal. `avatar_url` ramane sub constrangerea `users_avatar_url_shape` (doar http/https absolut).
-- Proxy public de assets (`GET /api/assets/{key}`): serveste DOAR prefixele `avatars/` si `posters/`; obiectele private (`imports/`, `backups/`) nu sunt accesibile prin el; respinge chei cu `..`.
-- Cache write-through de postere (`GET /api/img/{size}/{path}`): spec-ul e validat contra unei liste de dimensiuni permise si a unui path sigur (fara `..`, `:`, `//`), deci nu poate fi folosit pentru SSRF — fetch-ul se face doar spre baza TMDB fixa din config.
-- Object storage R2 (`services/storage.rs`): credentiale doar in `.env.prod` (chmod 600, gitignored); feature-urile sunt config-gated — fara `R2_*`, storage-ul e dezactivat si aplicatia ruleaza normal. DELETE se face prin URL presemnat (rust-s3 semneaza gresit DELETE prin header pe R2 -> 403).
-- Backup DB pe R2 (`scripts/backup_to_r2.sh`): `pg_dump | gzip -> R2 backups/` cu retentie (14 zile), rulat prin cron (03:30 zilnic); dump-ul e read-only fata de productie.
-- Deploy: compose adaptat pentru Docker Compose 2.40 (`deploy.resources.limits.pids` aliniat cu `pids_limit`) si tmpfs-ul frontend-ului (`/var/cache/nginx`, `/var/run`) setat writable pentru userul `nginx` (uid 101), altfel nginx read-only intra in crash-loop.
+- Self-serve TV Time import (`POST /api/import/tvtime`, multipart): uploaded files are capped at 32 MB/file; the job runs in the background (`tokio::spawn`) with a single import per account (guarded on `import_jobs`). TVDB/IMDB→TMDB resolution and caching reuse `TmdbService`; no synthetic episodes are created (the clean, product-grade approach).
+- Avatar upload (`POST`/`DELETE /api/users/me/avatar`): strict type validation (only `image/png|jpeg|webp|gif`) and size (≤3 MB); the R2 key is derived from `user_id`, with no user-controlled filename, so there is no path traversal. `avatar_url` stays under the `users_avatar_url_shape` constraint (absolute http/https only).
+- Public asset proxy (`GET /api/assets/{key}`): serves ONLY the `avatars/` and `posters/` prefixes; private objects (`imports/`, `backups/`) are not reachable through it; it rejects keys containing `..`.
+- Write-through poster cache (`GET /api/img/{size}/{path}`): the spec is validated against an allowlist of sizes and a safe path (no `..`, `:`, `//`), so it can't be used for SSRF — the fetch only targets the fixed TMDB base from config.
+- R2 object storage (`services/storage.rs`): credentials live only in `.env.prod` (chmod 600, gitignored); the features are config-gated — without `R2_*`, storage is disabled and the app runs normally. DELETE is done via a presigned URL (rust-s3 signs a header-based DELETE incorrectly on R2 → 403).
+- DB backup to R2 (`scripts/backup_to_r2.sh`): `pg_dump | gzip -> R2 backups/` with retention (14 days), run via cron (daily at 03:30); the dump is read-only against production.
+- Deploy: Compose adapted for Docker Compose 2.40 (`deploy.resources.limits.pids` aligned with `pids_limit`) and the frontend tmpfs (`/var/cache/nginx`, `/var/run`) set writable for the `nginx` user (uid 101), otherwise read-only Nginx enters a crash loop.
 
-## Riscuri reziduale
+## Changes applied (2026-07-13)
 
-- Proxy-ul de assets si cache-ul de postere fac backend-ul cale de servire pentru imagini. Cache-ul de postere e off by default (`VITE_USE_R2_IMAGES`); daca se activeaza, de setat `R2_PUBLIC_BASE_URL` (domeniu/CDN) ca imaginile sa nu treaca prin backend, si de adaugat originea API in `img-src` din CSP.
-- Cheile R2 din `.env.prod` sunt long-lived; de rotit periodic si de restrans permisiunile token-ului doar la bucket-ul `vazute`.
-- `rust-s3` 0.37 pin-uieste `quick-xml ^0.38`, care are doua advisories DoS la parsarea de XML malitios (`RUSTSEC-2026-0194/0195`, fix in >=0.41). Expunerea reala e minima — quick-xml parseaza doar raspunsurile API autentificate de la R2, nu input de user — deci CI le ignora explicit cu justificare. De scos ignore-urile cand rust-s3 trece pe quick-xml >=0.41. (Upgrade-ul rust-s3 0.35->0.37 a rezolvat deja advisories reale in `rustls-webpki` si `rustls-pemfile`.)
-- Access token-urile raman stateless pana expira. Durata default este 1h; `logout-all` si schimbarea parolei revoca refresh token-urile, dar un access token deja emis ramane valabil pana la expirare. Revocarea instant ar cere token versioning sau denylist.
-- Cookie-ul refresh foloseste `SameSite=Lax`. Este bun pentru deploy same-site, dar daca frontend si API ajung pe site-uri complet diferite va trebui `SameSite=None; Secure` plus protectie CSRF explicita.
-- `current` pentru sesiuni se determina din cookie-ul de refresh; un client care apeleaza fara cookie (doar cu access token) vede toate sesiunile drept ne-curente, dar nu este o problema de securitate.
-- `/metrics` nu are autentificare; protectia e ca nu este proxat de Nginx, deci depinde de izolarea retelei de deploy. Daca portul backend devine accesibil direct, endpoint-ul trebuie restrans.
-- `cargo audit` raporteaza `RUSTSEC-2023-0071` prin metadate `sqlx-mysql` din lockfile, desi build-ul foloseste doar feature-ul `postgres`. CI il ignora explicit; de revazut cand `sqlx` rezolva lockfile-ul.
-- `validator_derive` trage `proc-macro-error2`, marcat unmaintained in `cargo audit` ca warning (`RUSTSEC-2026-0173`). De urmarit upgrade-ul ecosistemului `validator`.
-- E2E browser tests exista acum pe doua niveluri: mock-uit (login/logout/refresh-401/forgot-password/error-boundary) si stiva reala (cookie HttpOnly, rotatie refresh, sesiuni, stergere cont, reset cu token). Raman neacoperite de E2E fluxurile de tracking/episoade/liste (acoperite doar de testele de integrare backend).
-- Secretele din `.env.prod` trebuie rotate daca au fost afisate in terminal, loguri sau transcript de audit. In special, evita `docker compose config` fara `--no-env-resolution` pe masini sau sesiuni care pot persista output-ul.
+- TMDB images are cached in private R2 with strict size/path validation, bounded streaming downloads, content inspection, and lifecycle retention. Raw catalog exports and database backups are archived separately and are never served by the public asset proxy.
+- A complete daily TMDB ID/title inventory is stored in PostgreSQL for local search. Import validation rejects duplicate IDs, malformed flags, invalid popularity values, blank/oversized titles, and control characters; C1 punctuation is repaired before the strict DB constraint is applied.
+- Local title search excludes adult/video entries and requires authentication. Catalog-only results do not create rows in the hydrated `media` cache and avoid upstream TMDB calls when a local match exists.
+- Detail hydration is limited to 200 sequential requests per day at four requests/second. It uses a database advisory lock, stops on provider/rate-limit failures, applies bounded retry backoff, refuses stale inventories, and revalidates successful entries every 30 days.
+- Production rollout was preceded and followed by verified R2 backups. The backend image runs non-root with a read-only filesystem, all Linux capabilities dropped, and no-new-privileges; Trivy reported zero HIGH/CRITICAL findings.
+- Production validation covered 164 backend unit tests, 72 PostgreSQL integration tests, 62 frontend tests, Clippy with warnings denied, `npm audit`, authenticated local-search smoke tests, and concurrent hydration locking.
 
-## Recomandari urmatoare
+## Residual risks
 
-- Adauga CSRF token daca deployment-ul ajunge cross-site sau daca schimbi refresh cookie pe `SameSite=None`.
-- Extinde E2E-ul catre fluxurile de continut (tracking, episoade, liste) daca devin critice, pe langa fluxurile de auth deja acoperite mock + real-stack.
-- Extinde observability: propaga request-id-ul si in liniile de audit/eroare (acum apare doar in access log), si conecteaza alerte pe `security: refresh token reuse` plus dashboards peste metrics-ul Prometheus.
-- Decide politicile de privacy pentru follower/following counts la profile private; momentan se ascund bio/avatar si activity, dar nu si counters.
-- Ruleaza periodic raportul gitleaks/CodeQL si trateaza PR-urile Dependabot ca parte din intretinere.
-- Roteaza JWT secret, parola DB si cheia TMDB dupa sesiuni de audit in care valorile au fost afisate accidental. Rotatia parolei DB trebuie facuta atomic: `ALTER USER`, update `.env.prod`, apoi recreate/restart backend.
+- The asset proxy and enabled poster cache make the backend a serving path for images. A dedicated `R2_PUBLIC_BASE_URL`/CDN would remove that bandwidth from the API while keeping the bucket private to writes.
+- The R2 keys in `.env.prod` are long-lived; rotate them periodically and scope the token's permissions to just the `vazute` bucket.
+- Access tokens stay stateless until they expire. The default lifetime is 1h; `logout-all` and a password change revoke the refresh tokens, but an already-issued access token stays valid until it expires. Instant revocation would require token versioning or a denylist.
+- The refresh cookie uses `SameSite=Lax`. That's fine for a same-site deploy, but if the frontend and API end up on entirely different sites it will need `SameSite=None; Secure` plus explicit CSRF protection.
+- `current` for sessions is determined from the refresh cookie; a client that calls without the cookie (with only an access token) sees all sessions as non-current, but this is not a security issue.
+- `/metrics` has no authentication; its protection is that it isn't proxied by Nginx, so it depends on the deploy network's isolation. If the backend port becomes directly reachable, the endpoint must be restricted.
+- `cargo audit` reports `RUSTSEC-2023-0071` via `sqlx-mysql` metadata in the lockfile, even though the build uses only the `postgres` feature. CI ignores it explicitly; revisit when `sqlx` resolves the lockfile.
+- SMTP is not configured in production, so password-reset emails cannot currently be delivered. Production correctly avoids logging the one-time reset URL, but the user-facing recovery flow remains operationally incomplete until SMTP is configured.
+- Browser E2E tests now exist at two levels: mocked (login/logout/refresh-401/forgot-password/error-boundary) and real-stack (HttpOnly cookie, refresh rotation, sessions, account deletion, reset with token). The tracking/episodes/lists flows remain uncovered by E2E (covered only by the backend integration tests).
+- The secrets in `.env.prod` must be rotated if they were shown in a terminal, logs, or an audit transcript. In particular, avoid `docker compose config` without `--no-env-resolution` on machines or sessions that can persist the output.
 
-## Verificari locale
+## Next recommendations
+
+- Add a CSRF token if the deployment goes cross-site or if you switch the refresh cookie to `SameSite=None`.
+- Extend E2E toward the content flows (tracking, episodes, lists) if they become critical, on top of the auth flows already covered mock + real-stack.
+- Extend observability: propagate the request-id into the audit/error lines too (it currently appears only in the access log), and wire up alerts on `security: refresh token reuse` plus dashboards over the Prometheus metrics.
+- Decide on the privacy policy for follower/following counts on private profiles; right now bio/avatar and activity are hidden, but the counters are not.
+- Run the gitleaks/CodeQL report periodically and treat Dependabot PRs as part of maintenance.
+- Rotate the JWT secret, the DB password, and the TMDB key after audit sessions where the values were accidentally shown. The DB password rotation must be done atomically: `ALTER USER`, update `.env.prod`, then recreate/restart the backend.
+
+## Local checks
 
 - `cargo fmt --check`
 - `cargo clippy --all-targets -- -D warnings`
 - `cargo test`
-- Teste de integrare pe Postgres: `TEST_DATABASE_URL=postgres://test_user:test_pass@127.0.0.1:55433/cinetrack_test cargo test --test api_tests -- --ignored --test-threads=1`
+- Integration tests against Postgres: `TEST_DATABASE_URL=postgres://test_user:test_pass@127.0.0.1:55433/cinetrack_test cargo test --test api_tests -- --ignored --test-threads=1`
 - `cargo audit --ignore RUSTSEC-2023-0071`
 - `npm run lint`
 - `npm test -- --run`
 - `npm run build`
-- `npm run test:e2e` (Playwright; porneste singur vite dev, backend mock-uit la nivel de retea)
+- `npm run test:e2e` (Playwright; it starts vite dev itself, backend mocked at the network layer)
 - `npm audit --omit=dev`
 - `docker compose -f docker-compose.prod.yml config --no-env-resolution --no-interpolate --quiet`
 - `docker run --rm --add-host backend:127.0.0.1 --add-host frontend:127.0.0.1 -v "$PWD/nginx/nginx.conf:/etc/nginx/nginx.conf:ro" -v /tmp/cinetrack-nginx-ssl:/etc/nginx/ssl:ro nginx:alpine nginx -t`
-- Validare config Nginx: `nginx -t` (sau in container cu certificate dummy)
+- Nginx config validation: `nginx -t` (or in a container with dummy certificates)
 - Secret scan: `docker run --rm -v "$PWD:/repo" zricethezav/gitleaks:v8.30.1 detect --source /repo --redact`
