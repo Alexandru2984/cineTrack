@@ -5,8 +5,10 @@ umask 077
 CONTAINER="${BACKEND_CONTAINER:-cinetrack-backend-1}"
 RUNTIME_DIR="${XDG_RUNTIME_DIR:-$HOME/.cache/cinetrack}"
 LOCK_FILE="${CATALOG_HYDRATION_LOCK_FILE:-$RUNTIME_DIR/catalog-hydration.lock}"
+LOCK_DIR="$(dirname "$LOCK_FILE")"
 
-mkdir -p -m 700 "$(dirname "$LOCK_FILE")"
+mkdir -p "$LOCK_DIR"
+chmod 700 "$LOCK_DIR"
 exec 9>"$LOCK_FILE"
 if ! flock -n 9; then
   echo "catalog hydration already running; skipping"
