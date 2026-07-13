@@ -3,9 +3,10 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use sqlx::PgPool;
+use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Duration;
-use tokio::sync::{OwnedSemaphorePermit, Semaphore};
+use std::time::{Duration, Instant};
+use tokio::sync::{Mutex, OwnedMutexGuard, OwnedSemaphorePermit, Semaphore};
 use tokio::time::timeout;
 
 use crate::config::Config;
@@ -57,6 +58,8 @@ pub struct TmdbService {
     api_requests: Arc<Semaphore>,
     image_requests: Arc<Semaphore>,
     permit_wait: Duration,
+    request_locks: Arc<Mutex<HashMap<String, Arc<Mutex<()>>>>>,
+    api_cooldown_until: Arc<Mutex<Option<Instant>>>,
 }
 
 impl TmdbService {
@@ -121,6 +124,8 @@ impl TmdbService {
             api_requests: Arc::new(Semaphore::new(max_api_requests)),
             image_requests: Arc::new(Semaphore::new(max_image_requests)),
             permit_wait,
+            request_locks: Arc::new(Mutex::new(HashMap::new())),
+            api_cooldown_until: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -151,6 +156,94 @@ impl TmdbService {
         } else {
             rb.query(&[("api_key", self.api_key.as_str())])
         }
+    }
+
+    async fn acquire_request_lock(&self, cache_key: &str) -> OwnedMutexGuard<()> {
+        let lock = {
+            let mut locks = self.request_locks.lock().await;
+            locks.retain(|_, lock| Arc::strong_count(lock) > 1);
+            locks
+                .entry(cache_key.to_string())
+                .or_insert_with(|| Arc::new(Mutex::new(())))
+                .clone()
+        };
+        lock.lock_owned().await
+    }
+
+    async fn ensure_api_not_cooling_down(&self) -> Result<(), AppError> {
+        let mut cooldown = self.api_cooldown_until.lock().await;
+        if cooldown.is_some_and(|until| until > Instant::now()) {
+            return Err(AppError::ServiceUnavailable(
+                "External media service is temporarily rate limited".to_string(),
+            ));
+        }
+        *cooldown = None;
+        Ok(())
+    }
+
+    fn response_outcome(status: reqwest::StatusCode) -> &'static str {
+        if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+            "429"
+        } else if status.is_success() {
+            "2xx"
+        } else if status.is_client_error() {
+            "4xx"
+        } else if status.is_server_error() {
+            "5xx"
+        } else {
+            "other"
+        }
+    }
+
+    async fn send_api<T: DeserializeOwned>(
+        &self,
+        endpoint: &'static str,
+        request: reqwest::RequestBuilder,
+    ) -> Result<T, AppError> {
+        self.ensure_api_not_cooling_down().await?;
+        let _permit = self.acquire_api_permit().await?;
+        let started = Instant::now();
+        let response = match request.send().await {
+            Ok(response) => response,
+            Err(error) => {
+                let outcome = if error.is_timeout() {
+                    "timeout"
+                } else if error.is_connect() {
+                    "connect"
+                } else {
+                    "transport"
+                };
+                crate::metrics::record_tmdb_request(endpoint, outcome, started.elapsed());
+                return Err(error.into());
+            }
+        };
+        let status = response.status();
+
+        if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+            let retry_after = response
+                .headers()
+                .get(reqwest::header::RETRY_AFTER)
+                .and_then(|value| value.to_str().ok())
+                .and_then(|value| value.parse::<u64>().ok())
+                .unwrap_or(5)
+                .clamp(1, 60);
+            *self.api_cooldown_until.lock().await =
+                Some(Instant::now() + Duration::from_secs(retry_after));
+            crate::metrics::record_tmdb_request(endpoint, "429", started.elapsed());
+            return Err(AppError::ServiceUnavailable(
+                "External media service is temporarily rate limited".to_string(),
+            ));
+        }
+
+        let outcome = Self::response_outcome(status);
+        let result = Self::decode_api_response(response).await;
+        let outcome = if result.is_err() && status.is_success() {
+            "invalid"
+        } else {
+            outcome
+        };
+        crate::metrics::record_tmdb_request(endpoint, outcome, started.elapsed());
+        result
     }
 
     fn provider_cache_key(endpoint: &str, parts: &[&str]) -> String {
@@ -318,7 +411,6 @@ impl TmdbService {
         media_type: Option<&str>,
         page: Option<u32>,
     ) -> Result<TmdbSearchResponse, AppError> {
-        let _permit = self.acquire_api_permit().await?;
         let endpoint = match media_type {
             Some("movie") => "search/movie",
             Some("tv") => "search/tv",
@@ -326,19 +418,16 @@ impl TmdbService {
         };
 
         let page = page.unwrap_or(1).to_string();
-        let response = self
-            .authed(
-                self.client
-                    .get(format!("{}/{}", self.base_url, endpoint))
-                    .query(&[
-                        ("query", query),
-                        ("page", page.as_str()),
-                        ("language", "en-US"),
-                    ]),
-            )
-            .send()
-            .await?;
-        Self::decode_api_response(response).await
+        let request = self.authed(
+            self.client
+                .get(format!("{}/{}", self.base_url, endpoint))
+                .query(&[
+                    ("query", query),
+                    ("page", page.as_str()),
+                    ("language", "en-US"),
+                ]),
+        );
+        self.send_api("search", request).await
     }
 
     pub async fn search_cached(
@@ -357,6 +446,7 @@ impl TmdbService {
             match Self::load_provider_response::<TmdbSearchResponse>(pool, &cache_key).await {
                 Ok(cached) => cached,
                 Err(error) => {
+                    crate::metrics::record_tmdb_cache("search", "read_error");
                     log::warn!("TMDB search cache lookup failed: {error}");
                     None
                 }
@@ -364,9 +454,28 @@ impl TmdbService {
 
         if let Some(entry) = &cached {
             if entry.expires_at > Utc::now() {
+                crate::metrics::record_tmdb_cache("search", "hit");
                 return Ok(entry.value.clone());
             }
         }
+
+        let _refresh_guard = self.acquire_request_lock(&cache_key).await;
+        let cached =
+            match Self::load_provider_response::<TmdbSearchResponse>(pool, &cache_key).await {
+                Ok(cached) => cached,
+                Err(error) => {
+                    crate::metrics::record_tmdb_cache("search", "read_error");
+                    log::warn!("TMDB search cache recheck failed: {error}");
+                    cached
+                }
+            };
+        if let Some(entry) = &cached {
+            if entry.expires_at > Utc::now() {
+                crate::metrics::record_tmdb_cache("search", "hit");
+                return Ok(entry.value.clone());
+            }
+        }
+        crate::metrics::record_tmdb_cache("search", "miss");
 
         match self
             .search(query, Some(media_type), page.parse().ok())
@@ -383,6 +492,7 @@ impl TmdbService {
                 )
                 .await
                 {
+                    crate::metrics::record_tmdb_cache("search", "write_error");
                     log::warn!("TMDB search cache write failed: {error}");
                 }
                 Ok(response)
@@ -390,6 +500,7 @@ impl TmdbService {
             Err(error) => {
                 if let Some(entry) = cached {
                     if entry.stale_until > Utc::now() {
+                        crate::metrics::record_tmdb_cache("search", "stale");
                         log::warn!("Serving stale TMDB search response after upstream failure");
                         return Ok(entry.value);
                     }
@@ -400,29 +511,21 @@ impl TmdbService {
     }
 
     pub async fn get_movie_detail(&self, tmdb_id: i32) -> Result<TmdbMovieDetail, AppError> {
-        let _permit = self.acquire_api_permit().await?;
-        let response = self
-            .authed(
-                self.client
-                    .get(format!("{}/movie/{}", self.base_url, tmdb_id))
-                    .query(&[("language", "en-US")]),
-            )
-            .send()
-            .await?;
-        Self::decode_api_response(response).await
+        let request = self.authed(
+            self.client
+                .get(format!("{}/movie/{}", self.base_url, tmdb_id))
+                .query(&[("language", "en-US")]),
+        );
+        self.send_api("movie_detail", request).await
     }
 
     pub async fn get_tv_detail(&self, tmdb_id: i32) -> Result<TmdbTvDetail, AppError> {
-        let _permit = self.acquire_api_permit().await?;
-        let response = self
-            .authed(
-                self.client
-                    .get(format!("{}/tv/{}", self.base_url, tmdb_id))
-                    .query(&[("language", "en-US")]),
-            )
-            .send()
-            .await?;
-        Self::decode_api_response(response).await
+        let request = self.authed(
+            self.client
+                .get(format!("{}/tv/{}", self.base_url, tmdb_id))
+                .query(&[("language", "en-US")]),
+        );
+        self.send_api("tv_detail", request).await
     }
 
     pub async fn get_season_episodes(
@@ -435,32 +538,24 @@ impl TmdbService {
                 "Invalid TMDB ID or season number".to_string(),
             ));
         }
-        let _permit = self.acquire_api_permit().await?;
-        let response = self
-            .authed(
-                self.client
-                    .get(format!(
-                        "{}/tv/{}/season/{}",
-                        self.base_url, tmdb_id, season_number
-                    ))
-                    .query(&[("language", "en-US")]),
-            )
-            .send()
-            .await?;
-        Self::decode_api_response(response).await
+        let request = self.authed(
+            self.client
+                .get(format!(
+                    "{}/tv/{}/season/{}",
+                    self.base_url, tmdb_id, season_number
+                ))
+                .query(&[("language", "en-US")]),
+        );
+        self.send_api("season", request).await
     }
 
     pub async fn get_trending(&self) -> Result<TmdbTrendingResponse, AppError> {
-        let _permit = self.acquire_api_permit().await?;
-        let response = self
-            .authed(
-                self.client
-                    .get(format!("{}/trending/all/week", self.base_url))
-                    .query(&[("language", "en-US")]),
-            )
-            .send()
-            .await?;
-        Self::decode_api_response(response).await
+        let request = self.authed(
+            self.client
+                .get(format!("{}/trending/all/week", self.base_url))
+                .query(&[("language", "en-US")]),
+        );
+        self.send_api("trending", request).await
     }
 
     pub async fn get_trending_cached(
@@ -472,6 +567,7 @@ impl TmdbService {
             match Self::load_provider_response::<TmdbTrendingResponse>(pool, &cache_key).await {
                 Ok(cached) => cached,
                 Err(error) => {
+                    crate::metrics::record_tmdb_cache("trending", "read_error");
                     log::warn!("TMDB trending cache lookup failed: {error}");
                     None
                 }
@@ -479,9 +575,28 @@ impl TmdbService {
 
         if let Some(entry) = &cached {
             if entry.expires_at > Utc::now() {
+                crate::metrics::record_tmdb_cache("trending", "hit");
                 return Ok(entry.value.clone());
             }
         }
+
+        let _refresh_guard = self.acquire_request_lock(&cache_key).await;
+        let cached =
+            match Self::load_provider_response::<TmdbTrendingResponse>(pool, &cache_key).await {
+                Ok(cached) => cached,
+                Err(error) => {
+                    crate::metrics::record_tmdb_cache("trending", "read_error");
+                    log::warn!("TMDB trending cache recheck failed: {error}");
+                    cached
+                }
+            };
+        if let Some(entry) = &cached {
+            if entry.expires_at > Utc::now() {
+                crate::metrics::record_tmdb_cache("trending", "hit");
+                return Ok(entry.value.clone());
+            }
+        }
+        crate::metrics::record_tmdb_cache("trending", "miss");
 
         match self.get_trending().await {
             Ok(response) => {
@@ -495,6 +610,7 @@ impl TmdbService {
                 )
                 .await
                 {
+                    crate::metrics::record_tmdb_cache("trending", "write_error");
                     log::warn!("TMDB trending cache write failed: {error}");
                 }
                 Ok(response)
@@ -502,6 +618,7 @@ impl TmdbService {
             Err(error) => {
                 if let Some(entry) = cached {
                     if entry.stale_until > Utc::now() {
+                        crate::metrics::record_tmdb_cache("trending", "stale");
                         log::warn!("Serving stale TMDB trending response after upstream failure");
                         return Ok(entry.value);
                     }
@@ -531,16 +648,12 @@ impl TmdbService {
             .map_err(|_| AppError::TmdbError("External API URL is invalid".to_string()))?
             .push(external_id);
 
-        let _permit = self.acquire_api_permit().await?;
-        let response = self
-            .authed(
-                self.client
-                    .get(url)
-                    .query(&[("external_source", source), ("language", "en-US")]),
-            )
-            .send()
-            .await?;
-        Self::decode_api_response(response).await
+        let request = self.authed(
+            self.client
+                .get(url)
+                .query(&[("external_source", source), ("language", "en-US")]),
+        );
+        self.send_api("find", request).await
     }
 
     async fn touch_media(pool: &PgPool, media_id: uuid::Uuid) -> Result<(), AppError> {
@@ -555,7 +668,7 @@ impl TmdbService {
         Ok(())
     }
 
-    pub async fn refresh_media(
+    async fn refresh_media_unlocked(
         &self,
         pool: &PgPool,
         tmdb_id: i32,
@@ -574,6 +687,20 @@ impl TmdbService {
         }
     }
 
+    pub async fn refresh_media(
+        &self,
+        pool: &PgPool,
+        tmdb_id: i32,
+        media_type: &str,
+    ) -> Result<Media, AppError> {
+        if tmdb_id <= 0 || !matches!(media_type, "movie" | "tv") {
+            return Err(AppError::BadRequest("Invalid media lookup".to_string()));
+        }
+        let lock_key = format!("detail:{media_type}:{tmdb_id}");
+        let _refresh_guard = self.acquire_request_lock(&lock_key).await;
+        self.refresh_media_unlocked(pool, tmdb_id, media_type).await
+    }
+
     /// Fetch or refresh media from TMDB with a 24-hour freshness window. A
     /// stale local row remains usable if the provider is temporarily down.
     pub async fn get_or_cache_media(
@@ -582,7 +709,14 @@ impl TmdbService {
         tmdb_id: i32,
         media_type: &str,
     ) -> Result<Media, AppError> {
-        // Check cache first
+        if tmdb_id <= 0 || !matches!(media_type, "movie" | "tv") {
+            return Err(AppError::BadRequest("Invalid media lookup".to_string()));
+        }
+        let cache_name = if media_type == "movie" {
+            "movie_detail"
+        } else {
+            "tv_detail"
+        };
         let cached = sqlx::query_as::<_, Media>(
             "SELECT * FROM media WHERE tmdb_id = $1 AND media_type = $2",
         )
@@ -591,26 +725,40 @@ impl TmdbService {
         .fetch_optional(pool)
         .await?;
 
-        if let Some(media) = cached {
+        if let Some(media) = &cached {
             let age = Utc::now() - media.tmdb_cached_at;
             if age.num_hours() < 24 {
                 Self::touch_media(pool, media.id).await?;
-                return Ok(media);
+                crate::metrics::record_tmdb_cache(cache_name, "hit");
+                return Ok(media.clone());
             }
         }
 
-        match self.refresh_media(pool, tmdb_id, media_type).await {
+        let lock_key = format!("detail:{media_type}:{tmdb_id}");
+        let _refresh_guard = self.acquire_request_lock(&lock_key).await;
+        let cached = sqlx::query_as::<_, Media>(
+            "SELECT * FROM media WHERE tmdb_id = $1 AND media_type = $2",
+        )
+        .bind(tmdb_id)
+        .bind(media_type)
+        .fetch_optional(pool)
+        .await?;
+        if let Some(media) = &cached {
+            let age = Utc::now() - media.tmdb_cached_at;
+            if age.num_hours() < 24 {
+                Self::touch_media(pool, media.id).await?;
+                crate::metrics::record_tmdb_cache(cache_name, "hit");
+                return Ok(media.clone());
+            }
+        }
+        crate::metrics::record_tmdb_cache(cache_name, "miss");
+
+        match self.refresh_media_unlocked(pool, tmdb_id, media_type).await {
             Ok(media) => Ok(media),
             Err(error) => {
-                if let Some(media) = sqlx::query_as::<_, Media>(
-                    "SELECT * FROM media WHERE tmdb_id = $1 AND media_type = $2",
-                )
-                .bind(tmdb_id)
-                .bind(media_type)
-                .fetch_optional(pool)
-                .await?
-                {
+                if let Some(media) = cached {
                     Self::touch_media(pool, media.id).await?;
+                    crate::metrics::record_tmdb_cache(cache_name, "stale");
                     log::warn!(
                         "Serving stale {media_type} metadata for TMDB id {tmdb_id} after refresh failure"
                     );
@@ -727,6 +875,8 @@ impl TmdbService {
         media: &Media,
         season_number: i32,
     ) -> Result<Vec<crate::models::Episode>, AppError> {
+        let lock_key = format!("season:{}:{season_number}", media.tmdb_id);
+        let _refresh_guard = self.acquire_request_lock(&lock_key).await;
         let season = sqlx::query_as::<_, crate::models::Season>(
             "SELECT * FROM seasons WHERE media_id = $1 AND season_number = $2",
         )
@@ -747,12 +897,15 @@ impl TmdbService {
             .episodes_cached_at
             .is_some_and(|cached_at| Utc::now() - cached_at < chrono::Duration::hours(24))
         {
+            crate::metrics::record_tmdb_cache("season_episodes", "hit");
             return Ok(cached_episodes);
         }
+        crate::metrics::record_tmdb_cache("season_episodes", "miss");
 
         let tmdb_episodes = match self.get_season_episodes(media.tmdb_id, season_number).await {
             Ok(episodes) => episodes,
             Err(_error) if !cached_episodes.is_empty() => {
+                crate::metrics::record_tmdb_cache("season_episodes", "stale");
                 log::warn!(
                     "Serving stale episodes for TMDB id {} season {} after refresh failure",
                     media.tmdb_id,
@@ -923,6 +1076,24 @@ mod tests {
         let result = service.get_trending().await;
 
         assert!(matches!(result, Err(AppError::TmdbError(_))));
+    }
+
+    #[tokio::test]
+    async fn rate_limit_response_starts_a_shared_cooldown() {
+        let (base_url, _) = response_server(
+            b"HTTP/1.1 429 Too Many Requests\r\nRetry-After: 30\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                .to_vec(),
+        )
+        .await;
+        let mut config = config_with_token(None);
+        config.tmdb_base_url = base_url;
+        let service = TmdbService::new(&config);
+
+        let first = service.get_trending().await;
+        let second = service.clone().get_trending().await;
+
+        assert!(matches!(first, Err(AppError::ServiceUnavailable(_))));
+        assert!(matches!(second, Err(AppError::ServiceUnavailable(_))));
     }
 
     #[tokio::test]

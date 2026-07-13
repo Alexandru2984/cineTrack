@@ -1722,6 +1722,7 @@ async fn test_media_search_uses_fresh_and_stale_provider_cache() {
         let read = stream.read(&mut request).await.unwrap();
         let request = String::from_utf8_lossy(&request[..read]);
         assert!(request.starts_with("GET /search/movie?"));
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         let body = r#"{
             "page": 1,
             "total_pages": 1,
@@ -1757,12 +1758,15 @@ async fn test_media_search_uses_fresh_and_stale_provider_cache() {
             .peer_addr(peer_addr())
             .to_request()
     };
-    let first = actix_test::call_service(
-        &app,
-        search("/api/media/search?q=Cache%20Me&type=movie&page=1"),
+    let first_request = search("/api/media/search?q=Cache%20Me&type=movie&page=1");
+    let concurrent_request = search("/api/media/search?q=cache%20me&type=movie&page=1");
+    let (first, concurrent) = futures_util::future::join(
+        actix_test::call_service(&app, first_request),
+        actix_test::call_service(&app, concurrent_request),
     )
     .await;
     assert_eq!(first.status(), 200);
+    assert_eq!(concurrent.status(), 200);
     let body: Value = actix_test::read_body_json(first).await;
     assert_eq!(body["results"][0]["id"], 616161);
     upstream.await.unwrap();
@@ -1802,6 +1806,21 @@ async fn test_media_search_uses_fresh_and_stale_provider_cache() {
     assert_eq!(stale.status(), 200);
     let body: Value = actix_test::read_body_json(stale).await;
     assert_eq!(body["results"][0]["title"], "Cache Me");
+
+    let metrics = actix_test::call_service(
+        &app,
+        actix_test::TestRequest::get()
+            .uri("/metrics")
+            .peer_addr(peer_addr())
+            .to_request(),
+    )
+    .await;
+    assert_eq!(metrics.status(), 200);
+    let metrics = String::from_utf8(actix_test::read_body(metrics).await.to_vec()).unwrap();
+    assert!(metrics.contains("cinetrack_tmdb_requests_total"));
+    assert!(metrics.contains("cinetrack_tmdb_request_duration_seconds"));
+    assert!(metrics.contains("cinetrack_tmdb_cache_events_total"));
+    assert!(metrics.contains("endpoint=\"search\",outcome=\"2xx\"} 1"));
 }
 
 #[actix_web::test]

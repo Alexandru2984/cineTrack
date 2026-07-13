@@ -917,6 +917,7 @@ dependencies = [
  "jsonwebtoken",
  "lettre",
  "log",
+ "prometheus",
  "rand 0.8.6",
  "reqwest",
  "serde",
