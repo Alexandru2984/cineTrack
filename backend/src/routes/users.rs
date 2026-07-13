@@ -10,7 +10,7 @@ use crate::dto::user::*;
 use crate::errors::AppError;
 use crate::middleware::auth::require_auth;
 use crate::models::User;
-use crate::services::quota;
+use crate::services::{notifications, quota};
 use crate::utils::password;
 
 #[derive(sqlx::FromRow)]
@@ -283,17 +283,32 @@ async fn update_profile(
     .await?;
 
     if data.is_public == Some(true) {
-        let accepted = sqlx::query(
+        let accepted_followers = sqlx::query_scalar::<_, Uuid>(
             "UPDATE follows SET status = 'accepted', updated_at = NOW()
-             WHERE following_id = $1 AND status = 'pending'",
+             WHERE following_id = $1 AND status = 'pending'
+             RETURNING follower_id",
         )
         .bind(user_id)
-        .execute(&mut *tx)
-        .await?
-        .rows_affected();
-        if accepted > 0 {
+        .fetch_all(&mut *tx)
+        .await?;
+        if !accepted_followers.is_empty() {
+            notifications::remove_many(
+                &mut tx,
+                user_id,
+                &accepted_followers,
+                notifications::FOLLOW_REQUEST,
+            )
+            .await?;
+            notifications::upsert_many(
+                &mut tx,
+                &accepted_followers,
+                user_id,
+                notifications::FOLLOW_ACCEPTED,
+            )
+            .await?;
             log::info!(
-                "audit: accepted pending follow requests after profile became public user_id={user_id} count={accepted}"
+                "audit: accepted pending follow requests after profile became public user_id={user_id} count={}",
+                accepted_followers.len()
             );
         }
     }
@@ -412,6 +427,16 @@ async fn follow_user(
     .bind(requested_status)
     .fetch_one(&mut *tx)
     .await?;
+    if existing_status.as_deref() != Some(status.as_str()) {
+        if status == "pending" {
+            notifications::upsert(&mut tx, target.id, user_id, notifications::FOLLOW_REQUEST)
+                .await?;
+        } else {
+            notifications::remove(&mut tx, target.id, user_id, notifications::FOLLOW_REQUEST)
+                .await?;
+            notifications::upsert(&mut tx, target.id, user_id, notifications::NEW_FOLLOWER).await?;
+        }
+    }
     tx.commit().await?;
 
     log::info!(
@@ -438,19 +463,25 @@ async fn unfollow_user(
     let user_id = require_auth(&req).await?;
     let username = path.into_inner();
 
+    let mut tx = pool.begin().await?;
     let target = sqlx::query_as::<_, User>("SELECT * FROM users WHERE LOWER(username) = LOWER($1)")
         .bind(&username)
-        .fetch_optional(pool.get_ref())
+        .fetch_optional(&mut *tx)
         .await?
         .ok_or_else(|| AppError::NotFound("User not found".to_string()))?;
+    quota::lock_social_relationship_writes(&mut tx, user_id, target.id).await?;
 
     let removed_status = sqlx::query_scalar::<_, String>(
         "DELETE FROM follows WHERE follower_id = $1 AND following_id = $2 RETURNING status",
     )
     .bind(user_id)
     .bind(target.id)
-    .fetch_optional(pool.get_ref())
+    .fetch_optional(&mut *tx)
     .await?;
+    if removed_status.as_deref() == Some("pending") {
+        notifications::remove(&mut tx, target.id, user_id, notifications::FOLLOW_REQUEST).await?;
+    }
+    tx.commit().await?;
 
     let message = if removed_status.as_deref() == Some("pending") {
         "Follow request canceled"
@@ -504,19 +535,30 @@ async fn accept_follow_request(
 ) -> Result<HttpResponse, AppError> {
     let user_id = require_auth(&req).await?;
     let follower_id = path.into_inner();
+    let mut tx = pool.begin().await?;
+    quota::lock_social_relationship_writes(&mut tx, follower_id, user_id).await?;
     let updated = sqlx::query(
         "UPDATE follows SET status = 'accepted', updated_at = NOW()
          WHERE follower_id = $1 AND following_id = $2 AND status = 'pending'",
     )
     .bind(follower_id)
     .bind(user_id)
-    .execute(pool.get_ref())
+    .execute(&mut *tx)
     .await?
     .rows_affected();
 
     if updated == 0 {
         return Err(AppError::NotFound("Follow request not found".to_string()));
     }
+    notifications::remove(&mut tx, user_id, follower_id, notifications::FOLLOW_REQUEST).await?;
+    notifications::upsert(
+        &mut tx,
+        follower_id,
+        user_id,
+        notifications::FOLLOW_ACCEPTED,
+    )
+    .await?;
+    tx.commit().await?;
     log::info!("audit: follow request accepted follower_id={follower_id} following_id={user_id}");
     Ok(HttpResponse::Ok().json(serde_json::json!({"message": "Follow request accepted"})))
 }
@@ -528,19 +570,23 @@ async fn reject_follow_request(
 ) -> Result<HttpResponse, AppError> {
     let user_id = require_auth(&req).await?;
     let follower_id = path.into_inner();
+    let mut tx = pool.begin().await?;
+    quota::lock_social_relationship_writes(&mut tx, follower_id, user_id).await?;
     let deleted = sqlx::query(
         "DELETE FROM follows
          WHERE follower_id = $1 AND following_id = $2 AND status = 'pending'",
     )
     .bind(follower_id)
     .bind(user_id)
-    .execute(pool.get_ref())
+    .execute(&mut *tx)
     .await?
     .rows_affected();
 
     if deleted == 0 {
         return Err(AppError::NotFound("Follow request not found".to_string()));
     }
+    notifications::remove(&mut tx, user_id, follower_id, notifications::FOLLOW_REQUEST).await?;
+    tx.commit().await?;
     log::info!("audit: follow request rejected follower_id={follower_id} following_id={user_id}");
     Ok(HttpResponse::Ok().json(serde_json::json!({"message": "Follow request rejected"})))
 }

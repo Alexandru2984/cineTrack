@@ -5,6 +5,7 @@ pub mod history;
 pub mod import;
 pub mod lists;
 pub mod media;
+pub mod notifications;
 pub mod stats;
 pub mod tracking;
 pub mod users;
@@ -20,6 +21,7 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
             // before the greedy /users scope claims the prefix.
             .configure(assets::configure)
             .configure(users::configure)
+            .configure(notifications::configure)
             .configure(media::configure)
             .configure(tracking::configure)
             .configure(history::configure)
@@ -39,6 +41,7 @@ pub fn configure_with_auth_rate_limit(
             .configure(|cfg| auth::configure_rate_limited(cfg, auth_rate_limiter))
             .configure(assets::configure)
             .configure(users::configure)
+            .configure(notifications::configure)
             .configure(media::configure)
             .configure(tracking::configure)
             .configure(history::configure)

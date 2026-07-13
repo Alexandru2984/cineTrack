@@ -125,6 +125,10 @@ fn create_app_with_config(
 }
 
 async fn clean_db(pool: &PgPool) {
+    sqlx::query("DELETE FROM notifications")
+        .execute(pool)
+        .await
+        .ok();
     sqlx::query("DELETE FROM list_items")
         .execute(pool)
         .await
@@ -2293,6 +2297,190 @@ async fn test_delete_account_success() {
 
 #[actix_web::test]
 #[ignore = "requires test DB"]
+async fn test_social_notifications_are_deduplicated_private_and_owner_scoped() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+
+    let (follower_token, _, follower_id) = register_user(
+        &app,
+        "notifyfollower",
+        "notifyfollower@example.com",
+        "Pass1234",
+    )
+    .await;
+    let (owner_token, _, owner_id) =
+        register_user(&app, "notifyowner", "notifyowner@example.com", "Pass1234").await;
+    let (public_token, _, _) =
+        register_user(&app, "notifypublic", "notifypublic@example.com", "Pass1234").await;
+    let (second_owner_token, _, second_owner_id) =
+        register_user(&app, "notifysecond", "notifysecond@example.com", "Pass1234").await;
+
+    for (id, avatar) in [
+        (&follower_id, "https://example.com/private-follower.jpg"),
+        (&owner_id, "https://example.com/private-owner.jpg"),
+        (&second_owner_id, "https://example.com/private-second.jpg"),
+    ] {
+        sqlx::query("UPDATE users SET is_public = false, avatar_url = $2 WHERE id = $1")
+            .bind(Uuid::parse_str(id).unwrap())
+            .bind(avatar)
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+
+    // Repeating an unchanged request must not create or refresh multiple rows.
+    for _ in 0..2 {
+        let req = actix_test::TestRequest::post()
+            .uri("/api/users/notifyowner/follow")
+            .insert_header(("Authorization", format!("Bearer {follower_token}")))
+            .peer_addr(peer_addr())
+            .to_request();
+        let resp = actix_test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 202);
+    }
+
+    let req = actix_test::TestRequest::get()
+        .uri("/api/notifications?limit=10")
+        .insert_header(("Authorization", format!("Bearer {owner_token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let owner_notifications: Value = actix_test::read_body_json(resp).await;
+    assert_eq!(owner_notifications["unread_count"], 1);
+    assert_eq!(owner_notifications["has_more"], false);
+    let owner_items = owner_notifications["items"].as_array().unwrap();
+    assert_eq!(owner_items.len(), 1);
+    assert_eq!(owner_items[0]["kind"], "follow_request");
+    assert_eq!(owner_items[0]["actor_username"], "notifyfollower");
+    assert!(owner_items[0]["actor_avatar_url"].is_null());
+    let request_notification_id = owner_items[0]["id"].as_str().unwrap();
+
+    // Notification ownership is enforced independently from relationship IDs.
+    let req = actix_test::TestRequest::post()
+        .uri(&format!(
+            "/api/notifications/{request_notification_id}/read"
+        ))
+        .insert_header(("Authorization", format!("Bearer {follower_token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 404);
+
+    let req = actix_test::TestRequest::post()
+        .uri(&format!(
+            "/api/notifications/{request_notification_id}/read"
+        ))
+        .insert_header(("Authorization", format!("Bearer {owner_token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+
+    let req = actix_test::TestRequest::post()
+        .uri(&format!(
+            "/api/users/me/follow-requests/{follower_id}/accept"
+        ))
+        .insert_header(("Authorization", format!("Bearer {owner_token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+
+    let req = actix_test::TestRequest::get()
+        .uri("/api/notifications")
+        .insert_header(("Authorization", format!("Bearer {owner_token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    let owner_after_accept: Value = actix_test::read_body_json(resp).await;
+    assert!(owner_after_accept["items"].as_array().unwrap().is_empty());
+    assert_eq!(owner_after_accept["unread_count"], 0);
+
+    let req = actix_test::TestRequest::get()
+        .uri("/api/notifications")
+        .insert_header(("Authorization", format!("Bearer {follower_token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    let follower_notifications: Value = actix_test::read_body_json(resp).await;
+    assert_eq!(follower_notifications["unread_count"], 1);
+    assert_eq!(
+        follower_notifications["items"][0]["kind"],
+        "follow_accepted"
+    );
+    assert_eq!(
+        follower_notifications["items"][0]["actor_avatar_url"],
+        "https://example.com/private-owner.jpg"
+    );
+
+    // A private actor's avatar is not disclosed to a public account they follow.
+    let req = actix_test::TestRequest::post()
+        .uri("/api/users/notifypublic/follow")
+        .insert_header(("Authorization", format!("Bearer {follower_token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+
+    let req = actix_test::TestRequest::get()
+        .uri("/api/notifications")
+        .insert_header(("Authorization", format!("Bearer {public_token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    let public_notifications: Value = actix_test::read_body_json(resp).await;
+    assert_eq!(public_notifications["items"][0]["kind"], "new_follower");
+    assert!(public_notifications["items"][0]["actor_avatar_url"].is_null());
+
+    // Canceling a pending relationship removes its now-stale notification.
+    let req = actix_test::TestRequest::post()
+        .uri("/api/users/notifysecond/follow")
+        .insert_header(("Authorization", format!("Bearer {follower_token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 202);
+    let req = actix_test::TestRequest::delete()
+        .uri("/api/users/notifysecond/follow")
+        .insert_header(("Authorization", format!("Bearer {follower_token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let req = actix_test::TestRequest::get()
+        .uri("/api/notifications")
+        .insert_header(("Authorization", format!("Bearer {second_owner_token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    let canceled_notifications: Value = actix_test::read_body_json(resp).await;
+    assert!(canceled_notifications["items"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/notifications/read-all")
+        .insert_header(("Authorization", format!("Bearer {follower_token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let body: Value = actix_test::read_body_json(resp).await;
+    assert_eq!(body["updated"], 1);
+
+    let req = actix_test::TestRequest::get()
+        .uri("/api/notifications")
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 401);
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
 async fn test_user_search_is_literal_paginated_and_privacy_safe() {
     let pool = setup_pool().await;
     clean_db(&pool).await;
@@ -2845,6 +3033,26 @@ async fn test_making_profile_public_accepts_pending_requests() {
     .await
     .unwrap();
     assert_eq!(status, "accepted");
+
+    let req = actix_test::TestRequest::get()
+        .uri("/api/notifications")
+        .insert_header(("Authorization", format!("Bearer {follower_token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let body: Value = actix_test::read_body_json(resp).await;
+    assert_eq!(body["unread_count"], 1);
+    assert_eq!(body["items"][0]["kind"], "follow_accepted");
+
+    let req = actix_test::TestRequest::get()
+        .uri("/api/notifications")
+        .insert_header(("Authorization", format!("Bearer {owner_token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    let body: Value = actix_test::read_body_json(resp).await;
+    assert!(body["items"].as_array().unwrap().is_empty());
 }
 
 #[actix_web::test]
