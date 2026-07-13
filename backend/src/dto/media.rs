@@ -49,6 +49,21 @@ pub struct MediaDetailQuery {
     pub language: Option<String>,
 }
 
+#[derive(Debug, Deserialize, Validate)]
+pub struct DiscoveryQuery {
+    #[validate(custom(function = "validate_language"))]
+    pub language: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DiscoveryResponse {
+    pub recommendations: Vec<TmdbSearchResult>,
+    pub personalized: bool,
+    pub recommendation_basis: Vec<String>,
+    pub popular_movies: Vec<TmdbSearchResult>,
+    pub popular_shows: Vec<TmdbSearchResult>,
+}
+
 #[derive(Debug, Serialize)]
 pub struct MediaResponse {
     pub id: String,

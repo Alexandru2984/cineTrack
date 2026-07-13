@@ -8,6 +8,7 @@ use crate::errors::AppError;
 use crate::middleware::auth::require_auth;
 use crate::models::{Episode, Media, Season};
 use crate::services::catalog;
+use crate::services::discovery as discovery_service;
 use crate::services::tmdb::TmdbService;
 
 pub fn configure(cfg: &mut web::ServiceConfig) {
@@ -15,6 +16,7 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
         web::scope("/media")
             .route("/search", web::get().to(search))
             .route("/trending", web::get().to(trending))
+            .route("/discovery", web::get().to(discovery))
             .route("/{id}", web::get().to(get_detail))
             .route("/{id}/seasons", web::get().to(get_seasons))
             .route(
@@ -22,6 +24,19 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
                 web::get().to(get_episodes),
             ),
     );
+}
+
+async fn discovery(
+    pool: web::Data<PgPool>,
+    req: HttpRequest,
+    query: web::Query<DiscoveryQuery>,
+) -> Result<HttpResponse, AppError> {
+    let user_id = require_auth(&req).await?;
+    query.validate()?;
+    let response =
+        discovery_service::load_discovery(pool.get_ref(), user_id, query.language.as_deref())
+            .await?;
+    Ok(HttpResponse::Ok().json(response))
 }
 
 fn parse_tmdb_id(value: &str) -> Result<i32, AppError> {

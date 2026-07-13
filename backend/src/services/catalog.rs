@@ -38,7 +38,7 @@ fn empty_response(page: u32) -> TmdbSearchResponse {
     }
 }
 
-fn locale_parts(language: Option<&str>) -> (Option<String>, Option<String>) {
+pub(crate) fn locale_parts(language: Option<&str>) -> (Option<String>, Option<String>) {
     let Some(language) = language else {
         return (None, None);
     };

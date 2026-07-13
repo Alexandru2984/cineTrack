@@ -1958,6 +1958,172 @@ async fn test_local_catalog_search_skips_or_replaces_unavailable_provider() {
 
 #[actix_web::test]
 #[ignore = "requires test DB"]
+async fn test_local_discovery_personalizes_and_filters_catalog() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (token, _, user_id) =
+        register_user(&app, "discoveryuser", "discovery@example.com", "Pass1234").await;
+
+    sqlx::query(
+        r#"INSERT INTO media
+            (tmdb_id, media_type, title, genres, poster_path, metadata_level,
+             tmdb_vote_average)
+        VALUES
+            (670001, 'movie', 'Tracked Drama',
+             '[{"id": 18, "name": "Drama"}]'::jsonb,
+             '/tracked.jpg', 'detail', 8.8),
+            (670002, 'movie', 'Drama Recommendation',
+             '[{"id": 18, "name": "Drama"}]'::jsonb,
+             '/drama.jpg', 'detail', 8.2),
+            (670003, 'movie', 'Popular Comedy',
+             '[{"id": 35, "name": "Comedy"}]'::jsonb,
+             '/comedy.jpg', 'detail', 7.9),
+            (670004, 'tv', 'Drama Series',
+             '[{"id": 18, "name": "Drama"}]'::jsonb,
+             '/series.jpg', 'detail', 8.0),
+            (670005, 'movie', 'Adult Candidate',
+             '[{"id": 18, "name": "Drama"}]'::jsonb,
+             '/adult.jpg', 'detail', 9.0),
+            (670006, 'movie', 'Video Candidate',
+             '[{"id": 18, "name": "Drama"}]'::jsonb,
+             '/video.jpg', 'detail', 9.0),
+            (670007, 'movie', 'Summary Candidate',
+             '[{"id": 18, "name": "Drama"}]'::jsonb,
+             '/summary.jpg', 'summary', 9.0),
+            (670008, 'movie', 'Posterless Candidate',
+             '[{"id": 18, "name": "Drama"}]'::jsonb,
+             NULL, 'detail', 9.0)"#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO catalog_external_ids
+            (media_type, tmdb_id, adult, video, popularity)
+        VALUES
+            ('movie', 670001, false, false, 100.0),
+            ('movie', 670002, false, false, 90.0),
+            ('movie', 670003, false, false, 500.0),
+            ('tv', 670004, false, false, 80.0),
+            ('movie', 670005, true, false, 10000.0),
+            ('movie', 670006, false, true, 9000.0),
+            ('movie', 670007, false, false, 8000.0),
+            ('movie', 670008, false, false, 7000.0)"#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO media_title_aliases
+            (media_id, kind, language_code, region_code, title)
+        SELECT id, 'translation', 'ro', 'RO', 'Alegerea dramatica'
+        FROM media
+        WHERE tmdb_id = 670002 AND media_type = 'movie'"#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO user_media
+            (user_id, media_id, status, rating, is_favorite)
+        SELECT $1, id, 'completed', 9, TRUE
+        FROM media
+        WHERE tmdb_id = 670001 AND media_type = 'movie'"#,
+    )
+    .bind(Uuid::parse_str(&user_id).unwrap())
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let unauthenticated = actix_test::call_service(
+        &app,
+        actix_test::TestRequest::get()
+            .uri("/api/media/discovery")
+            .peer_addr(peer_addr())
+            .to_request(),
+    )
+    .await;
+    assert_eq!(unauthenticated.status(), 401);
+
+    let invalid_locale = actix_test::call_service(
+        &app,
+        actix_test::TestRequest::get()
+            .uri("/api/media/discovery?language=romanian")
+            .insert_header(("Authorization", format!("Bearer {token}")))
+            .peer_addr(peer_addr())
+            .to_request(),
+    )
+    .await;
+    assert_eq!(invalid_locale.status(), 400);
+
+    let response = actix_test::call_service(
+        &app,
+        actix_test::TestRequest::get()
+            .uri("/api/media/discovery?language=ro-RO")
+            .insert_header(("Authorization", format!("Bearer {token}")))
+            .peer_addr(peer_addr())
+            .to_request(),
+    )
+    .await;
+    assert_eq!(response.status(), 200);
+    let body: Value = actix_test::read_body_json(response).await;
+    assert_eq!(body["personalized"], true);
+    assert_eq!(body["recommendation_basis"], json!(["Drama"]));
+
+    let recommendations = body["recommendations"].as_array().unwrap();
+    let recommendation_ids = recommendations
+        .iter()
+        .map(|item| item["id"].as_i64().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(recommendation_ids[..2], [670002, 670004]);
+    assert_eq!(recommendations[0]["title"], "Alegerea dramatica");
+    for excluded in [670001, 670005, 670006, 670007, 670008] {
+        assert!(!recommendation_ids.contains(&excluded));
+    }
+
+    let popular_movie_ids = body["popular_movies"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|item| item["id"].as_i64().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(popular_movie_ids, [670003, 670001, 670002]);
+    let popular_show_ids = body["popular_shows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|item| item["id"].as_i64().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(popular_show_ids, [670004]);
+
+    let (cold_token, _, _) =
+        register_user(&app, "newdiscovery", "newdiscovery@example.com", "Pass1234").await;
+    let cold_start = actix_test::call_service(
+        &app,
+        actix_test::TestRequest::get()
+            .uri("/api/media/discovery?language=ro-RO")
+            .insert_header(("Authorization", format!("Bearer {cold_token}")))
+            .peer_addr(peer_addr())
+            .to_request(),
+    )
+    .await;
+    assert_eq!(cold_start.status(), 200);
+    let cold_start: Value = actix_test::read_body_json(cold_start).await;
+    assert_eq!(cold_start["personalized"], false);
+    assert_eq!(cold_start["recommendation_basis"], json!([]));
+    assert_eq!(cold_start["recommendations"][0]["id"], 670003);
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM provider_response_cache")
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+        0
+    );
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
 async fn test_summary_media_is_hydrated_before_detail_response() {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
