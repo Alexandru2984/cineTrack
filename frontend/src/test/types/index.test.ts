@@ -8,6 +8,7 @@ import type {
   ListResponse,
   TrackingStatus,
   Session,
+  NotificationListResponse,
 } from '@/types';
 
 describe('Type contracts', () => {
@@ -120,5 +121,25 @@ describe('Type contracts', () => {
   it('TrackingStatus type accepts valid values', () => {
     const statuses: TrackingStatus[] = ['watching', 'completed', 'plan_to_watch', 'dropped', 'on_hold'];
     expect(statuses).toHaveLength(5);
+  });
+
+  it('NotificationListResponse exposes social actors without private account fields', () => {
+    const notifications: NotificationListResponse = {
+      items: [
+        {
+          id: 'notification-uuid',
+          kind: 'follow_request',
+          actor_id: 'actor-uuid',
+          actor_username: 'requester',
+          actor_avatar_url: null,
+          read_at: null,
+          created_at: '2026-07-13T12:00:00Z',
+        },
+      ],
+      unread_count: 1,
+      has_more: false,
+    };
+    expect(notifications.items[0]).not.toHaveProperty('email');
+    expect(notifications.unread_count).toBe(1);
   });
 });

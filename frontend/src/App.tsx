@@ -17,6 +17,7 @@ const TrackingPage = lazy(() => import('@/pages/Tracking'));
 const StatsPage = lazy(() => import('@/pages/Stats'));
 const ProfilePage = lazy(() => import('@/pages/Profile'));
 const SettingsPage = lazy(() => import('@/pages/Settings'));
+const NotificationsPage = lazy(() => import('@/pages/Notifications'));
 
 function PageLoader() {
   return (
@@ -79,6 +80,7 @@ export default function App() {
             <Route path="/stats" element={<ProtectedRoute><StatsPage /></ProtectedRoute>} />
             <Route path="/profile/:username" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
             <Route path="/settings" element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />
+            <Route path="/notifications" element={<ProtectedRoute><NotificationsPage /></ProtectedRoute>} />
           </Routes>
         </Suspense>
       </ErrorBoundary>

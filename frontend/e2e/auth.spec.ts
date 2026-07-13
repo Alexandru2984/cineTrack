@@ -48,6 +48,9 @@ async function stubAuthedReads(page: Page) {
       return route.fallback();
     }
     if (url.includes('/api/auth/me')) return route.fulfill({ json: TEST_USER });
+    if (url.includes('/api/notifications')) {
+      return route.fulfill({ json: { items: [], unread_count: 0, has_more: false } });
+    }
     if (url.includes('/api/media/trending')) return route.fulfill({ json: { results: [] } });
     if (url.includes('/api/stats/me/heatmap')) return route.fulfill({ json: [] });
     if (url.includes('/api/stats/me')) return route.fulfill({ json: EMPTY_STATS });
@@ -217,7 +220,64 @@ test('discovers and follows people from search', async ({ page }) => {
 
   await expect(page.getByRole('link', { name: 'alpha_user', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Follow alpha_user' }).click();
-  expect(followRequests).toBe(1);
+  await expect.poll(() => followRequests).toBe(1);
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= document.documentElement.clientWidth
+    )
+  ).toBe(true);
+});
+
+test('shows unread social notifications and marks the inbox as read', async ({ page }) => {
+  await stubSession(page);
+  await stubAuthedReads(page);
+  let unread = true;
+  let markAllRequests = 0;
+
+  await page.route('**/api/notifications**', (route) => {
+    if (route.request().method() === 'POST') {
+      markAllRequests += 1;
+      unread = false;
+      return route.fulfill({ json: { message: 'Notifications marked as read', updated: 1 } });
+    }
+    return route.fulfill({
+      json: {
+        items: [
+          {
+            id: '00000000-0000-4000-8000-000000000030',
+            kind: 'follow_request',
+            actor_id: '00000000-0000-4000-8000-000000000031',
+            actor_username: 'private_requester',
+            actor_avatar_url: null,
+            read_at: unread ? null : '2026-07-13T12:05:00Z',
+            created_at: '2026-07-13T12:00:00Z',
+          },
+        ],
+        unread_count: unread ? 1 : 0,
+        has_more: false,
+      },
+    });
+  });
+
+  await page.goto('/');
+  const bell = page.getByRole('button', { name: 'Notifications, 1 unread notification' });
+  await expect(bell).toBeVisible();
+  await bell.click();
+  await expect(page.getByText('requested to follow you')).toBeVisible();
+  await page.keyboard.press('Tab');
+  await page.keyboard.press('Escape');
+  await expect(bell).toBeFocused();
+  await bell.click();
+  await page.getByRole('link', { name: 'View all notifications' }).click();
+
+  await expect(page).toHaveURL(/\/notifications$/);
+  await expect(page.getByRole('heading', { name: 'Notifications' })).toBeVisible();
+  await expect(page.getByText('1 unread notification')).toBeVisible();
+  await page.getByRole('button', { name: 'Mark all as read' }).click();
+  await expect(page.getByText('You are all caught up.')).toBeVisible();
+  expect(markAllRequests).toBe(1);
 
   await page.setViewportSize({ width: 390, height: 844 });
   expect(
@@ -293,6 +353,9 @@ test('contains a page crash in a fallback and keeps the navbar', async ({ page }
     const url = route.request().url();
     if (url.includes('/api/auth/refresh')) return route.fallback();
     if (url.includes('/api/auth/me')) return route.fulfill({ json: TEST_USER });
+    if (url.includes('/api/notifications')) {
+      return route.fulfill({ json: { items: [], unread_count: 0, has_more: false } });
+    }
     if (url.includes('/api/media/trending')) return route.fulfill({ json: {} });
     return route.fulfill({ json: [] });
   });

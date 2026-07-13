@@ -120,6 +120,13 @@ test('private profiles require an approved follow request', async ({ browser }) 
     await ownerPage.reload();
     await expect(ownerPage.getByText(/Follow requests/i)).toBeVisible();
     await expect(ownerPage.getByText(follower.username, { exact: true })).toBeVisible();
+    const requestBell = ownerPage.getByRole('button', {
+      name: 'Notifications, 1 unread notification',
+    });
+    await expect(requestBell).toBeVisible();
+    await requestBell.click();
+    await expect(ownerPage.getByText('requested to follow you')).toBeVisible();
+    await ownerPage.keyboard.press('Escape');
     await ownerPage
       .getByRole('button', { name: `Reject follow request from ${follower.username}` })
       .click();
@@ -138,6 +145,15 @@ test('private profiles require an approved follow request', async ({ browser }) 
     await followerPage.reload();
     await expect(followerPage.getByRole('button', { name: 'Unfollow' })).toBeVisible();
     await expect(followerPage.getByText(/accepted follow request is required/i)).toHaveCount(0);
+    const acceptedBell = followerPage.getByRole('button', {
+      name: 'Notifications, 1 unread notification',
+    });
+    await expect(acceptedBell).toBeVisible();
+    await acceptedBell.click();
+    await expect(followerPage.getByText('accepted your follow request')).toBeVisible();
+    await followerPage.getByRole('link', { name: 'View all notifications' }).click();
+    await followerPage.getByRole('button', { name: 'Mark all as read' }).click();
+    await expect(followerPage.getByText('You are all caught up.')).toBeVisible();
   } finally {
     await ownerContext.close();
     await followerContext.close();

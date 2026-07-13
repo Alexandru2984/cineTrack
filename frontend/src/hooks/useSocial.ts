@@ -127,6 +127,7 @@ export function useAcceptFollowRequest() {
       void qc.invalidateQueries({ queryKey: ['follow-requests'] });
       void qc.invalidateQueries({ queryKey: ['followers'] });
       void qc.invalidateQueries({ queryKey: ['user'] });
+      void qc.invalidateQueries({ queryKey: ['notifications'] });
     },
   });
 }
@@ -140,6 +141,7 @@ export function useRejectFollowRequest() {
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['follow-requests'] });
       void qc.invalidateQueries({ queryKey: ['user'] });
+      void qc.invalidateQueries({ queryKey: ['notifications'] });
     },
   });
 }

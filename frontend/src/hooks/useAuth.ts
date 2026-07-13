@@ -60,6 +60,7 @@ export function useUpdatePrivacy() {
       qc.setQueryData(['me'], user);
       void qc.invalidateQueries({ queryKey: ['follow-requests'] });
       void qc.invalidateQueries({ queryKey: ['user'] });
+      void qc.invalidateQueries({ queryKey: ['notifications'] });
     },
   });
 }

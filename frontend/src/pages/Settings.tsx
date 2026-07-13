@@ -1,5 +1,5 @@
-import { useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useEffect, useRef, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import {
   useChangePassword,
   useSessions,
@@ -88,7 +88,11 @@ function FollowRequestsCard() {
   const reject = useRejectFollowRequest();
 
   return (
-    <section className="rounded-lg border border-[hsl(var(--border))] p-6">
+    <section
+      id="follow-requests"
+      tabIndex={-1}
+      className="scroll-mt-24 rounded-lg border border-[hsl(var(--border))] p-6 focus:outline-none"
+    >
       <h2 className="flex items-center gap-2 text-lg font-semibold">
         <UserRoundCheck className="h-5 w-5 text-[hsl(var(--primary))]" /> Follow requests
       </h2>
@@ -621,6 +625,18 @@ function DangerZoneCard() {
 }
 
 export default function SettingsPage() {
+  const location = useLocation();
+
+  useEffect(() => {
+    if (location.hash !== '#follow-requests') return;
+    const frame = requestAnimationFrame(() => {
+      const requests = document.getElementById('follow-requests');
+      requests?.scrollIntoView({ block: 'start' });
+      requests?.focus({ preventScroll: true });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [location.hash]);
+
   return (
     <div className="mx-auto max-w-3xl px-4 py-8 space-y-6">
       <h1 className="text-2xl font-bold">Settings</h1>
