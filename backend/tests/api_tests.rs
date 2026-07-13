@@ -125,6 +125,18 @@ fn create_app_with_config(
 }
 
 async fn clean_db(pool: &PgPool) {
+    sqlx::query("TRUNCATE catalog_external_ids_staging")
+        .execute(pool)
+        .await
+        .ok();
+    sqlx::query("DELETE FROM catalog_sync_state")
+        .execute(pool)
+        .await
+        .ok();
+    sqlx::query("DELETE FROM catalog_external_ids")
+        .execute(pool)
+        .await
+        .ok();
     sqlx::query("DELETE FROM provider_response_cache")
         .execute(pool)
         .await
@@ -2262,6 +2274,39 @@ async fn test_provider_response_pruner_removes_only_expired_entries() {
     .await
     .unwrap();
     assert_eq!(keys, vec!["b".repeat(64)]);
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn test_catalog_inventory_is_compact_and_constrained() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    sqlx::query(
+        r#"INSERT INTO catalog_external_ids
+            (media_type, tmdb_id, adult, video, popularity)
+        VALUES ('movie', 640001, false, false, 12.5)"#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let invalid = sqlx::query(
+        r#"INSERT INTO catalog_external_ids
+            (media_type, tmdb_id, adult, video, popularity)
+        VALUES ('person', -1, false, false, -1)"#,
+    )
+    .execute(&pool)
+    .await;
+    assert!(invalid.is_err());
+    assert_eq!(
+        sqlx::query_scalar::<_, String>(
+            "SELECT relpersistence::text FROM pg_class WHERE oid = 'catalog_external_ids_staging'::regclass",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap(),
+        "u"
+    );
 }
 
 #[actix_web::test]

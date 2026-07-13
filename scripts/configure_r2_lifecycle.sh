@@ -5,11 +5,17 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENV_FILE="${ENV_FILE:-$SCRIPT_DIR/../.env.prod}"
 POSTER_RETENTION_DAYS="${POSTER_RETENTION_DAYS:-175}"
+EXPORT_RETENTION_DAYS="${EXPORT_RETENTION_DAYS:-90}"
 DRY_RUN="${DRY_RUN:-0}"
 
 if [[ ! "$POSTER_RETENTION_DAYS" =~ ^[0-9]+$ ]] \
     || (( POSTER_RETENTION_DAYS < 1 || POSTER_RETENTION_DAYS > 175 )); then
   echo "POSTER_RETENTION_DAYS must be between 1 and 175" >&2
+  exit 1
+fi
+if [[ ! "$EXPORT_RETENTION_DAYS" =~ ^[0-9]+$ ]] \
+    || (( EXPORT_RETENTION_DAYS < 1 || EXPORT_RETENTION_DAYS > 175 )); then
+  echo "EXPORT_RETENTION_DAYS must be between 1 and 175" >&2
   exit 1
 fi
 
@@ -27,7 +33,8 @@ fi
 
 R2_S3_API="$R2_S3_API" R2_ACCESS_KEY_ID="$R2_ACCESS_KEY_ID" \
 R2_SECRET_ACCESS_KEY="$R2_SECRET_ACCESS_KEY" R2_BUCKET="$R2_BUCKET" \
-POSTER_RETENTION_DAYS="$POSTER_RETENTION_DAYS" DRY_RUN="$DRY_RUN" python3 - <<'PY'
+POSTER_RETENTION_DAYS="$POSTER_RETENTION_DAYS" \
+EXPORT_RETENTION_DAYS="$EXPORT_RETENTION_DAYS" DRY_RUN="$DRY_RUN" python3 - <<'PY'
 import os
 
 import boto3
@@ -36,6 +43,8 @@ from botocore.exceptions import ClientError
 
 rule_id = "CineTrack poster cache retention"
 retention_days = int(os.environ["POSTER_RETENTION_DAYS"])
+export_rule_id = "CineTrack catalog export retention"
+export_retention_days = int(os.environ["EXPORT_RETENTION_DAYS"])
 s3 = boto3.client(
     "s3",
     endpoint_url=os.environ["R2_S3_API"],
@@ -54,26 +63,37 @@ except ClientError as error:
     else:
         raise
 
-rule = {
+poster_rule = {
     "ID": rule_id,
     "Status": "Enabled",
     "Filter": {"Prefix": "posters/"},
     "Expiration": {"Days": retention_days},
 }
-rules = [existing for existing in current if existing.get("ID") != rule_id]
-rules.append(rule)
+export_rule = {
+    "ID": export_rule_id,
+    "Status": "Enabled",
+    "Filter": {"Prefix": "catalog/exports/"},
+    "Expiration": {"Days": export_retention_days},
+}
+managed_ids = {rule_id, export_rule_id}
+rules = [existing for existing in current if existing.get("ID") not in managed_ids]
+rules.extend([poster_rule, export_rule])
 
 if os.environ["DRY_RUN"] == "1":
     print(f"dry-run: would configure {rule_id!r} at {retention_days} days")
+    print(f"dry-run: would configure {export_rule_id!r} at {export_retention_days} days")
 else:
     s3.put_bucket_lifecycle_configuration(
         Bucket=bucket,
         LifecycleConfiguration={"Rules": rules},
     )
     configured = s3.get_bucket_lifecycle_configuration(Bucket=bucket).get("Rules", [])
-    matches = [candidate for candidate in configured if candidate.get("ID") == rule_id]
-    if len(matches) != 1 or matches[0] != rule:
-        raise RuntimeError("R2 lifecycle verification failed")
+    configured_by_id = {candidate.get("ID"): candidate for candidate in configured}
+    if configured_by_id.get(rule_id) != poster_rule:
+        raise RuntimeError("R2 poster lifecycle verification failed")
+    if configured_by_id.get(export_rule_id) != export_rule:
+        raise RuntimeError("R2 catalog lifecycle verification failed")
     print(f"configured {rule_id!r} at {retention_days} days")
-    print(f"preserved {len(rules) - 1} other lifecycle rule(s)")
+    print(f"configured {export_rule_id!r} at {export_retention_days} days")
+    print(f"preserved {len(rules) - 2} other lifecycle rule(s)")
 PY
