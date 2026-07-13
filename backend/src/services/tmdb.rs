@@ -1,5 +1,7 @@
-use chrono::{NaiveDate, Utc};
+use chrono::{DateTime, NaiveDate, Utc};
 use serde::de::DeserializeOwned;
+use serde::Serialize;
+use sha2::{Digest, Sha256};
 use sqlx::PgPool;
 use std::sync::Arc;
 use std::time::Duration;
@@ -15,6 +17,23 @@ const MAX_API_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
 const MAX_CONCURRENT_API_REQUESTS: usize = 16;
 const MAX_CONCURRENT_IMAGE_REQUESTS: usize = 8;
 const OUTBOUND_PERMIT_WAIT: Duration = Duration::from_secs(1);
+const SEARCH_CACHE_FRESH_HOURS: i64 = 6;
+const SEARCH_CACHE_STALE_DAYS: i64 = 7;
+const TRENDING_CACHE_FRESH_MINUTES: i64 = 30;
+const TRENDING_CACHE_STALE_HOURS: i64 = 24;
+
+#[derive(sqlx::FromRow)]
+struct ProviderCacheRow {
+    payload: serde_json::Value,
+    expires_at: DateTime<Utc>,
+    stale_until: DateTime<Utc>,
+}
+
+struct CachedProviderResponse<T> {
+    value: T,
+    expires_at: DateTime<Utc>,
+    stale_until: DateTime<Utc>,
+}
 
 pub(crate) fn is_valid_external_lookup_id(external_id: &str, source: &str) -> bool {
     match source {
@@ -134,6 +153,98 @@ impl TmdbService {
         }
     }
 
+    fn provider_cache_key(endpoint: &str, parts: &[&str]) -> String {
+        let mut digest = Sha256::new();
+        digest.update(b"tmdb\0");
+        digest.update(endpoint.as_bytes());
+        for part in parts {
+            digest.update(b"\0");
+            digest.update(part.as_bytes());
+        }
+        hex::encode(digest.finalize())
+    }
+
+    fn normalize_search_query(query: &str) -> String {
+        query
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+            .to_lowercase()
+    }
+
+    async fn load_provider_response<T: DeserializeOwned>(
+        pool: &PgPool,
+        cache_key: &str,
+    ) -> Result<Option<CachedProviderResponse<T>>, sqlx::Error> {
+        let row = sqlx::query_as::<_, ProviderCacheRow>(
+            r#"SELECT payload, expires_at, stale_until
+            FROM provider_response_cache
+            WHERE provider = 'tmdb' AND cache_key = $1 AND stale_until >= NOW()"#,
+        )
+        .bind(cache_key)
+        .fetch_optional(pool)
+        .await?;
+
+        let Some(row) = row else {
+            return Ok(None);
+        };
+        match serde_json::from_value(row.payload) {
+            Ok(value) => Ok(Some(CachedProviderResponse {
+                value,
+                expires_at: row.expires_at,
+                stale_until: row.stale_until,
+            })),
+            Err(error) => {
+                log::warn!("Discarding invalid TMDB provider cache entry: {error}");
+                sqlx::query(
+                    "DELETE FROM provider_response_cache WHERE provider = 'tmdb' AND cache_key = $1",
+                )
+                .bind(cache_key)
+                .execute(pool)
+                .await?;
+                Ok(None)
+            }
+        }
+    }
+
+    async fn store_provider_response<T: Serialize>(
+        pool: &PgPool,
+        cache_key: &str,
+        endpoint: &str,
+        value: &T,
+        fresh_for: chrono::Duration,
+        stale_for: chrono::Duration,
+    ) -> Result<(), AppError> {
+        let payload = serde_json::to_value(value)
+            .map_err(|error| AppError::InternalError(anyhow::Error::new(error)))?;
+        let fetched_at = Utc::now();
+        sqlx::query(
+            r#"INSERT INTO provider_response_cache
+                (provider, cache_key, endpoint, payload, fetched_at, expires_at, stale_until)
+            VALUES ('tmdb', $1, $2, $3, $4, $5, $6)
+            ON CONFLICT (provider, cache_key) DO UPDATE SET
+                endpoint = EXCLUDED.endpoint,
+                payload = EXCLUDED.payload,
+                fetched_at = EXCLUDED.fetched_at,
+                expires_at = EXCLUDED.expires_at,
+                stale_until = EXCLUDED.stale_until"#,
+        )
+        .bind(cache_key)
+        .bind(endpoint)
+        .bind(payload)
+        .bind(fetched_at)
+        .bind(fetched_at + fresh_for)
+        .bind(fetched_at + stale_for)
+        .execute(pool)
+        .await?;
+
+        if let Err(error) = crate::services::media_cache::prune_provider_response_cache(pool).await
+        {
+            log::warn!("Provider cache cleanup after write failed: {error}");
+        }
+        Ok(())
+    }
+
     async fn read_bounded_body(
         mut response: reqwest::Response,
         max_bytes: usize,
@@ -230,6 +341,64 @@ impl TmdbService {
         Self::decode_api_response(response).await
     }
 
+    pub async fn search_cached(
+        &self,
+        pool: &PgPool,
+        query: &str,
+        media_type: Option<&str>,
+        page: Option<u32>,
+    ) -> Result<TmdbSearchResponse, AppError> {
+        let normalized_query = Self::normalize_search_query(query);
+        let media_type = media_type.unwrap_or("multi");
+        let page = page.unwrap_or(1).to_string();
+        let cache_key =
+            Self::provider_cache_key("search", &["en-US", media_type, &page, &normalized_query]);
+        let cached =
+            match Self::load_provider_response::<TmdbSearchResponse>(pool, &cache_key).await {
+                Ok(cached) => cached,
+                Err(error) => {
+                    log::warn!("TMDB search cache lookup failed: {error}");
+                    None
+                }
+            };
+
+        if let Some(entry) = &cached {
+            if entry.expires_at > Utc::now() {
+                return Ok(entry.value.clone());
+            }
+        }
+
+        match self
+            .search(query, Some(media_type), page.parse().ok())
+            .await
+        {
+            Ok(response) => {
+                if let Err(error) = Self::store_provider_response(
+                    pool,
+                    &cache_key,
+                    "search",
+                    &response,
+                    chrono::Duration::hours(SEARCH_CACHE_FRESH_HOURS),
+                    chrono::Duration::days(SEARCH_CACHE_STALE_DAYS),
+                )
+                .await
+                {
+                    log::warn!("TMDB search cache write failed: {error}");
+                }
+                Ok(response)
+            }
+            Err(error) => {
+                if let Some(entry) = cached {
+                    if entry.stale_until > Utc::now() {
+                        log::warn!("Serving stale TMDB search response after upstream failure");
+                        return Ok(entry.value);
+                    }
+                }
+                Err(error)
+            }
+        }
+    }
+
     pub async fn get_movie_detail(&self, tmdb_id: i32) -> Result<TmdbMovieDetail, AppError> {
         let _permit = self.acquire_api_permit().await?;
         let response = self
@@ -294,6 +463,54 @@ impl TmdbService {
         Self::decode_api_response(response).await
     }
 
+    pub async fn get_trending_cached(
+        &self,
+        pool: &PgPool,
+    ) -> Result<TmdbTrendingResponse, AppError> {
+        let cache_key = Self::provider_cache_key("trending", &["all", "week", "en-US"]);
+        let cached =
+            match Self::load_provider_response::<TmdbTrendingResponse>(pool, &cache_key).await {
+                Ok(cached) => cached,
+                Err(error) => {
+                    log::warn!("TMDB trending cache lookup failed: {error}");
+                    None
+                }
+            };
+
+        if let Some(entry) = &cached {
+            if entry.expires_at > Utc::now() {
+                return Ok(entry.value.clone());
+            }
+        }
+
+        match self.get_trending().await {
+            Ok(response) => {
+                if let Err(error) = Self::store_provider_response(
+                    pool,
+                    &cache_key,
+                    "trending",
+                    &response,
+                    chrono::Duration::minutes(TRENDING_CACHE_FRESH_MINUTES),
+                    chrono::Duration::hours(TRENDING_CACHE_STALE_HOURS),
+                )
+                .await
+                {
+                    log::warn!("TMDB trending cache write failed: {error}");
+                }
+                Ok(response)
+            }
+            Err(error) => {
+                if let Some(entry) = cached {
+                    if entry.stale_until > Utc::now() {
+                        log::warn!("Serving stale TMDB trending response after upstream failure");
+                        return Ok(entry.value);
+                    }
+                }
+                Err(error)
+            }
+        }
+    }
+
     /// Map an external id (TVDB/IMDB) to TMDB via `/find`. `source` is e.g.
     /// "tvdb_id" or "imdb_id". Returns matches grouped by media type.
     pub async fn find_by_external_id(
@@ -326,7 +543,39 @@ impl TmdbService {
         Self::decode_api_response(response).await
     }
 
-    /// Fetch or refresh media from TMDB with 24h cache
+    async fn touch_media(pool: &PgPool, media_id: uuid::Uuid) -> Result<(), AppError> {
+        sqlx::query(
+            r#"UPDATE media
+            SET last_accessed_at = NOW()
+            WHERE id = $1 AND last_accessed_at < NOW() - INTERVAL '1 hour'"#,
+        )
+        .bind(media_id)
+        .execute(pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn refresh_media(
+        &self,
+        pool: &PgPool,
+        tmdb_id: i32,
+        media_type: &str,
+    ) -> Result<Media, AppError> {
+        match media_type {
+            "movie" => {
+                let detail = self.get_movie_detail(tmdb_id).await?;
+                self.upsert_movie(pool, &detail).await
+            }
+            "tv" => {
+                let detail = self.get_tv_detail(tmdb_id).await?;
+                self.upsert_tv(pool, &detail).await
+            }
+            _ => Err(AppError::BadRequest("Invalid media type".to_string())),
+        }
+    }
+
+    /// Fetch or refresh media from TMDB with a 24-hour freshness window. A
+    /// stale local row remains usable if the provider is temporarily down.
     pub async fn get_or_cache_media(
         &self,
         pool: &PgPool,
@@ -345,21 +594,30 @@ impl TmdbService {
         if let Some(media) = cached {
             let age = Utc::now() - media.tmdb_cached_at;
             if age.num_hours() < 24 {
+                Self::touch_media(pool, media.id).await?;
                 return Ok(media);
             }
         }
 
-        // Fetch from TMDB and upsert
-        match media_type {
-            "movie" => {
-                let detail = self.get_movie_detail(tmdb_id).await?;
-                self.upsert_movie(pool, &detail).await
+        match self.refresh_media(pool, tmdb_id, media_type).await {
+            Ok(media) => Ok(media),
+            Err(error) => {
+                if let Some(media) = sqlx::query_as::<_, Media>(
+                    "SELECT * FROM media WHERE tmdb_id = $1 AND media_type = $2",
+                )
+                .bind(tmdb_id)
+                .bind(media_type)
+                .fetch_optional(pool)
+                .await?
+                {
+                    Self::touch_media(pool, media.id).await?;
+                    log::warn!(
+                        "Serving stale {media_type} metadata for TMDB id {tmdb_id} after refresh failure"
+                    );
+                    return Ok(media);
+                }
+                Err(error)
             }
-            "tv" => {
-                let detail = self.get_tv_detail(tmdb_id).await?;
-                self.upsert_tv(pool, &detail).await
-            }
-            _ => Err(AppError::BadRequest("Invalid media type".to_string())),
         }
     }
 
@@ -378,10 +636,10 @@ impl TmdbService {
             .map(|g| serde_json::to_value(g).unwrap_or_default());
 
         let media = sqlx::query_as::<_, Media>(
-            r#"INSERT INTO media (tmdb_id, media_type, title, original_title, overview, poster_path, backdrop_path, release_date, status, genres, runtime_minutes, tmdb_vote_average, tmdb_cached_at)
-            VALUES ($1, 'movie', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
+            r#"INSERT INTO media (tmdb_id, media_type, title, original_title, overview, poster_path, backdrop_path, release_date, status, genres, runtime_minutes, tmdb_vote_average, tmdb_cached_at, last_accessed_at)
+            VALUES ($1, 'movie', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW(), NOW())
             ON CONFLICT (tmdb_id, media_type)
-            DO UPDATE SET title = $2, original_title = $3, overview = $4, poster_path = $5, backdrop_path = $6, release_date = $7, status = $8, genres = $9, runtime_minutes = $10, tmdb_vote_average = $11, tmdb_cached_at = NOW()
+            DO UPDATE SET title = $2, original_title = $3, overview = $4, poster_path = $5, backdrop_path = $6, release_date = $7, status = $8, genres = $9, runtime_minutes = $10, tmdb_vote_average = $11, tmdb_cached_at = NOW(), last_accessed_at = NOW()
             RETURNING *"#
         )
         .bind(detail.id)
@@ -415,11 +673,12 @@ impl TmdbService {
             .as_ref()
             .and_then(|r| r.first().copied());
 
+        let mut tx = pool.begin().await?;
         let media = sqlx::query_as::<_, Media>(
-            r#"INSERT INTO media (tmdb_id, media_type, title, original_title, overview, poster_path, backdrop_path, release_date, status, genres, runtime_minutes, tmdb_vote_average, tmdb_cached_at)
-            VALUES ($1, 'tv', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
+            r#"INSERT INTO media (tmdb_id, media_type, title, original_title, overview, poster_path, backdrop_path, release_date, status, genres, runtime_minutes, tmdb_vote_average, tmdb_cached_at, last_accessed_at)
+            VALUES ($1, 'tv', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW(), NOW())
             ON CONFLICT (tmdb_id, media_type)
-            DO UPDATE SET title = $2, original_title = $3, overview = $4, poster_path = $5, backdrop_path = $6, release_date = $7, status = $8, genres = $9, runtime_minutes = $10, tmdb_vote_average = $11, tmdb_cached_at = NOW()
+            DO UPDATE SET title = $2, original_title = $3, overview = $4, poster_path = $5, backdrop_path = $6, release_date = $7, status = $8, genres = $9, runtime_minutes = $10, tmdb_vote_average = $11, tmdb_cached_at = NOW(), last_accessed_at = NOW()
             RETURNING *"#
         )
         .bind(detail.id)
@@ -433,7 +692,7 @@ impl TmdbService {
         .bind(&genres_json)
         .bind(runtime)
         .bind(detail.vote_average)
-        .fetch_one(pool)
+        .fetch_one(&mut *tx)
         .await?;
 
         // Also cache seasons
@@ -453,11 +712,12 @@ impl TmdbService {
                 .bind(&s.name)
                 .bind(s.episode_count)
                 .bind(season_air_date)
-                .execute(pool)
+                .execute(&mut *tx)
                 .await?;
             }
         }
 
+        tx.commit().await?;
         Ok(media)
     }
 
@@ -476,22 +736,32 @@ impl TmdbService {
         .await?
         .ok_or_else(|| AppError::NotFound("Season not found".to_string()))?;
 
+        let cached_episodes = sqlx::query_as::<_, crate::models::Episode>(
+            "SELECT * FROM episodes WHERE season_id = $1 ORDER BY episode_number",
+        )
+        .bind(season.id)
+        .fetch_all(pool)
+        .await?;
+
         if season
             .episodes_cached_at
             .is_some_and(|cached_at| Utc::now() - cached_at < chrono::Duration::hours(24))
         {
-            return sqlx::query_as::<_, crate::models::Episode>(
-                "SELECT * FROM episodes WHERE season_id = $1 ORDER BY episode_number",
-            )
-            .bind(season.id)
-            .fetch_all(pool)
-            .await
-            .map_err(AppError::from);
+            return Ok(cached_episodes);
         }
 
-        let tmdb_episodes = self
-            .get_season_episodes(media.tmdb_id, season_number)
-            .await?;
+        let tmdb_episodes = match self.get_season_episodes(media.tmdb_id, season_number).await {
+            Ok(episodes) => episodes,
+            Err(_error) if !cached_episodes.is_empty() => {
+                log::warn!(
+                    "Serving stale episodes for TMDB id {} season {} after refresh failure",
+                    media.tmdb_id,
+                    season_number
+                );
+                return Ok(cached_episodes);
+            }
+            Err(error) => return Err(error),
+        };
 
         let mut tx = pool.begin().await?;
         for ep in &tmdb_episodes.episodes {
@@ -620,6 +890,20 @@ mod tests {
         assert!(!is_valid_external_lookup_id("../../account", "imdb_id"));
         assert!(!is_valid_external_lookup_id("tt123", "imdb_id"));
         assert!(!is_valid_external_lookup_id("tt1234567", "unknown"));
+    }
+
+    #[test]
+    fn provider_cache_keys_are_normalized_and_bounded() {
+        let first_query = TmdbService::normalize_search_query("  The   Matrix ");
+        let second_query = TmdbService::normalize_search_query("the matrix");
+        let first =
+            TmdbService::provider_cache_key("search", &["en-US", "movie", "1", &first_query]);
+        let second =
+            TmdbService::provider_cache_key("search", &["en-US", "movie", "1", &second_query]);
+
+        assert_eq!(first, second);
+        assert_eq!(first.len(), 64);
+        assert!(first.bytes().all(|byte| byte.is_ascii_hexdigit()));
     }
 
     #[tokio::test]

@@ -130,6 +130,13 @@ async fn main() -> std::io::Result<()> {
         Ok(deleted) => log::info!("Pruned {deleted} orphaned media cache row(s) at startup"),
         Err(error) => log::error!("Failed to prune orphaned media cache at startup: {error}"),
     }
+    match cinetrack::services::media_cache::prune_provider_response_cache(&pool).await {
+        Ok(0) => {}
+        Ok(deleted) => {
+            log::info!("Pruned {deleted} provider response cache row(s) at startup")
+        }
+        Err(error) => log::error!("Failed to prune provider response cache at startup: {error}"),
+    }
     cinetrack::services::media_cache::start_orphan_pruner(pool.clone());
 
     let tmdb_service = TmdbService::new(&config);

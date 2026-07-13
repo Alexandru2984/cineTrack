@@ -125,6 +125,10 @@ fn create_app_with_config(
 }
 
 async fn clean_db(pool: &PgPool) {
+    sqlx::query("DELETE FROM provider_response_cache")
+        .execute(pool)
+        .await
+        .ok();
     sqlx::query("DELETE FROM notifications")
         .execute(pool)
         .await
@@ -1707,7 +1711,102 @@ async fn test_media_search_requires_auth() {
 
 #[actix_web::test]
 #[ignore = "requires test DB"]
-async fn test_browsing_tmdb_detail_does_not_persist_cache() {
+async fn test_media_search_uses_fresh_and_stale_provider_cache() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let upstream = actix_web::rt::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let mut request = vec![0_u8; 4096];
+        let read = stream.read(&mut request).await.unwrap();
+        let request = String::from_utf8_lossy(&request[..read]);
+        assert!(request.starts_with("GET /search/movie?"));
+        let body = r#"{
+            "page": 1,
+            "total_pages": 1,
+            "total_results": 1,
+            "results": [{
+                "id": 616161,
+                "title": "Cache Me",
+                "media_type": "movie",
+                "vote_average": 7.4
+            }]
+        }"#;
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        stream.write_all(response.as_bytes()).await.unwrap();
+    });
+
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let mut config = test_config();
+    config.tmdb_base_url = format!("http://{address}");
+    config.tmdb_timeout_seconds = 1;
+    let app = actix_test::init_service(create_app_with_config(pool.clone(), config)).await;
+    let (token, _, _) =
+        register_user(&app, "searchcache", "searchcache@example.com", "Pass1234").await;
+
+    let search = |uri: &'static str| {
+        actix_test::TestRequest::get()
+            .uri(uri)
+            .insert_header(("Authorization", format!("Bearer {token}")))
+            .peer_addr(peer_addr())
+            .to_request()
+    };
+    let first = actix_test::call_service(
+        &app,
+        search("/api/media/search?q=Cache%20Me&type=movie&page=1"),
+    )
+    .await;
+    assert_eq!(first.status(), 200);
+    let body: Value = actix_test::read_body_json(first).await;
+    assert_eq!(body["results"][0]["id"], 616161);
+    upstream.await.unwrap();
+
+    // Normalization collapses whitespace and case, so this is the same key.
+    let fresh = actix_test::call_service(
+        &app,
+        search("/api/media/search?q=%20cache%20%20me%20&type=movie&page=1"),
+    )
+    .await;
+    assert_eq!(fresh.status(), 200);
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM provider_response_cache WHERE endpoint = 'search'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap(),
+        1
+    );
+
+    sqlx::query(
+        r#"UPDATE provider_response_cache
+        SET fetched_at = NOW() - INTERVAL '2 hours',
+            expires_at = NOW() - INTERVAL '1 hour',
+            stale_until = NOW() + INTERVAL '1 hour'
+        WHERE endpoint = 'search'"#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let stale = actix_test::call_service(
+        &app,
+        search("/api/media/search?q=Cache%20Me&type=movie&page=1"),
+    )
+    .await;
+    assert_eq!(stale.status(), 200);
+    let body: Value = actix_test::read_body_json(stale).await;
+    assert_eq!(body["results"][0]["title"], "Cache Me");
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn test_browsing_tmdb_detail_persists_catalog_cache() {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -1805,7 +1904,7 @@ async fn test_browsing_tmdb_detail_does_not_persist_cache() {
     let resp = actix_test::call_service(&app, req).await;
     assert_eq!(resp.status(), 200);
     let body: Value = actix_test::read_body_json(resp).await;
-    assert_eq!(body[0]["id"], "9001");
+    assert!(Uuid::parse_str(body[0]["id"].as_str().unwrap()).is_ok());
     assert_eq!(body[0]["episode_count"], 8);
 
     let req = actix_test::TestRequest::get()
@@ -1816,15 +1915,49 @@ async fn test_browsing_tmdb_detail_does_not_persist_cache() {
     let resp = actix_test::call_service(&app, req).await;
     assert_eq!(resp.status(), 200);
     let body: Value = actix_test::read_body_json(resp).await;
-    assert_eq!(body[0]["id"], "515151:1:1");
+    assert!(Uuid::parse_str(body[0]["id"].as_str().unwrap()).is_ok());
     assert_eq!(body[0]["runtime_minutes"], 47);
 
     let after = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM media")
         .fetch_one(&pool)
         .await
         .unwrap();
-    assert_eq!(after, before, "browsing must not populate persistent cache");
+    assert_eq!(after, before + 2, "browsing should populate local catalog");
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM seasons s JOIN media m ON m.id = s.media_id WHERE m.tmdb_id = 515151",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap(),
+        1
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM episodes e JOIN seasons s ON s.id = e.season_id JOIN media m ON m.id = s.media_id WHERE m.tmdb_id = 515151",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap(),
+        1
+    );
     upstream.await.unwrap();
+
+    // The upstream listener is closed; all three responses must now come from
+    // PostgreSQL without a network dependency.
+    for uri in [
+        "/api/media/424242?type=movie",
+        "/api/media/515151/seasons",
+        "/api/media/515151/seasons/1/episodes",
+    ] {
+        let req = actix_test::TestRequest::get()
+            .uri(uri)
+            .insert_header(("Authorization", format!("Bearer {token}")))
+            .peer_addr(peer_addr())
+            .to_request();
+        let resp = actix_test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 200, "cache miss for {uri}");
+    }
 }
 
 #[actix_web::test]
@@ -1840,14 +1973,20 @@ async fn test_orphan_media_pruner_preserves_references_and_active_imports() {
     let rows = sqlx::query_as::<_, (Uuid, i32)>(
         r#"INSERT INTO media (tmdb_id, media_type, title, tmdb_cached_at)
         VALUES
-            (994001, 'tv', 'Old orphan', NOW() - INTERVAL '10 minutes'),
+            (994001, 'tv', 'Old orphan', NOW() - INTERVAL '176 days'),
             (994002, 'movie', 'Recent orphan', NOW()),
-            (994003, 'movie', 'Tracked media', NOW() - INTERVAL '10 minutes'),
-            (994004, 'movie', 'History media', NOW() - INTERVAL '10 minutes'),
-            (994005, 'movie', 'Listed media', NOW() - INTERVAL '10 minutes')
+            (994003, 'movie', 'Tracked media', NOW() - INTERVAL '176 days'),
+            (994004, 'movie', 'History media', NOW() - INTERVAL '176 days'),
+            (994005, 'movie', 'Listed media', NOW() - INTERVAL '176 days')
         RETURNING id, tmdb_id"#,
     )
     .fetch_all(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE media SET last_accessed_at = tmdb_cached_at WHERE tmdb_id BETWEEN 994001 AND 994005",
+    )
+    .execute(&pool)
     .await
     .unwrap();
     let media_id = |tmdb_id| {
@@ -1946,6 +2085,37 @@ async fn test_orphan_media_pruner_preserves_references_and_active_imports() {
 
 #[actix_web::test]
 #[ignore = "requires test DB"]
+async fn test_provider_response_pruner_removes_only_expired_entries() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    sqlx::query(
+        r#"INSERT INTO provider_response_cache
+            (provider, cache_key, endpoint, payload, fetched_at, expires_at, stale_until)
+        VALUES
+            ('tmdb', repeat('a', 64), 'search', '{}'::jsonb,
+             NOW() - INTERVAL '3 hours', NOW() - INTERVAL '2 hours', NOW() - INTERVAL '1 hour'),
+            ('tmdb', repeat('b', 64), 'trending', '{}'::jsonb,
+             NOW(), NOW() + INTERVAL '30 minutes', NOW() + INTERVAL '1 day')"#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let deleted = cinetrack::services::media_cache::prune_provider_response_cache(&pool)
+        .await
+        .unwrap();
+    assert_eq!(deleted, 1);
+    let keys = sqlx::query_scalar::<_, String>(
+        "SELECT btrim(cache_key) FROM provider_response_cache ORDER BY cache_key",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(keys, vec!["b".repeat(64)]);
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
 async fn test_warm_episode_cache_avoids_upstream_request() {
     let pool = setup_pool().await;
     clean_db(&pool).await;
@@ -1991,6 +2161,62 @@ async fn test_warm_episode_cache_avoids_upstream_request() {
     let episodes: Value = actix_test::read_body_json(resp).await;
     assert_eq!(episodes.as_array().unwrap().len(), 1);
     assert_eq!(episodes[0]["name"], "Cached Episode");
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn test_stale_episode_cache_survives_upstream_failure() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let mut config = test_config();
+    config.tmdb_base_url = "http://127.0.0.1:9".to_string();
+    config.tmdb_timeout_seconds = 1;
+    let app = actix_test::init_service(create_app_with_config(pool.clone(), config)).await;
+    let (token, _, _) = register_user(
+        &app,
+        "staleepisodes",
+        "staleepisodes@example.com",
+        "Pass1234",
+    )
+    .await;
+
+    let media_id = sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO media (tmdb_id, media_type, title)
+        VALUES (993002, 'tv', 'Stale Episode Show')
+        RETURNING id"#,
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let season_id = sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO seasons
+            (media_id, season_number, name, episode_count, episodes_cached_at)
+        VALUES ($1, 1, 'Season 1', 1, NOW() - INTERVAL '2 days')
+        RETURNING id"#,
+    )
+    .bind(media_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO episodes (season_id, episode_number, name, runtime_minutes)
+        VALUES ($1, 1, 'Stale but available', 41)"#,
+    )
+    .bind(season_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let req = actix_test::TestRequest::get()
+        .uri(&format!("/api/media/{media_id}/seasons/1/episodes"))
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+
+    assert_eq!(resp.status(), 200);
+    let episodes: Value = actix_test::read_body_json(resp).await;
+    assert_eq!(episodes[0]["name"], "Stale but available");
 }
 
 #[actix_web::test]

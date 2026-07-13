@@ -19,6 +19,7 @@ pub struct Media {
     pub runtime_minutes: Option<i32>,
     pub tmdb_vote_average: Option<f64>,
     pub tmdb_cached_at: DateTime<Utc>,
+    pub last_accessed_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]

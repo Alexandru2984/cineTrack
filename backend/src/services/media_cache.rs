@@ -2,15 +2,16 @@ use std::time::Duration;
 
 use sqlx::PgPool;
 
-const PRUNE_INTERVAL: Duration = Duration::from_secs(60);
+const PRUNE_INTERVAL: Duration = Duration::from_secs(15 * 60);
+const MAX_PROVIDER_CACHE_ROWS: i64 = 10_000;
 
-/// Remove cache rows that have had enough time to become referenced by a
-/// tracking/import transaction but are still unused. Active imports pause the
-/// sweep because their media rows are resolved before the final bulk commit.
+/// Remove locally browsed media after the provider-safe retention window when
+/// no user data references it. Active imports pause the sweep because their
+/// media rows are resolved before the final bulk commit.
 pub async fn prune_orphaned_media(pool: &PgPool) -> Result<u64, sqlx::Error> {
     let deleted = sqlx::query(
         r#"DELETE FROM media m
-        WHERE m.tmdb_cached_at < NOW() - INTERVAL '2 minutes'
+        WHERE m.last_accessed_at < NOW() - INTERVAL '175 days'
           AND NOT EXISTS (
               SELECT 1 FROM import_jobs WHERE status IN ('pending', 'running')
           )
@@ -25,6 +26,35 @@ pub async fn prune_orphaned_media(pool: &PgPool) -> Result<u64, sqlx::Error> {
     Ok(deleted)
 }
 
+/// Remove expired provider responses and evict the coldest rows above the
+/// global bound. Cache writes call this too, so user-controlled search keys
+/// cannot grow the table unchecked between background sweeps.
+pub async fn prune_provider_response_cache(pool: &PgPool) -> Result<u64, sqlx::Error> {
+    let expired = sqlx::query("DELETE FROM provider_response_cache WHERE stale_until < NOW()")
+        .execute(pool)
+        .await?
+        .rows_affected();
+
+    let overflow = sqlx::query(
+        r#"WITH cold_rows AS (
+            SELECT provider, cache_key
+            FROM provider_response_cache
+            ORDER BY fetched_at DESC, provider, cache_key
+            OFFSET $1
+        )
+        DELETE FROM provider_response_cache cache
+        USING cold_rows
+        WHERE cache.provider = cold_rows.provider
+          AND cache.cache_key = cold_rows.cache_key"#,
+    )
+    .bind(MAX_PROVIDER_CACHE_ROWS)
+    .execute(pool)
+    .await?
+    .rows_affected();
+
+    Ok(expired + overflow)
+}
+
 pub fn start_orphan_pruner(pool: PgPool) {
     actix_web::rt::spawn(async move {
         let mut interval = tokio::time::interval(PRUNE_INTERVAL);
@@ -37,6 +67,11 @@ pub fn start_orphan_pruner(pool: PgPool) {
                 Ok(0) => {}
                 Ok(deleted) => log::info!("Pruned {deleted} orphaned media cache row(s)"),
                 Err(error) => log::error!("Failed to prune orphaned media cache: {error}"),
+            }
+            match prune_provider_response_cache(&pool).await {
+                Ok(0) => {}
+                Ok(deleted) => log::info!("Pruned {deleted} provider response cache row(s)"),
+                Err(error) => log::error!("Failed to prune provider response cache: {error}"),
             }
         }
     });

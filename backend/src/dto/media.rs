@@ -60,7 +60,7 @@ pub struct EpisodeResponse {
 }
 
 // TMDB API response types
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct TmdbSearchResponse {
     pub page: u32,
     pub total_pages: u32,
@@ -68,7 +68,7 @@ pub struct TmdbSearchResponse {
     pub results: Vec<TmdbSearchResult>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct TmdbSearchResult {
     pub id: i32,
     pub title: Option<String>,
@@ -146,7 +146,7 @@ pub struct TmdbEpisode {
     pub still_path: Option<String>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct TmdbTrendingResponse {
     pub results: Vec<TmdbSearchResult>,
 }
