@@ -259,7 +259,8 @@ văzute/
 ├── scripts/
 │   ├── run_tests.sh        # All-in-one test runner
 │   ├── backup_to_r2.sh     # pg_dump -> gzip -> Cloudflare R2 (with retention)
-│   └── sync_tmdb_catalog.py # Daily TMDB ID inventory -> PostgreSQL + R2
+│   ├── sync_tmdb_catalog.py # Daily TMDB ID/title inventory -> PostgreSQL + R2
+│   └── hydrate_tmdb_catalog.sh # Bounded popular-title detail hydration
 ├── nginx/                  # Internal reverse proxy config
 ├── docker-compose.yml      # Development stack
 ├── docker-compose.test.yml # Ephemeral test DB (tmpfs, port 55433 by default)
@@ -299,13 +300,13 @@ Object storage is **optional** — set the `R2_*` variables to enable it; withou
 
 - **Avatars** — `avatars/{user_id}.{ext}`, served via the asset proxy (or a public domain if `R2_PUBLIC_BASE_URL` is set).
 - **Poster cache** — an opt-in write-through cache (`VITE_USE_R2_IMAGES=true`) that mirrors TMDB images under `posters/` and serves them from `GET /api/img/{size}/{path}`.
-- **Catalog exports** — compressed daily TMDB ID exports are archived under `catalog/exports/`; PostgreSQL keeps the compact, indexed current inventory while R2 holds the raw recovery copies.
+- **Catalog exports** — compressed daily TMDB ID exports are archived under `catalog/exports/`; PostgreSQL keeps the compact, indexed current ID/title inventory while R2 holds the raw recovery copies.
 - **Database backups** — `scripts/backup_to_r2.sh` runs `pg_dump | gzip` and uploads a timestamped snapshot to `backups/`, pruning anything older than the retention window (default 14 days). Schedule it with cron:
   ```cron
   30 3 * * * /path/to/cineTrack/scripts/backup_to_r2.sh >> /var/log/vazute-backup.log 2>&1
   ```
 
-Apply the cache lifecycle rules once, then schedule the catalog sync after TMDB's daily exports are available:
+Apply the cache lifecycle rules once, then schedule the catalog sync after TMDB's daily exports are available. A second bounded job hydrates details for popular entries without scraping the entire catalog:
 
 ```bash
 ./scripts/configure_r2_lifecycle.sh
@@ -313,6 +314,7 @@ Apply the cache lifecycle rules once, then schedule the catalog sync after TMDB'
 
 ```cron
 15 9 * * * /path/to/cineTrack/scripts/sync_tmdb_catalog.py >> /var/log/vazute-catalog.log 2>&1
+0 10 * * * /path/to/cineTrack/scripts/hydrate_tmdb_catalog.sh >> /var/log/vazute-hydration.log 2>&1
 ```
 
 ## License
