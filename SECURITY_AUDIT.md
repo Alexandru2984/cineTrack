@@ -87,6 +87,7 @@ In the third round we reviewed the repo directly on the VPS/prod host and closed
 - Production rollout was preceded and followed by verified R2 backups (`cinetrack_20260713_194933.sql.gz` and `cinetrack_20260713_200203.sql.gz`). The initial alias backfill completed 200/200 requests with no transient, invalid, or not-found results and stored 5,993 aliases across 193 titles.
 - The backend and frontend images run non-root with read-only filesystems, all Linux capabilities dropped, and no-new-privileges. Trivy reported zero HIGH/CRITICAL source, configuration, and image findings; gitleaks scanned 120 commits without a leak; Actionlint and Zizmor reported no workflow findings; ShellCheck is clean.
 - Production validation covered 167 passing backend unit tests (one credential-gated R2 test ignored), 73 PostgreSQL integration tests, 64 frontend tests, and 13 mocked-browser Playwright tests. Clippy ran with warnings denied, the complete npm audit reported zero vulnerabilities, authenticated localized-search and personalized-discovery smoke tests passed, and the public discovery response completed in 113 ms during the rollout check.
+- Transactional email is connected to the local Mailcow deployment through `mail.micutu.com:587` with certificate-validated STARTTLS and authenticated `noreply@micutu.com`. A production password-reset request was verified from API submission through SMTP acceptance and IMAP delivery; the temporary account and message were removed afterward.
 
 ## Residual risks
 
@@ -97,7 +98,7 @@ In the third round we reviewed the repo directly on the VPS/prod host and closed
 - `current` for sessions is determined from the refresh cookie; a client that calls without the cookie (with only an access token) sees all sessions as non-current, but this is not a security issue.
 - `/metrics` has no authentication; its protection is that it isn't proxied by Nginx, so it depends on the deploy network's isolation. If the backend port becomes directly reachable, the endpoint must be restricted.
 - `cargo audit` reports `RUSTSEC-2023-0071` via `sqlx-mysql` metadata in the lockfile, even though the build uses only the `postgres` feature. CI ignores it explicitly; revisit when `sqlx` resolves the lockfile.
-- SMTP is not configured in production, so password-reset emails cannot currently be delivered. Production correctly avoids logging the one-time reset URL, but the user-facing recovery flow remains operationally incomplete until SMTP is configured.
+- The SMTP mailbox uses a long-lived credential stored in the git-ignored `.env.prod` file. Keep the file at mode `0600`, rotate the mailbox password periodically, and recreate the backend atomically after each rotation.
 - Browser E2E tests now exist at two levels: mocked (login/logout/refresh-401/forgot-password/error-boundary/discovery layout) and real-stack (HttpOnly cookie, refresh rotation, sessions, account deletion, reset with token). The tracking/episodes/lists flows remain uncovered by E2E (covered only by the backend integration tests).
 - The secrets in `.env.prod` must be rotated if they were shown in a terminal, logs, or an audit transcript. In particular, avoid `docker compose config` without `--no-env-resolution` on machines or sessions that can persist the output.
 
