@@ -13,6 +13,7 @@ import os
 from pathlib import Path
 import subprocess
 import tempfile
+import unicodedata
 import urllib.request
 
 import boto3
@@ -129,6 +130,18 @@ def download(url: str, destination: Path, max_bytes: int) -> tuple[int, str]:
     return size, digest.hexdigest()
 
 
+def normalize_title(raw_title: str) -> str:
+    repaired: list[str] = []
+    for character in raw_title:
+        codepoint = ord(character)
+        if 0x80 <= codepoint <= 0x9F:
+            character = bytes([codepoint]).decode("windows-1252", errors="replace")
+        if unicodedata.category(character) == "Cc":
+            character = " "
+        repaired.append(character)
+    return " ".join(unicodedata.normalize("NFC", "".join(repaired)).split())
+
+
 def export_to_tsv(source: Path, destination: Path, media_type: str) -> int:
     if media_type not in {"movie", "tv"}:
         raise RuntimeError("catalog media type must be movie or tv")
@@ -154,7 +167,7 @@ def export_to_tsv(source: Path, destination: Path, media_type: str) -> int:
                 raw_title = item[title_field]
                 if not isinstance(raw_title, str):
                     raise TypeError(f"{title_field} must be a string")
-                title = " ".join(raw_title.split())
+                title = normalize_title(raw_title)
                 adult = (
                     item["adult"] if media_type == "movie" else item.get("adult", False)
                 )
