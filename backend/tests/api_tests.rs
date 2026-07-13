@@ -1869,6 +1869,21 @@ async fn test_local_catalog_search_skips_or_replaces_unavailable_provider() {
     .execute(&pool)
     .await
     .unwrap();
+    sqlx::query(
+        r#"INSERT INTO catalog_external_ids
+            (media_type, tmdb_id, adult, video, popularity)
+        VALUES ('tv', 620200, false, false, 999.0)"#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO catalog_external_titles (media_type, tmdb_id, title)
+        VALUES ('tv', 620200, 'Archive Needle')"#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
 
     let request = |query: &'static str| {
         actix_test::TestRequest::get()
@@ -1894,6 +1909,25 @@ async fn test_local_catalog_search_skips_or_replaces_unavailable_provider() {
     assert_eq!(fallback.status(), 200);
     let fallback: Value = actix_test::read_body_json(fallback).await;
     assert_eq!(fallback["results"][0]["title"], "Fallback Film");
+
+    let inventory = actix_test::call_service(
+        &app,
+        request("/api/media/search?q=Archive%20Needle&type=tv&page=1"),
+    )
+    .await;
+    assert_eq!(inventory.status(), 200);
+    let inventory: Value = actix_test::read_body_json(inventory).await;
+    assert_eq!(inventory["results"].as_array().unwrap().len(), 1);
+    assert_eq!(inventory["results"][0]["name"], "Archive Needle");
+    assert_eq!(inventory["results"][0]["media_type"], "tv");
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM media WHERE tmdb_id = 620200")
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+        0,
+        "catalog-only searches must not inflate the hydrated media cache"
+    );
     assert_eq!(
         sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM provider_response_cache")
             .fetch_one(&pool)
@@ -2292,7 +2326,7 @@ async fn test_catalog_inventory_is_compact_and_constrained() {
     sqlx::query(
         r#"INSERT INTO catalog_external_ids
             (media_type, tmdb_id, adult, video, popularity)
-        VALUES ('tv', 640002, NULL, false, 10.0)"#,
+        VALUES ('tv', 640002, false, false, 10.0)"#,
     )
     .execute(&pool)
     .await
@@ -2306,14 +2340,28 @@ async fn test_catalog_inventory_is_compact_and_constrained() {
     .execute(&pool)
     .await;
     assert!(invalid.is_err());
-    let unknown_movie_flag = sqlx::query(
+    let unknown_adult_flag = sqlx::query(
         r#"INSERT INTO catalog_external_ids
             (media_type, tmdb_id, adult, video, popularity)
-        VALUES ('movie', 640003, NULL, false, 8.0)"#,
+        VALUES ('tv', 640003, NULL, false, 8.0)"#,
     )
     .execute(&pool)
     .await;
-    assert!(unknown_movie_flag.is_err());
+    assert!(unknown_adult_flag.is_err());
+    sqlx::query(
+        r#"INSERT INTO catalog_external_titles (media_type, tmdb_id, title)
+        VALUES ('movie', 640001, 'Indexed Catalog Film')"#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let invalid_title = sqlx::query(
+        r#"INSERT INTO catalog_external_titles (media_type, tmdb_id, title)
+        VALUES ('tv', 640002, E'Bad\nTitle')"#,
+    )
+    .execute(&pool)
+    .await;
+    assert!(invalid_title.is_err());
     assert_eq!(
         sqlx::query_scalar::<_, String>(
             "SELECT relpersistence::text FROM pg_class WHERE oid = 'catalog_external_ids_staging'::regclass",
@@ -2323,6 +2371,122 @@ async fn test_catalog_inventory_is_compact_and_constrained() {
         .unwrap(),
         "u"
     );
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn test_popular_catalog_hydration_is_bounded_and_persistent() {
+    use cinetrack::services::catalog_hydration::{
+        hydrate_popular_catalog, HydrationOptions, HydrationSummary,
+    };
+    use cinetrack::services::tmdb::TmdbService;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let upstream = actix_web::rt::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let mut request = vec![0_u8; 4096];
+        let read = stream.read(&mut request).await.unwrap();
+        assert!(String::from_utf8_lossy(&request[..read]).starts_with("GET /movie/650001?"));
+        let body = r#"{
+            "id": 650001,
+            "title": "Most Popular Fixture",
+            "original_title": "Most Popular Fixture",
+            "overview": "Hydrated by the bounded catalog worker",
+            "release_date": "2026-07-13",
+            "status": "Released",
+            "genres": [],
+            "runtime": 99,
+            "vote_average": 7.5
+        }"#;
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        stream.write_all(response.as_bytes()).await.unwrap();
+    });
+
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    sqlx::query(
+        r#"INSERT INTO catalog_external_ids
+            (media_type, tmdb_id, adult, video, popularity)
+        VALUES
+            ('movie', 650001, false, false, 1000.0),
+            ('movie', 650002, false, false, 10.0)"#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO catalog_external_titles (media_type, tmdb_id, title)
+        VALUES
+            ('movie', 650001, 'Most Popular Fixture'),
+            ('movie', 650002, 'Lower Popularity Fixture')"#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO catalog_sync_state
+            (provider, export_date, movie_rows, tv_rows, movie_sha256, tv_sha256,
+             movie_object_key, tv_object_key)
+        VALUES
+            ('tmdb', CURRENT_DATE, 2, 1, repeat('a', 64), repeat('b', 64),
+             'catalog/movie.gz', 'catalog/tv.gz')"#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let mut config = test_config();
+    config.tmdb_base_url = format!("http://{address}");
+    let tmdb = TmdbService::new(&config);
+    let summary = hydrate_popular_catalog(
+        &pool,
+        &tmdb,
+        HydrationOptions {
+            budget: 1,
+            request_delay: std::time::Duration::ZERO,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        summary,
+        HydrationSummary {
+            selected: 1,
+            succeeded: 1,
+            ..HydrationSummary::default()
+        }
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i32>("SELECT tmdb_id FROM media WHERE metadata_level = 'detail'")
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+        650001
+    );
+    assert!(sqlx::query_scalar::<_, bool>(
+        r#"SELECT outcome = 'success'
+                AND consecutive_failures = 0
+                AND next_attempt_at >= NOW() + INTERVAL '29 days'
+            FROM catalog_hydration_state
+            WHERE media_type = 'movie' AND tmdb_id = 650001"#,
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap());
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM media WHERE tmdb_id = 650002")
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+        0
+    );
+    upstream.await.unwrap();
 }
 
 #[actix_web::test]

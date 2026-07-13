@@ -49,8 +49,78 @@ pub async fn search_local(
     }
     let offset = i64::from(page.saturating_sub(1)) * SEARCH_PAGE_SIZE;
     let rows = sqlx::query_as::<_, LocalSearchRow>(
-        r#"WITH ranked AS (
+        r#"WITH raw_candidates AS (
             SELECT
+                ids.tmdb_id,
+                ids.media_type,
+                COALESCE(media.title, titles.title) AS title,
+                COALESCE(media.original_title, titles.title) AS original_title,
+                media.overview,
+                media.poster_path,
+                media.backdrop_path,
+                media.release_date,
+                media.tmdb_vote_average AS vote_average,
+                CASE
+                    WHEN lower(titles.title) = $1 THEN 100.0
+                    WHEN lower(titles.title) LIKE $1 || '%' THEN 80.0
+                    ELSE 50.0
+                END
+                + similarity(lower(titles.title), $1) * 10
+                + LEAST(
+                    LN(1.0 + GREATEST(ids.popularity::double precision, 0.0)),
+                    10.0
+                ) AS rank,
+                1 AS source_priority
+            FROM catalog_external_titles titles
+            JOIN catalog_external_ids ids
+              USING (media_type, tmdb_id)
+            LEFT JOIN media
+              ON media.tmdb_id = ids.tmdb_id
+             AND media.media_type = ids.media_type
+            WHERE ids.adult = FALSE
+              AND ids.video = FALSE
+              AND ($2::text IS NULL OR ids.media_type = $2)
+              AND (
+                  lower(titles.title) % $1
+                  OR lower(titles.title) LIKE $1 || '%'
+              )
+            UNION ALL
+            SELECT
+                media.tmdb_id,
+                media.media_type,
+                media.title,
+                media.original_title,
+                media.overview,
+                media.poster_path,
+                media.backdrop_path,
+                media.release_date,
+                media.tmdb_vote_average AS vote_average,
+                CASE
+                    WHEN lower(media.title) = $1 THEN 105.0
+                    WHEN lower(media.original_title) = $1 THEN 100.0
+                    WHEN lower(media.title) LIKE $1 || '%' THEN 85.0
+                    WHEN lower(media.original_title) LIKE $1 || '%' THEN 80.0
+                    ELSE 55.0
+                END
+                + GREATEST(
+                    similarity(lower(media.title), $1),
+                    COALESCE(similarity(lower(media.original_title), $1), 0)
+                ) * 10 AS rank,
+                2 AS source_priority
+            FROM media
+            LEFT JOIN catalog_external_ids ids
+              ON ids.tmdb_id = media.tmdb_id
+             AND ids.media_type = media.media_type
+            WHERE (ids.tmdb_id IS NULL OR (ids.adult = FALSE AND ids.video = FALSE))
+              AND ($2::text IS NULL OR media.media_type = $2)
+              AND (
+                  lower(media.title) % $1
+                  OR lower(media.original_title) % $1
+                  OR lower(media.title) LIKE $1 || '%'
+                  OR lower(media.original_title) LIKE $1 || '%'
+              )
+        ), deduplicated AS (
+            SELECT DISTINCT ON (tmdb_id, media_type)
                 tmdb_id,
                 media_type,
                 title,
@@ -59,26 +129,10 @@ pub async fn search_local(
                 poster_path,
                 backdrop_path,
                 release_date,
-                tmdb_vote_average AS vote_average,
-                CASE
-                    WHEN lower(title) = $1 THEN 100.0
-                    WHEN lower(original_title) = $1 THEN 95.0
-                    WHEN lower(title) LIKE $1 || '%' THEN 80.0
-                    WHEN lower(original_title) LIKE $1 || '%' THEN 75.0
-                    ELSE 50.0
-                END
-                + GREATEST(
-                    similarity(lower(title), $1),
-                    COALESCE(similarity(lower(original_title), $1), 0)
-                ) * 10 AS rank
-            FROM media
-            WHERE ($2::text IS NULL OR media_type = $2)
-              AND (
-                  lower(title) % $1
-                  OR lower(original_title) % $1
-                  OR lower(title) LIKE $1 || '%'
-                  OR lower(original_title) LIKE $1 || '%'
-              )
+                vote_average,
+                rank
+            FROM raw_candidates
+            ORDER BY tmdb_id, media_type, rank DESC, source_priority DESC
         )
         SELECT
             tmdb_id,
@@ -91,7 +145,7 @@ pub async fn search_local(
             release_date,
             vote_average,
             COUNT(*) OVER () AS total_count
-        FROM ranked
+        FROM deduplicated
         ORDER BY rank DESC, vote_average DESC NULLS LAST, release_date DESC NULLS LAST, tmdb_id
         LIMIT $3 OFFSET $4"#,
     )
@@ -222,8 +276,8 @@ pub async fn cache_search_results(
     Ok(affected)
 }
 
-pub fn page_is_local(response: &TmdbSearchResponse) -> bool {
-    response.results.len() == SEARCH_PAGE_SIZE as usize
+pub fn has_local_results(response: &TmdbSearchResponse) -> bool {
+    !response.results.is_empty()
 }
 
 #[cfg(test)]
@@ -236,26 +290,24 @@ mod tests {
     }
 
     #[test]
-    fn only_full_pages_skip_the_provider() {
+    fn any_local_match_skips_the_provider() {
         let mut response = empty_response(1);
-        assert!(!page_is_local(&response));
-        response.results = (0..SEARCH_PAGE_SIZE)
-            .map(|id| TmdbSearchResult {
-                id: id as i32 + 1,
-                title: Some(format!("Title {id}")),
-                name: None,
-                original_title: None,
-                original_name: None,
-                overview: None,
-                poster_path: None,
-                backdrop_path: None,
-                release_date: None,
-                first_air_date: None,
-                vote_average: None,
-                media_type: Some("movie".to_string()),
-                genre_ids: None,
-            })
-            .collect();
-        assert!(page_is_local(&response));
+        assert!(!has_local_results(&response));
+        response.results.push(TmdbSearchResult {
+            id: 1,
+            title: Some("Title".to_string()),
+            name: None,
+            original_title: None,
+            original_name: None,
+            overview: None,
+            poster_path: None,
+            backdrop_path: None,
+            release_date: None,
+            first_air_date: None,
+            vote_average: None,
+            media_type: Some("movie".to_string()),
+            genre_ids: None,
+        });
+        assert!(has_local_results(&response));
     }
 }

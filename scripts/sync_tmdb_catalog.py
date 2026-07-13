@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import csv
 import datetime as dt
 import fcntl
 import gzip
@@ -36,6 +37,14 @@ ON CONFLICT (media_type, tmdb_id) DO UPDATE SET
 WHERE (catalog_external_ids.adult, catalog_external_ids.video, catalog_external_ids.popularity)
       IS DISTINCT FROM (EXCLUDED.adult, EXCLUDED.video, EXCLUDED.popularity);
 
+INSERT INTO catalog_external_titles (media_type, tmdb_id, title)
+SELECT media_type, tmdb_id, title
+FROM catalog_external_ids_staging
+ON CONFLICT (media_type, tmdb_id) DO UPDATE SET
+    title = EXCLUDED.title,
+    updated_at = NOW()
+WHERE catalog_external_titles.title IS DISTINCT FROM EXCLUDED.title;
+
 DELETE FROM catalog_external_ids current
 WHERE NOT EXISTS (
     SELECT 1
@@ -63,6 +72,7 @@ ON CONFLICT (provider) DO UPDATE SET
 TRUNCATE catalog_external_ids_staging;
 COMMIT;
 ANALYZE catalog_external_ids;
+ANALYZE catalog_external_titles;
 """
 
 
@@ -120,11 +130,14 @@ def download(url: str, destination: Path, max_bytes: int) -> tuple[int, str]:
 
 
 def export_to_tsv(source: Path, destination: Path, media_type: str) -> int:
+    if media_type not in {"movie", "tv"}:
+        raise RuntimeError("catalog media type must be movie or tv")
     rows = 0
     seen_ids: set[int] = set()
     with gzip.open(source, "rb") as compressed, destination.open(
         "w", encoding="utf-8", newline=""
     ) as output:
+        writer = csv.writer(output, delimiter="\t", lineterminator="\n")
         line_number = 0
         while line := compressed.readline(MAX_EXPORT_LINE_BYTES + 1):
             line_number += 1
@@ -135,28 +148,40 @@ def export_to_tsv(source: Path, destination: Path, media_type: str) -> int:
             try:
                 item = json.loads(line)
                 tmdb_id = item["id"]
-                adult = item.get("adult")
+                title_field = (
+                    "original_title" if media_type == "movie" else "original_name"
+                )
+                raw_title = item[title_field]
+                if not isinstance(raw_title, str):
+                    raise TypeError(f"{title_field} must be a string")
+                title = " ".join(raw_title.split())
+                adult = (
+                    item["adult"] if media_type == "movie" else item.get("adult", False)
+                )
                 video = item.get("video", False)
                 popularity = float(item.get("popularity", 0))
             except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
                 raise RuntimeError(f"invalid {media_type} export row {line_number}: {error}") from error
             if isinstance(tmdb_id, bool) or not isinstance(tmdb_id, int) or tmdb_id <= 0:
                 raise RuntimeError(f"invalid {media_type} id at row {line_number}")
-            if (
-                (adult is None and media_type != "tv")
-                or (adult is not None and not isinstance(adult, bool))
-                or not isinstance(video, bool)
-            ):
+            if not isinstance(adult, bool) or not isinstance(video, bool):
                 raise RuntimeError(f"invalid {media_type} flags at row {line_number}")
+            if not title or len(title) > 500:
+                raise RuntimeError(f"invalid {media_type} title at row {line_number}")
             if not 0 <= popularity < float("inf"):
                 raise RuntimeError(f"invalid {media_type} popularity at row {line_number}")
             if tmdb_id in seen_ids:
                 raise RuntimeError(f"duplicate {media_type} id {tmdb_id}")
             seen_ids.add(tmdb_id)
-            adult_value = "\\N" if adult is None else ("t" if adult else "f")
-            output.write(
-                f"{media_type}\t{tmdb_id}\t{adult_value}\t"
-                f"{'t' if video else 'f'}\t{popularity}\n"
+            writer.writerow(
+                (
+                    media_type,
+                    tmdb_id,
+                    title,
+                    "t" if adult else "f",
+                    "t" if video else "f",
+                    popularity,
+                )
             )
             rows += 1
             if rows > MAX_ROWS_PER_EXPORT:
@@ -233,7 +258,7 @@ def copy_tsv(container: str, role: str, database: str, source: Path) -> None:
         role,
         database,
         "-c",
-        r"\copy catalog_external_ids_staging (media_type, tmdb_id, adult, video, popularity) FROM STDIN WITH (FORMAT csv, DELIMITER E'\t', NULL '\N')",
+        r"\copy catalog_external_ids_staging (media_type, tmdb_id, title, adult, video, popularity) FROM STDIN WITH (FORMAT csv, DELIMITER E'\t')",
     )
     with source.open("rb") as input_file:
         subprocess.run(command, stdin=input_file, check=True)

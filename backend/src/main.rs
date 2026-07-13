@@ -11,6 +11,7 @@ use cinetrack::{
     middleware::rate_limit::TrustedProxyIpKeyExtractor,
     middleware::request_id::{current_request_id, request_id},
     routes,
+    services::catalog_hydration::{hydrate_popular_catalog, HydrationOptions},
     services::email::EmailService,
     services::tmdb::TmdbService,
     utils::password,
@@ -19,6 +20,19 @@ use cinetrack::{
 /// Access-log format including the per-request correlation id (set by the
 /// request_id middleware and echoed in the X-Request-Id response header).
 const LOG_FORMAT: &str = r#"%a "%r" %s %b "%{User-Agent}i" %T req-id=%{x-request-id}o"#;
+
+fn bounded_env_u32(name: &str, default: u32, minimum: u32, maximum: u32) -> std::io::Result<u32> {
+    let value = std::env::var(name)
+        .unwrap_or_else(|_| default.to_string())
+        .parse::<u32>()
+        .map_err(|_| std::io::Error::other(format!("{name} must be a number")))?;
+    if !(minimum..=maximum).contains(&value) {
+        return Err(std::io::Error::other(format!(
+            "{name} must be between {minimum} and {maximum}"
+        )));
+    }
+    Ok(value)
+}
 
 fn run_healthcheck() -> std::io::Result<()> {
     let port = std::env::var("APP_PORT")
@@ -76,9 +90,18 @@ fn init_logger() {
 async fn main() -> std::io::Result<()> {
     dotenvy::dotenv().ok();
 
-    if std::env::args().any(|arg| arg == "--healthcheck") {
-        return run_healthcheck();
-    }
+    let arguments = std::env::args().skip(1).collect::<Vec<_>>();
+    let hydrate_catalog = match arguments.as_slice() {
+        [] => false,
+        [argument] if argument == "--healthcheck" => return run_healthcheck(),
+        [argument] if argument == "--hydrate-catalog" => true,
+        _ => {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "supported arguments are --healthcheck and --hydrate-catalog",
+            ));
+        }
+    };
 
     init_logger();
 
@@ -105,6 +128,40 @@ async fn main() -> std::io::Result<()> {
         .expect("Failed to run database migrations");
 
     log::info!("Migrations applied successfully");
+
+    if hydrate_catalog {
+        let options = HydrationOptions {
+            budget: bounded_env_u32("CATALOG_HYDRATION_DAILY_BUDGET", 200, 1, 1_000)?,
+            request_delay: Duration::from_millis(u64::from(bounded_env_u32(
+                "CATALOG_HYDRATION_DELAY_MS",
+                250,
+                100,
+                5_000,
+            )?)),
+        };
+        let tmdb_service = TmdbService::new(&config);
+        let summary = hydrate_popular_catalog(&pool, &tmdb_service, options)
+            .await
+            .map_err(|error| {
+                log::error!("Catalog hydration failed: {error}");
+                std::io::Error::other("catalog hydration failed")
+            })?;
+        log::info!(
+            "Catalog hydration complete: selected={} succeeded={} not_found={} transient={} invalid={} locked={}",
+            summary.selected,
+            summary.succeeded,
+            summary.not_found,
+            summary.transient_failures,
+            summary.invalid,
+            summary.skipped_locked,
+        );
+        if summary.stopped_early {
+            return Err(std::io::Error::other(
+                "catalog hydration stopped after a provider failure",
+            ));
+        }
+        return Ok(());
+    }
 
     // This deployment runs a single backend process and import tasks are
     // in-memory. Any pending/running row found at process start belongs to a

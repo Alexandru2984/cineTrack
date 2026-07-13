@@ -1,5 +1,6 @@
 pub mod auth;
 pub mod catalog;
+pub mod catalog_hydration;
 pub mod email;
 pub mod importer;
 pub mod media_cache;

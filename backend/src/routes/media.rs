@@ -115,7 +115,7 @@ async fn search(
         };
     if let Some(response) = local
         .as_ref()
-        .filter(|response| catalog::page_is_local(response))
+        .filter(|response| catalog::has_local_results(response))
     {
         crate::metrics::record_tmdb_cache("local_search", "hit");
         return Ok(HttpResponse::Ok().json(response));

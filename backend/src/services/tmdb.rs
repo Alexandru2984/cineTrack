@@ -235,6 +235,13 @@ impl TmdbService {
             ));
         }
 
+        if status == reqwest::StatusCode::NOT_FOUND {
+            crate::metrics::record_tmdb_request(endpoint, "4xx", started.elapsed());
+            return Err(AppError::NotFound(
+                "External media was not found".to_string(),
+            ));
+        }
+
         let outcome = Self::response_outcome(status);
         let result = Self::decode_api_response(response).await;
         let outcome = if result.is_err() && status.is_success() {
@@ -425,6 +432,7 @@ impl TmdbService {
                     ("query", query),
                     ("page", page.as_str()),
                     ("language", "en-US"),
+                    ("include_adult", "false"),
                 ]),
         );
         self.send_api("search", request).await
