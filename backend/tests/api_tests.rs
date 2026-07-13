@@ -2289,6 +2289,14 @@ async fn test_catalog_inventory_is_compact_and_constrained() {
     .execute(&pool)
     .await
     .unwrap();
+    sqlx::query(
+        r#"INSERT INTO catalog_external_ids
+            (media_type, tmdb_id, adult, video, popularity)
+        VALUES ('tv', 640002, NULL, false, 10.0)"#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
 
     let invalid = sqlx::query(
         r#"INSERT INTO catalog_external_ids
@@ -2298,6 +2306,14 @@ async fn test_catalog_inventory_is_compact_and_constrained() {
     .execute(&pool)
     .await;
     assert!(invalid.is_err());
+    let unknown_movie_flag = sqlx::query(
+        r#"INSERT INTO catalog_external_ids
+            (media_type, tmdb_id, adult, video, popularity)
+        VALUES ('movie', 640003, NULL, false, 8.0)"#,
+    )
+    .execute(&pool)
+    .await;
+    assert!(unknown_movie_flag.is_err());
     assert_eq!(
         sqlx::query_scalar::<_, String>(
             "SELECT relpersistence::text FROM pg_class WHERE oid = 'catalog_external_ids_staging'::regclass",

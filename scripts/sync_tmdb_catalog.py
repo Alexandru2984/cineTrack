@@ -135,22 +135,27 @@ def export_to_tsv(source: Path, destination: Path, media_type: str) -> int:
             try:
                 item = json.loads(line)
                 tmdb_id = item["id"]
-                adult = item["adult"]
+                adult = item.get("adult")
                 video = item.get("video", False)
                 popularity = float(item.get("popularity", 0))
             except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
                 raise RuntimeError(f"invalid {media_type} export row {line_number}: {error}") from error
             if isinstance(tmdb_id, bool) or not isinstance(tmdb_id, int) or tmdb_id <= 0:
                 raise RuntimeError(f"invalid {media_type} id at row {line_number}")
-            if not isinstance(adult, bool) or not isinstance(video, bool):
+            if (
+                (adult is None and media_type != "tv")
+                or (adult is not None and not isinstance(adult, bool))
+                or not isinstance(video, bool)
+            ):
                 raise RuntimeError(f"invalid {media_type} flags at row {line_number}")
             if not 0 <= popularity < float("inf"):
                 raise RuntimeError(f"invalid {media_type} popularity at row {line_number}")
             if tmdb_id in seen_ids:
                 raise RuntimeError(f"duplicate {media_type} id {tmdb_id}")
             seen_ids.add(tmdb_id)
+            adult_value = "\\N" if adult is None else ("t" if adult else "f")
             output.write(
-                f"{media_type}\t{tmdb_id}\t{'t' if adult else 'f'}\t"
+                f"{media_type}\t{tmdb_id}\t{adult_value}\t"
                 f"{'t' if video else 'f'}\t{popularity}\n"
             )
             rows += 1
@@ -228,7 +233,7 @@ def copy_tsv(container: str, role: str, database: str, source: Path) -> None:
         role,
         database,
         "-c",
-        r"\copy catalog_external_ids_staging (media_type, tmdb_id, adult, video, popularity) FROM STDIN WITH (FORMAT csv, DELIMITER E'\t')",
+        r"\copy catalog_external_ids_staging (media_type, tmdb_id, adult, video, popularity) FROM STDIN WITH (FORMAT csv, DELIMITER E'\t', NULL '\N')",
     )
     with source.open("rb") as input_file:
         subprocess.run(command, stdin=input_file, check=True)
