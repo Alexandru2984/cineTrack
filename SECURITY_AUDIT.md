@@ -81,8 +81,12 @@ In the third round we reviewed the repo directly on the VPS/prod host and closed
 - A complete daily TMDB ID/title inventory is stored in PostgreSQL for local search. Import validation rejects duplicate IDs, malformed flags, invalid popularity values, blank/oversized titles, and control characters; C1 punctuation is repaired before the strict DB constraint is applied.
 - Local title search excludes adult/video entries and requires authentication. Catalog-only results do not create rows in the hydrated `media` cache and avoid upstream TMDB calls when a local match exists.
 - Detail hydration is limited to 200 sequential requests per day at four requests/second. It uses a database advisory lock, stops on provider/rate-limit failures, applies bounded retry backoff, refuses stale inventories, and revalidates successful entries every 30 days.
-- Production rollout was preceded and followed by verified R2 backups. The backend image runs non-root with a read-only filesystem, all Linux capabilities dropped, and no-new-privileges; Trivy reported zero HIGH/CRITICAL findings.
-- Production validation covered 164 backend unit tests, 72 PostgreSQL integration tests, 62 frontend tests, Clippy with warnings denied, `npm audit`, authenticated local-search smoke tests, and concurrent hydration locking.
+- Hydrated media now stores bounded TMDB translations and alternative titles in a constrained alias table. Search, detail, discovery, provider-cache keys, and frontend queries all honor a validated locale such as `ro-RO`; localized responses do not overwrite the canonical English title.
+- Authenticated discovery is generated entirely from PostgreSQL. Recommendations weight completed/watching/favorite/high-rated genres, exclude every already-tracked title and adult/video entries, and fall back to the daily local popularity inventory for cold-start accounts. The legacy TMDB `/trending` path was removed.
+- The dashboard now exposes horizontal, responsive shelves for personalized recommendations, popular movies, and popular shows. Tracking mutations invalidate discovery so the current title disappears from recommendations without waiting for cache expiry.
+- Production rollout was preceded and followed by verified R2 backups (`cinetrack_20260713_194933.sql.gz` and `cinetrack_20260713_200203.sql.gz`). The initial alias backfill completed 200/200 requests with no transient, invalid, or not-found results and stored 5,993 aliases across 193 titles.
+- The backend and frontend images run non-root with read-only filesystems, all Linux capabilities dropped, and no-new-privileges. Trivy reported zero HIGH/CRITICAL source, configuration, and image findings; gitleaks scanned 120 commits without a leak; Actionlint and Zizmor reported no workflow findings; ShellCheck is clean.
+- Production validation covered 167 passing backend unit tests (one credential-gated R2 test ignored), 73 PostgreSQL integration tests, 64 frontend tests, and 13 mocked-browser Playwright tests. Clippy ran with warnings denied, the complete npm audit reported zero vulnerabilities, authenticated localized-search and personalized-discovery smoke tests passed, and the public discovery response completed in 113 ms during the rollout check.
 
 ## Residual risks
 
@@ -94,7 +98,7 @@ In the third round we reviewed the repo directly on the VPS/prod host and closed
 - `/metrics` has no authentication; its protection is that it isn't proxied by Nginx, so it depends on the deploy network's isolation. If the backend port becomes directly reachable, the endpoint must be restricted.
 - `cargo audit` reports `RUSTSEC-2023-0071` via `sqlx-mysql` metadata in the lockfile, even though the build uses only the `postgres` feature. CI ignores it explicitly; revisit when `sqlx` resolves the lockfile.
 - SMTP is not configured in production, so password-reset emails cannot currently be delivered. Production correctly avoids logging the one-time reset URL, but the user-facing recovery flow remains operationally incomplete until SMTP is configured.
-- Browser E2E tests now exist at two levels: mocked (login/logout/refresh-401/forgot-password/error-boundary) and real-stack (HttpOnly cookie, refresh rotation, sessions, account deletion, reset with token). The tracking/episodes/lists flows remain uncovered by E2E (covered only by the backend integration tests).
+- Browser E2E tests now exist at two levels: mocked (login/logout/refresh-401/forgot-password/error-boundary/discovery layout) and real-stack (HttpOnly cookie, refresh rotation, sessions, account deletion, reset with token). The tracking/episodes/lists flows remain uncovered by E2E (covered only by the backend integration tests).
 - The secrets in `.env.prod` must be rotated if they were shown in a terminal, logs, or an audit transcript. In particular, avoid `docker compose config` without `--no-env-resolution` on machines or sessions that can persist the output.
 
 ## Next recommendations
@@ -118,6 +122,10 @@ In the third round we reviewed the repo directly on the VPS/prod host and closed
 - `npm run build`
 - `npm run test:e2e` (Playwright; it starts vite dev itself, backend mocked at the network layer)
 - `npm audit --omit=dev`
+- `docker run --rm -v "$PWD:/repo:ro" -w /repo rhysd/actionlint:latest`
+- `docker run --rm -v "$PWD:/repo:ro" -w /repo ghcr.io/zizmorcore/zizmor:latest .`
+- `docker run --rm -v "$PWD:/repo:ro" -w /repo koalaman/shellcheck:stable scripts/*.sh`
+- Trivy source/config and candidate-image scans with HIGH/CRITICAL findings configured to fail the command.
 - `docker compose -f docker-compose.prod.yml config --no-env-resolution --no-interpolate --quiet`
 - `docker run --rm --add-host backend:127.0.0.1 --add-host frontend:127.0.0.1 -v "$PWD/nginx/nginx.conf:/etc/nginx/nginx.conf:ro" -v /tmp/cinetrack-nginx-ssl:/etc/nginx/ssl:ro nginx:alpine nginx -t`
 - Nginx config validation: `nginx -t` (or in a container with dummy certificates)
