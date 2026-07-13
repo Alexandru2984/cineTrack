@@ -101,6 +101,7 @@ services:
       dockerfile: Dockerfile.prod
       args:
         VITE_API_URL: ${VITE_API_URL}
+        VITE_USE_R2_IMAGES: "${VITE_USE_R2_IMAGES:-false}"
     read_only: true
     tmpfs:
       # Writable by the non-root nginx user (uid 101); the tmpfs overlays the
