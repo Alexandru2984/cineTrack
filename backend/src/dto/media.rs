@@ -232,11 +232,6 @@ pub struct TmdbEpisode {
     pub still_path: Option<String>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct TmdbTrendingResponse {
-    pub results: Vec<TmdbSearchResult>,
-}
-
 /// `/find/{external_id}` groups matches by media type. Used to map TV Time's
 /// TVDB (shows) and IMDB (movies) ids onto TMDB ids during import.
 #[derive(Debug, Deserialize, Serialize, Default)]

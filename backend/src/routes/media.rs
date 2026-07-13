@@ -15,7 +15,6 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
     cfg.service(
         web::scope("/media")
             .route("/search", web::get().to(search))
-            .route("/trending", web::get().to(trending))
             .route("/discovery", web::get().to(discovery))
             .route("/{id}", web::get().to(get_detail))
             .route("/{id}/seasons", web::get().to(get_seasons))
@@ -169,16 +168,6 @@ async fn search(
         }
     };
 
-    Ok(HttpResponse::Ok().json(results))
-}
-
-async fn trending(
-    pool: web::Data<PgPool>,
-    tmdb: web::Data<TmdbService>,
-    req: HttpRequest,
-) -> Result<HttpResponse, AppError> {
-    require_auth(&req).await?;
-    let results = tmdb.get_trending_cached(pool.get_ref()).await?;
     Ok(HttpResponse::Ok().json(results))
 }
 

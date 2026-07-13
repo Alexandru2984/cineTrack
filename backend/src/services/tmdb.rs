@@ -20,8 +20,6 @@ const MAX_CONCURRENT_IMAGE_REQUESTS: usize = 8;
 const OUTBOUND_PERMIT_WAIT: Duration = Duration::from_secs(1);
 const SEARCH_CACHE_FRESH_HOURS: i64 = 24;
 const SEARCH_CACHE_STALE_DAYS: i64 = 30;
-const TRENDING_CACHE_FRESH_MINUTES: i64 = 30;
-const TRENDING_CACHE_STALE_HOURS: i64 = 24;
 const MAX_TITLE_ALIASES_PER_MEDIA: usize = 500;
 
 #[derive(sqlx::FromRow)]
@@ -709,85 +707,6 @@ impl TmdbService {
         self.send_api("season", request).await
     }
 
-    pub async fn get_trending(&self) -> Result<TmdbTrendingResponse, AppError> {
-        let request = self.authed(
-            self.client
-                .get(format!("{}/trending/all/week", self.base_url))
-                .query(&[("language", "en-US")]),
-        );
-        self.send_api("trending", request).await
-    }
-
-    pub async fn get_trending_cached(
-        &self,
-        pool: &PgPool,
-    ) -> Result<TmdbTrendingResponse, AppError> {
-        let cache_key = Self::provider_cache_key("trending", &["all", "week", "en-US"]);
-        let cached =
-            match Self::load_provider_response::<TmdbTrendingResponse>(pool, &cache_key).await {
-                Ok(cached) => cached,
-                Err(error) => {
-                    crate::metrics::record_tmdb_cache("trending", "read_error");
-                    log::warn!("TMDB trending cache lookup failed: {error}");
-                    None
-                }
-            };
-
-        if let Some(entry) = &cached {
-            if entry.expires_at > Utc::now() {
-                crate::metrics::record_tmdb_cache("trending", "hit");
-                return Ok(entry.value.clone());
-            }
-        }
-
-        let _refresh_guard = self.acquire_request_lock(&cache_key).await;
-        let cached =
-            match Self::load_provider_response::<TmdbTrendingResponse>(pool, &cache_key).await {
-                Ok(cached) => cached,
-                Err(error) => {
-                    crate::metrics::record_tmdb_cache("trending", "read_error");
-                    log::warn!("TMDB trending cache recheck failed: {error}");
-                    cached
-                }
-            };
-        if let Some(entry) = &cached {
-            if entry.expires_at > Utc::now() {
-                crate::metrics::record_tmdb_cache("trending", "hit");
-                return Ok(entry.value.clone());
-            }
-        }
-        crate::metrics::record_tmdb_cache("trending", "miss");
-
-        match self.get_trending().await {
-            Ok(response) => {
-                if let Err(error) = Self::store_provider_response(
-                    pool,
-                    &cache_key,
-                    "trending",
-                    &response,
-                    chrono::Duration::minutes(TRENDING_CACHE_FRESH_MINUTES),
-                    chrono::Duration::hours(TRENDING_CACHE_STALE_HOURS),
-                )
-                .await
-                {
-                    crate::metrics::record_tmdb_cache("trending", "write_error");
-                    log::warn!("TMDB trending cache write failed: {error}");
-                }
-                Ok(response)
-            }
-            Err(error) => {
-                if let Some(entry) = cached {
-                    if entry.stale_until > Utc::now() {
-                        crate::metrics::record_tmdb_cache("trending", "stale");
-                        log::warn!("Serving stale TMDB trending response after upstream failure");
-                        return Ok(entry.value);
-                    }
-                }
-                Err(error)
-            }
-        }
-    }
-
     /// Map an external id (TVDB/IMDB) to TMDB via `/find`. `source` is e.g.
     /// "tvdb_id" or "imdb_id". Returns matches grouped by media type.
     pub async fn find_by_external_id(
@@ -1305,7 +1224,7 @@ mod tests {
         config.tmdb_base_url = base_url;
         let service = TmdbService::new(&config);
 
-        let result = service.get_trending().await;
+        let result = service.get_movie_detail(1).await;
 
         assert!(matches!(result, Err(AppError::TmdbError(_))));
     }
@@ -1321,8 +1240,8 @@ mod tests {
         config.tmdb_base_url = base_url;
         let service = TmdbService::new(&config);
 
-        let first = service.get_trending().await;
-        let second = service.clone().get_trending().await;
+        let first = service.get_movie_detail(1).await;
+        let second = service.clone().get_movie_detail(1).await;
 
         assert!(matches!(first, Err(AppError::ServiceUnavailable(_))));
         assert!(matches!(second, Err(AppError::ServiceUnavailable(_))));
@@ -1338,7 +1257,7 @@ mod tests {
         );
 
         let api_permit = service.acquire_api_permit().await.unwrap();
-        let result = service.clone().get_trending().await;
+        let result = service.clone().get_movie_detail(1).await;
         assert!(matches!(result, Err(AppError::ServiceUnavailable(_))));
         drop(api_permit);
         assert!(service.acquire_api_permit().await.is_ok());
@@ -1371,7 +1290,7 @@ mod tests {
         config.tmdb_base_url = base_url;
         let service = TmdbService::new(&config);
 
-        let result = service.get_trending().await;
+        let result = service.get_movie_detail(1).await;
 
         assert!(matches!(result, Err(AppError::TmdbError(_))));
         assert!(
