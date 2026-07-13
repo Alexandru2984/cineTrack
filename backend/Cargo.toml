@@ -28,7 +28,7 @@ log = "0.4"
 env_logger = "0.11"
 anyhow = "1"
 lettre = { version = "0.11", default-features = false, features = ["builder", "smtp-transport", "tokio1-rustls-tls", "hostname"] }
-actix-web-prom = "0.9"
+actix-web-prom = "0.10"
 prometheus = { version = "0.13", default-features = false }
 aws-sdk-s3 = { version = "=1.124.0", default-features = false, features = ["behavior-version-latest", "default-https-client", "http-1x", "rt-tokio"] }
 aws-smithy-types = "=1.4.5"
