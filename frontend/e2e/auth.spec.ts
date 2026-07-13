@@ -183,6 +183,50 @@ test('shows followed episode activity on the dashboard', async ({ page }) => {
   ).toBe(true);
 });
 
+test('discovers and follows people from search', async ({ page }) => {
+  await stubSession(page);
+  await stubAuthedReads(page);
+  let followRequests = 0;
+  await page.route('**/api/users/search**', (route) =>
+    route.fulfill({
+      json: {
+        page: 1,
+        has_more: false,
+        results: [
+          {
+            id: '00000000-0000-4000-8000-000000000020',
+            username: 'alpha_user',
+            avatar_url: null,
+            bio: 'Tracks science fiction shows',
+            is_public: true,
+            followers_count: 4,
+            follow_status: null,
+          },
+        ],
+      },
+    })
+  );
+  await page.route('**/api/users/alpha_user/follow', (route) => {
+    followRequests += 1;
+    return route.fulfill({ json: { status: 'accepted' } });
+  });
+
+  await page.goto('/search');
+  await page.getByRole('tab', { name: 'People' }).click();
+  await page.getByLabel('Search people').fill('alpha');
+
+  await expect(page.getByRole('link', { name: 'alpha_user', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Follow alpha_user' }).click();
+  expect(followRequests).toBe(1);
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= document.documentElement.clientWidth
+    )
+  ).toBe(true);
+});
+
 test('logs out and returns to the login page', async ({ page }) => {
   await stubSession(page);
   await stubAuthedReads(page);

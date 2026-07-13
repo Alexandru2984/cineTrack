@@ -1,6 +1,12 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '@/lib/api';
-import type { PublicUserProfile, ActivityItem, UserSummary, FollowRequest } from '@/types';
+import type {
+  PublicUserProfile,
+  ActivityItem,
+  UserSummary,
+  FollowRequest,
+  UserSearchResponse,
+} from '@/types';
 
 export function useUserProfile(username: string) {
   return useQuery<PublicUserProfile>({
@@ -35,6 +41,20 @@ export function useActivityFeed(limit = 10) {
   });
 }
 
+export function useUserSearch(query: string, page = 1, limit = 20) {
+  return useQuery<UserSearchResponse>({
+    queryKey: ['user-search', query, page, limit],
+    queryFn: async () => {
+      const response = await api.get('/users/search', {
+        params: { q: query, page, limit },
+      });
+      return response.data;
+    },
+    enabled: query.length >= 2,
+    placeholderData: (previous) => previous,
+  });
+}
+
 export function useFollow() {
   const qc = useQueryClient();
   return useMutation({
@@ -46,6 +66,7 @@ export function useFollow() {
     },
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['user'] });
+      void qc.invalidateQueries({ queryKey: ['user-search'] });
       void qc.invalidateQueries({ queryKey: ['activity', 'feed'] });
     },
   });
@@ -59,6 +80,7 @@ export function useUnfollow() {
     },
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['user'] });
+      void qc.invalidateQueries({ queryKey: ['user-search'] });
       void qc.invalidateQueries({ queryKey: ['activity', 'feed'] });
     },
   });

@@ -151,6 +151,22 @@ export interface FollowRequest {
   requested_at: string;
 }
 
+export interface UserSearchResult {
+  id: string;
+  username: string;
+  avatar_url: string | null;
+  bio: string | null;
+  is_public: boolean;
+  followers_count: number;
+  follow_status: 'pending' | 'accepted' | null;
+}
+
+export interface UserSearchResponse {
+  results: UserSearchResult[];
+  page: number;
+  has_more: boolean;
+}
+
 export interface ActivityItem {
   id: string;
   user_id: string;
