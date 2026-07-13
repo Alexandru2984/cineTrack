@@ -1770,6 +1770,15 @@ async fn test_media_search_uses_fresh_and_stale_provider_cache() {
     let body: Value = actix_test::read_body_json(first).await;
     assert_eq!(body["results"][0]["id"], 616161);
     upstream.await.unwrap();
+    assert_eq!(
+        sqlx::query_scalar::<_, String>(
+            "SELECT metadata_level FROM media WHERE tmdb_id = 616161 AND media_type = 'movie'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap(),
+        "summary"
+    );
 
     // Normalization collapses whitespace and case, so this is the same key.
     let fresh = actix_test::call_service(
@@ -1821,6 +1830,128 @@ async fn test_media_search_uses_fresh_and_stale_provider_cache() {
     assert!(metrics.contains("cinetrack_tmdb_request_duration_seconds"));
     assert!(metrics.contains("cinetrack_tmdb_cache_events_total"));
     assert!(metrics.contains("endpoint=\"search\",outcome=\"2xx\"} 1"));
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn test_local_catalog_search_skips_or_replaces_unavailable_provider() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let mut config = test_config();
+    config.tmdb_base_url = "http://127.0.0.1:9".to_string();
+    config.tmdb_timeout_seconds = 1;
+    let app = actix_test::init_service(create_app_with_config(pool.clone(), config)).await;
+    let (token, _, _) =
+        register_user(&app, "localsearch", "localsearch@example.com", "Pass1234").await;
+    sqlx::query(
+        r#"INSERT INTO media (tmdb_id, media_type, title, metadata_level)
+        SELECT 620000 + value, 'movie', 'Offline Matrix ' || value, 'summary'
+        FROM generate_series(1, 20) AS value"#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO media (tmdb_id, media_type, title, metadata_level) VALUES (620100, 'movie', 'Fallback Film', 'summary')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let request = |query: &'static str| {
+        actix_test::TestRequest::get()
+            .uri(query)
+            .insert_header(("Authorization", format!("Bearer {token}")))
+            .peer_addr(peer_addr())
+            .to_request()
+    };
+    let full_page = actix_test::call_service(
+        &app,
+        request("/api/media/search?q=Offline%20Matrix&type=movie&page=1"),
+    )
+    .await;
+    assert_eq!(full_page.status(), 200);
+    let full_page: Value = actix_test::read_body_json(full_page).await;
+    assert_eq!(full_page["results"].as_array().unwrap().len(), 20);
+
+    let fallback = actix_test::call_service(
+        &app,
+        request("/api/media/search?q=Fallback%20Film&type=movie&page=1"),
+    )
+    .await;
+    assert_eq!(fallback.status(), 200);
+    let fallback: Value = actix_test::read_body_json(fallback).await;
+    assert_eq!(fallback["results"][0]["title"], "Fallback Film");
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM provider_response_cache")
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+        0
+    );
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn test_summary_media_is_hydrated_before_detail_response() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let upstream = actix_web::rt::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let mut request = vec![0_u8; 4096];
+        let read = stream.read(&mut request).await.unwrap();
+        assert!(String::from_utf8_lossy(&request[..read]).starts_with("GET /movie/630001?"));
+        let body = r#"{
+            "id": 630001,
+            "title": "Hydrated Film",
+            "overview": "Complete detail",
+            "release_date": "2026-07-13",
+            "status": "Released",
+            "genres": [],
+            "runtime": 101,
+            "vote_average": 8.1
+        }"#;
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        stream.write_all(response.as_bytes()).await.unwrap();
+    });
+
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    sqlx::query(
+        "INSERT INTO media (tmdb_id, media_type, title, metadata_level) VALUES (630001, 'movie', 'Hydrated Film', 'summary')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let mut config = test_config();
+    config.tmdb_base_url = format!("http://{address}");
+    let app = actix_test::init_service(create_app_with_config(pool.clone(), config)).await;
+    let (token, _, _) = register_user(&app, "hydrate", "hydrate@example.com", "Pass1234").await;
+
+    let req = actix_test::TestRequest::get()
+        .uri("/api/media/630001?type=movie")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let response = actix_test::call_service(&app, req).await;
+    assert_eq!(response.status(), 200);
+    let detail: Value = actix_test::read_body_json(response).await;
+    assert_eq!(detail["overview"], "Complete detail");
+    assert_eq!(detail["runtime_minutes"], 101);
+    assert_eq!(
+        sqlx::query_scalar::<_, String>("SELECT metadata_level FROM media WHERE tmdb_id = 630001")
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+        "detail"
+    );
+    upstream.await.unwrap();
 }
 
 #[actix_web::test]

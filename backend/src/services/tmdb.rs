@@ -18,8 +18,8 @@ const MAX_API_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
 const MAX_CONCURRENT_API_REQUESTS: usize = 16;
 const MAX_CONCURRENT_IMAGE_REQUESTS: usize = 8;
 const OUTBOUND_PERMIT_WAIT: Duration = Duration::from_secs(1);
-const SEARCH_CACHE_FRESH_HOURS: i64 = 6;
-const SEARCH_CACHE_STALE_DAYS: i64 = 7;
+const SEARCH_CACHE_FRESH_HOURS: i64 = 24;
+const SEARCH_CACHE_STALE_DAYS: i64 = 30;
 const TRENDING_CACHE_FRESH_MINUTES: i64 = 30;
 const TRENDING_CACHE_STALE_HOURS: i64 = 24;
 
@@ -727,7 +727,7 @@ impl TmdbService {
 
         if let Some(media) = &cached {
             let age = Utc::now() - media.tmdb_cached_at;
-            if age.num_hours() < 24 {
+            if media.metadata_level == "detail" && age.num_hours() < 24 {
                 Self::touch_media(pool, media.id).await?;
                 crate::metrics::record_tmdb_cache(cache_name, "hit");
                 return Ok(media.clone());
@@ -745,7 +745,7 @@ impl TmdbService {
         .await?;
         if let Some(media) = &cached {
             let age = Utc::now() - media.tmdb_cached_at;
-            if age.num_hours() < 24 {
+            if media.metadata_level == "detail" && age.num_hours() < 24 {
                 Self::touch_media(pool, media.id).await?;
                 crate::metrics::record_tmdb_cache(cache_name, "hit");
                 return Ok(media.clone());
@@ -756,7 +756,7 @@ impl TmdbService {
         match self.refresh_media_unlocked(pool, tmdb_id, media_type).await {
             Ok(media) => Ok(media),
             Err(error) => {
-                if let Some(media) = cached {
+                if let Some(media) = cached.filter(|media| media.metadata_level == "detail") {
                     Self::touch_media(pool, media.id).await?;
                     crate::metrics::record_tmdb_cache(cache_name, "stale");
                     log::warn!(
@@ -784,10 +784,10 @@ impl TmdbService {
             .map(|g| serde_json::to_value(g).unwrap_or_default());
 
         let media = sqlx::query_as::<_, Media>(
-            r#"INSERT INTO media (tmdb_id, media_type, title, original_title, overview, poster_path, backdrop_path, release_date, status, genres, runtime_minutes, tmdb_vote_average, tmdb_cached_at, last_accessed_at)
-            VALUES ($1, 'movie', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW(), NOW())
+            r#"INSERT INTO media (tmdb_id, media_type, title, original_title, overview, poster_path, backdrop_path, release_date, status, genres, runtime_minutes, tmdb_vote_average, tmdb_cached_at, last_accessed_at, metadata_level)
+            VALUES ($1, 'movie', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW(), NOW(), 'detail')
             ON CONFLICT (tmdb_id, media_type)
-            DO UPDATE SET title = $2, original_title = $3, overview = $4, poster_path = $5, backdrop_path = $6, release_date = $7, status = $8, genres = $9, runtime_minutes = $10, tmdb_vote_average = $11, tmdb_cached_at = NOW(), last_accessed_at = NOW()
+            DO UPDATE SET title = $2, original_title = $3, overview = $4, poster_path = $5, backdrop_path = $6, release_date = $7, status = $8, genres = $9, runtime_minutes = $10, tmdb_vote_average = $11, tmdb_cached_at = NOW(), last_accessed_at = NOW(), metadata_level = 'detail'
             RETURNING *"#
         )
         .bind(detail.id)
@@ -823,10 +823,10 @@ impl TmdbService {
 
         let mut tx = pool.begin().await?;
         let media = sqlx::query_as::<_, Media>(
-            r#"INSERT INTO media (tmdb_id, media_type, title, original_title, overview, poster_path, backdrop_path, release_date, status, genres, runtime_minutes, tmdb_vote_average, tmdb_cached_at, last_accessed_at)
-            VALUES ($1, 'tv', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW(), NOW())
+            r#"INSERT INTO media (tmdb_id, media_type, title, original_title, overview, poster_path, backdrop_path, release_date, status, genres, runtime_minutes, tmdb_vote_average, tmdb_cached_at, last_accessed_at, metadata_level)
+            VALUES ($1, 'tv', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW(), NOW(), 'detail')
             ON CONFLICT (tmdb_id, media_type)
-            DO UPDATE SET title = $2, original_title = $3, overview = $4, poster_path = $5, backdrop_path = $6, release_date = $7, status = $8, genres = $9, runtime_minutes = $10, tmdb_vote_average = $11, tmdb_cached_at = NOW(), last_accessed_at = NOW()
+            DO UPDATE SET title = $2, original_title = $3, overview = $4, poster_path = $5, backdrop_path = $6, release_date = $7, status = $8, genres = $9, runtime_minutes = $10, tmdb_vote_average = $11, tmdb_cached_at = NOW(), last_accessed_at = NOW(), metadata_level = 'detail'
             RETURNING *"#
         )
         .bind(detail.id)

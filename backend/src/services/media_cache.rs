@@ -4,12 +4,13 @@ use sqlx::PgPool;
 
 const PRUNE_INTERVAL: Duration = Duration::from_secs(15 * 60);
 const MAX_PROVIDER_CACHE_ROWS: i64 = 10_000;
+const MAX_UNREFERENCED_MEDIA_ROWS: i64 = 250_000;
 
 /// Remove locally browsed media after the provider-safe retention window when
 /// no user data references it. Active imports pause the sweep because their
 /// media rows are resolved before the final bulk commit.
 pub async fn prune_orphaned_media(pool: &PgPool) -> Result<u64, sqlx::Error> {
-    let deleted = sqlx::query(
+    let expired = sqlx::query(
         r#"DELETE FROM media m
         WHERE m.last_accessed_at < NOW() - INTERVAL '175 days'
           AND NOT EXISTS (
@@ -23,7 +24,29 @@ pub async fn prune_orphaned_media(pool: &PgPool) -> Result<u64, sqlx::Error> {
     .await?
     .rows_affected();
 
-    Ok(deleted)
+    let overflow = sqlx::query(
+        r#"WITH cold_rows AS (
+            SELECT m.id
+            FROM media m
+            WHERE NOT EXISTS (
+                    SELECT 1 FROM import_jobs WHERE status IN ('pending', 'running')
+                )
+              AND NOT EXISTS (SELECT 1 FROM user_media um WHERE um.media_id = m.id)
+              AND NOT EXISTS (SELECT 1 FROM watch_history wh WHERE wh.media_id = m.id)
+              AND NOT EXISTS (SELECT 1 FROM list_items li WHERE li.media_id = m.id)
+            ORDER BY m.last_accessed_at DESC, m.id
+            OFFSET $1
+        )
+        DELETE FROM media m
+        USING cold_rows
+        WHERE m.id = cold_rows.id"#,
+    )
+    .bind(MAX_UNREFERENCED_MEDIA_ROWS)
+    .execute(pool)
+    .await?
+    .rows_affected();
+
+    Ok(expired + overflow)
 }
 
 /// Remove expired provider responses and evict the coldest rows above the

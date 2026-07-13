@@ -7,6 +7,7 @@ use crate::dto::media::*;
 use crate::errors::AppError;
 use crate::middleware::auth::require_auth;
 use crate::models::{Episode, Media, Season};
+use crate::services::catalog;
 use crate::services::tmdb::TmdbService;
 
 pub fn configure(cfg: &mut web::ServiceConfig) {
@@ -101,14 +102,53 @@ async fn search(
 ) -> Result<HttpResponse, AppError> {
     require_auth(&req).await?;
     query.validate()?;
-    let results = tmdb
+    let page = query.page.unwrap_or(1);
+    let local =
+        match catalog::search_local(pool.get_ref(), &query.q, query.media_type.as_deref(), page)
+            .await
+        {
+            Ok(response) => Some(response),
+            Err(error) => {
+                log::warn!("Local catalog search failed: {error}");
+                None
+            }
+        };
+    if let Some(response) = local
+        .as_ref()
+        .filter(|response| catalog::page_is_local(response))
+    {
+        crate::metrics::record_tmdb_cache("local_search", "hit");
+        return Ok(HttpResponse::Ok().json(response));
+    }
+
+    let provider = tmdb
         .search_cached(
             pool.get_ref(),
             &query.q,
             query.media_type.as_deref(),
-            query.page,
+            Some(page),
         )
-        .await?;
+        .await;
+    let results = match provider {
+        Ok(results) => {
+            if let Err(error) =
+                catalog::cache_search_results(pool.get_ref(), &results, query.media_type.as_deref())
+                    .await
+            {
+                log::warn!("Could not cache TMDB search summaries: {error}");
+            }
+            results
+        }
+        Err(error) => {
+            if let Some(response) = local.filter(|response| !response.results.is_empty()) {
+                crate::metrics::record_tmdb_cache("local_search", "fallback");
+                log::warn!("Serving local catalog results after TMDB search failure");
+                response
+            } else {
+                return Err(error);
+            }
+        }
+    };
 
     Ok(HttpResponse::Ok().json(results))
 }

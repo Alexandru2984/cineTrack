@@ -20,6 +20,7 @@ pub struct Media {
     pub tmdb_vote_average: Option<f64>,
     pub tmdb_cached_at: DateTime<Utc>,
     pub last_accessed_at: DateTime<Utc>,
+    pub metadata_level: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
