@@ -2814,6 +2814,20 @@ async fn test_tracked_release_schedule_sync_persists_episodes_and_cadence() {
                     }]
                 }"#,
             ),
+            (
+                "/movie/770002/release_dates?",
+                "200 OK",
+                r#"{
+                    "id": 770002,
+                    "results": [{
+                        "iso_3166_1": "RO",
+                        "release_dates": [{
+                            "release_date": "2026-09-01T00:00:00.000Z",
+                            "type": 4
+                        }]
+                    }]
+                }"#,
+            ),
         ];
 
         for (expected_path, status, body) in responses {
@@ -2859,6 +2873,24 @@ async fn test_tracked_release_schedule_sync_persists_episodes_and_cadence() {
     .execute(&pool)
     .await
     .unwrap();
+    let movie_id = sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO media
+            (tmdb_id, media_type, title, release_date, status, metadata_level)
+        VALUES (770002, 'movie', 'Old Planned Movie', '2001-01-01', 'Released', 'detail')
+        RETURNING id"#,
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO user_media (user_id, media_id, status)
+        VALUES ($1, $2, 'plan_to_watch')"#,
+    )
+    .bind(user_id)
+    .bind(movie_id)
+    .execute(&pool)
+    .await
+    .unwrap();
 
     let mut config = test_config();
     config.tmdb_base_url = format!("http://{address}");
@@ -2874,10 +2906,12 @@ async fn test_tracked_release_schedule_sync_persists_episodes_and_cadence() {
     assert_eq!(
         summary,
         ReleaseScheduleSummary {
-            selected: 1,
-            succeeded: 1,
+            selected: 2,
+            succeeded: 2,
             tv_titles: 1,
+            movie_titles: 1,
             refreshed_seasons: 1,
+            cached_movie_dates: 1,
             ..ReleaseScheduleSummary::default()
         }
     );
@@ -2902,6 +2936,24 @@ async fn test_tracked_release_schedule_sync_persists_episodes_and_cadence() {
             WHERE media_id = $1"#,
     )
     .bind(media_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap());
+    assert!(sqlx::query_scalar::<_, bool>(
+        r#"SELECT EXISTS (
+                SELECT 1 FROM media_release_dates
+                WHERE media_id = $1
+                  AND country_code = 'RO'
+                  AND release_type = 4
+                  AND release_date = '2026-09-01'
+            ) AND EXISTS (
+                SELECT 1 FROM release_schedule_sync_state
+                WHERE media_id = $1
+                  AND outcome = 'success'
+                  AND next_attempt_at >= NOW() + INTERVAL '29 days'
+            )"#,
+    )
+    .bind(movie_id)
     .fetch_one(&pool)
     .await
     .unwrap());

@@ -156,10 +156,6 @@ async fn candidates(
                       WHERE tracked.media_id = media.id
                         AND tracked.status = 'plan_to_watch'
                   )
-                  AND (
-                      media.release_date IS NULL
-                      OR media.release_date >= CURRENT_DATE - 30
-                  )
               )
           )
         ORDER BY
