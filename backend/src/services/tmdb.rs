@@ -21,6 +21,7 @@ const OUTBOUND_PERMIT_WAIT: Duration = Duration::from_secs(1);
 const SEARCH_CACHE_FRESH_HOURS: i64 = 24;
 const SEARCH_CACHE_STALE_DAYS: i64 = 30;
 const MAX_TITLE_ALIASES_PER_MEDIA: usize = 500;
+const MAX_RELEASE_DATES_PER_MOVIE: usize = 2_000;
 
 #[derive(sqlx::FromRow)]
 struct ProviderCacheRow {
@@ -40,6 +41,12 @@ struct TitleAlias {
     language_code: String,
     region_code: String,
     title: String,
+}
+
+struct RegionalReleaseDate {
+    country_code: String,
+    release_type: i16,
+    release_date: NaiveDate,
 }
 
 pub(crate) fn is_valid_external_lookup_id(external_id: &str, source: &str) -> bool {
@@ -707,6 +714,20 @@ impl TmdbService {
         self.send_api("season", request).await
     }
 
+    pub async fn get_movie_release_dates(
+        &self,
+        tmdb_id: i32,
+    ) -> Result<TmdbMovieReleaseDates, AppError> {
+        if tmdb_id <= 0 {
+            return Err(AppError::BadRequest("Invalid TMDB ID".to_string()));
+        }
+        let request = self.authed(
+            self.client
+                .get(format!("{}/movie/{}/release_dates", self.base_url, tmdb_id)),
+        );
+        self.send_api("movie_release_dates", request).await
+    }
+
     /// Map an external id (TVDB/IMDB) to TMDB via `/find`. `source` is e.g.
     /// "tvdb_id" or "imdb_id". Returns matches grouped by media type.
     pub async fn find_by_external_id(
@@ -937,6 +958,86 @@ impl TmdbService {
         .await?;
         tx.commit().await?;
         Ok(media)
+    }
+
+    fn collect_release_dates(response: &TmdbMovieReleaseDates) -> Vec<RegionalReleaseDate> {
+        let mut seen = HashSet::new();
+        let mut releases = Vec::new();
+
+        for country in &response.results {
+            let country_code = country.iso_3166_1.trim().to_ascii_uppercase();
+            if country_code.len() != 2
+                || !country_code.bytes().all(|byte| byte.is_ascii_uppercase())
+            {
+                continue;
+            }
+
+            for release in &country.release_dates {
+                if !(1..=6).contains(&release.release_type) {
+                    continue;
+                }
+                let Some(raw_date) = release.release_date.get(..10) else {
+                    continue;
+                };
+                let Ok(release_date) = NaiveDate::parse_from_str(raw_date, "%Y-%m-%d") else {
+                    continue;
+                };
+                let key = (country_code.clone(), release.release_type, release_date);
+                if seen.insert(key.clone()) {
+                    releases.push(RegionalReleaseDate {
+                        country_code: key.0,
+                        release_type: key.1,
+                        release_date: key.2,
+                    });
+                }
+                if releases.len() == MAX_RELEASE_DATES_PER_MOVIE {
+                    return releases;
+                }
+            }
+        }
+        releases
+    }
+
+    pub async fn refresh_movie_release_dates(
+        &self,
+        pool: &PgPool,
+        media: &Media,
+    ) -> Result<usize, AppError> {
+        if media.media_type != "movie" || media.tmdb_id <= 0 {
+            return Err(AppError::BadRequest(
+                "Release dates require a valid movie".to_string(),
+            ));
+        }
+
+        let response = self.get_movie_release_dates(media.tmdb_id).await?;
+        if response.id != media.tmdb_id {
+            return Err(AppError::TmdbError(
+                "External release data did not match the requested movie".to_string(),
+            ));
+        }
+        let releases = Self::collect_release_dates(&response);
+        let mut tx = pool.begin().await?;
+        sqlx::query("DELETE FROM media_release_dates WHERE media_id = $1")
+            .bind(media.id)
+            .execute(&mut *tx)
+            .await?;
+
+        if !releases.is_empty() {
+            let mut query = QueryBuilder::<Postgres>::new(
+                "INSERT INTO media_release_dates \
+                 (media_id, country_code, release_type, release_date) ",
+            );
+            query.push_values(&releases, |mut row, release| {
+                row.push_bind(media.id)
+                    .push_bind(&release.country_code)
+                    .push_bind(release.release_type)
+                    .push_bind(release.release_date);
+            });
+            query.build().execute(&mut *tx).await?;
+        }
+
+        tx.commit().await?;
+        Ok(releases.len())
     }
 
     async fn upsert_tv(&self, pool: &PgPool, detail: &TmdbTvDetail) -> Result<Media, AppError> {
@@ -1208,6 +1309,49 @@ mod tests {
             Some("Film Românesc".to_string())
         );
         assert!(TmdbService::normalize_alias_title(&"x".repeat(501)).is_none());
+    }
+
+    #[test]
+    fn regional_release_dates_are_validated_and_deduplicated() {
+        let response = TmdbMovieReleaseDates {
+            id: 42,
+            results: vec![
+                TmdbCountryReleaseDates {
+                    iso_3166_1: "ro".to_string(),
+                    release_dates: vec![
+                        TmdbReleaseDate {
+                            release_date: "2026-08-14T00:00:00.000Z".to_string(),
+                            release_type: 3,
+                        },
+                        TmdbReleaseDate {
+                            release_date: "2026-08-14T12:00:00.000Z".to_string(),
+                            release_type: 3,
+                        },
+                        TmdbReleaseDate {
+                            release_date: "not-a-date".to_string(),
+                            release_type: 4,
+                        },
+                    ],
+                },
+                TmdbCountryReleaseDates {
+                    iso_3166_1: "INVALID".to_string(),
+                    release_dates: vec![TmdbReleaseDate {
+                        release_date: "2026-08-15T00:00:00.000Z".to_string(),
+                        release_type: 9,
+                    }],
+                },
+            ],
+        };
+
+        let releases = TmdbService::collect_release_dates(&response);
+
+        assert_eq!(releases.len(), 1);
+        assert_eq!(releases[0].country_code, "RO");
+        assert_eq!(releases[0].release_type, 3);
+        assert_eq!(
+            releases[0].release_date,
+            NaiveDate::from_ymd_opt(2026, 8, 14).unwrap()
+        );
     }
 
     #[tokio::test]

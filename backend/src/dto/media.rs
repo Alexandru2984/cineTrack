@@ -232,6 +232,27 @@ pub struct TmdbEpisode {
     pub still_path: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct TmdbMovieReleaseDates {
+    pub id: i32,
+    #[serde(default)]
+    pub results: Vec<TmdbCountryReleaseDates>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TmdbCountryReleaseDates {
+    pub iso_3166_1: String,
+    #[serde(default)]
+    pub release_dates: Vec<TmdbReleaseDate>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TmdbReleaseDate {
+    pub release_date: String,
+    #[serde(rename = "type")]
+    pub release_type: i16,
+}
+
 /// `/find/{external_id}` groups matches by media type. Used to map TV Time's
 /// TVDB (shows) and IMDB (movies) ids onto TMDB ids during import.
 #[derive(Debug, Deserialize, Serialize, Default)]
