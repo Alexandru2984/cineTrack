@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import {
   BarChart3,
   Bell,
+  CalendarDays,
   CheckCheck,
   Film,
   LogOut,
@@ -16,6 +17,7 @@ import {
 } from 'lucide-react';
 import { NotificationList } from '@/components/NotificationList';
 import { useLogout } from '@/hooks/useAuth';
+import { useCalendarSummary } from '@/hooks/useCalendar';
 import {
   useMarkAllNotificationsRead,
   useMarkNotificationRead,
@@ -50,9 +52,11 @@ export function Navbar() {
   const authed = isAuthenticated();
   const logoutMutation = useLogout();
   const notificationSummary = useNotificationSummary(authed);
+  const calendarSummary = useCalendarSummary(authed);
   const markRead = useMarkNotificationRead();
   const markAllRead = useMarkAllNotificationsRead();
   const unreadCount = notificationSummary.data?.unread_count ?? 0;
+  const newEpisodeCount = calendarSummary.data?.new_count ?? 0;
 
   useEffect(() => {
     if (!notificationsOpen) return;
@@ -111,6 +115,17 @@ export function Navbar() {
                 className="flex items-center gap-1 text-sm transition-colors hover:text-[hsl(var(--primary))]"
               >
                 <BarChart3 className="h-4 w-4" /> My List
+              </Link>
+              <Link
+                to="/calendar"
+                className="flex items-center gap-1 text-sm transition-colors hover:text-cyan-600 dark:hover:text-cyan-400"
+              >
+                <CalendarDays className="h-4 w-4" /> Calendar
+                {newEpisodeCount > 0 && (
+                  <span className="ml-0.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-cyan-600 px-1 text-[10px] font-semibold leading-none text-white">
+                    {newEpisodeCount > 99 ? '99+' : newEpisodeCount}
+                  </span>
+                )}
               </Link>
               <Link
                 to="/stats"
@@ -268,6 +283,18 @@ export function Navbar() {
                   onClick={() => setMobileOpen(false)}
                 >
                   Search
+                </Link>
+                <Link
+                  to="/calendar"
+                  className="flex items-center justify-between py-2 text-sm"
+                  onClick={() => setMobileOpen(false)}
+                >
+                  <span>Calendar</span>
+                  {newEpisodeCount > 0 && (
+                    <span className="rounded-full bg-cyan-600 px-2 py-0.5 text-xs font-semibold text-white">
+                      {newEpisodeCount > 99 ? '99+' : newEpisodeCount}
+                    </span>
+                  )}
                 </Link>
                 <Link
                   to="/tracking"

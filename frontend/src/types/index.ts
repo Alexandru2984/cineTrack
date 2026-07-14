@@ -113,6 +113,79 @@ export interface HistoryItem {
   watched_at: string;
 }
 
+export interface CalendarEpisode {
+  episode_id: string;
+  media_id: string;
+  tmdb_id: number;
+  title: string;
+  poster_path: string | null;
+  season_number: number;
+  episode_number: number;
+  episode_name: string | null;
+  overview: string | null;
+  runtime_minutes: number | null;
+  air_date: string;
+  still_path: string | null;
+  is_planned: boolean;
+}
+
+export interface EpisodeCursor {
+  before_date: string;
+  before_id: string;
+}
+
+export interface CalendarEpisodePage {
+  items: CalendarEpisode[];
+  next_cursor: EpisodeCursor | null;
+}
+
+export type UpcomingItemKind = 'episode' | 'movie';
+
+export interface UpcomingCalendarItem {
+  item_kind: UpcomingItemKind;
+  item_id: string;
+  media_id: string;
+  tmdb_id: number;
+  title: string;
+  poster_path: string | null;
+  release_date: string;
+  release_type: number | null;
+  season_number: number | null;
+  episode_number: number | null;
+  episode_name: string | null;
+  still_path: string | null;
+  is_planned: boolean;
+}
+
+export interface UpcomingCursor {
+  after_date: string;
+  after_kind: UpcomingItemKind;
+  after_key: string;
+}
+
+export interface UpcomingCalendarPage {
+  items: UpcomingCalendarItem[];
+  next_cursor: UpcomingCursor | null;
+  country_code: string;
+}
+
+export interface CalendarSummary {
+  new_count: number;
+  planned_count: number;
+  last_synced_at: string | null;
+}
+
+export interface CalendarPreferences {
+  country_code: string;
+}
+
+export interface CalendarWatchResponse {
+  history_id: string;
+  media_id: string;
+  episode_id: string;
+  already_watched: boolean;
+}
+
 export interface UserStats {
   total_movies: number;
   total_shows: number;

@@ -13,6 +13,7 @@ const ForgotPasswordPage = lazy(() => import('@/pages/ForgotPassword'));
 const ResetPasswordPage = lazy(() => import('@/pages/ResetPassword'));
 const Dashboard = lazy(() => import('@/pages/Dashboard'));
 const SearchPage = lazy(() => import('@/pages/Search'));
+const CalendarPage = lazy(() => import('@/pages/Calendar'));
 const MediaDetail = lazy(() => import('@/pages/MediaDetail'));
 const TrackingPage = lazy(() => import('@/pages/Tracking'));
 const StatsPage = lazy(() => import('@/pages/Stats'));
@@ -77,6 +78,7 @@ export default function App() {
               <Route path="/reset-password" element={<PublicOnlyRoute><ResetPasswordPage /></PublicOnlyRoute>} />
               <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
               <Route path="/search" element={<ProtectedRoute><SearchPage /></ProtectedRoute>} />
+              <Route path="/calendar" element={<ProtectedRoute><CalendarPage /></ProtectedRoute>} />
               <Route path="/media/:id" element={<ProtectedRoute><MediaDetail /></ProtectedRoute>} />
               <Route path="/tracking" element={<ProtectedRoute><TrackingPage /></ProtectedRoute>} />
               <Route path="/stats" element={<ProtectedRoute><StatsPage /></ProtectedRoute>} />
