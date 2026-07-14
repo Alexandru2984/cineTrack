@@ -27,3 +27,10 @@ pub struct WatchHistory {
     pub watched_at: DateTime<Utc>,
     pub created_at: DateTime<Utc>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct EpisodePlan {
+    pub user_id: Uuid,
+    pub episode_id: Uuid,
+    pub created_at: DateTime<Utc>,
+}
