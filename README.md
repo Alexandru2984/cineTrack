@@ -13,9 +13,10 @@ A personal movie and TV show tracker with social features, inspired by TV Time. 
 
 - **Track Movies & TV Shows** — Add to your watchlist, mark as watching/completed/dropped, rate and review
 - **Episode Tracking** — Mark individual episodes as watched for TV series
+- **Release Calendar** — See newly aired episodes, browse regional upcoming releases, save episodes for later, and mark them watched in place
 - **Activity Heatmap** — GitHub-style contribution calendar for your viewing history
 - **Detailed Stats** — Total watch time, streak tracking, genre distribution, monthly activity charts
-- **TMDB Integration** — Search and browse movies/TV shows powered by The Movie Database API
+- **TMDB Integration** — Search a daily local catalog and refresh focused metadata/release schedules through bounded background jobs
 - **Import from TV Time** — Upload your TV Time export and bring over your whole library, episode history and rewatches (background job with progress + a matched/unmatched summary)
 - **Profile Avatars** — Upload a profile picture (stored in Cloudflare R2)
 - **Dark Mode** — Toggle between light and dark themes
@@ -61,10 +62,11 @@ The application has been through multiple security audits. Key measures include:
 - **Input Validation** — All user inputs validated with length limits (bio 500, review 5000, list names 200, etc.) and content validation
 - **Upload Safety** — Avatar bytes, structure, dimensions, declared type, and size are checked; imports have byte and record limits plus a two-job global concurrency cap; poster downloads are streamed through an uncredentialed, non-redirecting client with strict size limits
 - **Storage Access Control** — The public asset proxy only serves validated images under `avatars/` and `posters/`; private backup objects are never reachable through it
-- **Cache Discipline** — Browsing TMDB details, seasons, and episodes is read-only; persistent media rows are created only for tracking/imports, and unreferenced rows are pruned automatically
+- **Cache Discipline** — Search, discovery, and Calendar read from PostgreSQL; bounded workers refresh the daily catalog, selected details, and tracked release schedules without request-time Calendar calls to TMDB
+- **Calendar Integrity** — Episode actions are owner-scoped and transactionally serialized; watched history is authoritative and a database trigger removes stale plans regardless of the write path
 - **Privacy** — Private profiles require an approved follow request before details or activity become visible; public user endpoints never expose emails; no user enumeration on register
 - **Access Control** — Private lists return 404 to non-owners; all media endpoints require authentication; history entries validated against existing media
-- **Storage Quotas** — Per-account limits of 10,000 tracked titles and 100,000 watch events are enforced atomically across API requests and imports
+- **Storage Quotas** — Per-account limits of 10,000 tracked titles, 10,000 planned episodes, and 100,000 watch events are enforced atomically across API requests and imports
 - **Security Headers** — HSTS, X-Frame-Options (DENY), X-Content-Type-Options, Referrer-Policy, Permissions-Policy, and a same-origin-only script/connect Content-Security-Policy
 - **Container Security** — Both backend and frontend run as non-root users; Docker resource limits enforced
 - **Error Handling** — Internal errors (TMDB, JWT) sanitized before reaching client; no stack traces or implementation details leaked
@@ -182,16 +184,16 @@ npm run dev
 
 ### Testing
 
-The project has **245 unit & integration tests** plus **15 Playwright E2E tests** across four layers:
+The project has **318 passing unit & integration tests** plus **19 Playwright E2E tests** across four layers. One credential-gated R2 test is ignored by default:
 
 ```bash
-# Backend unit tests (134 tests) — no external dependencies
-cd backend && cargo test
+# Backend unit tests (175 passing) — no external dependencies
+cd backend && cargo test --lib
 
-# Frontend tests (54 tests) — Vitest + jsdom
-cd frontend && npm test
+# Frontend tests (67 passing) — Vitest + jsdom
+cd frontend && npm test -- --run
 
-# Backend integration tests (57 tests) — needs a test DB
+# Backend integration tests (76 passing) — needs a test DB
 docker compose -p cinetrack-test -f docker-compose.test.yml up -d --wait
 cd backend && TEST_DATABASE_URL="postgres://test_user:test_pass@127.0.0.1:55433/cinetrack_test" \
   cargo test --test api_tests -- --ignored --test-threads=1
@@ -211,8 +213,8 @@ docker compose -f docker-compose.test.yml -p cinetrack_e2e down -v
 
 **What's tested:**
 - **Unit tests** — JWT generation/validation, Argon2id hashing, password policy, all DTO validators (boundary cases, XSS rejection), error mapping & sanitization
-- **Integration tests** — Full auth flows, access control, IDOR protection, user enumeration prevention, profile privacy and follow approvals, atomic tracking/history transitions, statistics semantics, list CRUD, and import job reservation
-- **Frontend tests** — Zustand stores (auth, theme), utility functions (class merging, URL builders, formatters), type contracts, error-boundary fallback
+- **Integration tests** — Full auth flows, access control, IDOR protection, user enumeration prevention, profile privacy, atomic tracking/history transitions, Calendar ownership and pagination, release-schedule persistence, statistics, lists, and imports
+- **Frontend tests** — Zustand stores, query hooks, utility functions, Calendar grouping/actions, route contracts, About attribution, and error-boundary fallback
 - **E2E tests (Playwright)** — route guards and login/logout/forgot-password against a mocked API, plus a real-stack suite (live backend + ephemeral Postgres) covering registration with an HttpOnly refresh cookie, real token rotation through the browser, active sessions, account deletion, and password reset via the emailed token
 
 ## Project Structure
@@ -222,7 +224,7 @@ văzute/
 ├── backend/                # Rust + Actix-Web API
 │   ├── migrations/         # SQLx database migrations
 │   ├── tests/
-│   │   └── api_tests.rs    # Integration tests (44 tests, need test DB)
+│   │   └── api_tests.rs    # PostgreSQL integration tests
 │   └── src/
 │       ├── config.rs       # Environment configuration
 │       ├── db.rs           # Database pool setup
@@ -238,11 +240,13 @@ văzute/
 │       ├── middleware/      # JWT auth extraction
 │       ├── models/         # Database models
 │       ├── routes/         # API route handlers
+│       │   ├── calendar.rs # New/upcoming feeds, preferences, episode actions
 │       │   ├── import.rs   # TV Time import (multipart -> background job)
 │       │   ├── assets.rs   # Avatars, R2 asset proxy, poster cache
 │       │   └── ...
 │       ├── services/       # Business logic
 │       │   ├── tmdb.rs     # TMDB client + media/season/episode caching
+│       │   ├── release_schedule.rs # Focused tracked-title release sync
 │       │   ├── importer.rs # TV Time -> TMDB resolution + import pipeline
 │       │   ├── storage.rs  # Cloudflare R2 (S3) wrapper
 │       │   └── ...
@@ -251,16 +255,17 @@ văzute/
 │   └── src/
 │       ├── components/     # UI components (Navbar, etc.)
 │       ├── hooks/          # TanStack Query hooks
-│       ├── pages/          # Route pages
+│       ├── pages/          # Route pages (including Calendar and About)
 │       ├── store/          # Zustand stores (auth, theme)
 │       ├── lib/            # API client with refresh interceptor
-│       ├── test/           # Vitest tests (53 tests)
+│       ├── test/           # Vitest setup and helpers
 │       └── types/          # TypeScript interfaces
 ├── scripts/
 │   ├── run_tests.sh        # All-in-one test runner
 │   ├── backup_to_r2.sh     # pg_dump -> gzip -> Cloudflare R2 (with retention)
 │   ├── sync_tmdb_catalog.py # Daily TMDB ID/title inventory -> PostgreSQL + R2
-│   └── hydrate_tmdb_catalog.sh # Bounded popular-title detail hydration
+│   ├── hydrate_tmdb_catalog.sh # Bounded popular-title detail hydration
+│   └── sync_release_schedules.sh # Tracked-title episodes/releases -> PostgreSQL
 ├── nginx/                  # Internal reverse proxy config
 ├── docker-compose.yml      # Development stack
 ├── docker-compose.test.yml # Ephemeral test DB (tmpfs, port 55433 by default)
@@ -274,7 +279,8 @@ All endpoints except auth (register/login/refresh) require a valid JWT access to
 | Area | Endpoints |
 |------|-----------|
 | **Auth** | Register, Login, Logout, Refresh Token, Me |
-| **Media** | Search, Details, Seasons/Episodes, Trending |
+| **Media** | Local catalog search, localized details, Seasons/Episodes, personalized discovery |
+| **Calendar** | New episodes, upcoming episodes/movies, regional preferences, episode plan/watched actions |
 | **Tracking** | CRUD for user's movie/show list with status, rating, review |
 | **History** | Log watched episodes/movies with timestamps |
 | **Stats** | Heatmap data, watch time, streaks, genre distribution |
@@ -296,7 +302,9 @@ Users migrating from TV Time can bring their history in from **Settings → Impo
 
 ## Object Storage & Backups (Cloudflare R2)
 
-Object storage is **optional** — set the `R2_*` variables to enable it; without them the app runs normally and storage features are disabled. R2 is used for:
+Object storage is **optional** — set the `R2_*` variables to enable it; without them the app runs normally and storage features are disabled. R2 is object/archive storage, not a relational query engine. Live catalog, episode, and regional release rows stay in PostgreSQL so personalized Calendar queries are indexed and fast; raw catalog exports and compressed database backups use R2 instead of permanent VPS file storage.
+
+R2 is used for:
 
 - **Avatars** — `avatars/{user_id}.{ext}`, served via the asset proxy (or a public domain if `R2_PUBLIC_BASE_URL` is set).
 - **Poster cache** — an opt-in write-through cache (`VITE_USE_R2_IMAGES=true`) that mirrors TMDB images under `posters/` and serves them from `GET /api/img/{size}/{path}`.

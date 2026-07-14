@@ -2773,6 +2773,7 @@ async fn test_tracked_release_schedule_sync_persists_episodes_and_cadence() {
         let responses = [
             (
                 "/tv/770001?",
+                "200 OK",
                 r#"{
                     "id": 770001,
                     "name": "Schedule Fixture",
@@ -2787,13 +2788,21 @@ async fn test_tracked_release_schedule_sync_persists_episodes_and_cadence() {
                         "name": "Season 1",
                         "episode_count": 2,
                         "air_date": "2026-07-01"
+                    }, {
+                        "id": 771002,
+                        "season_number": 2,
+                        "name": "Season 2",
+                        "episode_count": 1,
+                        "air_date": "2026-08-01"
                     }],
-                    "next_episode_to_air": {"season_number": 1},
+                    "next_episode_to_air": {"season_number": 2},
                     "last_episode_to_air": {"season_number": 1}
                 }"#,
             ),
+            ("/tv/770001/season/2?", "404 Not Found", r#"{}"#),
             (
                 "/tv/770001/season/1?",
+                "200 OK",
                 r#"{
                     "episodes": [{
                         "episode_number": 1,
@@ -2807,14 +2816,14 @@ async fn test_tracked_release_schedule_sync_persists_episodes_and_cadence() {
             ),
         ];
 
-        for (expected_path, body) in responses {
+        for (expected_path, status, body) in responses {
             let (mut stream, _) = listener.accept().await.unwrap();
             let mut request = vec![0_u8; 4096];
             let read = stream.read(&mut request).await.unwrap();
             assert!(String::from_utf8_lossy(&request[..read])
                 .starts_with(&format!("GET {expected_path}")));
             let response = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
                 body.len(),
                 body
             );

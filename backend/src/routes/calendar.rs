@@ -362,6 +362,7 @@ async fn plan_episode(
     let episode_id = path.into_inner();
     let mut tx = pool.begin().await?;
     lock_episode_state(&mut tx, user_id, episode_id).await?;
+    quota::lock_tracking_writes(&mut tx, user_id).await?;
     ensure_tracked_episode(&mut tx, user_id, episode_id).await?;
     quota::lock_history_writes(&mut tx, user_id).await?;
 

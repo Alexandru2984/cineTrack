@@ -1,6 +1,6 @@
 # CineTrack Security Audit
 
-Date: 2026-07-13 (earlier rounds 2026-06-13 through 2026-07-07)
+Date: 2026-07-14 (earlier rounds 2026-06-13 through 2026-07-13)
 
 ## Summary
 
@@ -89,7 +89,20 @@ In the third round we reviewed the repo directly on the VPS/prod host and closed
 - Production validation covered 167 passing backend unit tests (one credential-gated R2 test ignored), 73 PostgreSQL integration tests, 64 frontend tests, and 13 mocked-browser Playwright tests. Clippy ran with warnings denied, the complete npm audit reported zero vulnerabilities, authenticated localized-search and personalized-discovery smoke tests passed, and the public discovery response completed in 113 ms during the rollout check.
 - Transactional email is connected to the local Mailcow deployment through `mail.micutu.com:587` with certificate-validated STARTTLS and authenticated `noreply@micutu.com`. A production password-reset request was verified from API submission through SMTP acceptance and IMAP delivery; the temporary account and message were removed afterward.
 
+## Changes applied (2026-07-14)
+
+- Added a personalized release Calendar backed entirely by PostgreSQL. The authenticated request path never contacts TMDB; it only reads the locally cached episodes and regional movie dates belonging to titles in the current user's library.
+- Calendar query inputs are bounded and validated: 100-row page maximum, 90/365-day windows, complete opaque cursors, an ISO-style two-letter country code, a local `today` value within one day of UTC, and specials excluded by default.
+- Episode plan/watch actions use per-user/per-episode transaction locks and re-check library ownership. Planning is capped at 10,000 episodes per account, idempotent writes do not consume quota, and a database trigger removes a plan whenever any code path inserts matching watched history.
+- Added a focused schedule worker that deduplicates tracked titles across accounts, caps each run, rate-paces requests, takes a global PostgreSQL advisory lock, applies retry backoff, and stops early on upstream/provider failures. Active shows refresh every six hours, ended shows weekly, and relevant movies daily.
+- Regional movie dates are normalized into constrained PostgreSQL rows and selected according to each user's country preference (default `RO`). Missing future-season detail now skips that season without discarding a valid show's current-season refresh.
+- The global TMDB footer was removed. Required attribution now lives on a public About page with the exact non-endorsement notice, while application navigation remains focused on repeated tracking work.
+- Full validation includes 175 passing backend unit tests, 76 PostgreSQL integration tests, 67 frontend tests, and 19 Playwright browser tests; the focused worker regression explicitly covers a not-yet-published season returning 404.
+
 ## Residual risks
+
+- Calendar freshness depends on the scheduled worker and TMDB availability. The default 200-title run budget is intentionally bounded; monitor `release_schedule_sync_state` age/outcomes and the worker exit code before raising it.
+- PostgreSQL is the live metadata/query store; R2 is only the durable object/archive layer. Treating R2 as the primary movie database would remove relational indexes and personalized joins, so disaster recovery still requires restoring an R2 database snapshot into PostgreSQL.
 
 - The asset proxy and enabled poster cache make the backend a serving path for images. A dedicated `R2_PUBLIC_BASE_URL`/CDN would remove that bandwidth from the API while keeping the bucket private to writes.
 - The R2 keys in `.env.prod` are long-lived; rotate them periodically and scope the token's permissions to just the `vazute` bucket.
@@ -98,12 +111,14 @@ In the third round we reviewed the repo directly on the VPS/prod host and closed
 - `current` for sessions is determined from the refresh cookie; a client that calls without the cookie (with only an access token) sees all sessions as non-current, but this is not a security issue.
 - `/metrics` has no authentication; its protection is that it isn't proxied by Nginx, so it depends on the deploy network's isolation. If the backend port becomes directly reachable, the endpoint must be restricted.
 - `cargo audit` reports `RUSTSEC-2023-0071` via `sqlx-mysql` metadata in the lockfile, even though the build uses only the `postgres` feature. CI ignores it explicitly; revisit when `sqlx` resolves the lockfile.
+- `cargo audit` also reports transitive `spin` 0.9.8/0.10.0 releases as yanked (through Prometheus/SQLx metadata and AWS S3 dependencies). They have no RustSec advisory, but should be replaced when their upstream crates update.
 - The SMTP mailbox uses a long-lived credential stored in the git-ignored `.env.prod` file. Keep the file at mode `0600`, rotate the mailbox password periodically, and recreate the backend atomically after each rotation.
 - Browser E2E tests now exist at two levels: mocked (login/logout/refresh-401/forgot-password/error-boundary/discovery layout) and real-stack (HttpOnly cookie, refresh rotation, sessions, account deletion, reset with token). The tracking/episodes/lists flows remain uncovered by E2E (covered only by the backend integration tests).
 - The secrets in `.env.prod` must be rotated if they were shown in a terminal, logs, or an audit transcript. In particular, avoid `docker compose config` without `--no-env-resolution` on machines or sessions that can persist the output.
 
 ## Next recommendations
 
+- Alert when the release worker stops early, accumulates repeated failures, or leaves active tracked shows stale for more than 12 hours.
 - Add a CSRF token if the deployment goes cross-site or if you switch the refresh cookie to `SameSite=None`.
 - Extend E2E toward the content flows (tracking, episodes, lists) if they become critical, on top of the auth flows already covered mock + real-stack.
 - Extend observability: propagate the request-id into the audit/error lines too (it currently appears only in the access log), and wire up alerts on `security: refresh token reuse` plus dashboards over the Prometheus metrics.

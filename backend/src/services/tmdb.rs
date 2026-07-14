@@ -1117,11 +1117,22 @@ impl TmdbService {
         let season_numbers = Self::schedule_season_numbers(&detail, Utc::now().date_naive());
         let media = self.upsert_tv(pool, &detail).await?;
 
+        let mut refreshed_seasons = 0;
         for season_number in &season_numbers {
-            self.refresh_season_episodes(pool, &media, *season_number)
-                .await?;
+            match self
+                .refresh_season_episodes(pool, &media, *season_number)
+                .await
+            {
+                Ok(_) => refreshed_seasons += 1,
+                Err(AppError::NotFound(_)) => {
+                    log::warn!(
+                        "TMDB season not available yet: tmdb_id={tmdb_id} season={season_number}"
+                    );
+                }
+                Err(error) => return Err(error),
+            }
         }
-        Ok(season_numbers.len())
+        Ok(refreshed_seasons)
     }
 
     async fn upsert_tv(&self, pool: &PgPool, detail: &TmdbTvDetail) -> Result<Media, AppError> {
