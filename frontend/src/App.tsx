@@ -5,7 +5,6 @@ import { useAuthStore } from '@/store/auth';
 import { bootstrapSession } from '@/lib/api';
 import { Navbar } from '@/components/Navbar';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
-import { DataAttribution } from '@/components/DataAttribution';
 
 const LoginPage = lazy(() => import('@/pages/Login'));
 const RegisterPage = lazy(() => import('@/pages/Register'));
@@ -20,6 +19,7 @@ const StatsPage = lazy(() => import('@/pages/Stats'));
 const ProfilePage = lazy(() => import('@/pages/Profile'));
 const SettingsPage = lazy(() => import('@/pages/Settings'));
 const NotificationsPage = lazy(() => import('@/pages/Notifications'));
+const AboutPage = lazy(() => import('@/pages/About'));
 
 function PageLoader() {
   return (
@@ -76,6 +76,7 @@ export default function App() {
               <Route path="/register" element={<PublicOnlyRoute><RegisterPage /></PublicOnlyRoute>} />
               <Route path="/forgot-password" element={<PublicOnlyRoute><ForgotPasswordPage /></PublicOnlyRoute>} />
               <Route path="/reset-password" element={<PublicOnlyRoute><ResetPasswordPage /></PublicOnlyRoute>} />
+              <Route path="/about" element={<AboutPage />} />
               <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
               <Route path="/search" element={<ProtectedRoute><SearchPage /></ProtectedRoute>} />
               <Route path="/calendar" element={<ProtectedRoute><CalendarPage /></ProtectedRoute>} />
@@ -89,7 +90,6 @@ export default function App() {
           </Suspense>
         </ErrorBoundary>
       </main>
-      <DataAttribution />
     </div>
   );
 }

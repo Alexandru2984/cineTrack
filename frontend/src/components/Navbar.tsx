@@ -240,6 +240,9 @@ export function Navbar() {
               <Link to="/login" className="text-sm hover:text-[hsl(var(--primary))]">
                 Login
               </Link>
+              <Link to="/about" className="text-sm hover:text-[hsl(var(--primary))]">
+                About
+              </Link>
               <Link
                 to="/register"
                 className="rounded-md bg-[hsl(var(--primary))] px-4 py-2 text-sm text-white hover:opacity-90"
@@ -382,6 +385,13 @@ export function Navbar() {
                   onClick={() => setMobileOpen(false)}
                 >
                   Login
+                </Link>
+                <Link
+                  to="/about"
+                  className="block py-2 text-sm"
+                  onClick={() => setMobileOpen(false)}
+                >
+                  About
                 </Link>
                 <Link
                   to="/register"

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   useChangePassword,
   useSessions,
@@ -23,8 +23,10 @@ import type { ImportJob } from '@/types';
 import {
   AlertTriangle,
   CheckCircle2,
+  ChevronRight,
   DownloadCloud,
   ImageUp,
+  Info,
   LockKeyhole,
   KeyRound,
   Loader2,
@@ -646,6 +648,16 @@ export default function SettingsPage() {
       <ImportCard />
       <ChangePasswordCard />
       <SessionsCard />
+      <Link
+        to="/about"
+        className="flex items-center justify-between gap-4 border-y border-[hsl(var(--border))] px-1 py-4 text-sm font-medium hover:text-[hsl(var(--primary))]"
+      >
+        <span className="flex items-center gap-2">
+          <Info className="h-5 w-5 text-[hsl(var(--muted-foreground))]" aria-hidden="true" />
+          About &amp; data sources
+        </span>
+        <ChevronRight className="h-4 w-4" aria-hidden="true" />
+      </Link>
       <DangerZoneCard />
     </div>
   );
