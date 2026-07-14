@@ -202,10 +202,17 @@ pub struct TmdbTvDetail {
     pub episode_run_time: Option<Vec<i32>>,
     pub vote_average: Option<f64>,
     pub seasons: Option<Vec<TmdbSeason>>,
+    pub next_episode_to_air: Option<TmdbEpisodeAirSummary>,
+    pub last_episode_to_air: Option<TmdbEpisodeAirSummary>,
     #[serde(default)]
     pub alternative_titles: Option<TmdbAlternativeTitles>,
     #[serde(default)]
     pub translations: Option<TmdbTranslations>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TmdbEpisodeAirSummary {
+    pub season_number: i32,
 }
 
 #[derive(Debug, Deserialize)]

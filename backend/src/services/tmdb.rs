@@ -1040,6 +1040,90 @@ impl TmdbService {
         Ok(releases.len())
     }
 
+    fn schedule_season_numbers(detail: &TmdbTvDetail, today: NaiveDate) -> Vec<i32> {
+        let Some(seasons) = &detail.seasons else {
+            return Vec::new();
+        };
+        let available = seasons
+            .iter()
+            .filter(|season| season.season_number > 0)
+            .map(|season| season.season_number)
+            .collect::<HashSet<_>>();
+        let mut candidates = Vec::new();
+
+        for season_number in [
+            detail
+                .next_episode_to_air
+                .as_ref()
+                .map(|episode| episode.season_number),
+            detail
+                .last_episode_to_air
+                .as_ref()
+                .map(|episode| episode.season_number),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            if available.contains(&season_number) && !candidates.contains(&season_number) {
+                candidates.push(season_number);
+            }
+        }
+
+        let earliest = today - chrono::Duration::days(450);
+        let latest = today + chrono::Duration::days(180);
+        let mut recent = seasons
+            .iter()
+            .filter(|season| season.season_number > 0)
+            .filter(|season| {
+                season
+                    .air_date
+                    .as_deref()
+                    .and_then(|date| NaiveDate::parse_from_str(date, "%Y-%m-%d").ok())
+                    .is_some_and(|date| date >= earliest && date <= latest)
+            })
+            .map(|season| season.season_number)
+            .collect::<Vec<_>>();
+        recent.sort_unstable_by(|left, right| right.cmp(left));
+
+        if let Some(latest_season) = available.iter().max().copied() {
+            recent.push(latest_season);
+        }
+        for season_number in recent {
+            if !candidates.contains(&season_number) {
+                candidates.push(season_number);
+            }
+            if candidates.len() == 2 {
+                break;
+            }
+        }
+        candidates.truncate(2);
+        candidates
+    }
+
+    pub async fn refresh_tv_schedule(
+        &self,
+        pool: &PgPool,
+        tmdb_id: i32,
+    ) -> Result<usize, AppError> {
+        if tmdb_id <= 0 {
+            return Err(AppError::BadRequest("Invalid TMDB ID".to_string()));
+        }
+        let detail = self.get_tv_detail(tmdb_id).await?;
+        if detail.id != tmdb_id {
+            return Err(AppError::TmdbError(
+                "External TV data did not match the requested show".to_string(),
+            ));
+        }
+        let season_numbers = Self::schedule_season_numbers(&detail, Utc::now().date_naive());
+        let media = self.upsert_tv(pool, &detail).await?;
+
+        for season_number in &season_numbers {
+            self.refresh_season_episodes(pool, &media, *season_number)
+                .await?;
+        }
+        Ok(season_numbers.len())
+    }
+
     async fn upsert_tv(&self, pool: &PgPool, detail: &TmdbTvDetail) -> Result<Media, AppError> {
         let air_date = detail
             .first_air_date
@@ -1116,6 +1200,40 @@ impl TmdbService {
         media: &Media,
         season_number: i32,
     ) -> Result<Vec<crate::models::Episode>, AppError> {
+        self.cache_season_episodes_with_policy(
+            pool,
+            media,
+            season_number,
+            chrono::Duration::hours(24),
+            true,
+        )
+        .await
+    }
+
+    async fn refresh_season_episodes(
+        &self,
+        pool: &PgPool,
+        media: &Media,
+        season_number: i32,
+    ) -> Result<Vec<crate::models::Episode>, AppError> {
+        self.cache_season_episodes_with_policy(
+            pool,
+            media,
+            season_number,
+            chrono::Duration::zero(),
+            false,
+        )
+        .await
+    }
+
+    async fn cache_season_episodes_with_policy(
+        &self,
+        pool: &PgPool,
+        media: &Media,
+        season_number: i32,
+        max_age: chrono::Duration,
+        serve_stale_on_error: bool,
+    ) -> Result<Vec<crate::models::Episode>, AppError> {
         let lock_key = format!("season:{}:{season_number}", media.tmdb_id);
         let _refresh_guard = self.acquire_request_lock(&lock_key).await;
         let season = sqlx::query_as::<_, crate::models::Season>(
@@ -1134,9 +1252,10 @@ impl TmdbService {
         .fetch_all(pool)
         .await?;
 
-        if season
-            .episodes_cached_at
-            .is_some_and(|cached_at| Utc::now() - cached_at < chrono::Duration::hours(24))
+        if max_age > chrono::Duration::zero()
+            && season
+                .episodes_cached_at
+                .is_some_and(|cached_at| Utc::now() - cached_at < max_age)
         {
             crate::metrics::record_tmdb_cache("season_episodes", "hit");
             return Ok(cached_episodes);
@@ -1145,7 +1264,7 @@ impl TmdbService {
 
         let tmdb_episodes = match self.get_season_episodes(media.tmdb_id, season_number).await {
             Ok(episodes) => episodes,
-            Err(_error) if !cached_episodes.is_empty() => {
+            Err(_error) if serve_stale_on_error && !cached_episodes.is_empty() => {
                 crate::metrics::record_tmdb_cache("season_episodes", "stale");
                 log::warn!(
                     "Serving stale episodes for TMDB id {} season {} after refresh failure",
@@ -1351,6 +1470,31 @@ mod tests {
         assert_eq!(
             releases[0].release_date,
             NaiveDate::from_ymd_opt(2026, 8, 14).unwrap()
+        );
+    }
+
+    #[test]
+    fn schedule_refresh_prioritizes_next_and_current_seasons() {
+        let detail: TmdbTvDetail = serde_json::from_value(serde_json::json!({
+            "id": 7,
+            "name": "Schedule Fixture",
+            "seasons": [
+                {"id": 70, "season_number": 0, "name": "Specials", "episode_count": 3},
+                {"id": 71, "season_number": 1, "name": "Season 1", "episode_count": 10, "air_date": "2024-01-01"},
+                {"id": 72, "season_number": 2, "name": "Season 2", "episode_count": 10, "air_date": "2026-06-01"},
+                {"id": 73, "season_number": 3, "name": "Season 3", "episode_count": 8, "air_date": "2026-08-01"}
+            ],
+            "next_episode_to_air": {"season_number": 3},
+            "last_episode_to_air": {"season_number": 2}
+        }))
+        .unwrap();
+
+        assert_eq!(
+            TmdbService::schedule_season_numbers(
+                &detail,
+                NaiveDate::from_ymd_opt(2026, 7, 14).unwrap()
+            ),
+            vec![3, 2]
         );
     }
 

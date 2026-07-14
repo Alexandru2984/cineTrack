@@ -2760,6 +2760,152 @@ async fn test_popular_catalog_hydration_is_bounded_and_persistent() {
 
 #[actix_web::test]
 #[ignore = "requires test DB"]
+async fn test_tracked_release_schedule_sync_persists_episodes_and_cadence() {
+    use cinetrack::services::release_schedule::{
+        sync_tracked_release_schedules, ReleaseScheduleOptions, ReleaseScheduleSummary,
+    };
+    use cinetrack::services::tmdb::TmdbService;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let upstream = actix_web::rt::spawn(async move {
+        let responses = [
+            (
+                "/tv/770001?",
+                r#"{
+                    "id": 770001,
+                    "name": "Schedule Fixture",
+                    "original_name": "Schedule Fixture",
+                    "status": "Returning Series",
+                    "genres": [],
+                    "episode_run_time": [48],
+                    "vote_average": 8.1,
+                    "seasons": [{
+                        "id": 771001,
+                        "season_number": 1,
+                        "name": "Season 1",
+                        "episode_count": 2,
+                        "air_date": "2026-07-01"
+                    }],
+                    "next_episode_to_air": {"season_number": 1},
+                    "last_episode_to_air": {"season_number": 1}
+                }"#,
+            ),
+            (
+                "/tv/770001/season/1?",
+                r#"{
+                    "episodes": [{
+                        "episode_number": 1,
+                        "name": "Fresh Episode",
+                        "overview": "Synced without a request-time provider call.",
+                        "runtime": 48,
+                        "air_date": "2026-07-14",
+                        "still_path": "/fresh.jpg"
+                    }]
+                }"#,
+            ),
+        ];
+
+        for (expected_path, body) in responses {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = vec![0_u8; 4096];
+            let read = stream.read(&mut request).await.unwrap();
+            assert!(String::from_utf8_lossy(&request[..read])
+                .starts_with(&format!("GET {expected_path}")));
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            stream.write_all(response.as_bytes()).await.unwrap();
+        }
+    });
+
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let user_id = sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO users (username, email)
+        VALUES ('scheduleuser', 'schedule@example.com')
+        RETURNING id"#,
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let media_id = sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO media
+            (tmdb_id, media_type, title, status, metadata_level)
+        VALUES (770001, 'tv', 'Schedule Fixture', 'Returning Series', 'detail')
+        RETURNING id"#,
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO user_media (user_id, media_id, status)
+        VALUES ($1, $2, 'watching')"#,
+    )
+    .bind(user_id)
+    .bind(media_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let mut config = test_config();
+    config.tmdb_base_url = format!("http://{address}");
+    let tmdb = TmdbService::new(&config);
+    let options = ReleaseScheduleOptions {
+        budget: 10,
+        request_delay: std::time::Duration::ZERO,
+    };
+    let summary = sync_tracked_release_schedules(&pool, &tmdb, options)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        summary,
+        ReleaseScheduleSummary {
+            selected: 1,
+            succeeded: 1,
+            tv_titles: 1,
+            refreshed_seasons: 1,
+            ..ReleaseScheduleSummary::default()
+        }
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, String>(
+            r#"SELECT episodes.name
+            FROM episodes
+            JOIN seasons ON seasons.id = episodes.season_id
+            WHERE seasons.media_id = $1 AND episodes.episode_number = 1"#,
+        )
+        .bind(media_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap(),
+        "Fresh Episode"
+    );
+    assert!(sqlx::query_scalar::<_, bool>(
+        r#"SELECT outcome = 'success'
+                AND consecutive_failures = 0
+                AND next_attempt_at >= NOW() + INTERVAL '5 hours'
+            FROM release_schedule_sync_state
+            WHERE media_id = $1"#,
+    )
+    .bind(media_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap());
+
+    let second = sync_tracked_release_schedules(&pool, &tmdb, options)
+        .await
+        .unwrap();
+    assert_eq!(second, ReleaseScheduleSummary::default());
+    upstream.await.unwrap();
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
 async fn test_warm_episode_cache_avoids_upstream_request() {
     let pool = setup_pool().await;
     clean_db(&pool).await;

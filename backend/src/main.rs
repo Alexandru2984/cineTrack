@@ -13,6 +13,7 @@ use cinetrack::{
     routes,
     services::catalog_hydration::{hydrate_popular_catalog, HydrationOptions},
     services::email::EmailService,
+    services::release_schedule::{sync_tracked_release_schedules, ReleaseScheduleOptions},
     services::tmdb::TmdbService,
     utils::password,
 };
@@ -91,14 +92,15 @@ async fn main() -> std::io::Result<()> {
     dotenvy::dotenv().ok();
 
     let arguments = std::env::args().skip(1).collect::<Vec<_>>();
-    let hydrate_catalog = match arguments.as_slice() {
-        [] => false,
+    let (hydrate_catalog, sync_release_schedules) = match arguments.as_slice() {
+        [] => (false, false),
         [argument] if argument == "--healthcheck" => return run_healthcheck(),
-        [argument] if argument == "--hydrate-catalog" => true,
+        [argument] if argument == "--hydrate-catalog" => (true, false),
+        [argument] if argument == "--sync-release-schedules" => (false, true),
         _ => {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
-                "supported arguments are --healthcheck and --hydrate-catalog",
+                "supported arguments are --healthcheck, --hydrate-catalog and --sync-release-schedules",
             ));
         }
     };
@@ -158,6 +160,44 @@ async fn main() -> std::io::Result<()> {
         if summary.stopped_early {
             return Err(std::io::Error::other(
                 "catalog hydration stopped after a provider failure",
+            ));
+        }
+        return Ok(());
+    }
+
+    if sync_release_schedules {
+        let options = ReleaseScheduleOptions {
+            budget: bounded_env_u32("RELEASE_SCHEDULE_SYNC_BUDGET", 200, 1, 2_000)?,
+            request_delay: Duration::from_millis(u64::from(bounded_env_u32(
+                "RELEASE_SCHEDULE_SYNC_DELAY_MS",
+                250,
+                100,
+                5_000,
+            )?)),
+        };
+        let tmdb_service = TmdbService::new(&config);
+        let summary = sync_tracked_release_schedules(&pool, &tmdb_service, options)
+            .await
+            .map_err(|error| {
+                log::error!("Release schedule sync failed: {error}");
+                std::io::Error::other("release schedule sync failed")
+            })?;
+        log::info!(
+            "Release schedule sync complete: selected={} succeeded={} tv={} movies={} seasons={} movie_dates={} not_found={} transient={} invalid={} locked={}",
+            summary.selected,
+            summary.succeeded,
+            summary.tv_titles,
+            summary.movie_titles,
+            summary.refreshed_seasons,
+            summary.cached_movie_dates,
+            summary.not_found,
+            summary.transient_failures,
+            summary.invalid,
+            summary.skipped_locked,
+        );
+        if summary.stopped_early {
+            return Err(std::io::Error::other(
+                "release schedule sync stopped after a provider failure",
             ));
         }
         return Ok(());

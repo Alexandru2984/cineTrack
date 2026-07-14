@@ -306,7 +306,7 @@ Object storage is **optional** — set the `R2_*` variables to enable it; withou
   30 3 * * * /path/to/cineTrack/scripts/backup_to_r2.sh >> /var/log/vazute-backup.log 2>&1
   ```
 
-Apply the cache lifecycle rules once, then schedule the catalog sync after TMDB's daily exports are available. A second bounded job hydrates details for popular entries without scraping the entire catalog:
+Apply the cache lifecycle rules once, then schedule the catalog sync after TMDB's daily exports are available. A second bounded job hydrates details for popular entries without scraping the entire catalog. The focused release job refreshes only distinct titles tracked by users and can run more often:
 
 ```bash
 ./scripts/configure_r2_lifecycle.sh
@@ -315,6 +315,7 @@ Apply the cache lifecycle rules once, then schedule the catalog sync after TMDB'
 ```cron
 15 9 * * * /path/to/cineTrack/scripts/sync_tmdb_catalog.py >> /var/log/vazute-catalog.log 2>&1
 0 10 * * * /path/to/cineTrack/scripts/hydrate_tmdb_catalog.sh >> /var/log/vazute-hydration.log 2>&1
+20 */6 * * * /path/to/cineTrack/scripts/sync_release_schedules.sh >> /var/log/vazute-release-schedules.log 2>&1
 ```
 
 ## License
