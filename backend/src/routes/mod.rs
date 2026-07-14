@@ -1,5 +1,6 @@
 pub mod assets;
 pub mod auth;
+pub mod calendar;
 pub mod health;
 pub mod history;
 pub mod import;
@@ -22,6 +23,7 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
             .configure(assets::configure)
             .configure(users::configure)
             .configure(notifications::configure)
+            .configure(calendar::configure)
             .configure(media::configure)
             .configure(tracking::configure)
             .configure(history::configure)
@@ -42,6 +44,7 @@ pub fn configure_with_auth_rate_limit(
             .configure(assets::configure)
             .configure(users::configure)
             .configure(notifications::configure)
+            .configure(calendar::configure)
             .configure(media::configure)
             .configure(tracking::configure)
             .configure(history::configure)

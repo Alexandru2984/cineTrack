@@ -7,6 +7,7 @@ pub const MAX_TRACKING_ITEMS_PER_USER: i64 = 10_000;
 pub const MAX_HISTORY_EVENTS_PER_USER: i64 = 100_000;
 pub const MAX_SOCIAL_RELATIONSHIPS_PER_USER: i64 = 5_000;
 pub const MAX_PENDING_FOLLOW_REQUESTS_PER_USER: i64 = 5_000;
+pub const MAX_EPISODE_PLANS_PER_USER: i64 = 10_000;
 
 pub async fn lock_and_count_tracking(
     tx: &mut Transaction<'_, Postgres>,
@@ -58,6 +59,25 @@ pub async fn lock_history_writes(
     Ok(())
 }
 
+pub async fn lock_and_count_episode_plans(
+    tx: &mut Transaction<'_, Postgres>,
+    user_id: Uuid,
+) -> Result<i64, AppError> {
+    sqlx::query(
+        "SELECT pg_advisory_xact_lock(hashtextextended('episode-plan-quota:' || $1::text, 0))",
+    )
+    .bind(user_id)
+    .execute(&mut **tx)
+    .await?;
+
+    Ok(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM episode_plans WHERE user_id = $1")
+            .bind(user_id)
+            .fetch_one(&mut **tx)
+            .await?,
+    )
+}
+
 pub async fn lock_social_relationship_writes(
     tx: &mut Transaction<'_, Postgres>,
     first_user_id: Uuid,
@@ -95,6 +115,15 @@ pub fn ensure_history_capacity(current: i64, additional: i64) -> Result<(), AppE
         additional,
         MAX_HISTORY_EVENTS_PER_USER,
         "history events",
+    )
+}
+
+pub fn ensure_episode_plan_capacity(current: i64, additional: i64) -> Result<(), AppError> {
+    ensure_capacity(
+        current,
+        additional,
+        MAX_EPISODE_PLANS_PER_USER,
+        "planned episodes",
     )
 }
 
@@ -158,6 +187,15 @@ mod tests {
         assert!(ensure_history_capacity(MAX_HISTORY_EVENTS_PER_USER - 10, 10).is_ok());
         assert!(matches!(
             ensure_history_capacity(MAX_HISTORY_EVENTS_PER_USER - 10, 11),
+            Err(AppError::Conflict(_))
+        ));
+    }
+
+    #[test]
+    fn episode_plan_quota_allows_idempotent_writes() {
+        assert!(ensure_episode_plan_capacity(MAX_EPISODE_PLANS_PER_USER, 0).is_ok());
+        assert!(matches!(
+            ensure_episode_plan_capacity(MAX_EPISODE_PLANS_PER_USER, 1),
             Err(AppError::Conflict(_))
         ));
     }

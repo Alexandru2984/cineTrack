@@ -2906,6 +2906,462 @@ async fn test_tracked_release_schedule_sync_persists_episodes_and_cadence() {
 
 #[actix_web::test]
 #[ignore = "requires test DB"]
+async fn test_calendar_lists_new_and_regional_upcoming_releases() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (token, _, user_id) =
+        register_user(&app, "calendar", "calendar@example.com", "Pass1234").await;
+    let (_, _, other_user_id) = register_user(
+        &app,
+        "othercalendar",
+        "othercalendar@example.com",
+        "Pass1234",
+    )
+    .await;
+    let user_id = Uuid::parse_str(&user_id).unwrap();
+    let other_user_id = Uuid::parse_str(&other_user_id).unwrap();
+    let today = chrono::Utc::now().date_naive();
+
+    let show_id = sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO media (tmdb_id, media_type, title, status)
+        VALUES (780001, 'tv', 'Calendar Show', 'Returning Series')
+        RETURNING id"#,
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let season_id = sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO seasons (media_id, season_number, name, episode_count)
+        VALUES ($1, 1, 'Season 1', 4)
+        RETURNING id"#,
+    )
+    .bind(show_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO user_media (user_id, media_id, status) VALUES ($1, $2, 'watching')")
+        .bind(user_id)
+        .bind(show_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let today_episode = sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO episodes
+            (season_id, episode_number, name, runtime_minutes, air_date, still_path)
+        VALUES ($1, 1, 'Today Episode', 45, $2, '/today.jpg')
+        RETURNING id"#,
+    )
+    .bind(season_id)
+    .bind(today)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let watched_episode = sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO episodes (season_id, episode_number, name, air_date)
+        VALUES ($1, 2, 'Already Watched', $2)
+        RETURNING id"#,
+    )
+    .bind(season_id)
+    .bind(today - chrono::Duration::days(1))
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let old_planned_episode = sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO episodes (season_id, episode_number, name, air_date)
+        VALUES ($1, 3, 'Saved Earlier', $2)
+        RETURNING id"#,
+    )
+    .bind(season_id)
+    .bind(today - chrono::Duration::days(45))
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let future_episode = sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO episodes
+            (season_id, episode_number, name, air_date, still_path)
+        VALUES ($1, 4, 'Next Episode', $2, '/next.jpg')
+        RETURNING id"#,
+    )
+    .bind(season_id)
+    .bind(today + chrono::Duration::days(5))
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO watch_history (user_id, media_id, episode_id)
+        VALUES ($1, $2, $3)"#,
+    )
+    .bind(user_id)
+    .bind(show_id)
+    .bind(watched_episode)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO episode_plans (user_id, episode_id) VALUES ($1, $2)")
+        .bind(user_id)
+        .bind(old_planned_episode)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        r#"INSERT INTO release_schedule_sync_state
+            (media_id, outcome, consecutive_failures, last_attempt_at,
+             next_attempt_at, last_success_at)
+        VALUES ($1, 'success', 0, NOW(), NOW() + INTERVAL '6 hours', NOW())"#,
+    )
+    .bind(show_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let movie_id = sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO media (tmdb_id, media_type, title, release_date)
+        VALUES (780002, 'movie', 'Regional Movie', $1)
+        RETURNING id"#,
+    )
+    .bind(today + chrono::Duration::days(20))
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO user_media (user_id, media_id, status) VALUES ($1, $2, 'plan_to_watch')",
+    )
+    .bind(user_id)
+    .bind(movie_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO media_release_dates
+            (media_id, country_code, release_type, release_date)
+        VALUES
+            ($1, 'RO', 3, $2),
+            ($1, 'RO', 4, $3),
+            ($1, 'US', 3, $4)"#,
+    )
+    .bind(movie_id)
+    .bind(today + chrono::Duration::days(3))
+    .bind(today + chrono::Duration::days(7))
+    .bind(today + chrono::Duration::days(9))
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let other_show_id = sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO media (tmdb_id, media_type, title)
+        VALUES (780003, 'tv', 'Private Other Show')
+        RETURNING id"#,
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let other_season_id = sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO seasons (media_id, season_number) VALUES ($1, 1) RETURNING id"#,
+    )
+    .bind(other_show_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO user_media (user_id, media_id, status) VALUES ($1, $2, 'watching')")
+        .bind(other_user_id)
+        .bind(other_show_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        r#"INSERT INTO episodes (season_id, episode_number, name, air_date)
+        VALUES ($1, 1, 'Must Not Leak', $2)"#,
+    )
+    .bind(other_season_id)
+    .bind(today)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let req = actix_test::TestRequest::get()
+        .uri(&format!("/api/calendar/new?today={today}&limit=1"))
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let first_page: Value = actix_test::read_body_json(resp).await;
+    assert_eq!(first_page["items"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        first_page["items"][0]["episode_id"],
+        today_episode.to_string()
+    );
+    assert!(first_page["next_cursor"].is_object());
+
+    let cursor_date = first_page["next_cursor"]["before_date"].as_str().unwrap();
+    let cursor_id = first_page["next_cursor"]["before_id"].as_str().unwrap();
+    let req = actix_test::TestRequest::get()
+        .uri(&format!(
+            "/api/calendar/new?today={today}&limit=10&before_date={cursor_date}&before_id={cursor_id}"
+        ))
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let second_page: Value = actix_test::read_body_json(resp).await;
+    assert_eq!(second_page["items"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        second_page["items"][0]["episode_id"],
+        old_planned_episode.to_string()
+    );
+    assert_eq!(second_page["items"][0]["is_planned"], true);
+
+    let req = actix_test::TestRequest::get()
+        .uri(&format!("/api/calendar/summary?today={today}"))
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let summary: Value = actix_test::call_and_read_body_json(&app, req).await;
+    assert_eq!(summary["new_count"], 1);
+    assert_eq!(summary["planned_count"], 1);
+    assert!(summary["last_synced_at"].is_string());
+
+    let req = actix_test::TestRequest::get()
+        .uri(&format!("/api/calendar/upcoming?today={today}&days=30"))
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let upcoming: Value = actix_test::read_body_json(resp).await;
+    assert_eq!(upcoming["country_code"], "RO");
+    assert_eq!(upcoming["items"].as_array().unwrap().len(), 3);
+    assert_eq!(upcoming["items"][0]["release_type"], 3);
+    assert_eq!(upcoming["items"][1]["item_id"], future_episode.to_string());
+    assert_eq!(upcoming["items"][2]["release_type"], 4);
+    assert!(upcoming["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|item| item["title"] != "Private Other Show"));
+
+    let req = actix_test::TestRequest::put()
+        .uri("/api/calendar/preferences")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .set_json(json!({"country_code": "us"}))
+        .to_request();
+    let preferences: Value = actix_test::call_and_read_body_json(&app, req).await;
+    assert_eq!(preferences["country_code"], "US");
+
+    let req = actix_test::TestRequest::get()
+        .uri(&format!(
+            "/api/calendar/upcoming?today={today}&days=30&type=movie"
+        ))
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let us_upcoming: Value = actix_test::call_and_read_body_json(&app, req).await;
+    assert_eq!(us_upcoming["items"].as_array().unwrap().len(), 1);
+    assert_eq!(us_upcoming["items"][0]["release_type"], 3);
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn test_calendar_episode_actions_are_idempotent_and_owner_scoped() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (token, _, user_id) =
+        register_user(&app, "episodeplan", "episodeplan@example.com", "Pass1234").await;
+    let (other_token, _, other_user_id) = register_user(
+        &app,
+        "episodeplanother",
+        "episodeplanother@example.com",
+        "Pass1234",
+    )
+    .await;
+    let user_id = Uuid::parse_str(&user_id).unwrap();
+    let other_user_id = Uuid::parse_str(&other_user_id).unwrap();
+
+    let media_id = sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO media (tmdb_id, media_type, title)
+        VALUES (781001, 'tv', 'Episode Actions')
+        RETURNING id"#,
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let season_id = sqlx::query_scalar::<_, Uuid>(
+        "INSERT INTO seasons (media_id, season_number) VALUES ($1, 1) RETURNING id",
+    )
+    .bind(media_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let episode_id = sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO episodes (season_id, episode_number, name, air_date)
+        VALUES ($1, 1, 'Action Episode', CURRENT_DATE)
+        RETURNING id"#,
+    )
+    .bind(season_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO user_media (user_id, media_id, status) VALUES ($1, $2, 'plan_to_watch')",
+    )
+    .bind(user_id)
+    .bind(media_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let req = actix_test::TestRequest::get()
+        .uri("/api/calendar/new")
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 401);
+
+    let plan_uri = format!("/api/calendar/episodes/{episode_id}/plan");
+    for expected_status in [201, 200] {
+        let req = actix_test::TestRequest::put()
+            .uri(&plan_uri)
+            .insert_header(("Authorization", format!("Bearer {token}")))
+            .peer_addr(peer_addr())
+            .to_request();
+        assert_eq!(
+            actix_test::call_service(&app, req).await.status(),
+            expected_status
+        );
+    }
+
+    let req = actix_test::TestRequest::delete()
+        .uri(&plan_uri)
+        .insert_header(("Authorization", format!("Bearer {other_token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 200);
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM episode_plans WHERE user_id = $1 AND episode_id = $2",
+        )
+        .bind(user_id)
+        .bind(episode_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap(),
+        1
+    );
+
+    for (request_token, expected_status) in [(&other_token, 404), (&token, 201), (&token, 200)] {
+        let req = actix_test::TestRequest::post()
+            .uri(&format!("/api/calendar/episodes/{episode_id}/watched"))
+            .insert_header(("Authorization", format!("Bearer {request_token}")))
+            .peer_addr(peer_addr())
+            .to_request();
+        assert_eq!(
+            actix_test::call_service(&app, req).await.status(),
+            expected_status
+        );
+    }
+
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM watch_history WHERE user_id = $1 AND episode_id = $2",
+        )
+        .bind(user_id)
+        .bind(episode_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap(),
+        1
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, String>(
+            "SELECT status FROM user_media WHERE user_id = $1 AND media_id = $2",
+        )
+        .bind(user_id)
+        .bind(media_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap(),
+        "watching"
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM episode_plans WHERE user_id = $1 AND episode_id = $2",
+        )
+        .bind(user_id)
+        .bind(episode_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap(),
+        0
+    );
+
+    let trigger_episode_id = sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO episodes (season_id, episode_number, name, air_date)
+        VALUES ($1, 2, 'Trigger Episode', CURRENT_DATE)
+        RETURNING id"#,
+    )
+    .bind(season_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO episode_plans (user_id, episode_id) VALUES ($1, $2)")
+        .bind(user_id)
+        .bind(trigger_episode_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        r#"INSERT INTO watch_history (user_id, media_id, episode_id)
+        VALUES ($1, $2, $3)"#,
+    )
+    .bind(user_id)
+    .bind(media_id)
+    .bind(trigger_episode_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM episode_plans WHERE user_id = $1 AND episode_id = $2",
+        )
+        .bind(user_id)
+        .bind(trigger_episode_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap(),
+        0
+    );
+
+    let req = actix_test::TestRequest::put()
+        .uri(&plan_uri)
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 409);
+
+    let req = actix_test::TestRequest::put()
+        .uri("/api/calendar/preferences")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .set_json(json!({"country_code": "../../../"}))
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 400);
+
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM watch_history WHERE user_id = $1")
+            .bind(other_user_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+        0
+    );
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
 async fn test_warm_episode_cache_avoids_upstream_request() {
     let pool = setup_pool().await;
     clean_db(&pool).await;
