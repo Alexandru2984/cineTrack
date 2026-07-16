@@ -8,6 +8,7 @@ import { CheckCircle2, CloudOff, RefreshCw, X } from 'lucide-react';
 import { useRegisterSW } from 'virtual:pwa-register/react';
 import { PwaContext, type PwaContextValue } from '@/hooks/usePwaInstall';
 import { useAuthStore } from '@/store/auth';
+import { isIosInstallPlatform } from '@/lib/pwa';
 
 interface InstallChoice {
   outcome: 'accepted' | 'dismissed';
@@ -82,6 +83,7 @@ export function PwaProvider({ children }: { children: React.ReactNode }) {
       canInstall: !isStandalone && installPrompt !== null,
       install,
       isStandalone,
+      needsManualInstall: !isStandalone && isIosInstallPlatform(),
     }),
     [install, installPrompt, isStandalone],
   );

@@ -4,6 +4,7 @@ export interface PwaContextValue {
   canInstall: boolean;
   install: () => Promise<void>;
   isStandalone: boolean;
+  needsManualInstall: boolean;
 }
 
 export const PwaContext = createContext<PwaContextValue | null>(null);

@@ -25,7 +25,6 @@ import {
   AlertTriangle,
   CheckCircle2,
   ChevronRight,
-  Download,
   DownloadCloud,
   ImageUp,
   Info,
@@ -40,28 +39,7 @@ import {
   UserRoundCheck,
   X,
 } from 'lucide-react';
-import { usePwaInstall } from '@/hooks/usePwaInstall';
-
-function InstallAppCard() {
-  const { canInstall, install, isStandalone } = usePwaInstall();
-  if (!canInstall || isStandalone) return null;
-
-  return (
-    <section className="rounded-lg border border-[hsl(var(--border))] p-6">
-      <h2 className="flex items-center gap-2 text-lg font-semibold">
-        <Download className="h-5 w-5 text-[hsl(var(--primary))]" /> Install Văzute
-      </h2>
-      <button
-        type="button"
-        onClick={() => void install()}
-        className="mt-4 flex h-10 items-center gap-2 rounded-md bg-[hsl(var(--primary))] px-4 text-sm font-medium text-white hover:opacity-90"
-      >
-        <Download className="h-4 w-4" aria-hidden="true" />
-        Install app
-      </button>
-    </section>
-  );
-}
+import { InstallAppCard } from '@/components/InstallAppCard';
 
 function SignOutCard() {
   const navigate = useNavigate();
