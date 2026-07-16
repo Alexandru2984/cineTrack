@@ -17,6 +17,7 @@ pub struct UpdateProfileRequest {
 /// confirmation step (also blocks CSRF-style state changes from a stolen cookie
 /// alone, since the access token is required separately).
 #[derive(Debug, Deserialize, Validate)]
+#[serde(deny_unknown_fields)]
 pub struct DeleteAccountRequest {
     #[validate(length(min = 1, max = 128, message = "Password must be 1-128 characters"))]
     pub password: String,
@@ -109,5 +110,16 @@ mod tests {
         }
         .validate()
         .is_err());
+    }
+
+    #[test]
+    fn delete_account_rejects_unknown_fields() {
+        assert!(
+            serde_json::from_value::<DeleteAccountRequest>(serde_json::json!({
+                "password": "SecurePass1",
+                "user_id": uuid::Uuid::new_v4()
+            }))
+            .is_err()
+        );
     }
 }

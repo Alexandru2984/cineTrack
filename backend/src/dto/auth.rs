@@ -15,6 +15,7 @@ fn validate_refresh_token(token: &str) -> Result<(), validator::ValidationError>
 }
 
 #[derive(Debug, Deserialize, Validate)]
+#[serde(deny_unknown_fields)]
 pub struct RegisterRequest {
     #[validate(
         length(min = 3, max = 50, message = "Username must be 3-50 characters"),
@@ -56,6 +57,7 @@ fn validate_password_strength(password: &str) -> Result<(), validator::Validatio
 }
 
 #[derive(Debug, Deserialize, Validate)]
+#[serde(deny_unknown_fields)]
 pub struct LoginRequest {
     #[validate(
         length(max = 254, message = "Email must be at most 254 characters"),
@@ -136,6 +138,7 @@ impl From<crate::models::User> for UserSummary {
 }
 
 #[derive(Debug, Deserialize, Validate)]
+#[serde(deny_unknown_fields)]
 pub struct ChangePasswordRequest {
     #[validate(length(
         min = 1,
@@ -151,6 +154,7 @@ pub struct ChangePasswordRequest {
 }
 
 #[derive(Debug, Deserialize, Validate)]
+#[serde(deny_unknown_fields)]
 pub struct ForgotPasswordRequest {
     #[validate(
         length(max = 254, message = "Email must be at most 254 characters"),
@@ -160,6 +164,7 @@ pub struct ForgotPasswordRequest {
 }
 
 #[derive(Debug, Deserialize, Validate)]
+#[serde(deny_unknown_fields)]
 pub struct ResetPasswordRequest {
     #[validate(custom(function = "validate_refresh_token"))]
     pub token: String,
@@ -269,6 +274,48 @@ mod tests {
             password: "SecurePass1".to_string(),
         };
         assert!(req.validate().is_ok());
+    }
+
+    #[test]
+    fn auth_payloads_reject_unknown_fields() {
+        assert!(
+            serde_json::from_value::<RegisterRequest>(serde_json::json!({
+                "username": "testuser",
+                "email": "test@example.com",
+                "password": "SecurePass1",
+                "admin": true
+            }))
+            .is_err()
+        );
+        assert!(serde_json::from_value::<LoginRequest>(serde_json::json!({
+            "email": "test@example.com",
+            "password": "SecurePass1",
+            "remember_me": true
+        }))
+        .is_err());
+        assert!(
+            serde_json::from_value::<ChangePasswordRequest>(serde_json::json!({
+                "current_password": "SecurePass1",
+                "new_password": "NewSecurePass2",
+                "user_id": uuid::Uuid::new_v4()
+            }))
+            .is_err()
+        );
+        assert!(
+            serde_json::from_value::<ForgotPasswordRequest>(serde_json::json!({
+                "email": "test@example.com",
+                "redirect_url": "https://attacker.invalid"
+            }))
+            .is_err()
+        );
+        assert!(
+            serde_json::from_value::<ResetPasswordRequest>(serde_json::json!({
+                "token": "a".repeat(128),
+                "new_password": "NewSecurePass2",
+                "keep_sessions": true
+            }))
+            .is_err()
+        );
     }
 
     #[test]

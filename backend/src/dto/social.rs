@@ -109,6 +109,7 @@ pub struct ActivityItem {
 }
 
 #[derive(Debug, Deserialize, Validate)]
+#[serde(deny_unknown_fields)]
 pub struct CreateListRequest {
     #[validate(
         length(min = 1, max = 200, message = "List name must be 1-200 characters"),
@@ -121,6 +122,7 @@ pub struct CreateListRequest {
 }
 
 #[derive(Debug, Deserialize, Validate)]
+#[serde(deny_unknown_fields)]
 pub struct UpdateListRequest {
     #[validate(
         length(min = 1, max = 200, message = "List name must be 1-200 characters"),
@@ -143,6 +145,7 @@ pub struct ListResponse {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AddListItemRequest {
     pub media_id: Uuid,
 }
@@ -280,5 +283,32 @@ mod tests {
             limit: Some(51),
         };
         assert!(params.validate().is_err());
+    }
+
+    #[test]
+    fn list_payloads_reject_unknown_fields() {
+        assert!(
+            serde_json::from_value::<CreateListRequest>(serde_json::json!({
+                "name": "Favorites",
+                "description": null,
+                "is_public": false,
+                "user_id": Uuid::new_v4()
+            }))
+            .is_err()
+        );
+        assert!(
+            serde_json::from_value::<UpdateListRequest>(serde_json::json!({
+                "name": "Favorites",
+                "owner_id": Uuid::new_v4()
+            }))
+            .is_err()
+        );
+        assert!(
+            serde_json::from_value::<AddListItemRequest>(serde_json::json!({
+                "media_id": Uuid::new_v4(),
+                "position": 1
+            }))
+            .is_err()
+        );
     }
 }

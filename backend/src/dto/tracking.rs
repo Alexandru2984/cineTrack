@@ -48,6 +48,7 @@ fn validate_tracking_status(status: &str) -> Result<(), validator::ValidationErr
 }
 
 #[derive(Debug, Deserialize, Validate)]
+#[serde(deny_unknown_fields)]
 pub struct CreateTrackingRequest {
     #[validate(range(min = 1, message = "TMDB id must be positive"))]
     pub tmdb_id: i32,
@@ -58,6 +59,7 @@ pub struct CreateTrackingRequest {
 }
 
 #[derive(Debug, Deserialize, Validate)]
+#[serde(deny_unknown_fields)]
 pub struct UpdateTrackingRequest {
     #[validate(custom(function = "validate_tracking_status"))]
     pub status: Option<String>,
@@ -95,6 +97,7 @@ pub struct TrackingResponse {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CreateHistoryRequest {
     pub media_id: Uuid,
     pub episode_id: Option<Uuid>,
@@ -201,5 +204,34 @@ mod tests {
             completed_at: None,
         };
         assert!(req.validate().is_err());
+    }
+
+    #[test]
+    fn tracking_payloads_reject_unknown_fields() {
+        assert!(
+            serde_json::from_value::<CreateTrackingRequest>(serde_json::json!({
+                "tmdb_id": 1,
+                "media_type": "movie",
+                "status": "watching",
+                "user_id": Uuid::new_v4()
+            }))
+            .is_err()
+        );
+        assert!(
+            serde_json::from_value::<UpdateTrackingRequest>(serde_json::json!({
+                "status": "completed",
+                "watched": true
+            }))
+            .is_err()
+        );
+        assert!(
+            serde_json::from_value::<CreateHistoryRequest>(serde_json::json!({
+                "media_id": Uuid::new_v4(),
+                "episode_id": null,
+                "watched_at": null,
+                "user_id": Uuid::new_v4()
+            }))
+            .is_err()
+        );
     }
 }
