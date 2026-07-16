@@ -21,6 +21,12 @@ cd ../frontend
 npx vitest run 2>&1 | grep -E "✓|✗|Test Files|Tests|Duration"
 echo ""
 
+echo "=== Mobile Checks ==="
+cd ../mobile
+CI=1 npm run verify
+CI=1 npm run export:android
+echo ""
+
 echo "=== Backend Integration Tests ==="
 echo "Starting test database..."
 cd ..
