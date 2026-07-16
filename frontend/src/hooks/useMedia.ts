@@ -23,7 +23,7 @@ export function useSearch(query: string, type?: string, page = 1) {
       const res = await api.get('/media/search', { params });
       return res.data;
     },
-    enabled: query.length > 0,
+    enabled: query.length >= 2,
   });
 }
 

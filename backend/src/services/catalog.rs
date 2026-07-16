@@ -6,6 +6,7 @@ use crate::dto::media::{TmdbSearchResponse, TmdbSearchResult};
 
 const SEARCH_PAGE_SIZE: i64 = 20;
 const MIN_LOCAL_QUERY_CHARS: usize = 3;
+const LOCAL_SEARCH_TIMEOUT: &str = "1000ms";
 
 #[derive(FromRow)]
 struct LocalSearchRow {
@@ -69,6 +70,11 @@ pub async fn search_local(
     }
     let offset = i64::from(page.saturating_sub(1)) * SEARCH_PAGE_SIZE;
     let (language_code, region_code) = locale_parts(language);
+    let mut transaction = pool.begin().await?;
+    sqlx::query("SELECT set_config('statement_timeout', $1, true)")
+        .bind(LOCAL_SEARCH_TIMEOUT)
+        .execute(&mut *transaction)
+        .await?;
     let rows = sqlx::query_as::<_, LocalSearchRow>(
         r#"WITH localized_media AS MATERIALIZED (
             SELECT DISTINCT ON (aliases.media_id)
@@ -232,8 +238,9 @@ pub async fn search_local(
     .bind(offset)
     .bind(language_code.as_deref())
     .bind(region_code.as_deref())
-    .fetch_all(pool)
+    .fetch_all(&mut *transaction)
     .await?;
+    transaction.commit().await?;
 
     let total = rows.first().map_or(0, |row| row.total_count.max(0));
     let total_results = u32::try_from(total).unwrap_or(u32::MAX);

@@ -27,9 +27,27 @@ fn validate_language(language: &str) -> Result<(), validator::ValidationError> {
     }
 }
 
+fn validate_search_query(query: &str) -> Result<(), validator::ValidationError> {
+    if query
+        .chars()
+        .filter(|character| !character.is_whitespace())
+        .count()
+        >= 2
+    {
+        return Ok(());
+    }
+
+    let mut error = validator::ValidationError::new("invalid_search_query");
+    error.message = Some("Search query must contain at least 2 characters".into());
+    Err(error)
+}
+
 #[derive(Debug, Deserialize, Validate)]
 pub struct SearchQuery {
-    #[validate(length(min = 1, max = 200, message = "Search query must be 1-200 characters"))]
+    #[validate(
+        length(min = 2, max = 200, message = "Search query must be 2-200 characters"),
+        custom(function = "validate_search_query")
+    )]
     pub q: String,
     #[serde(rename = "type")]
     #[validate(custom(function = "validate_media_type"))]
@@ -291,6 +309,23 @@ mod tests {
     #[test]
     fn test_search_query_empty_rejected() {
         assert!(query("").validate().is_err());
+    }
+
+    #[test]
+    fn search_requires_two_non_whitespace_characters() {
+        for value in ["", "a", " a ", " \t "] {
+            assert!(
+                query(value).validate().is_err(),
+                "{value:?} should be rejected"
+            );
+        }
+
+        for value in ["ab", "a b", " Matrix "] {
+            assert!(
+                query(value).validate().is_ok(),
+                "{value:?} should be accepted"
+            );
+        }
     }
 
     #[test]
