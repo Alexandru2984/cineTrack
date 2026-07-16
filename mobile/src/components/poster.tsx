@@ -4,10 +4,17 @@ import { StyleSheet, View } from 'react-native';
 
 import { radius } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
-import { TMDB_IMAGE_BASE_URL } from '@/lib/config';
+import {
+  API_BASE_URL,
+  TMDB_IMAGE_BASE_URL,
+  USE_R2_IMAGES,
+} from '@/lib/config';
 
 export function imageUrl(path: string | null | undefined, size = 'w342') {
-  return path ? `${TMDB_IMAGE_BASE_URL}/${size}${path}` : null;
+  if (!path) return null;
+  return USE_R2_IMAGES
+    ? `${API_BASE_URL}/img/${size}${path}`
+    : `${TMDB_IMAGE_BASE_URL}/${size}${path}`;
 }
 
 export function Poster({

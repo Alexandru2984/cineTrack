@@ -8,7 +8,8 @@
       "developmentClient": true,
       "distribution": "internal",
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://vazute.micutu.com"
+        "EXPO_PUBLIC_API_URL": "https://vazute.micutu.com",
+        "EXPO_PUBLIC_USE_R2_IMAGES": "true"
       }
     },
     "preview": {
@@ -17,13 +18,15 @@
         "buildType": "apk"
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://vazute.micutu.com"
+        "EXPO_PUBLIC_API_URL": "https://vazute.micutu.com",
+        "EXPO_PUBLIC_USE_R2_IMAGES": "true"
       }
     },
     "production": {
       "autoIncrement": true,
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://vazute.micutu.com"
+        "EXPO_PUBLIC_API_URL": "https://vazute.micutu.com",
+        "EXPO_PUBLIC_USE_R2_IMAGES": "true"
       }
     }
   }
