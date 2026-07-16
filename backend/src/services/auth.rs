@@ -1,5 +1,7 @@
 use chrono::{Duration, Utc};
 use sqlx::PgPool;
+use std::time::Duration as StdDuration;
+use tokio::time::Instant;
 use uuid::Uuid;
 
 use crate::config::Config;
@@ -8,6 +10,8 @@ use crate::errors::AppError;
 use crate::models::{PasswordResetToken, RefreshToken, User};
 use crate::services::email::EmailService;
 use crate::utils::{jwt, password};
+
+const PASSWORD_RESET_RESPONSE_FLOOR: StdDuration = StdDuration::from_millis(250);
 
 /// Normalize an email for storage and lookup: trimmed and lowercased, so
 /// `Test@X.com ` and `test@x.com` resolve to the same account.
@@ -275,6 +279,7 @@ pub async fn forgot_password(
     email_service: &EmailService,
     email: &str,
 ) -> Result<(), AppError> {
+    let respond_at = Instant::now() + PASSWORD_RESET_RESPONSE_FLOOR;
     let email = normalize_email(email);
     let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE email = $1")
         .bind(&email)
@@ -282,6 +287,7 @@ pub async fn forgot_password(
         .await?;
 
     let Some(user) = user else {
+        tokio::time::sleep_until(respond_at).await;
         return Ok(());
     };
 
@@ -308,12 +314,17 @@ pub async fn forgot_password(
         config.frontend_url.trim_end_matches('/'),
         token
     );
-    email_service
-        .send_password_reset(&user.email, &reset_url)
-        .await;
+    let email_service = email_service.clone();
+    let recipient = user.email.clone();
+    actix_web::rt::spawn(async move {
+        email_service
+            .send_password_reset(&recipient, &reset_url)
+            .await;
+    });
 
     log::info!("audit: password reset requested user_id={}", user.id);
 
+    tokio::time::sleep_until(respond_at).await;
     Ok(())
 }
 
