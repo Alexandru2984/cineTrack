@@ -99,7 +99,7 @@ fn init_logger() {
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-    dotenvy::dotenv().ok();
+    load_local_env();
 
     let arguments = std::env::args().skip(1).collect::<Vec<_>>();
     let mode = match arguments.as_slice() {
@@ -369,4 +369,20 @@ async fn main() -> std::io::Result<()> {
     .bind(format!("{}:{}", host, port))?
     .run()
     .await
+}
+
+fn load_local_env() {
+    let Ok(current_dir) = std::env::current_dir() else {
+        return;
+    };
+    let repository_root = if current_dir.join("docker-compose.yml").is_file() {
+        current_dir.as_path()
+    } else {
+        current_dir
+            .parent()
+            .filter(|parent| parent.join("docker-compose.yml").is_file())
+            .unwrap_or(current_dir.as_path())
+    };
+
+    dotenvy::from_path(repository_root.join(".env")).ok();
 }
