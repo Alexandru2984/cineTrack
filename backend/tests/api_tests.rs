@@ -3039,6 +3039,16 @@ async fn test_calendar_lists_new_and_regional_upcoming_releases() {
     .fetch_one(&pool)
     .await
     .unwrap();
+    let backlog_episode = sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO episodes (season_id, episode_number, name, air_date)
+        VALUES ($1, 5, 'Deep Backlog', $2)
+        RETURNING id"#,
+    )
+    .bind(season_id)
+    .bind(today - chrono::Duration::days(400))
+    .fetch_one(&pool)
+    .await
+    .unwrap();
     let future_episode = sqlx::query_scalar::<_, Uuid>(
         r#"INSERT INTO episodes
             (season_id, episode_number, name, air_date, still_path)
@@ -3168,12 +3178,17 @@ async fn test_calendar_lists_new_and_regional_upcoming_releases() {
     let resp = actix_test::call_service(&app, req).await;
     assert_eq!(resp.status(), 200);
     let second_page: Value = actix_test::read_body_json(resp).await;
-    assert_eq!(second_page["items"].as_array().unwrap().len(), 1);
+    assert_eq!(second_page["items"].as_array().unwrap().len(), 2);
     assert_eq!(
         second_page["items"][0]["episode_id"],
         old_planned_episode.to_string()
     );
     assert_eq!(second_page["items"][0]["is_planned"], true);
+    assert_eq!(
+        second_page["items"][1]["episode_id"],
+        backlog_episode.to_string()
+    );
+    assert_eq!(second_page["next_cursor"], Value::Null);
 
     let req = actix_test::TestRequest::get()
         .uri(&format!("/api/calendar/summary?today={today}"))

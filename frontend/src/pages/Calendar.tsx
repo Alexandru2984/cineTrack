@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   AlertCircle,
@@ -123,11 +123,43 @@ export default function CalendarPage() {
   );
   const activeQuery = view === 'new' ? newEpisodes : upcoming;
   const activeItems = view === 'new' ? newItems : upcomingItems;
+  const fetchNextPage = activeQuery.fetchNextPage;
+  const hasNextPage = activeQuery.hasNextPage;
+  const isFetchingNextPage = activeQuery.isFetchingNextPage;
   const mutationError = actionError(setPlanned.error) ?? actionError(markWatched.error);
+  const loadMoreRef = useRef<HTMLDivElement>(null);
   const countryCode = updatePreferences.variables
     ?? preferences.data?.country_code
     ?? upcoming.data?.pages[0]?.country_code
     ?? 'RO';
+
+  useEffect(() => {
+    const target = loadMoreRef.current;
+    if (
+      !target
+      || !hasNextPage
+      || isFetchingNextPage
+      || typeof IntersectionObserver === 'undefined'
+    ) {
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          void fetchNextPage();
+        }
+      },
+      { rootMargin: '320px 0px' },
+    );
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+    view,
+  ]);
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-8">
@@ -275,18 +307,18 @@ export default function CalendarPage() {
         )}
       </section>
 
-      {activeQuery.hasNextPage && (
-        <div className="mt-6 flex justify-center">
+      {hasNextPage && (
+        <div ref={loadMoreRef} className="mt-6 flex justify-center">
           <button
             type="button"
-            disabled={activeQuery.isFetchingNextPage}
-            onClick={() => void activeQuery.fetchNextPage()}
+            disabled={isFetchingNextPage}
+            onClick={() => void fetchNextPage()}
             className="flex h-10 items-center gap-2 rounded-md border border-[hsl(var(--border))] px-4 text-sm font-medium hover:bg-[hsl(var(--accent))] disabled:opacity-50"
           >
-            {activeQuery.isFetchingNextPage
+            {isFetchingNextPage
               ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
               : <ChevronDown className="h-4 w-4" aria-hidden="true" />}
-            Load more
+            {view === 'new' ? 'Load older episodes' : 'Load later releases'}
           </button>
         </div>
       )}

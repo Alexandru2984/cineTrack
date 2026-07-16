@@ -1,5 +1,5 @@
 import { MemoryRouter } from 'react-router-dom';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import CalendarPage from '@/pages/Calendar';
@@ -139,5 +139,38 @@ describe('Calendar page', () => {
 
     await user.selectOptions(screen.getByLabelText('Release region'), 'US');
     expect(mocks.updatePreferences).toHaveBeenCalledWith('US');
+  });
+
+  it('loads the next backlog page when the list end approaches the viewport', async () => {
+    mocks.useNewEpisodes.mockReturnValue({
+      ...queryResult([todayEpisode]),
+      hasNextPage: true,
+    });
+    vi.stubGlobal('IntersectionObserver', class {
+      private readonly callback: IntersectionObserverCallback;
+
+      constructor(callback: IntersectionObserverCallback) {
+        this.callback = callback;
+      }
+
+      observe(target: Element) {
+        this.callback(
+          [{ isIntersecting: true, target } as IntersectionObserverEntry],
+          this as unknown as IntersectionObserver,
+        );
+      }
+
+      disconnect() {}
+      unobserve() {}
+      takeRecords() { return []; }
+      root = null;
+      rootMargin = '';
+      thresholds = [];
+    });
+
+    render(<MemoryRouter><CalendarPage /></MemoryRouter>);
+
+    await waitFor(() => expect(mocks.fetchNextPage).toHaveBeenCalledTimes(1));
+    vi.unstubAllGlobals();
   });
 });

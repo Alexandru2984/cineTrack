@@ -13,7 +13,7 @@ A personal movie and TV show tracker with social features, inspired by TV Time. 
 
 - **Track Movies & TV Shows** — Add to your watchlist, mark as watching/completed/dropped, rate and review
 - **Episode Tracking** — Mark individual episodes as watched for TV series
-- **Release Calendar** — See newly aired episodes, browse regional upcoming releases, save episodes for later, and mark them watched in place
+- **Release Calendar** — Work through the full unwatched episode backlog, browse regional upcoming releases, save episodes for later, and mark them watched in place
 - **Activity Heatmap** — GitHub-style contribution calendar for your viewing history
 - **Detailed Stats** — Total watch time, streak tracking, genre distribution, monthly activity charts
 - **TMDB Integration** — Search a daily local catalog and refresh focused metadata/release schedules through bounded background jobs

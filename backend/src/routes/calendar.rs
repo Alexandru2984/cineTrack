@@ -63,28 +63,20 @@ async fn new_episodes(
         WHERE tracked.user_id = $1
           AND tracked.status <> 'dropped'
           AND episodes.air_date <= $2
-          AND ($6 OR seasons.season_number > 0)
-          AND (
-              episodes.air_date >= $2 - $3
-              OR EXISTS (
-                  SELECT 1 FROM episode_plans plans
-                  WHERE plans.user_id = $1 AND plans.episode_id = episodes.id
-              )
-          )
+          AND ($5 OR seasons.season_number > 0)
           AND NOT EXISTS (
               SELECT 1 FROM watch_history history
               WHERE history.user_id = $1 AND history.episode_id = episodes.id
           )
           AND (
-              $4::date IS NULL
-              OR (episodes.air_date, episodes.id) < ($4, $5)
+              $3::date IS NULL
+              OR (episodes.air_date, episodes.id) < ($3, $4)
           )
         ORDER BY episodes.air_date DESC, episodes.id DESC
-        LIMIT $7"#,
+        LIMIT $6"#,
     )
     .bind(user_id)
     .bind(params.today)
-    .bind(params.days)
     .bind(before_date)
     .bind(before_id)
     .bind(params.include_specials)
