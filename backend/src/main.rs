@@ -21,6 +21,15 @@ use cinetrack::{
 /// Access-log format including the per-request correlation id (set by the
 /// request_id middleware and echoed in the X-Request-Id response header).
 const LOG_FORMAT: &str = r#"%a "%r" %s %b "%{User-Agent}i" %T req-id=%{x-request-id}o"#;
+static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
+
+#[derive(Clone, Copy)]
+enum RunMode {
+    Serve,
+    HydrateCatalog,
+    SyncReleaseSchedules,
+    Migrate,
+}
 
 fn bounded_env_u32(name: &str, default: u32, minimum: u32, maximum: u32) -> std::io::Result<u32> {
     let value = std::env::var(name)
@@ -92,20 +101,33 @@ async fn main() -> std::io::Result<()> {
     dotenvy::dotenv().ok();
 
     let arguments = std::env::args().skip(1).collect::<Vec<_>>();
-    let (hydrate_catalog, sync_release_schedules) = match arguments.as_slice() {
-        [] => (false, false),
+    let mode = match arguments.as_slice() {
+        [] => RunMode::Serve,
         [argument] if argument == "--healthcheck" => return run_healthcheck(),
-        [argument] if argument == "--hydrate-catalog" => (true, false),
-        [argument] if argument == "--sync-release-schedules" => (false, true),
+        [argument] if argument == "--hydrate-catalog" => RunMode::HydrateCatalog,
+        [argument] if argument == "--sync-release-schedules" => RunMode::SyncReleaseSchedules,
+        [argument] if argument == "--migrate" => RunMode::Migrate,
         _ => {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
-                "supported arguments are --healthcheck, --hydrate-catalog and --sync-release-schedules",
+                "supported arguments are --healthcheck, --hydrate-catalog, --sync-release-schedules and --migrate",
             ));
         }
     };
 
     init_logger();
+
+    if matches!(mode, RunMode::Migrate) {
+        let database_url = std::env::var("DATABASE_URL")
+            .map_err(|_| std::io::Error::other("DATABASE_URL must be set"))?;
+        let pool = db::create_pool(&database_url).await;
+        MIGRATOR.run(&pool).await.map_err(|error| {
+            log::error!("Database migration failed: {error}");
+            std::io::Error::other("database migration failed")
+        })?;
+        log::info!("Migrations applied successfully");
+        return Ok(());
+    }
 
     let config = config::Config::from_env();
     password::initialize().await.map_err(|error| {
@@ -121,17 +143,22 @@ async fn main() -> std::io::Result<()> {
                 log::error!("Refusing privileged production database role: {error}");
                 std::io::Error::other("production database role is overprivileged")
             })?;
+        db::ensure_migrations_current(&pool, &MIGRATOR)
+            .await
+            .map_err(|error| {
+                log::error!("Refusing stale production database schema: {error}");
+                std::io::Error::other("production database schema is not current")
+            })?;
+        log::info!("Production database role and migration state verified");
+    } else {
+        MIGRATOR
+            .run(&pool)
+            .await
+            .expect("Failed to run database migrations");
+        log::info!("Migrations applied successfully");
     }
 
-    // Run migrations
-    sqlx::migrate!("./migrations")
-        .run(&pool)
-        .await
-        .expect("Failed to run database migrations");
-
-    log::info!("Migrations applied successfully");
-
-    if hydrate_catalog {
+    if matches!(mode, RunMode::HydrateCatalog) {
         let options = HydrationOptions {
             budget: bounded_env_u32("CATALOG_HYDRATION_DAILY_BUDGET", 200, 1, 1_000)?,
             request_delay: Duration::from_millis(u64::from(bounded_env_u32(
@@ -165,7 +192,7 @@ async fn main() -> std::io::Result<()> {
         return Ok(());
     }
 
-    if sync_release_schedules {
+    if matches!(mode, RunMode::SyncReleaseSchedules) {
         let options = ReleaseScheduleOptions {
             budget: bounded_env_u32("RELEASE_SCHEDULE_SYNC_BUDGET", 200, 1, 2_000)?,
             request_delay: Duration::from_millis(u64::from(bounded_env_u32(
