@@ -116,8 +116,14 @@ In the third round we reviewed the repo directly on the VPS/prod host and closed
 - The Up Next integration test verifies sequence order and cross-user isolation. The mobile browser test exercises the watched mutation, query invalidation, empty state, 40 px action targets, and a 320 px viewport without horizontal overflow.
 - PWA production-build tests now run in CI alongside mocked and real-stack browser suites. iOS detection and prompt/manual/already-installed states have focused unit coverage.
 - The application does not currently request TMDB Watch Providers or direct JustWatch offers. A visible JustWatch source link and attribution were nevertheless added to About with regression coverage, preserving the contractual guard before a future availability widget is introduced. The [TMDB Watch Providers terms](https://developer.themoviedb.org/reference/movie-watch-providers) require JustWatch attribution whenever that data is used, and a future widget must carry the source link next to the data.
-- The final source/config scan, 140-commit gitleaks scan, Actionlint, Zizmor, and ShellCheck runs were clean. Trivy 0.72.0 reported zero HIGH/CRITICAL findings in both candidate images, including vulnerabilities without a published fix.
-- Current validation covers 177 passing backend unit tests, 77 PostgreSQL integration tests, 81 frontend tests, and 24 Playwright browser tests (16 mocked, 6 real-stack, 2 PWA).
+- The PWA rollout source/config scan, 140-commit gitleaks scan, Actionlint, Zizmor, and ShellCheck runs were clean. Trivy 0.72.0 reported zero HIGH/CRITICAL findings in both candidate images, including vulnerabilities without a published fix.
+- Added dedicated no-store native authentication endpoints. Register/login/refresh return the rotating refresh token only to native clients and never set a cookie; logout accepts the validated token body. The existing browser endpoints remain HttpOnly-cookie based.
+- Added an Expo SDK 57 native client for iOS and Android. Refresh tokens use `WHEN_UNLOCKED_THIS_DEVICE_ONLY` SecureStore storage, access tokens remain memory-only, concurrent 401 responses share one refresh operation, and a failed rotation clears the local session.
+- Native core flows cover Home/Up Next, the full new/upcoming Calendar, local catalog search, an infinitely paginated library, profile attribution, password recovery, season-wide watched actions, and the selected-episode prompt for including earlier gaps.
+- Native poster and backdrop requests use the existing `/api/img` write-through R2 cache by default instead of contacting TMDB's image CDN directly. A development-only environment switch can fall back when the target backend has no R2 storage.
+- Android prebuild validation confirmed the production package id and explicit removal of legacy storage, overlay, and vibration permissions. SecureStore backup exclusions remain active. iOS prebuild validation confirmed the bundle id, disabled arbitrary HTTP loads, the non-exempt-encryption declaration, and removal of the unused Face ID description.
+- Mobile CI performs reproducible `npm ci`, lint, strict TypeScript, all 20 Expo Doctor checks, a HIGH/CRITICAL npm audit gate, and an Android Hermes export. Dependabot now tracks the mobile lockfile separately; Actionlint and Zizmor found no workflow issues.
+- Current validation covers 177 passing backend unit tests, 78 PostgreSQL integration tests, 81 frontend tests, and 24 Playwright browser tests (16 mocked, 6 real-stack, 2 PWA). Mobile validation also passed lint, TypeScript, Expo Doctor 20/20, Android export, Android/iOS prebuild, staged gitleaks, and a Trivy HIGH/CRITICAL scan.
 - Production rollout was bracketed by verified R2 snapshots `cinetrack_20260716_171248.sql.gz` and `cinetrack_20260716_171521.sql.gz`. Backend moved from image `bdf86c4af228` to `a8a51aa35000`; frontend moved from `0cd257b3383d` to `98d9451640f1`; PostgreSQL was not recreated.
 - Live validation confirmed healthy read-only/non-root containers, the public health endpoint, a protected `401` on unauthenticated Up Next, the installable manifest, strict service-worker cache headers, HSTS/CSP, JustWatch/TMDB attribution at 390 px without overflow, and a service-worker-controlled offline launch. An authenticated temporary-account smoke test returned a valid empty Up Next feed, deleted the account successfully, and left zero `@example.invalid` users.
 
@@ -128,6 +134,10 @@ In the third round we reviewed the repo directly on the VPS/prod host and closed
 - A watched-through action may need to refresh many old seasons and can therefore take longer while TMDB is slow. The provider phase is bounded and the final history write is atomic, but it is still a synchronous user action.
 - Manual bulk history uses the current timestamp because the application cannot infer when old episodes were actually watched. Large backfills therefore appear on the current activity day and affect watch-time statistics accordingly.
 - Offline mode intentionally restores the application shell rather than persisting personalized API data. Users can open the installed app without a connection, but their library, Calendar, and mutations require the backend; this avoids leaving authenticated responses in shared browser caches.
+- No signed native binary has been built or exercised on a physical device yet. Android/iOS source generation and the Android Hermes bundle pass, but store signing, device networking, keyboard behavior, push handling, and release-build UI still require EAS/internal-distribution validation.
+- Native UI automation is not present yet. Backend integration tests cover the mobile token contract, while native screens currently rely on lint, strict typing, Expo Doctor, bundle export, and prebuild validation.
+- The first native release covers the core tracking workflow, not the entire web surface. TV Time import, social/follow flows, avatar/privacy/session settings, detailed charts, and account deletion still require the PWA until they are ported.
+- `npm audit` reports 11 moderate findings in Expo's build/configuration path through `@expo/config-plugins -> xcode@3.0.1 -> uuid@7.0.3`. There are zero high or critical findings. `npm audit fix --force` proposes an incompatible Expo downgrade, so CI gates HIGH/CRITICAL and the moderate tooling advisory must be tracked until Expo updates the chain.
 
 - The asset proxy and enabled poster cache make the backend a serving path for images. A dedicated `R2_PUBLIC_BASE_URL`/CDN would remove that bandwidth from the API while keeping the bucket private to writes.
 - The R2 keys in `.env.prod` are long-lived; rotate them periodically and scope the token's permissions to just the `vazute` bucket.
@@ -146,6 +156,8 @@ In the third round we reviewed the repo directly on the VPS/prod host and closed
 - Alert when the release worker stops early, accumulates repeated failures, or leaves active tracked shows stale for more than 12 hours.
 - Add a CSRF token if the deployment goes cross-site or if you switch the refresh cookie to `SameSite=None`.
 - Extend E2E toward the content flows (tracking, episodes, lists) if they become critical, on top of the auth flows already covered mock + real-stack.
+- Produce internal EAS builds for both platforms, test them on at least one current and one older device class, then add Maestro or Detox coverage for login/rotation, Calendar pagination, watched-through confirmation, and logout.
+- Add native push notifications for planned and newly released episodes only after token registration, consent, delivery retries, and account/device revocation are designed.
 - Extend observability: propagate the request-id into the audit/error lines too (it currently appears only in the access log), and wire up alerts on `security: refresh token reuse` plus dashboards over the Prometheus metrics.
 - Decide on the privacy policy for follower/following counts on private profiles; right now bio/avatar and activity are hidden, but the counters are not.
 - Run the gitleaks/CodeQL report periodically and treat Dependabot PRs as part of maintenance.
@@ -164,6 +176,8 @@ In the third round we reviewed the repo directly on the VPS/prod host and closed
 - `npm run test:e2e` (Playwright; it starts vite dev itself, backend mocked at the network layer)
 - `npm run test:e2e:pwa` (Playwright against the production build; manifest, service worker and offline launch)
 - `npm audit --omit=dev`
+- `(cd mobile && npm ci && npm run verify && npm audit --audit-level=high && npm run export:android)`
+- Native config generation: `(cd mobile && npx expo prebuild --platform android --no-install --clean)` and the equivalent iOS command; generated directories remain ignored.
 - `docker run --rm -v "$PWD:/repo:ro" -w /repo rhysd/actionlint:latest`
 - `docker run --rm -v "$PWD:/repo:ro" -w /repo ghcr.io/zizmorcore/zizmor:latest .`
 - `docker run --rm -v "$PWD:/repo:ro" -w /repo koalaman/shellcheck:stable scripts/*.sh`

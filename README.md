@@ -16,6 +16,7 @@ A personal movie and TV show tracker with social features, inspired by TV Time. 
 - **Release Calendar** — Work through the full unwatched episode backlog, browse regional upcoming releases, save episodes for later, and mark them watched in place
 - **Up Next** — Continue with the earliest unwatched aired episode from each tracked show without skipping progress
 - **Installable PWA** — Mobile-first navigation, adaptive app icons, safe-area support, explicit updates, iOS installation guidance, and an offline launch shell
+- **Native Mobile Client** — Expo SDK 57 app for iOS and Android with rotating native sessions, Home, Calendar, Search, Library, Profile, season-wide watched actions, and watched-through confirmation
 - **Activity Heatmap** — GitHub-style contribution calendar for your viewing history
 - **Detailed Stats** — Total watch time, streak tracking, genre distribution, monthly activity charts
 - **TMDB Integration** — Search a daily local catalog and refresh focused metadata/release schedules through bounded background jobs
@@ -49,6 +50,13 @@ A personal movie and TV show tracker with social features, inspired by TV Time. 
 - **Recharts** — Statistics charts
 - **react-calendar-heatmap** — Activity visualization
 
+### Mobile
+- **Expo SDK 57** + **React Native 0.86** — Managed native iOS and Android client
+- **Expo Router** — File-based stacks and a five-tab application shell
+- **Expo SecureStore** — Device-bound refresh-token storage; access tokens remain in memory
+- **TanStack Query 5** + **Zustand 5** — Server state, mutation invalidation, and session state
+- **EAS Build** — Development, internal preview, and production build profiles
+
 ### Infrastructure
 - **Docker** + **Docker Compose** — Containerization with resource limits
 - **Nginx** — Reverse proxy with SSL termination (Let's Encrypt)
@@ -68,6 +76,8 @@ The application has been through multiple security audits. Key measures include:
 - **Cache Discipline** — Search, discovery, and Calendar read from PostgreSQL; bounded workers refresh the daily catalog, selected details, and tracked release schedules without request-time Calendar calls to TMDB
 - **Calendar Integrity** — Episode actions are owner-scoped and transactionally serialized; watched history is authoritative and a database trigger removes stale plans regardless of the write path
 - **PWA Cache Privacy** — The service worker never caches `/api` responses; only versioned application assets and public TMDB poster URLs are eligible for offline storage
+- **Native Session Isolation** — Web refresh tokens stay in HttpOnly cookies; native refresh tokens are returned only by dedicated no-store endpoints and saved in SecureStore, while access tokens are never persisted
+- **Mobile Platform Hardening** — Android release manifests block legacy storage, overlay, and vibration permissions; iOS keeps arbitrary HTTP disabled and does not declare unused Face ID access
 - **Data Attribution** — The public About page preserves the required TMDB notice and JustWatch source link; any future availability widget must repeat JustWatch attribution next to its data
 - **Privacy** — Private profiles require an approved follow request before details or activity become visible; public user endpoints never expose emails; no user enumeration on register
 - **Access Control** — Private lists return 404 to non-owners; all media endpoints require authentication; history entries validated against existing media
@@ -187,9 +197,20 @@ npm install
 npm run dev
 ```
 
+**Mobile:**
+```bash
+cd mobile
+npm ci
+cp .env.example .env.local
+npm start
+```
+
+Native simulator/device builds require Android Studio or Xcode. See
+[`mobile/README.md`](mobile/README.md) for EAS profiles and verification commands.
+
 ### Testing
 
-The project has **335 passing unit & integration tests** plus **24 Playwright E2E tests** across backend unit, frontend unit, PostgreSQL integration, and three browser suites. One credential-gated R2 test is ignored by default:
+The project has **336 passing unit & integration tests** plus **24 Playwright E2E tests** across backend unit, frontend unit, PostgreSQL integration, and three browser suites. The native client additionally has lint, strict TypeScript, Expo Doctor, dependency-audit, prebuild, and Android-export gates. One credential-gated R2 test is ignored by default:
 
 ```bash
 # Backend unit tests (177 passing) — no external dependencies
@@ -198,7 +219,7 @@ cd backend && cargo test --lib
 # Frontend tests (81 passing) — Vitest + jsdom
 cd frontend && npm test -- --run
 
-# Backend integration tests (77 passing) — needs a test DB
+# Backend integration tests (78 passing) — needs a test DB
 docker compose -p cinetrack-test -f docker-compose.test.yml up -d --wait
 cd backend && TEST_DATABASE_URL="postgres://test_user:test_pass@127.0.0.1:55433/cinetrack_test" \
   cargo test --test api_tests -- --ignored --test-threads=1
@@ -215,6 +236,9 @@ TEST_DB_PORT=55444 docker compose -f docker-compose.test.yml -p cinetrack_e2e up
 cd frontend && npm run test:e2e:realstack
 docker compose -f docker-compose.test.yml -p cinetrack_e2e down -v
 
+# Native client validation and Android bundle export
+cd mobile && npm run verify && npm audit --audit-level=high && npm run export:android
+
 # Or run everything at once:
 ./scripts/run_tests.sh
 ```
@@ -223,6 +247,7 @@ docker compose -f docker-compose.test.yml -p cinetrack_e2e down -v
 - **Unit tests** — JWT generation/validation, Argon2id hashing, password policy, all DTO validators (boundary cases, XSS rejection), error mapping & sanitization
 - **Integration tests** — Full auth flows, access control, IDOR protection, user enumeration prevention, profile privacy, atomic tracking/history transitions, sequential Up Next selection, bulk episode history, Calendar ownership and pagination, release schedules, statistics, lists, and imports
 - **Frontend tests** — Zustand stores, query hooks, utility functions, full-backlog Calendar pagination, Up Next actions, PWA lifecycle/install states, episode/season bulk controls, route contracts, About attribution, and error-boundary fallback
+- **Mobile checks** — ESLint with React Compiler rules, strict TypeScript, all 20 Expo Doctor checks, reproducible `npm ci`, Android Hermes export, permission-aware Android/iOS prebuilds, and HIGH/CRITICAL dependency gates
 - **E2E tests (Playwright)** — route guards, auth flows, mobile navigation, sequential episode actions, discovery/social UI, and watched-through confirmation against a mocked API; install/offline PWA behavior against a production build; plus a real-stack suite covering cookies, token rotation, sessions, account deletion, private follows, and password reset
 
 ## Project Structure
@@ -268,6 +293,12 @@ văzute/
 │       ├── lib/            # API client with refresh interceptor
 │       ├── test/           # Vitest setup and helpers
 │       └── types/          # TypeScript interfaces
+├── mobile/                 # Expo + React Native client
+│   ├── src/app/            # Auth stack, tab screens, media details
+│   ├── src/hooks/          # Native TanStack Query hooks
+│   ├── src/lib/            # API, SecureStore session, formatting
+│   ├── app.json            # iOS/Android identifiers and permissions
+│   └── eas.json            # Development, preview, production profiles
 ├── scripts/
 │   ├── run_tests.sh        # All-in-one test runner
 │   ├── backup_to_r2.sh     # pg_dump -> gzip -> Cloudflare R2 (with retention)
@@ -286,7 +317,7 @@ All endpoints except auth (register/login/refresh) require a valid JWT access to
 
 | Area | Endpoints |
 |------|-----------|
-| **Auth** | Register, Login, Logout, Refresh Token, Me |
+| **Auth** | Web and native Register/Login/Logout/Refresh, Me, sessions, password reset |
 | **Media** | Local catalog search, localized details, Seasons/Episodes, personalized discovery |
 | **Calendar** | Sequential Up Next episodes, full unwatched backlog, upcoming episodes/movies, regional preferences, episode plan/watched actions |
 | **Tracking** | CRUD for user's movie/show list with status, rating, review |
