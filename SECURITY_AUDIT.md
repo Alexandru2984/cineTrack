@@ -110,7 +110,14 @@ In the third round we reviewed the repo directly on the VPS/prod host and closed
 - The show detail page displays watched/total season progress, asks whether to include earlier gaps, confirms season-wide writes, locks background scrolling in the modal, and invalidates History, Tracking, Stats, Activity, Discovery, and Calendar caches after success.
 - The candidate frontend image initially exposed `curl`/`libcurl` 8.19.0-r0 findings for CVE-2026-5773 and CVE-2026-6276. The production Dockerfile now pins the rebuilt official Nginx digest with `curl`/`libcurl` 8.21.0-r0 and verifies all audited package versions locally; the image must pass a HIGH/CRITICAL Trivy gate before rollout.
 - Valid TMDB season responses can exceed the generic 2 MiB API-body limit for long-running shows. Season detail now has an endpoint-specific 8 MiB streaming cap, while every other TMDB response remains capped at 2 MiB; regression tests cover both the larger valid response and rejection above the season limit.
-- Current validation covers 177 passing backend unit tests, 77 PostgreSQL integration tests, 70 frontend tests, and 20 Playwright browser tests.
+- Added an installable PWA shell with adaptive/maskable icons, explicit update handling, safe-area-aware mobile navigation, offline launch, browser installation prompts, and the manual Safari path required on iPhone/iPad.
+- Workbox precaches versioned application assets only. Navigation fallback explicitly denies `/api`, runtime caching is limited to public `image.tmdb.org` poster URLs with entry/age quotas, and a browser test verifies that no authenticated API URL reaches Cache Storage.
+- Added `GET /api/calendar/up-next`, bounded to 20 results and authenticated through the existing middleware. A lateral query selects the earliest aired unwatched regular episode per non-dropped tracked show; planned state only prioritizes that sequential candidate, so a later saved episode cannot make Home skip earlier progress.
+- The Up Next integration test verifies sequence order and cross-user isolation. The mobile browser test exercises the watched mutation, query invalidation, empty state, 40 px action targets, and a 320 px viewport without horizontal overflow.
+- PWA production-build tests now run in CI alongside mocked and real-stack browser suites. iOS detection and prompt/manual/already-installed states have focused unit coverage.
+- The application does not currently request TMDB Watch Providers or direct JustWatch offers. A visible JustWatch source link and attribution were nevertheless added to About with regression coverage, preserving the contractual guard before a future availability widget is introduced. The [TMDB Watch Providers terms](https://developer.themoviedb.org/reference/movie-watch-providers) require JustWatch attribution whenever that data is used, and a future widget must carry the source link next to the data.
+- The final source/config scan, 140-commit gitleaks scan, Actionlint, Zizmor, and ShellCheck runs were clean. Trivy 0.72.0 reported zero HIGH/CRITICAL findings in both candidate images, including vulnerabilities without a published fix.
+- Current validation covers 177 passing backend unit tests, 77 PostgreSQL integration tests, 81 frontend tests, and 24 Playwright browser tests (16 mocked, 6 real-stack, 2 PWA).
 
 ## Residual risks
 
@@ -118,6 +125,7 @@ In the third round we reviewed the repo directly on the VPS/prod host and closed
 - PostgreSQL is the live metadata/query store; R2 is only the durable object/archive layer. Treating R2 as the primary movie database would remove relational indexes and personalized joins, so disaster recovery still requires restoring an R2 database snapshot into PostgreSQL.
 - A watched-through action may need to refresh many old seasons and can therefore take longer while TMDB is slow. The provider phase is bounded and the final history write is atomic, but it is still a synchronous user action.
 - Manual bulk history uses the current timestamp because the application cannot infer when old episodes were actually watched. Large backfills therefore appear on the current activity day and affect watch-time statistics accordingly.
+- Offline mode intentionally restores the application shell rather than persisting personalized API data. Users can open the installed app without a connection, but their library, Calendar, and mutations require the backend; this avoids leaving authenticated responses in shared browser caches.
 
 - The asset proxy and enabled poster cache make the backend a serving path for images. A dedicated `R2_PUBLIC_BASE_URL`/CDN would remove that bandwidth from the API while keeping the bucket private to writes.
 - The R2 keys in `.env.prod` are long-lived; rotate them periodically and scope the token's permissions to just the `vazute` bucket.
@@ -128,7 +136,7 @@ In the third round we reviewed the repo directly on the VPS/prod host and closed
 - `cargo audit` reports `RUSTSEC-2023-0071` via `sqlx-mysql` metadata in the lockfile, even though the build uses only the `postgres` feature. CI ignores it explicitly; revisit when `sqlx` resolves the lockfile.
 - `cargo audit` also reports transitive `spin` 0.9.8/0.10.0 releases as yanked (through Prometheus/SQLx metadata and AWS S3 dependencies). They have no RustSec advisory, but should be replaced when their upstream crates update.
 - The SMTP mailbox uses a long-lived credential stored in the git-ignored `.env.prod` file. Keep the file at mode `0600`, rotate the mailbox password periodically, and recreate the backend atomically after each rotation.
-- Browser E2E tests now exist at two levels: mocked (auth, discovery/social UI, error boundary, and episode backfill confirmation) and real-stack (HttpOnly cookie, refresh rotation, private follows, sessions, account deletion, reset with token). Lists and general tracking edits remain covered only below the browser layer.
+- Browser E2E tests now exist at three levels: mocked (auth, mobile navigation, discovery/social UI, Up Next, error boundary, and episode backfill confirmation), production-build PWA (manifest, service worker, API-cache exclusion, offline launch), and real-stack (HttpOnly cookie, refresh rotation, private follows, sessions, account deletion, reset with token). Lists and general tracking edits remain covered only below the browser layer.
 - The secrets in `.env.prod` must be rotated if they were shown in a terminal, logs, or an audit transcript. In particular, avoid `docker compose config` without `--no-env-resolution` on machines or sessions that can persist the output.
 
 ## Next recommendations
@@ -152,6 +160,7 @@ In the third round we reviewed the repo directly on the VPS/prod host and closed
 - `npm test -- --run`
 - `npm run build`
 - `npm run test:e2e` (Playwright; it starts vite dev itself, backend mocked at the network layer)
+- `npm run test:e2e:pwa` (Playwright against the production build; manifest, service worker and offline launch)
 - `npm audit --omit=dev`
 - `docker run --rm -v "$PWD:/repo:ro" -w /repo rhysd/actionlint:latest`
 - `docker run --rm -v "$PWD:/repo:ro" -w /repo ghcr.io/zizmorcore/zizmor:latest .`

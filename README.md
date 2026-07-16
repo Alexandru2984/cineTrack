@@ -14,6 +14,8 @@ A personal movie and TV show tracker with social features, inspired by TV Time. 
 - **Track Movies & TV Shows** — Add to your watchlist, mark as watching/completed/dropped, rate and review
 - **Episode Tracking** — Mark one episode, a full aired season, or every previous episode through a selected point
 - **Release Calendar** — Work through the full unwatched episode backlog, browse regional upcoming releases, save episodes for later, and mark them watched in place
+- **Up Next** — Continue with the earliest unwatched aired episode from each tracked show without skipping progress
+- **Installable PWA** — Mobile-first navigation, adaptive app icons, safe-area support, explicit updates, iOS installation guidance, and an offline launch shell
 - **Activity Heatmap** — GitHub-style contribution calendar for your viewing history
 - **Detailed Stats** — Total watch time, streak tracking, genre distribution, monthly activity charts
 - **TMDB Integration** — Search a daily local catalog and refresh focused metadata/release schedules through bounded background jobs
@@ -39,6 +41,7 @@ A personal movie and TV show tracker with social features, inspired by TV Time. 
 ### Frontend
 - **React 19** + **TypeScript** — UI framework
 - **Vite 8** — Build tool
+- **Vite PWA + Workbox** — Installable application shell with controlled offline caching
 - **Vitest** — Unit testing framework
 - **Tailwind CSS 4** — Styling
 - **TanStack Query 5** — Server state management
@@ -64,6 +67,8 @@ The application has been through multiple security audits. Key measures include:
 - **Storage Access Control** — The public asset proxy only serves validated images under `avatars/` and `posters/`; private backup objects are never reachable through it
 - **Cache Discipline** — Search, discovery, and Calendar read from PostgreSQL; bounded workers refresh the daily catalog, selected details, and tracked release schedules without request-time Calendar calls to TMDB
 - **Calendar Integrity** — Episode actions are owner-scoped and transactionally serialized; watched history is authoritative and a database trigger removes stale plans regardless of the write path
+- **PWA Cache Privacy** — The service worker never caches `/api` responses; only versioned application assets and public TMDB poster URLs are eligible for offline storage
+- **Data Attribution** — The public About page preserves the required TMDB notice and JustWatch source link; any future availability widget must repeat JustWatch attribution next to its data
 - **Privacy** — Private profiles require an approved follow request before details or activity become visible; public user endpoints never expose emails; no user enumeration on register
 - **Access Control** — Private lists return 404 to non-owners; all media endpoints require authentication; history entries validated against existing media
 - **Storage Quotas** — Per-account limits of 10,000 tracked titles, 10,000 planned episodes, and 100,000 watch events are enforced atomically across API requests and imports
@@ -184,13 +189,13 @@ npm run dev
 
 ### Testing
 
-The project has **322 passing unit & integration tests** plus **20 Playwright E2E tests** across four layers. One credential-gated R2 test is ignored by default:
+The project has **335 passing unit & integration tests** plus **24 Playwright E2E tests** across backend unit, frontend unit, PostgreSQL integration, and three browser suites. One credential-gated R2 test is ignored by default:
 
 ```bash
-# Backend unit tests (175 passing) — no external dependencies
+# Backend unit tests (177 passing) — no external dependencies
 cd backend && cargo test --lib
 
-# Frontend tests (70 passing) — Vitest + jsdom
+# Frontend tests (81 passing) — Vitest + jsdom
 cd frontend && npm test -- --run
 
 # Backend integration tests (77 passing) — needs a test DB
@@ -201,6 +206,9 @@ docker compose -p cinetrack-test -f docker-compose.test.yml down
 
 # Frontend E2E — mocked backend, no DB needed (Playwright boots Vite itself)
 cd frontend && npm run test:e2e
+
+# PWA E2E — production build, manifest/service worker, API-cache exclusion, offline launch
+cd frontend && npm run test:e2e:pwa
 
 # Frontend E2E — real backend + ephemeral Postgres (Playwright boots both)
 TEST_DB_PORT=55444 docker compose -f docker-compose.test.yml -p cinetrack_e2e up -d --wait
@@ -213,9 +221,9 @@ docker compose -f docker-compose.test.yml -p cinetrack_e2e down -v
 
 **What's tested:**
 - **Unit tests** — JWT generation/validation, Argon2id hashing, password policy, all DTO validators (boundary cases, XSS rejection), error mapping & sanitization
-- **Integration tests** — Full auth flows, access control, IDOR protection, user enumeration prevention, profile privacy, atomic tracking/history transitions, bulk episode history, Calendar ownership and pagination, release schedules, statistics, lists, and imports
-- **Frontend tests** — Zustand stores, query hooks, utility functions, full-backlog Calendar pagination, episode/season bulk controls, route contracts, About attribution, and error-boundary fallback
-- **E2E tests (Playwright)** — route guards, auth flows, discovery/social UI, and the watched-through confirmation against a mocked API, plus a real-stack suite covering cookies, token rotation, sessions, account deletion, private follows, and password reset
+- **Integration tests** — Full auth flows, access control, IDOR protection, user enumeration prevention, profile privacy, atomic tracking/history transitions, sequential Up Next selection, bulk episode history, Calendar ownership and pagination, release schedules, statistics, lists, and imports
+- **Frontend tests** — Zustand stores, query hooks, utility functions, full-backlog Calendar pagination, Up Next actions, PWA lifecycle/install states, episode/season bulk controls, route contracts, About attribution, and error-boundary fallback
+- **E2E tests (Playwright)** — route guards, auth flows, mobile navigation, sequential episode actions, discovery/social UI, and watched-through confirmation against a mocked API; install/offline PWA behavior against a production build; plus a real-stack suite covering cookies, token rotation, sessions, account deletion, private follows, and password reset
 
 ## Project Structure
 
@@ -280,7 +288,7 @@ All endpoints except auth (register/login/refresh) require a valid JWT access to
 |------|-----------|
 | **Auth** | Register, Login, Logout, Refresh Token, Me |
 | **Media** | Local catalog search, localized details, Seasons/Episodes, personalized discovery |
-| **Calendar** | New episodes, upcoming episodes/movies, regional preferences, episode plan/watched actions |
+| **Calendar** | Sequential Up Next episodes, full unwatched backlog, upcoming episodes/movies, regional preferences, episode plan/watched actions |
 | **Tracking** | CRUD for user's movie/show list with status, rating, review |
 | **History** | Log watched episodes/movies, show season progress, mark a season watched, or backfill through an episode |
 | **Stats** | Heatmap data, watch time, streaks, genre distribution |
