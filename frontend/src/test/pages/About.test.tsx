@@ -16,5 +16,12 @@ describe('About page', () => {
       'href',
       'https://www.themoviedb.org',
     );
+    expect(screen.getByText(
+      'Streaming availability data, when displayed, is provided by JustWatch.',
+    )).toBeVisible();
+    expect(screen.getByRole('link', { name: 'JustWatch' })).toHaveAttribute(
+      'href',
+      'https://www.justwatch.com/ro',
+    );
   });
 });
