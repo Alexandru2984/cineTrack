@@ -108,6 +108,7 @@ In the third round we reviewed the repo directly on the VPS/prod host and closed
 - Marking an episode resumes `plan_to_watch`, `on_hold`, or `dropped` tracking as `watching`; completed shows remain completed. The existing database trigger clears matching episode plans for every inserted history event.
 - Season-level actions exclude episodes with a known future air date. The watched-through action includes only the selected episode and regular-season episodes before it; future episodes after the selected point remain untouched.
 - The show detail page displays watched/total season progress, asks whether to include earlier gaps, confirms season-wide writes, locks background scrolling in the modal, and invalidates History, Tracking, Stats, Activity, Discovery, and Calendar caches after success.
+- The candidate frontend image initially exposed `curl`/`libcurl` 8.19.0-r0 findings for CVE-2026-5773 and CVE-2026-6276. The production Dockerfile now pins the rebuilt official Nginx digest with `curl`/`libcurl` 8.21.0-r0 and verifies all audited package versions locally; the image must pass a HIGH/CRITICAL Trivy gate before rollout.
 - Current validation covers 175 passing backend unit tests, 77 PostgreSQL integration tests, 70 frontend tests, and 20 Playwright browser tests.
 
 ## Residual risks
