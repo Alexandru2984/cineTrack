@@ -33,6 +33,7 @@ services:
           pids: 256
 
   backend:
+    image: cinetrack-backend
     build:
       context: ./backend
       dockerfile: Dockerfile.prod
@@ -98,6 +99,28 @@ services:
           memory: 512M
           cpus: "1.0"
           pids: 256
+
+  migrate:
+    profiles: ["ops"]
+    image: cinetrack-backend
+    command: ["/usr/local/bin/cinetrack", "--migrate"]
+    environment:
+      DATABASE_URL: "postgresql://${MIGRATION_DATABASE_USER:-cinetrack_migrator}:${MIGRATION_DATABASE_PASSWORD:-provision-migration-role-first}@db:5432/${POSTGRES_DB}"
+      RUST_LOG: "${RUST_LOG:-cinetrack=info}"
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,noexec,nosuid,nodev
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 128
+    init: true
+    restart: "no"
+    logging: *default-logging
+    depends_on:
+      db:
+        condition: service_healthy
 
   frontend:
     build:

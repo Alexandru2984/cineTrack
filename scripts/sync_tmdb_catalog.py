@@ -305,7 +305,7 @@ def main() -> int:
     load_env_file(Path(os.environ.get("ENV_FILE", DEFAULT_ENV_FILE)))
     container = os.environ.get("DB_CONTAINER", "cinetrack-db-1")
     database = required("POSTGRES_DB")
-    role = os.environ.get("APP_DATABASE_USER", "cinetrack_app")
+    role = os.environ.get("MIGRATION_DATABASE_USER", "cinetrack_migrator")
     bucket = required("R2_BUCKET")
     export_base = os.environ.get(
         "TMDB_EXPORT_BASE_URL", "https://files.tmdb.org/p/exports"
