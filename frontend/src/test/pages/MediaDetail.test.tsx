@@ -6,8 +6,11 @@ import MediaDetail from '@/pages/MediaDetail';
 const mocks = vi.hoisted(() => ({
   useEpisodes: vi.fn(),
   useWatchedEpisodes: vi.fn(),
+  useShowWatchProgress: vi.fn(),
   createTracking: vi.fn(),
   markEpisodeWatched: vi.fn(),
+  markSeasonWatched: vi.fn(),
+  markEpisodesWatchedThrough: vi.fn(),
 }));
 
 vi.mock('react-router-dom', () => ({
@@ -51,8 +54,19 @@ vi.mock('@/hooks/useTracking', () => ({
     error: null,
   }),
   useWatchedEpisodes: (...args: unknown[]) => mocks.useWatchedEpisodes(...args),
+  useShowWatchProgress: (...args: unknown[]) => mocks.useShowWatchProgress(...args),
   useMarkEpisodeWatched: () => ({
     mutate: mocks.markEpisodeWatched,
+    isPending: false,
+    error: null,
+  }),
+  useMarkSeasonWatched: () => ({
+    mutate: mocks.markSeasonWatched,
+    isPending: false,
+    error: null,
+  }),
+  useMarkEpisodesWatchedThrough: () => ({
+    mutate: mocks.markEpisodesWatchedThrough,
     isPending: false,
     error: null,
   }),
@@ -85,6 +99,22 @@ describe('MediaDetail episode tracking', () => {
       isLoading: false,
     });
     mocks.useWatchedEpisodes.mockReturnValue({ data: [1] });
+    mocks.useShowWatchProgress.mockReturnValue({
+      data: [
+        {
+          season_number: 1,
+          episode_count: 2,
+          available_episode_count: 2,
+          watched_count: 2,
+        },
+        {
+          season_number: 2,
+          episode_count: 2,
+          available_episode_count: 2,
+          watched_count: 1,
+        },
+      ],
+    });
   });
 
   it('selects seasons and marks only unwatched episodes', async () => {
@@ -104,5 +134,52 @@ describe('MediaDetail episode tracking', () => {
       seasonNumber: 2,
       episodeNumber: 2,
     });
+  });
+
+  it('offers to mark previous episodes when the selected episode leaves gaps', async () => {
+    const user = userEvent.setup();
+    mocks.useWatchedEpisodes.mockReturnValue({ data: [] });
+    mocks.useShowWatchProgress.mockReturnValue({
+      data: [
+        {
+          season_number: 1,
+          episode_count: 2,
+          available_episode_count: 2,
+          watched_count: 0,
+        },
+      ],
+    });
+    render(<MediaDetail />);
+
+    await user.click(screen.getAllByTitle('Mark watched')[1]);
+    expect(screen.getByRole('dialog', { name: 'Mark S01E02 watched?' })).toBeVisible();
+
+    await user.click(screen.getByRole('button', { name: 'This and previous' }));
+    expect(mocks.markEpisodesWatchedThrough).toHaveBeenCalledWith(
+      {
+        tmdbId: 1399,
+        seasonNumber: 1,
+        episodeNumber: 2,
+      },
+      expect.objectContaining({ onSuccess: expect.any(Function) }),
+    );
+    expect(mocks.markEpisodeWatched).not.toHaveBeenCalled();
+  });
+
+  it('confirms marking every available episode in a season', async () => {
+    const user = userEvent.setup();
+    render(<MediaDetail />);
+
+    await user.click(screen.getByRole('button', { name: 'Mark season watched' }));
+    expect(screen.getByRole('dialog', { name: 'Mark Season 1 watched?' })).toBeVisible();
+
+    await user.click(screen.getByRole('button', { name: 'Mark season' }));
+    expect(mocks.markSeasonWatched).toHaveBeenCalledWith(
+      {
+        tmdbId: 1399,
+        seasonNumber: 1,
+      },
+      expect.objectContaining({ onSuccess: expect.any(Function) }),
+    );
   });
 });

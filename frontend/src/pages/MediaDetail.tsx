@@ -1,15 +1,54 @@
 import { useSearchParams } from 'react-router-dom';
 import { useParams } from 'react-router-dom';
 import { useEpisodes, useMediaDetail, useSeasons } from '@/hooks/useMedia';
-import { useCreateTracking, useMarkEpisodeWatched, useWatchedEpisodes } from '@/hooks/useTracking';
+import {
+  useCreateTracking,
+  useMarkEpisodeWatched,
+  useMarkEpisodesWatchedThrough,
+  useMarkSeasonWatched,
+  useShowWatchProgress,
+  useWatchedEpisodes,
+} from '@/hooks/useTracking';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
 import { getPosterUrl, getBackdropUrl, formatDate, formatRuntime } from '@/lib/utils';
 import { getApiErrorMessage } from '@/lib/api';
-import { Calendar, Check, CheckCircle2, Clock, Plus, Star } from 'lucide-react';
-import { useState } from 'react';
-import type { Media } from '@/types';
+import {
+  Calendar,
+  Check,
+  CheckCheck,
+  CheckCircle2,
+  Clock,
+  Loader2,
+  Plus,
+  Star,
+  X,
+} from 'lucide-react';
+import { useEffect, useState } from 'react';
+import type { Episode, Media, Season, SeasonWatchProgress } from '@/types';
 
 type Genre = NonNullable<Media['genres']>[number];
+type WatchConfirmation =
+  | {
+      kind: 'episode';
+      episode: Episode;
+      previousUnwatchedCount: number;
+    }
+  | {
+      kind: 'season';
+      season: Season;
+      unwatchedCount: number;
+    };
+
+function episodeCode(seasonNumber: number, episodeNumber: number): string {
+  return `S${String(seasonNumber).padStart(2, '0')}E${String(episodeNumber).padStart(2, '0')}`;
+}
+
+function localDateKey(): string {
+  const now = new Date();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${now.getFullYear()}-${month}-${day}`;
+}
 
 export default function MediaDetail() {
   const { id } = useParams<{ id: string }>();
@@ -38,15 +77,35 @@ export default function MediaDetail() {
     media?.tmdb_id,
     selectedSeason
   );
+  const { data: showWatchProgress = [] } = useShowWatchProgress(media?.tmdb_id);
   const createTracking = useCreateTracking();
   const markEpisodeWatched = useMarkEpisodeWatched();
+  const markSeasonWatched = useMarkSeasonWatched();
+  const markEpisodesWatchedThrough = useMarkEpisodesWatchedThrough();
   const [trackingStatus, setTrackingStatus] = useState('');
+  const [watchConfirmation, setWatchConfirmation] = useState<WatchConfirmation | null>(null);
 
   if (isLoading) return <LoadingSpinner />;
   if (!media) return <div className="text-center py-16">Media not found</div>;
 
   const genres: Genre[] = Array.isArray(media.genres) ? media.genres : [];
   const watchedEpisodeSet = new Set(watchedEpisodes);
+  const progressBySeason = new Map<number, SeasonWatchProgress>(
+    showWatchProgress.map((progress) => [progress.season_number, progress]),
+  );
+  const selectedSeasonData = seasons.find(
+    (season) => season.season_number === selectedSeason,
+  );
+  const watchableEpisodes = episodes.filter(
+    (episode) => episode.air_date === null || episode.air_date <= localDateKey(),
+  );
+  const selectedSeasonUnwatchedCount = watchableEpisodes.filter(
+    (episode) => !watchedEpisodeSet.has(episode.episode_number),
+  ).length;
+  const bulkWatchPending = markSeasonWatched.isPending || markEpisodesWatchedThrough.isPending;
+  const watchError = markEpisodeWatched.error
+    ?? markSeasonWatched.error
+    ?? markEpisodesWatchedThrough.error;
 
   const handleAddToList = (status: string) => {
     createTracking.mutate(
@@ -57,6 +116,47 @@ export default function MediaDetail() {
       },
       { onSuccess: () => setTrackingStatus(status) }
     );
+  };
+
+  const previousUnwatchedCount = (episode: Episode): number => {
+    const earlierSeasonCount = seasons
+      .filter(
+        (season) =>
+          season.season_number > 0
+          && selectedSeason !== null
+          && season.season_number < selectedSeason,
+      )
+      .reduce((total, season) => {
+        const progress = progressBySeason.get(season.season_number);
+        const expected = progress?.episode_count
+          ?? season.episode_count
+          ?? progress?.available_episode_count
+          ?? 0;
+        return total + Math.max(0, expected - (progress?.watched_count ?? 0));
+      }, 0);
+    const earlierCurrentSeasonCount = episodes.filter(
+      (candidate) =>
+        candidate.episode_number < episode.episode_number
+        && !watchedEpisodeSet.has(candidate.episode_number),
+    ).length;
+    return earlierSeasonCount + earlierCurrentSeasonCount;
+  };
+
+  const handleEpisodeWatch = (episode: Episode) => {
+    const previousCount = previousUnwatchedCount(episode);
+    if (previousCount > 0) {
+      setWatchConfirmation({
+        kind: 'episode',
+        episode,
+        previousUnwatchedCount: previousCount,
+      });
+      return;
+    }
+    markEpisodeWatched.mutate({
+      tmdbId: media.tmdb_id,
+      seasonNumber: selectedSeason!,
+      episodeNumber: episode.episode_number,
+    });
   };
 
   const backdrop = getBackdropUrl(media.backdrop_path);
@@ -163,28 +263,34 @@ export default function MediaDetail() {
           <section className="mt-10">
             <h2 className="text-2xl font-bold mb-4">Seasons</h2>
             <div className="flex gap-2 overflow-x-auto border-b border-[hsl(var(--border))] pb-3" role="tablist">
-              {seasons.map((season) => (
-                <button
-                  key={season.id}
-                  type="button"
-                  role="tab"
-                  aria-selected={selectedSeason === season.season_number}
-                  onClick={() => setSeasonSelection({
-                    mediaId: id!,
-                    seasonNumber: season.season_number,
-                  })}
-                  className={`min-h-10 shrink-0 rounded-md px-3 text-sm font-medium transition-colors ${
-                    selectedSeason === season.season_number
-                      ? 'bg-[hsl(var(--primary))] text-white'
-                      : 'border border-[hsl(var(--border))] hover:bg-[hsl(var(--secondary))]'
-                  }`}
-                >
-                  {season.season_number === 0 ? 'Specials' : `Season ${season.season_number}`}
-                  {season.episode_count != null && (
-                    <span className="ml-2 opacity-70">{season.episode_count}</span>
-                  )}
-                </button>
-              ))}
+              {seasons.map((season) => {
+                const progress = progressBySeason.get(season.season_number);
+                const total = progress?.episode_count ?? season.episode_count;
+                return (
+                  <button
+                    key={season.id}
+                    type="button"
+                    role="tab"
+                    aria-selected={selectedSeason === season.season_number}
+                    onClick={() => setSeasonSelection({
+                      mediaId: id!,
+                      seasonNumber: season.season_number,
+                    })}
+                    className={`min-h-10 shrink-0 rounded-md px-3 text-sm font-medium transition-colors ${
+                      selectedSeason === season.season_number
+                        ? 'bg-[hsl(var(--primary))] text-white'
+                        : 'border border-[hsl(var(--border))] hover:bg-[hsl(var(--secondary))]'
+                    }`}
+                  >
+                    {season.season_number === 0 ? 'Specials' : `Season ${season.season_number}`}
+                    {total != null && (
+                      <span className="ml-2 opacity-70">
+                        {progress ? `${progress.watched_count}/${total}` : total}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
             </div>
 
             <div className="mt-5">
@@ -193,58 +299,245 @@ export default function MediaDetail() {
               ) : episodes.length === 0 ? (
                 <p className="py-8 text-[hsl(var(--muted-foreground))]">No episodes available</p>
               ) : (
-                <div className="divide-y divide-[hsl(var(--border))]">
-                  {episodes.map((episode) => {
-                    const watched = watchedEpisodeSet.has(episode.episode_number);
-                    return (
-                      <div key={episode.id} className="flex min-h-24 items-start gap-3 py-4 sm:gap-4">
-                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-[hsl(var(--secondary))] text-sm font-semibold">
-                          {episode.episode_number}
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <h3 className="font-medium">{episode.name || `Episode ${episode.episode_number}`}</h3>
-                          <div className="mt-1 flex flex-wrap gap-x-3 text-xs text-[hsl(var(--muted-foreground))]">
-                            {episode.air_date && <span>{formatDate(episode.air_date)}</span>}
-                            {episode.runtime_minutes != null && <span>{formatRuntime(episode.runtime_minutes)}</span>}
+                <>
+                  <div className="mb-2 flex min-h-10 flex-wrap items-center justify-between gap-2 border-b border-[hsl(var(--border))] pb-2">
+                    <p className="text-sm text-[hsl(var(--muted-foreground))]">
+                      {watchedEpisodeSet.size} of {episodes.length} watched
+                    </p>
+                    <button
+                      type="button"
+                      disabled={selectedSeasonUnwatchedCount === 0 || bulkWatchPending}
+                      onClick={() => {
+                        if (selectedSeasonData) {
+                          setWatchConfirmation({
+                            kind: 'season',
+                            season: selectedSeasonData,
+                            unwatchedCount: selectedSeasonUnwatchedCount,
+                          });
+                        }
+                      }}
+                      className="flex h-9 items-center gap-2 rounded-md border border-[hsl(var(--border))] px-3 text-sm font-medium hover:border-emerald-600 hover:text-emerald-600 disabled:cursor-default disabled:opacity-60"
+                    >
+                      {bulkWatchPending
+                        ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                        : selectedSeasonUnwatchedCount === 0
+                          ? <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
+                          : <CheckCheck className="h-4 w-4" aria-hidden="true" />}
+                      {selectedSeasonUnwatchedCount === 0 ? 'Season watched' : 'Mark season watched'}
+                    </button>
+                  </div>
+                  <div className="divide-y divide-[hsl(var(--border))]">
+                    {episodes.map((episode) => {
+                      const watched = watchedEpisodeSet.has(episode.episode_number);
+                      return (
+                        <div key={episode.id} className="flex min-h-24 items-start gap-3 py-4 sm:gap-4">
+                          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-[hsl(var(--secondary))] text-sm font-semibold">
+                            {episode.episode_number}
                           </div>
-                          {episode.overview && (
-                            <p className="mt-2 line-clamp-2 text-sm leading-relaxed text-[hsl(var(--muted-foreground))]">
-                              {episode.overview}
-                            </p>
-                          )}
+                          <div className="min-w-0 flex-1">
+                            <h3 className="font-medium">{episode.name || `Episode ${episode.episode_number}`}</h3>
+                            <div className="mt-1 flex flex-wrap gap-x-3 text-xs text-[hsl(var(--muted-foreground))]">
+                              {episode.air_date && <span>{formatDate(episode.air_date)}</span>}
+                              {episode.runtime_minutes != null && <span>{formatRuntime(episode.runtime_minutes)}</span>}
+                            </div>
+                            {episode.overview && (
+                              <p className="mt-2 line-clamp-2 text-sm leading-relaxed text-[hsl(var(--muted-foreground))]">
+                                {episode.overview}
+                              </p>
+                            )}
+                          </div>
+                          <button
+                            type="button"
+                            title={watched ? 'Watched' : 'Mark watched'}
+                            disabled={watched || markEpisodeWatched.isPending || bulkWatchPending}
+                            onClick={() => handleEpisodeWatch(episode)}
+                            className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-md border transition-colors sm:w-32 sm:gap-2 ${
+                              watched
+                                ? 'border-emerald-600 text-emerald-600'
+                                : 'border-[hsl(var(--border))] hover:border-[hsl(var(--primary))] hover:text-[hsl(var(--primary))]'
+                            } disabled:cursor-default disabled:opacity-70`}
+                          >
+                            {watched ? <CheckCircle2 className="h-4 w-4" /> : <Check className="h-4 w-4" />}
+                            <span className="hidden text-sm sm:inline">{watched ? 'Watched' : 'Mark watched'}</span>
+                          </button>
                         </div>
-                        <button
-                          type="button"
-                          title={watched ? 'Watched' : 'Mark watched'}
-                          disabled={watched || markEpisodeWatched.isPending}
-                          onClick={() => markEpisodeWatched.mutate({
-                            tmdbId: media.tmdb_id,
-                            seasonNumber: selectedSeason!,
-                            episodeNumber: episode.episode_number,
-                          })}
-                          className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-md border transition-colors sm:w-32 sm:gap-2 ${
-                            watched
-                              ? 'border-emerald-600 text-emerald-600'
-                              : 'border-[hsl(var(--border))] hover:border-[hsl(var(--primary))] hover:text-[hsl(var(--primary))]'
-                          } disabled:cursor-default disabled:opacity-70`}
-                        >
-                          {watched ? <CheckCircle2 className="h-4 w-4" /> : <Check className="h-4 w-4" />}
-                          <span className="hidden text-sm sm:inline">{watched ? 'Watched' : 'Mark watched'}</span>
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
+                      );
+                    })}
+                  </div>
+                </>
               )}
-              {markEpisodeWatched.error && (
+              {watchError && (
                 <p className="mt-3 text-sm text-[hsl(var(--destructive))]">
-                  {getApiErrorMessage(markEpisodeWatched.error, 'Could not mark this episode')}
+                  {getApiErrorMessage(watchError, 'Could not update watched episodes')}
                 </p>
               )}
             </div>
           </section>
         )}
       </div>
+      {watchConfirmation && selectedSeason !== null && (
+        <WatchConfirmationDialog
+          confirmation={watchConfirmation}
+          seasonNumber={selectedSeason}
+          pending={markEpisodeWatched.isPending || bulkWatchPending}
+          onClose={() => setWatchConfirmation(null)}
+          onOnlyEpisode={() => {
+            if (watchConfirmation.kind !== 'episode') return;
+            markEpisodeWatched.mutate(
+              {
+                tmdbId: media.tmdb_id,
+                seasonNumber: selectedSeason,
+                episodeNumber: watchConfirmation.episode.episode_number,
+              },
+              { onSuccess: () => setWatchConfirmation(null) },
+            );
+          }}
+          onEpisodeAndPrevious={() => {
+            if (watchConfirmation.kind !== 'episode') return;
+            markEpisodesWatchedThrough.mutate(
+              {
+                tmdbId: media.tmdb_id,
+                seasonNumber: selectedSeason,
+                episodeNumber: watchConfirmation.episode.episode_number,
+              },
+              { onSuccess: () => setWatchConfirmation(null) },
+            );
+          }}
+          onSeason={() => {
+            if (watchConfirmation.kind !== 'season') return;
+            markSeasonWatched.mutate(
+              {
+                tmdbId: media.tmdb_id,
+                seasonNumber: watchConfirmation.season.season_number,
+              },
+              { onSuccess: () => setWatchConfirmation(null) },
+            );
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function WatchConfirmationDialog({
+  confirmation,
+  seasonNumber,
+  pending,
+  onClose,
+  onOnlyEpisode,
+  onEpisodeAndPrevious,
+  onSeason,
+}: {
+  confirmation: WatchConfirmation;
+  seasonNumber: number;
+  pending: boolean;
+  onClose: () => void;
+  onOnlyEpisode: () => void;
+  onEpisodeAndPrevious: () => void;
+  onSeason: () => void;
+}) {
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, []);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !pending) onClose();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [onClose, pending]);
+
+  const episodeLabel = confirmation.kind === 'episode'
+    ? episodeCode(seasonNumber, confirmation.episode.episode_number)
+    : null;
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-0 sm:items-center sm:p-4"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget && !pending) onClose();
+      }}
+    >
+      <section
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="watch-confirmation-title"
+        className="w-full max-w-md rounded-t-lg border border-[hsl(var(--border))] bg-[hsl(var(--background))] p-5 shadow-2xl sm:rounded-lg"
+      >
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h2 id="watch-confirmation-title" className="text-lg font-semibold">
+              {confirmation.kind === 'episode'
+                ? `Mark ${episodeLabel} watched?`
+                : `Mark ${confirmation.season.name || `Season ${confirmation.season.season_number}`} watched?`}
+            </h2>
+            <p className="mt-2 text-sm leading-relaxed text-[hsl(var(--muted-foreground))]">
+              {confirmation.kind === 'episode'
+                ? `${confirmation.previousUnwatchedCount} earlier unwatched episode${confirmation.previousUnwatchedCount === 1 ? '' : 's'} can be added at the same time.`
+                : `${confirmation.unwatchedCount} available episode${confirmation.unwatchedCount === 1 ? '' : 's'} will be added to your history.`}
+            </p>
+          </div>
+          <button
+            type="button"
+            title="Close"
+            aria-label="Close"
+            disabled={pending}
+            onClick={onClose}
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md hover:bg-[hsl(var(--accent))] disabled:opacity-50"
+          >
+            <X className="h-4 w-4" aria-hidden="true" />
+          </button>
+        </div>
+
+        <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+          <button
+            type="button"
+            disabled={pending}
+            onClick={onClose}
+            className="h-10 rounded-md border border-[hsl(var(--border))] px-4 text-sm font-medium hover:bg-[hsl(var(--accent))] disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          {confirmation.kind === 'episode' ? (
+            <>
+              <button
+                type="button"
+                autoFocus
+                disabled={pending}
+                onClick={onOnlyEpisode}
+                className="h-10 rounded-md border border-[hsl(var(--border))] px-4 text-sm font-medium hover:bg-[hsl(var(--accent))] disabled:opacity-50"
+              >
+                Only this episode
+              </button>
+              <button
+                type="button"
+                disabled={pending}
+                onClick={onEpisodeAndPrevious}
+                className="flex h-10 items-center justify-center gap-2 rounded-md bg-emerald-600 px-4 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
+              >
+                {pending && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
+                This and previous
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              autoFocus
+              disabled={pending}
+              onClick={onSeason}
+              className="flex h-10 items-center justify-center gap-2 rounded-md bg-emerald-600 px-4 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
+            >
+              {pending && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
+              Mark season
+            </button>
+          )}
+        </div>
+      </section>
     </div>
   );
 }

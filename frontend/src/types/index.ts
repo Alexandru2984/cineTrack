@@ -56,6 +56,20 @@ export interface Episode {
   still_path: string | null;
 }
 
+export interface SeasonWatchProgress {
+  season_number: number;
+  episode_count: number | null;
+  available_episode_count: number;
+  watched_count: number;
+}
+
+export interface BulkWatchResponse {
+  media_id: string;
+  candidate_count: number;
+  marked_count: number;
+  already_watched_count: number;
+}
+
 export interface TmdbSearchResult {
   id: number;
   title?: string;

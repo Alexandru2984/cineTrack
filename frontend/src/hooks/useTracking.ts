@@ -1,6 +1,25 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '@/lib/api';
-import type { TrackingItem, HistoryItem } from '@/types';
+import type {
+  BulkWatchResponse,
+  HistoryItem,
+  SeasonWatchProgress,
+  TrackingItem,
+} from '@/types';
+
+function invalidateEpisodeWatchState(
+  queryClient: ReturnType<typeof useQueryClient>,
+  tmdbId: number,
+) {
+  void queryClient.invalidateQueries({ queryKey: ['watched-episodes', tmdbId] });
+  void queryClient.invalidateQueries({ queryKey: ['show-watch-progress', tmdbId] });
+  void queryClient.invalidateQueries({ queryKey: ['history'] });
+  void queryClient.invalidateQueries({ queryKey: ['tracking'] });
+  void queryClient.invalidateQueries({ queryKey: ['stats'] });
+  void queryClient.invalidateQueries({ queryKey: ['activity'] });
+  void queryClient.invalidateQueries({ queryKey: ['discovery'] });
+  void queryClient.invalidateQueries({ queryKey: ['calendar'] });
+}
 
 export function useTracking(status?: string) {
   return useQuery<TrackingItem[]>({
@@ -96,6 +115,17 @@ export function useWatchedEpisodes(tmdbId: number | undefined, seasonNumber: num
   });
 }
 
+export function useShowWatchProgress(tmdbId: number | undefined) {
+  return useQuery<SeasonWatchProgress[]>({
+    queryKey: ['show-watch-progress', tmdbId],
+    queryFn: async () => {
+      const res = await api.get(`/history/tv/${tmdbId}/progress`);
+      return res.data;
+    },
+    enabled: !!tmdbId,
+  });
+}
+
 export function useMarkEpisodeWatched() {
   const qc = useQueryClient();
   return useMutation({
@@ -114,14 +144,51 @@ export function useMarkEpisodeWatched() {
       return res.data;
     },
     onSuccess: (_data, variables) => {
-      void qc.invalidateQueries({
-        queryKey: ['watched-episodes', variables.tmdbId, variables.seasonNumber],
-      });
-      void qc.invalidateQueries({ queryKey: ['history'] });
-      void qc.invalidateQueries({ queryKey: ['tracking'] });
-      void qc.invalidateQueries({ queryKey: ['stats'] });
-      void qc.invalidateQueries({ queryKey: ['activity'] });
-      void qc.invalidateQueries({ queryKey: ['discovery'] });
+      invalidateEpisodeWatchState(qc, variables.tmdbId);
+    },
+  });
+}
+
+export function useMarkSeasonWatched() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      tmdbId,
+      seasonNumber,
+    }: {
+      tmdbId: number;
+      seasonNumber: number;
+    }) => {
+      const res = await api.post<BulkWatchResponse>(
+        `/history/tv/${tmdbId}/seasons/${seasonNumber}/watched`,
+      );
+      return res.data;
+    },
+    onSuccess: (_data, variables) => {
+      invalidateEpisodeWatchState(qc, variables.tmdbId);
+    },
+  });
+}
+
+export function useMarkEpisodesWatchedThrough() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      tmdbId,
+      seasonNumber,
+      episodeNumber,
+    }: {
+      tmdbId: number;
+      seasonNumber: number;
+      episodeNumber: number;
+    }) => {
+      const res = await api.post<BulkWatchResponse>(
+        `/history/tv/${tmdbId}/seasons/${seasonNumber}/episodes/${episodeNumber}/watched-through`,
+      );
+      return res.data;
+    },
+    onSuccess: (_data, variables) => {
+      invalidateEpisodeWatchState(qc, variables.tmdbId);
     },
   });
 }
