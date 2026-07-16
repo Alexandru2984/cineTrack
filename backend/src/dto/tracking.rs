@@ -11,6 +11,22 @@ pub const VALID_TRACKING_STATUSES: &[&str] = &[
     "on_hold",
 ];
 
+#[derive(Debug, Serialize)]
+pub struct SeasonWatchProgress {
+    pub season_number: i32,
+    pub episode_count: Option<i32>,
+    pub available_episode_count: i64,
+    pub watched_count: i64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct BulkWatchResponse {
+    pub media_id: Uuid,
+    pub candidate_count: i64,
+    pub marked_count: i64,
+    pub already_watched_count: i64,
+}
+
 fn validate_media_type(media_type: &str) -> Result<(), validator::ValidationError> {
     if VALID_MEDIA_TYPES.contains(&media_type) {
         Ok(())
