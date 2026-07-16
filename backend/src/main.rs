@@ -29,6 +29,7 @@ enum RunMode {
     HydrateCatalog,
     SyncReleaseSchedules,
     Migrate,
+    CheckConfig,
 }
 
 fn bounded_env_u32(name: &str, default: u32, minimum: u32, maximum: u32) -> std::io::Result<u32> {
@@ -107,10 +108,11 @@ async fn main() -> std::io::Result<()> {
         [argument] if argument == "--hydrate-catalog" => RunMode::HydrateCatalog,
         [argument] if argument == "--sync-release-schedules" => RunMode::SyncReleaseSchedules,
         [argument] if argument == "--migrate" => RunMode::Migrate,
+        [argument] if argument == "--check-config" => RunMode::CheckConfig,
         _ => {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
-                "supported arguments are --healthcheck, --hydrate-catalog, --sync-release-schedules and --migrate",
+                "supported arguments are --healthcheck, --hydrate-catalog, --sync-release-schedules, --migrate and --check-config",
             ));
         }
     };
@@ -130,6 +132,10 @@ async fn main() -> std::io::Result<()> {
     }
 
     let config = config::Config::from_env();
+    if matches!(mode, RunMode::CheckConfig) {
+        log::info!("Application configuration is valid");
+        return Ok(());
+    }
     password::initialize().await.map_err(|error| {
         log::error!("Failed to initialize password verification: {error:?}");
         std::io::Error::other("failed to initialize password verification")
