@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   useChangePassword,
+  useLogout,
   useSessions,
   useRevokeSession,
   useLogoutAllSessions,
@@ -59,6 +60,26 @@ function InstallAppCard() {
         Install app
       </button>
     </section>
+  );
+}
+
+function SignOutCard() {
+  const navigate = useNavigate();
+  const logout = useLogout();
+
+  return (
+    <button
+      type="button"
+      disabled={logout.isPending}
+      onClick={() => logout.mutate(undefined, { onSuccess: () => navigate('/login') })}
+      className="flex h-12 w-full items-center justify-between border-y border-[hsl(var(--border))] px-1 text-sm font-medium text-[hsl(var(--destructive))] disabled:opacity-50"
+    >
+      <span className="flex items-center gap-2">
+        <LogOut className="h-5 w-5" aria-hidden="true" />
+        Sign out
+      </span>
+      <ChevronRight className="h-4 w-4" aria-hidden="true" />
+    </button>
   );
 }
 
@@ -663,7 +684,7 @@ export default function SettingsPage() {
   }, [location.hash]);
 
   return (
-    <div className="mx-auto max-w-3xl px-4 py-8 space-y-6">
+    <div className="mx-auto max-w-3xl space-y-6 px-4 py-6 sm:py-8">
       <h1 className="text-2xl font-bold">Settings</h1>
       <ProfilePictureCard />
       <PrivacyCard />
@@ -672,6 +693,7 @@ export default function SettingsPage() {
       <ImportCard />
       <ChangePasswordCard />
       <SessionsCard />
+      <SignOutCard />
       <Link
         to="/about"
         className="flex items-center justify-between gap-4 border-y border-[hsl(var(--border))] px-1 py-4 text-sm font-medium hover:text-[hsl(var(--primary))]"

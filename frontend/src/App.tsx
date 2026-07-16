@@ -5,6 +5,7 @@ import { useAuthStore } from '@/store/auth';
 import { bootstrapSession } from '@/lib/api';
 import { Navbar } from '@/components/Navbar';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
+import { MobileTabBar } from '@/components/MobileTabBar';
 
 const LoginPage = lazy(() => import('@/pages/Login'));
 const RegisterPage = lazy(() => import('@/pages/Register'));
@@ -23,7 +24,7 @@ const AboutPage = lazy(() => import('@/pages/About'));
 
 function PageLoader() {
   return (
-    <div className="flex min-h-[calc(100vh-4rem)] items-center justify-center">
+    <div className="flex min-h-[calc(100dvh-4rem)] items-center justify-center">
       <Loader2
         className="h-6 w-6 animate-spin text-[hsl(var(--primary))]"
         aria-label="Loading page"
@@ -49,6 +50,7 @@ export default function App() {
   // moves elsewhere, instead of staying stuck on the fallback.
   const location = useLocation();
   const authStatus = useAuthStore((state) => state.status);
+  const authenticated = authStatus === 'authenticated';
 
   useEffect(() => {
     void bootstrapSession();
@@ -56,7 +58,7 @@ export default function App() {
 
   if (authStatus === 'loading') {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[hsl(var(--background))]">
+      <div className="flex min-h-dvh items-center justify-center bg-[hsl(var(--background))]">
         <Loader2
           className="h-6 w-6 animate-spin text-[hsl(var(--primary))]"
           aria-label="Loading session"
@@ -66,9 +68,15 @@ export default function App() {
   }
 
   return (
-    <div className="flex min-h-screen flex-col bg-[hsl(var(--background))] text-[hsl(var(--foreground))]">
+    <div className="flex min-h-dvh flex-col bg-[hsl(var(--background))] text-[hsl(var(--foreground))]">
       <Navbar />
-      <main className="flex-1">
+      <main
+        className={`flex-1 ${
+          authenticated
+            ? 'pb-[calc(4.5rem+env(safe-area-inset-bottom))] md:pb-0'
+            : ''
+        }`}
+      >
         <ErrorBoundary key={location.pathname}>
           <Suspense fallback={<PageLoader />}>
             <Routes>
@@ -90,6 +98,7 @@ export default function App() {
           </Suspense>
         </ErrorBoundary>
       </main>
+      {authenticated && <MobileTabBar />}
     </div>
   );
 }

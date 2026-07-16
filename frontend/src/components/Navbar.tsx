@@ -91,9 +91,9 @@ export function Navbar() {
   };
 
   return (
-    <nav className="sticky top-0 z-50 border-b border-[hsl(var(--border))] bg-[hsl(var(--background))]/95 backdrop-blur">
+    <nav className="sticky top-0 z-50 border-b border-[hsl(var(--border))] bg-[hsl(var(--background))]/95 pt-[env(safe-area-inset-top)] backdrop-blur">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-        <div className="flex h-16 items-center justify-between">
+        <div className="flex h-14 items-center justify-between md:h-16">
           <Link
             to="/"
             className="flex items-center gap-2 text-xl font-bold text-[hsl(var(--primary))]"
@@ -254,154 +254,78 @@ export function Navbar() {
 
           <div className="flex items-center gap-1 md:hidden">
             {authed && (
-              <Link
-                to="/notifications"
-                aria-label={unreadLabel(unreadCount)}
-                className="relative flex h-10 w-10 items-center justify-center rounded-md transition-colors hover:bg-[hsl(var(--accent))]"
-              >
-                <Bell className="h-5 w-5" aria-hidden="true" />
-                <UnreadBadge count={unreadCount} />
-              </Link>
-            )}
-            <button
-              type="button"
-              className="flex h-10 w-10 items-center justify-center rounded-md"
-              aria-label={mobileOpen ? 'Close navigation' : 'Open navigation'}
-              aria-expanded={mobileOpen}
-              aria-controls="mobile-navigation"
-              onClick={() => setMobileOpen(!mobileOpen)}
-            >
-              {mobileOpen ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
-            </button>
-          </div>
-        </div>
-
-        {mobileOpen && (
-          <div id="mobile-navigation" className="space-y-2 pb-4 md:hidden">
-            {authed ? (
               <>
                 <Link
-                  to="/search"
-                  className="block py-2 text-sm"
-                  onClick={() => setMobileOpen(false)}
-                >
-                  Search
-                </Link>
-                <Link
-                  to="/calendar"
-                  className="flex items-center justify-between py-2 text-sm"
-                  onClick={() => setMobileOpen(false)}
-                >
-                  <span>Calendar</span>
-                  {newEpisodeCount > 0 && (
-                    <span className="rounded-full bg-cyan-600 px-2 py-0.5 text-xs font-semibold text-white">
-                      {newEpisodeCount > 99 ? '99+' : newEpisodeCount}
-                    </span>
-                  )}
-                </Link>
-                <Link
-                  to="/tracking"
-                  className="block py-2 text-sm"
-                  onClick={() => setMobileOpen(false)}
-                >
-                  My List
-                </Link>
-                <Link
-                  to="/stats"
-                  className="block py-2 text-sm"
-                  onClick={() => setMobileOpen(false)}
-                >
-                  Stats
-                </Link>
-                <Link
                   to="/notifications"
-                  className="flex items-center justify-between py-2 text-sm"
-                  onClick={() => setMobileOpen(false)}
+                  aria-label={unreadLabel(unreadCount)}
+                  className="relative flex h-10 w-10 items-center justify-center rounded-md transition-colors hover:bg-[hsl(var(--accent))]"
                 >
-                  <span>Notifications</span>
-                  {unreadCount > 0 && (
-                    <span className="rounded-full bg-[hsl(var(--destructive))] px-2 py-0.5 text-xs font-semibold text-white">
-                      {unreadCount > 99 ? '99+' : unreadCount}
-                    </span>
-                  )}
-                </Link>
-                <Link
-                  to={`/profile/${encodeURIComponent(user?.username ?? '')}`}
-                  className="block py-2 text-sm"
-                  onClick={() => setMobileOpen(false)}
-                >
-                  Profile
+                  <Bell className="h-5 w-5" aria-hidden="true" />
+                  <UnreadBadge count={unreadCount} />
                 </Link>
                 <Link
                   to="/settings"
-                  className="block py-2 text-sm"
-                  onClick={() => setMobileOpen(false)}
+                  aria-label="Settings"
+                  title="Settings"
+                  className="flex h-10 w-10 items-center justify-center rounded-md transition-colors hover:bg-[hsl(var(--accent))]"
                 >
-                  Settings
-                </Link>
-                <button
-                  type="button"
-                  onClick={handleLogout}
-                  className="block py-2 text-sm text-[hsl(var(--destructive))]"
-                >
-                  Logout
-                </button>
-                <button
-                  type="button"
-                  onClick={toggle}
-                  className="flex items-center gap-2 py-2 text-sm"
-                >
-                  {isDark ? (
-                    <>
-                      <Sun className="h-4 w-4" /> Light Mode
-                    </>
-                  ) : (
-                    <>
-                      <Moon className="h-4 w-4" /> Dark Mode
-                    </>
-                  )}
-                </button>
-              </>
-            ) : (
-              <>
-                <button
-                  type="button"
-                  onClick={toggle}
-                  className="flex items-center gap-2 py-2 text-sm"
-                >
-                  {isDark ? (
-                    <>
-                      <Sun className="h-4 w-4" /> Light Mode
-                    </>
-                  ) : (
-                    <>
-                      <Moon className="h-4 w-4" /> Dark Mode
-                    </>
-                  )}
-                </button>
-                <Link
-                  to="/login"
-                  className="block py-2 text-sm"
-                  onClick={() => setMobileOpen(false)}
-                >
-                  Login
-                </Link>
-                <Link
-                  to="/about"
-                  className="block py-2 text-sm"
-                  onClick={() => setMobileOpen(false)}
-                >
-                  About
-                </Link>
-                <Link
-                  to="/register"
-                  className="block py-2 text-sm"
-                  onClick={() => setMobileOpen(false)}
-                >
-                  Register
+                  <Settings className="h-5 w-5" aria-hidden="true" />
                 </Link>
               </>
             )}
+            {!authed && (
+              <button
+                type="button"
+                className="flex h-10 w-10 items-center justify-center rounded-md"
+                aria-label={mobileOpen ? 'Close navigation' : 'Open navigation'}
+                aria-expanded={mobileOpen}
+                aria-controls="mobile-navigation"
+                onClick={() => setMobileOpen(!mobileOpen)}
+              >
+                {mobileOpen ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
+              </button>
+            )}
+          </div>
+        </div>
+
+        {mobileOpen && !authed && (
+          <div id="mobile-navigation" className="space-y-2 pb-4 md:hidden">
+            <button
+              type="button"
+              onClick={toggle}
+              className="flex items-center gap-2 py-2 text-sm"
+            >
+              {isDark ? (
+                <>
+                  <Sun className="h-4 w-4" /> Light Mode
+                </>
+              ) : (
+                <>
+                  <Moon className="h-4 w-4" /> Dark Mode
+                </>
+              )}
+            </button>
+            <Link
+              to="/login"
+              className="block py-2 text-sm"
+              onClick={() => setMobileOpen(false)}
+            >
+              Login
+            </Link>
+            <Link
+              to="/about"
+              className="block py-2 text-sm"
+              onClick={() => setMobileOpen(false)}
+            >
+              About
+            </Link>
+            <Link
+              to="/register"
+              className="block py-2 text-sm"
+              onClick={() => setMobileOpen(false)}
+            >
+              Register
+            </Link>
           </div>
         )}
       </div>

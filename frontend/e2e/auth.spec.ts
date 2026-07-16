@@ -303,9 +303,19 @@ test('confirms and marks an episode together with previous gaps', async ({ page 
     return route.fulfill({ json: [] });
   });
 
+  await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/media/1399?type=tv');
   await page.getByTitle('Mark watched').last().click();
-  await expect(page.getByRole('dialog', { name: 'Mark S01E02 watched?' })).toBeVisible();
+  const dialog = page.getByRole('dialog', { name: 'Mark S01E02 watched?' });
+  await expect(dialog).toBeVisible();
+  expect(
+    await dialog.evaluate((element) => getComputedStyle(element.parentElement!).zIndex)
+  ).toBe('80');
+  expect(
+    await page
+      .getByRole('navigation', { name: 'Primary mobile navigation' })
+      .evaluate((element) => getComputedStyle(element).zIndex)
+  ).toBe('40');
   await page.getByRole('button', { name: 'This and previous' }).click();
 
   await expect.poll(() => watchedThroughRequests).toBe(1);
@@ -339,6 +349,56 @@ test('renders local discovery shelves without viewport overflow', async ({ page 
 
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(page.getByRole('heading', { name: 'Popular Movies' })).toBeVisible();
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= document.documentElement.clientWidth
+    )
+  ).toBe(true);
+});
+
+test('uses a touch-safe primary tab bar on narrow authenticated screens', async ({ page }) => {
+  await stubSession(page);
+  await stubAuthedReads(page);
+  await page.route('**/api/calendar/summary**', (route) =>
+    route.fulfill({
+      json: {
+        new_count: 3,
+        planned_count: 0,
+        last_synced_at: '2026-07-16T12:00:00Z',
+      },
+    })
+  );
+
+  await page.setViewportSize({ width: 320, height: 700 });
+  await page.goto('/');
+
+  const navigation = page.getByRole('navigation', {
+    name: 'Primary mobile navigation',
+  });
+  await expect(navigation).toBeVisible();
+  await expect(navigation.getByRole('link', { name: 'Home' })).toHaveAttribute(
+    'aria-current',
+    'page'
+  );
+  await expect(
+    navigation.getByRole('link', { name: 'Calendar, 3 new episodes' })
+  ).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Open navigation' })).toHaveCount(0);
+  await expect(page.getByRole('link', { name: 'Settings' })).toBeVisible();
+
+  const navBox = await navigation.boundingBox();
+  const mainPaddingBottom = await page.locator('main').evaluate((element) =>
+    Number.parseFloat(getComputedStyle(element).paddingBottom)
+  );
+  expect(navBox).not.toBeNull();
+  expect(mainPaddingBottom).toBeGreaterThanOrEqual(navBox!.height);
+
+  await navigation.getByRole('link', { name: 'Library' }).click();
+  await expect(page).toHaveURL(/\/tracking$/);
+  await expect(navigation.getByRole('link', { name: 'Library' })).toHaveAttribute(
+    'aria-current',
+    'page'
+  );
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= document.documentElement.clientWidth

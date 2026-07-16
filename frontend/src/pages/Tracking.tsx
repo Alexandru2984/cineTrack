@@ -14,16 +14,23 @@ export default function TrackingPage() {
   const deleteTracking = useDeleteTracking();
 
   return (
-    <div className="mx-auto max-w-7xl px-4 py-8 space-y-6">
-      <h1 className="text-3xl font-bold">My List</h1>
+    <div className="mx-auto max-w-7xl space-y-6 px-4 py-6 sm:py-8">
+      <h1 className="text-2xl font-bold sm:text-3xl">My List</h1>
 
       {/* Tabs */}
-      <div className="flex gap-2 overflow-x-auto pb-2">
+      <div
+        role="tablist"
+        aria-label="Library status"
+        className="sticky top-[calc(3.5rem+env(safe-area-inset-top))] z-30 -mx-4 flex gap-2 overflow-x-auto border-y border-[hsl(var(--border))] bg-[hsl(var(--background))]/95 px-4 py-3 backdrop-blur md:static md:mx-0 md:border-0 md:bg-transparent md:px-0 md:py-0 md:pb-2 md:backdrop-blur-none"
+      >
         {TABS.map((t) => (
           <button
             key={t}
+            type="button"
+            role="tab"
+            aria-selected={tab === t}
             onClick={() => setTab(t)}
-            className={`whitespace-nowrap rounded-full px-4 py-1.5 text-sm font-medium transition-colors ${
+            className={`min-h-10 shrink-0 whitespace-nowrap rounded-md px-4 text-sm font-medium transition-colors ${
               tab === t
                 ? 'bg-[hsl(var(--primary))] text-white'
                 : 'border border-[hsl(var(--border))] hover:bg-[hsl(var(--secondary))]'
@@ -44,9 +51,9 @@ export default function TrackingPage() {
 
       <div className="space-y-3">
         {items?.map((item) => (
-          <div
+          <article
             key={item.id}
-            className="flex items-center gap-4 rounded-lg border border-[hsl(var(--border))] p-3 bg-[hsl(var(--card))]"
+            className="flex flex-wrap items-center gap-3 rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-3 sm:flex-nowrap sm:gap-4"
           >
             <Link to={`/media/${item.tmdb_id}?type=${item.media_type}`}>
               <img
@@ -71,13 +78,12 @@ export default function TrackingPage() {
                 </div>
               )}
             </div>
-            <div className="flex items-center gap-2 shrink-0">
-              {/* Quick rating */}
+            <div className="flex w-full shrink-0 items-center gap-2 border-t border-[hsl(var(--border))] pt-3 sm:w-auto sm:border-0 sm:pt-0">
               <select
                 aria-label={`Status for ${item.title}`}
                 value={item.status}
                 onChange={(e) => updateTracking.mutate({ id: item.id, status: e.target.value })}
-                className="rounded border border-[hsl(var(--input))] bg-transparent px-2 py-1 text-xs"
+                className="h-10 min-w-0 flex-1 rounded-md border border-[hsl(var(--input))] bg-transparent px-2 text-sm sm:w-36 sm:flex-none sm:text-xs"
               >
                 {Object.entries(STATUS_LABELS).map(([k, v]) => (
                   <option key={k} value={k}>{v}</option>
@@ -88,7 +94,7 @@ export default function TrackingPage() {
                 title={item.is_favorite ? `Remove ${item.title} from favorites` : `Add ${item.title} to favorites`}
                 aria-label={item.is_favorite ? `Remove ${item.title} from favorites` : `Add ${item.title} to favorites`}
                 onClick={() => updateTracking.mutate({ id: item.id, is_favorite: !item.is_favorite })}
-                className="p-1"
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-[hsl(var(--border))]"
               >
                 <Heart className={`h-4 w-4 ${item.is_favorite ? 'fill-red-500 text-red-500' : 'text-[hsl(var(--muted-foreground))]'}`} />
               </button>
@@ -97,12 +103,12 @@ export default function TrackingPage() {
                 title={`Remove ${item.title} from your list`}
                 aria-label={`Remove ${item.title} from your list`}
                 onClick={() => { if (confirm('Remove from list?')) deleteTracking.mutate(item.id); }}
-                className="p-1 text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--destructive))]"
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-[hsl(var(--border))] text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--destructive))]"
               >
                 <Trash2 className="h-4 w-4" />
               </button>
             </div>
-          </div>
+          </article>
         ))}
       </div>
     </div>

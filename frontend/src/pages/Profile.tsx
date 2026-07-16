@@ -1,11 +1,20 @@
-import { useParams } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
 import { useUserProfile, useUserActivity, useFollow, useUnfollow } from '@/hooks/useSocial';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
 import { ActivityList } from '@/components/ActivityList';
 import { useAuthStore } from '@/store/auth';
 import { formatDate } from '@/lib/utils';
 import { getApiErrorMessage } from '@/lib/api';
-import { User, UserPlus, UserMinus, Calendar, Clock3, LockKeyhole } from 'lucide-react';
+import {
+  BarChart3,
+  Calendar,
+  Clock3,
+  LockKeyhole,
+  Settings,
+  User,
+  UserMinus,
+  UserPlus,
+} from 'lucide-react';
 
 export default function ProfilePage() {
   const { username } = useParams<{ username: string }>();
@@ -28,7 +37,7 @@ export default function ProfilePage() {
   const removeRelationship = hasPendingRequest || hasAcceptedFollow;
 
   return (
-    <div className="mx-auto max-w-4xl px-4 py-8 space-y-8">
+    <div className="mx-auto max-w-4xl space-y-8 px-4 py-6 sm:py-8">
       {/* Profile header */}
       <div className="flex items-start gap-4 sm:gap-6">
         <div className="h-20 w-20 rounded-full bg-[hsl(var(--primary))]/20 flex items-center justify-center shrink-0">
@@ -41,6 +50,26 @@ export default function ProfilePage() {
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-3">
             <h1 className="min-w-0 break-all text-2xl font-bold">{profile.username}</h1>
+            {isOwnProfile && (
+              <span className="flex items-center gap-1">
+                <Link
+                  to="/stats"
+                  aria-label="Stats"
+                  title="Stats"
+                  className="flex h-9 w-9 items-center justify-center rounded-md border border-[hsl(var(--border))] text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--primary))]"
+                >
+                  <BarChart3 className="h-4 w-4" aria-hidden="true" />
+                </Link>
+                <Link
+                  to="/settings"
+                  aria-label="Settings"
+                  title="Settings"
+                  className="flex h-9 w-9 items-center justify-center rounded-md border border-[hsl(var(--border))] text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--primary))]"
+                >
+                  <Settings className="h-4 w-4" aria-hidden="true" />
+                </Link>
+              </span>
+            )}
             {!isOwnProfile && (
               <button
                 onClick={() =>

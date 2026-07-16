@@ -30,17 +30,20 @@ export default function Dashboard() {
   const startDate = new Date(today.getFullYear(), 0, 1);
 
   return (
-    <div className="mx-auto max-w-7xl px-4 py-8 space-y-8">
+    <div className="mx-auto max-w-7xl space-y-7 px-4 py-6 sm:space-y-8 sm:py-8">
       <div>
-        <h1 className="text-3xl font-bold">
-          Welcome back, <span className="break-all">{user?.username}</span>!
+        <h1 className="text-2xl font-bold sm:text-3xl">
+          Welcome back,
+          <span className="mt-1 block max-w-full truncate text-[hsl(var(--primary))] sm:mt-0 sm:inline sm:whitespace-normal sm:break-all">
+            {' '}{user?.username}!
+          </span>
         </h1>
         <p className="text-[hsl(var(--muted-foreground))] mt-1">Here's your watching overview</p>
       </div>
 
       {/* Stats cards */}
       {stats && (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 gap-2 sm:gap-4 md:grid-cols-4">
           <StatCard icon={<Film className="h-5 w-5" />} label="Movies" value={stats.total_movies} />
           <StatCard icon={<Tv className="h-5 w-5" />} label="Shows" value={stats.total_shows} />
           <StatCard icon={<Clock className="h-5 w-5" />} label="Hours Watched" value={Math.round(stats.total_hours)} />
@@ -220,7 +223,7 @@ function MediaShelfSkeleton({ title }: { title: string }) {
 
 function StatCard({ icon, label, value }: { icon: React.ReactNode; label: string; value: string | number }) {
   return (
-    <div className="rounded-lg border border-[hsl(var(--border))] p-4 bg-[hsl(var(--card))]">
+    <div className="rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-3 sm:p-4">
       <div className="flex items-center gap-2 text-[hsl(var(--muted-foreground))]">
         {icon}
         <span className="text-sm">{label}</span>

@@ -7,6 +7,7 @@ import {
 import { CheckCircle2, CloudOff, RefreshCw, X } from 'lucide-react';
 import { useRegisterSW } from 'virtual:pwa-register/react';
 import { PwaContext, type PwaContextValue } from '@/hooks/usePwaInstall';
+import { useAuthStore } from '@/store/auth';
 
 interface InstallChoice {
   outcome: 'accepted' | 'dismissed';
@@ -25,6 +26,7 @@ function standaloneMode(): boolean {
 }
 
 export function PwaProvider({ children }: { children: React.ReactNode }) {
+  const authenticated = useAuthStore((state) => state.status === 'authenticated');
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [isStandalone, setIsStandalone] = useState(standaloneMode);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
@@ -94,6 +96,7 @@ export function PwaProvider({ children }: { children: React.ReactNode }) {
         onUpdate={() => void updateServiceWorker(true)}
         onDismissUpdate={() => setNeedRefresh(false)}
         onDismissReady={() => setOfflineReady(false)}
+        hasMobileTabs={authenticated}
       />
     </PwaContext.Provider>
   );
@@ -106,6 +109,7 @@ interface PwaStatusProps {
   onUpdate: () => void;
   onDismissUpdate: () => void;
   onDismissReady: () => void;
+  hasMobileTabs?: boolean;
 }
 
 export function PwaStatus({
@@ -115,6 +119,7 @@ export function PwaStatus({
   onUpdate,
   onDismissUpdate,
   onDismissReady,
+  hasMobileTabs = false,
 }: PwaStatusProps) {
   const state = !isOnline
     ? 'offline'
@@ -129,7 +134,11 @@ export function PwaStatus({
     <aside
       role={state === 'update' ? 'alert' : 'status'}
       aria-live={state === 'update' ? 'assertive' : 'polite'}
-      className="fixed inset-x-4 bottom-[calc(1rem+env(safe-area-inset-bottom))] z-[70] mx-auto flex min-h-14 max-w-sm items-center gap-3 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--popover))] px-4 py-3 text-[hsl(var(--popover-foreground))] shadow-xl"
+      className={`fixed inset-x-4 z-[70] mx-auto flex min-h-14 max-w-sm items-center gap-3 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--popover))] px-4 py-3 text-[hsl(var(--popover-foreground))] shadow-xl ${
+        hasMobileTabs
+          ? 'bottom-[calc(4.75rem+env(safe-area-inset-bottom))] md:bottom-[calc(1rem+env(safe-area-inset-bottom))]'
+          : 'bottom-[calc(1rem+env(safe-area-inset-bottom))]'
+      }`}
     >
       {state === 'offline' ? (
         <CloudOff className="h-5 w-5 shrink-0 text-[hsl(var(--muted-foreground))]" />

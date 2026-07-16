@@ -196,9 +196,9 @@ export default function CalendarPage() {
         </label>
       </header>
 
-      <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
+      <div className="sticky top-[calc(3.5rem+env(safe-area-inset-top))] z-30 -mx-4 mt-4 flex flex-col gap-3 border-y border-[hsl(var(--border))] bg-[hsl(var(--background))]/95 px-4 py-3 backdrop-blur md:static md:mx-0 md:mt-5 md:flex-row md:flex-wrap md:items-center md:justify-between md:border-0 md:bg-transparent md:px-0 md:py-0 md:backdrop-blur-none">
         <div
-          className="inline-flex h-10 overflow-hidden rounded-md border border-[hsl(var(--border))]"
+          className="inline-flex h-10 w-full overflow-hidden rounded-md border border-[hsl(var(--border))] sm:w-auto"
           role="tablist"
           aria-label="Calendar view"
         >
@@ -207,7 +207,7 @@ export default function CalendarPage() {
             role="tab"
             aria-selected={view === 'new'}
             onClick={() => setView('new')}
-            className={`flex min-w-36 items-center justify-center gap-2 px-3 text-sm font-medium transition-colors ${
+            className={`flex min-w-0 flex-1 items-center justify-center gap-2 px-3 text-sm font-medium transition-colors sm:min-w-36 sm:flex-none ${
               view === 'new'
                 ? 'bg-[hsl(var(--foreground))] text-[hsl(var(--background))]'
                 : 'hover:bg-[hsl(var(--accent))]'
@@ -225,7 +225,7 @@ export default function CalendarPage() {
             role="tab"
             aria-selected={view === 'upcoming'}
             onClick={() => setView('upcoming')}
-            className={`min-w-28 border-l border-[hsl(var(--border))] px-3 text-sm font-medium transition-colors ${
+            className={`min-w-0 flex-1 border-l border-[hsl(var(--border))] px-3 text-sm font-medium transition-colors sm:min-w-28 sm:flex-none ${
               view === 'upcoming'
                 ? 'bg-[hsl(var(--foreground))] text-[hsl(var(--background))]'
                 : 'hover:bg-[hsl(var(--accent))]'
@@ -235,7 +235,7 @@ export default function CalendarPage() {
           </button>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3">
+        <div className="flex w-full flex-wrap items-center justify-between gap-3 md:w-auto md:justify-start">
           {view === 'upcoming' && (
             <div
               className="inline-flex h-9 overflow-hidden rounded-md border border-[hsl(var(--border))]"
