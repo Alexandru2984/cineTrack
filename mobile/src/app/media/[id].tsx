@@ -48,6 +48,7 @@ import type {
 } from '@/types';
 
 type PrimaryTrackingStatus = 'watching' | 'plan_to_watch' | 'completed';
+const MAX_TMDB_ID = 2_147_483_647;
 
 const statusOptions = [
   { value: 'watching', label: 'Watching' },
@@ -62,10 +63,17 @@ function localDateKey() {
   return `${date.getFullYear()}-${month}-${day}`;
 }
 
+function normalizeTmdbId(value: string | undefined) {
+  if (!value || !/^[1-9]\d{0,9}$/.test(value)) return '';
+  const id = Number(value);
+  return Number.isSafeInteger(id) && id <= MAX_TMDB_ID ? String(id) : '';
+}
+
 export default function MediaDetailScreen() {
   const theme = useTheme();
   const params = useLocalSearchParams<{ id: string; type?: string }>();
-  const id = Array.isArray(params.id) ? params.id[0] : params.id;
+  const rawId = Array.isArray(params.id) ? params.id[0] : params.id;
+  const id = normalizeTmdbId(rawId);
   const rawType = Array.isArray(params.type) ? params.type[0] : params.type;
   const type: MediaType = rawType === 'tv' ? 'tv' : 'movie';
   const media = useMediaDetail(id, type);

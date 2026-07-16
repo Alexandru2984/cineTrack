@@ -20,6 +20,7 @@
     },
     "android": {
       "package": "com.micutu.vazute",
+      "allowBackup": false,
       "blockedPermissions": [
         "android.permission.READ_EXTERNAL_STORAGE",
         "android.permission.WRITE_EXTERNAL_STORAGE",
@@ -53,6 +54,14 @@
         {
           "configureAndroidBackup": true,
           "faceIDPermission": false
+        }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": false
+          }
         }
       ]
     ],

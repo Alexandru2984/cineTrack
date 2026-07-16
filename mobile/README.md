@@ -17,7 +17,8 @@ npm start
 ```
 
 The production API is used by default. Set `EXPO_PUBLIC_API_URL` to an origin
-without the `/api` suffix when running another backend.
+without the `/api` suffix when running another backend. Release builds reject
+non-HTTPS origins; HTTP is accepted only by development bundles.
 Images use the backend's write-through R2 cache by default. Set
 `EXPO_PUBLIC_USE_R2_IMAGES=false` only when the target backend has no R2
 storage configured.
