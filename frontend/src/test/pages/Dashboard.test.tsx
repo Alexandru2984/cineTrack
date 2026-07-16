@@ -36,6 +36,10 @@ vi.mock('@/components/ActivityList', () => ({
   ActivityList: () => <div>Activity fixture</div>,
 }));
 
+vi.mock('@/components/UpNextEpisodes', () => ({
+  UpNextEpisodes: () => <div>Up Next fixture</div>,
+}));
+
 vi.mock('react-calendar-heatmap', () => ({
   default: () => <div>Heatmap fixture</div>,
 }));
@@ -66,6 +70,7 @@ describe('Dashboard discovery', () => {
     expect(screen.getByRole('heading', { name: 'For You' })).toBeVisible();
     expect(screen.getByText('Drama · Thriller')).toBeVisible();
     expect(screen.getByText('Alegerea dramatica')).toBeVisible();
+    expect(screen.getByText('Up Next fixture')).toBeVisible();
     expect(screen.getByRole('heading', { name: 'Popular Movies' })).toBeVisible();
     expect(screen.getByText('Popular Movie')).toBeVisible();
     expect(screen.getByRole('heading', { name: 'Popular Shows' })).toBeVisible();

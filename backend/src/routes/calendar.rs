@@ -11,6 +11,7 @@ use crate::services::quota;
 pub fn configure(cfg: &mut web::ServiceConfig) {
     cfg.service(
         web::scope("/calendar")
+            .route("/up-next", web::get().to(up_next_episodes))
             .route("/new", web::get().to(new_episodes))
             .route("/upcoming", web::get().to(upcoming_releases))
             .route("/summary", web::get().to(calendar_summary))
@@ -95,6 +96,81 @@ async fn new_episodes(
         });
 
     Ok(HttpResponse::Ok().json(CalendarEpisodePage { items, next_cursor }))
+}
+
+async fn up_next_episodes(
+    pool: web::Data<PgPool>,
+    req: HttpRequest,
+    query: web::Query<UpNextQuery>,
+) -> Result<HttpResponse, AppError> {
+    let user_id = require_auth(&req).await?;
+    let params = query.resolve()?;
+    let items = sqlx::query_as::<_, CalendarEpisode>(
+        r#"SELECT
+            next_episode.episode_id,
+            next_episode.media_id,
+            next_episode.tmdb_id,
+            next_episode.title,
+            next_episode.poster_path,
+            next_episode.season_number,
+            next_episode.episode_number,
+            next_episode.episode_name,
+            next_episode.overview,
+            next_episode.runtime_minutes,
+            next_episode.air_date,
+            next_episode.still_path,
+            next_episode.is_planned
+        FROM user_media tracked
+        JOIN media ON media.id = tracked.media_id AND media.media_type = 'tv'
+        JOIN LATERAL (
+            SELECT
+                episodes.id AS episode_id,
+                media.id AS media_id,
+                media.tmdb_id,
+                media.title,
+                media.poster_path,
+                seasons.season_number,
+                episodes.episode_number,
+                episodes.name AS episode_name,
+                episodes.overview,
+                episodes.runtime_minutes,
+                episodes.air_date,
+                episodes.still_path,
+                plans.episode_id IS NOT NULL AS is_planned
+            FROM seasons
+            JOIN episodes ON episodes.season_id = seasons.id
+            LEFT JOIN episode_plans plans
+              ON plans.user_id = $1 AND plans.episode_id = episodes.id
+            WHERE seasons.media_id = media.id
+              AND episodes.air_date <= $2
+              AND ($3 OR seasons.season_number > 0)
+              AND NOT EXISTS (
+                  SELECT 1 FROM watch_history history
+                  WHERE history.user_id = $1 AND history.episode_id = episodes.id
+              )
+            ORDER BY
+                seasons.season_number ASC,
+                episodes.episode_number ASC,
+                episodes.air_date ASC,
+                episodes.id ASC
+            LIMIT 1
+        ) next_episode ON TRUE
+        WHERE tracked.user_id = $1
+          AND tracked.status <> 'dropped'
+        ORDER BY
+            next_episode.is_planned DESC,
+            next_episode.air_date DESC,
+            next_episode.episode_id DESC
+        LIMIT $4"#,
+    )
+    .bind(user_id)
+    .bind(params.today)
+    .bind(params.include_specials)
+    .bind(params.limit)
+    .fetch_all(pool.get_ref())
+    .await?;
+
+    Ok(HttpResponse::Ok().json(UpNextResponse { items }))
 }
 
 async fn upcoming_releases(

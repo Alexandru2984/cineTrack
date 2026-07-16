@@ -153,6 +153,10 @@ export interface CalendarEpisodePage {
   next_cursor: EpisodeCursor | null;
 }
 
+export interface UpNextResponse {
+  items: CalendarEpisode[];
+}
+
 export type UpcomingItemKind = 'episode' | 'movie';
 
 export interface UpcomingCalendarItem {

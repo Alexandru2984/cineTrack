@@ -6,6 +6,7 @@ import type {
   CalendarSummary,
   CalendarWatchResponse,
   EpisodeCursor,
+  UpNextResponse,
   UpcomingCalendarPage,
   UpcomingCursor,
 } from '@/types';
@@ -15,6 +16,8 @@ const PAGE_LIMIT = 50;
 export const calendarKeys = {
   all: ['calendar'] as const,
   summary: (today: string) => ['calendar', 'summary', today] as const,
+  upNext: (today: string, limit: number, includeSpecials: boolean) =>
+    ['calendar', 'up-next', today, limit, includeSpecials] as const,
   new: (today: string, includeSpecials: boolean) =>
     ['calendar', 'new', today, includeSpecials] as const,
   upcoming: (today: string, itemType: string, includeSpecials: boolean) =>
@@ -41,6 +44,28 @@ export function useCalendarSummary(enabled = true) {
     },
     enabled,
     refetchInterval: 5 * 60 * 1000,
+  });
+}
+
+export function useUpNextEpisodes(
+  limit = 6,
+  includeSpecials = false,
+  enabled = true,
+) {
+  const today = localDateKey();
+  return useQuery<UpNextResponse>({
+    queryKey: calendarKeys.upNext(today, limit, includeSpecials),
+    queryFn: async () => {
+      const response = await api.get<UpNextResponse>('/calendar/up-next', {
+        params: {
+          today,
+          limit,
+          include_specials: includeSpecials,
+        },
+      });
+      return response.data;
+    },
+    enabled,
   });
 }
 

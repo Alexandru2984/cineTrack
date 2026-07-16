@@ -4,6 +4,7 @@ import { useActivityFeed } from '@/hooks/useSocial';
 import { useAuthStore } from '@/store/auth';
 import { MediaCard } from '@/components/MediaCard';
 import { ActivityList } from '@/components/ActivityList';
+import { UpNextEpisodes } from '@/components/UpNextEpisodes';
 import type { TmdbSearchResult } from '@/types';
 import CalendarHeatmap from 'react-calendar-heatmap';
 import 'react-calendar-heatmap/dist/styles.css';
@@ -40,6 +41,8 @@ export default function Dashboard() {
         </h1>
         <p className="text-[hsl(var(--muted-foreground))] mt-1">Here's your watching overview</p>
       </div>
+
+      <UpNextEpisodes />
 
       {/* Stats cards */}
       {stats && (

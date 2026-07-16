@@ -45,6 +45,30 @@ pub struct ResolvedNewCalendarQuery {
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct UpNextQuery {
+    pub today: Option<NaiveDate>,
+    pub limit: Option<u16>,
+    pub include_specials: Option<bool>,
+}
+
+impl UpNextQuery {
+    pub fn resolve(&self) -> Result<ResolvedUpNextQuery, AppError> {
+        Ok(ResolvedUpNextQuery {
+            today: resolve_today(self.today)?,
+            limit: i64::from(self.limit.unwrap_or(6).clamp(1, 20)),
+            include_specials: self.include_specials.unwrap_or(false),
+        })
+    }
+}
+
+pub struct ResolvedUpNextQuery {
+    pub today: NaiveDate,
+    pub limit: i64,
+    pub include_specials: bool,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct UpcomingCalendarQuery {
     pub today: Option<NaiveDate>,
     pub days: Option<u16>,
@@ -158,6 +182,11 @@ pub struct CalendarEpisodePage {
     pub next_cursor: Option<EpisodeCursor>,
 }
 
+#[derive(Debug, Serialize)]
+pub struct UpNextResponse {
+    pub items: Vec<CalendarEpisode>,
+}
+
 #[derive(Debug, Serialize, sqlx::FromRow)]
 pub struct UpcomingCalendarItem {
     pub item_kind: String,
@@ -232,6 +261,15 @@ mod tests {
         .unwrap();
         assert_eq!(resolved.days, 90);
         assert_eq!(resolved.limit, 100);
+
+        let up_next = UpNextQuery {
+            today: None,
+            limit: Some(u16::MAX),
+            include_specials: None,
+        }
+        .resolve()
+        .unwrap();
+        assert_eq!(up_next.limit, 20);
     }
 
     #[test]

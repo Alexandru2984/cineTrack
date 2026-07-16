@@ -3191,6 +3191,25 @@ async fn test_calendar_lists_new_and_regional_upcoming_releases() {
     assert_eq!(second_page["next_cursor"], Value::Null);
 
     let req = actix_test::TestRequest::get()
+        .uri(&format!("/api/calendar/up-next?today={today}&limit=6"))
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let up_next: Value = actix_test::call_and_read_body_json(&app, req).await;
+    assert_eq!(up_next["items"].as_array().unwrap().len(), 1);
+    assert_eq!(up_next["items"][0]["episode_id"], today_episode.to_string());
+    assert_eq!(up_next["items"][0]["is_planned"], false);
+    assert_ne!(
+        up_next["items"][0]["episode_id"],
+        old_planned_episode.to_string()
+    );
+    assert!(up_next["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|item| item["title"] != "Private Other Show"));
+
+    let req = actix_test::TestRequest::get()
         .uri(&format!("/api/calendar/summary?today={today}"))
         .insert_header(("Authorization", format!("Bearer {token}")))
         .peer_addr(peer_addr())
@@ -3293,6 +3312,12 @@ async fn test_calendar_episode_actions_are_idempotent_and_owner_scoped() {
 
     let req = actix_test::TestRequest::get()
         .uri("/api/calendar/new")
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 401);
+
+    let req = actix_test::TestRequest::get()
+        .uri("/api/calendar/up-next")
         .peer_addr(peer_addr())
         .to_request();
     assert_eq!(actix_test::call_service(&app, req).await.status(), 401);

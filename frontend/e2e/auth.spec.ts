@@ -58,6 +58,7 @@ async function stubAuthedReads(page: Page, discovery = EMPTY_DISCOVERY) {
     if (url.includes('/api/notifications')) {
       return route.fulfill({ json: { items: [], unread_count: 0, has_more: false } });
     }
+    if (url.includes('/api/calendar/up-next')) return route.fulfill({ json: { items: [] } });
     if (url.includes('/api/media/discovery')) return route.fulfill({ json: discovery });
     if (url.includes('/api/stats/me/heatmap')) return route.fulfill({ json: [] });
     if (url.includes('/api/stats/me')) return route.fulfill({ json: EMPTY_STATS });
@@ -186,6 +187,59 @@ test('shows followed episode activity on the dashboard', async ({ page }) => {
   await expect(page.getByText('S2 E3 · The Reveal')).toBeVisible();
 
   await page.setViewportSize({ width: 390, height: 844 });
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= document.documentElement.clientWidth
+    )
+  ).toBe(true);
+});
+
+test('manages the next sequential episode from mobile home', async ({ page }) => {
+  await stubSession(page);
+  await stubAuthedReads(page);
+  let watchedRequests = 0;
+  let upNextItems = [
+    {
+      episode_id: '00000000-0000-4000-8000-000000000020',
+      media_id: '00000000-0000-4000-8000-000000000021',
+      tmdb_id: 502,
+      title: 'Mobile Queue Show',
+      poster_path: null,
+      season_number: 1,
+      episode_number: 3,
+      episode_name: 'Queue Episode',
+      overview: null,
+      runtime_minutes: 44,
+      air_date: '2026-07-16',
+      still_path: null,
+      is_planned: false,
+    },
+  ];
+  await page.route('**/api/calendar/up-next**', (route) =>
+    route.fulfill({ json: { items: upNextItems } })
+  );
+  await page.route('**/api/calendar/episodes/*/watched', (route) => {
+    watchedRequests += 1;
+    upNextItems = [];
+    return route.fulfill({
+      json: {
+        history_id: '00000000-0000-4000-8000-000000000022',
+        media_id: '00000000-0000-4000-8000-000000000021',
+        episode_id: '00000000-0000-4000-8000-000000000020',
+        already_watched: false,
+      },
+    });
+  });
+
+  await page.setViewportSize({ width: 320, height: 700 });
+  await page.goto('/');
+  await expect(page.getByRole('heading', { name: 'Up Next' })).toBeVisible();
+  await expect(page.getByText('Mobile Queue Show')).toBeVisible();
+
+  await page.getByRole('button', { name: 'Mark Queue Episode watched' }).click();
+
+  await expect.poll(() => watchedRequests).toBe(1);
+  await expect(page.getByText("You're caught up")).toBeVisible();
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= document.documentElement.clientWidth
