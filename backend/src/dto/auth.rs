@@ -75,6 +75,22 @@ pub struct AuthResponse {
 }
 
 #[derive(Debug, Serialize)]
+pub struct MobileAuthResponse {
+    #[serde(flatten)]
+    pub auth: AuthResponse,
+    pub refresh_token: String,
+}
+
+impl MobileAuthResponse {
+    pub fn new(auth: AuthResponse, refresh_token: String) -> Self {
+        Self {
+            auth,
+            refresh_token,
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
 pub struct UserResponse {
     pub id: uuid::Uuid,
     pub username: String,
@@ -166,13 +182,17 @@ pub struct SessionResponse {
     pub current: bool,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Validate)]
+#[serde(deny_unknown_fields)]
 pub struct RefreshRequest {
+    #[validate(custom(function = "validate_refresh_token"))]
     pub refresh_token: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Validate)]
+#[serde(deny_unknown_fields)]
 pub struct LogoutRequest {
+    #[validate(custom(function = "validate_refresh_token"))]
     pub refresh_token: String,
 }
 

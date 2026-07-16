@@ -262,6 +262,93 @@ async fn test_register_success() {
 
 #[actix_web::test]
 #[ignore = "requires test DB"]
+async fn test_mobile_auth_returns_rotating_tokens_without_cookies() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/auth/mobile/register")
+        .insert_header((header::USER_AGENT, "VazuteMobile/1.0 (integration test)"))
+        .set_json(json!({
+            "username": "mobileauth",
+            "email": "mobileauth@example.com",
+            "password": "Pass1234"
+        }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 201);
+    assert_eq!(
+        resp.headers()
+            .get(header::CACHE_CONTROL)
+            .and_then(|value| value.to_str().ok()),
+        Some("no-store")
+    );
+    assert!(resp.headers().get_all(header::SET_COOKIE).next().is_none());
+    let registered: Value = actix_test::read_body_json(resp).await;
+    let first_refresh = registered["refresh_token"].as_str().unwrap().to_string();
+    assert_eq!(first_refresh.len(), 128);
+    assert!(!registered["access_token"].as_str().unwrap().is_empty());
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/auth/mobile/logout")
+        .set_json(json!({ "refresh_token": first_refresh }))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 200);
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/auth/mobile/login")
+        .set_json(json!({
+            "email": "mobileauth@example.com",
+            "password": "Pass1234"
+        }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    assert!(resp.headers().get_all(header::SET_COOKIE).next().is_none());
+    let logged_in: Value = actix_test::read_body_json(resp).await;
+    let second_refresh = logged_in["refresh_token"].as_str().unwrap().to_string();
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/auth/mobile/refresh")
+        .set_json(json!({ "refresh_token": second_refresh }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    assert!(resp.headers().get_all(header::SET_COOKIE).next().is_none());
+    let refreshed: Value = actix_test::read_body_json(resp).await;
+    let final_refresh = refreshed["refresh_token"].as_str().unwrap().to_string();
+    let access_token = refreshed["access_token"].as_str().unwrap();
+    assert_ne!(final_refresh, second_refresh);
+
+    let req = actix_test::TestRequest::get()
+        .uri("/api/auth/me")
+        .insert_header(("Authorization", format!("Bearer {access_token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 200);
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/auth/mobile/logout")
+        .set_json(json!({ "refresh_token": &final_refresh }))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 200);
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/auth/mobile/refresh")
+        .set_json(json!({ "refresh_token": final_refresh }))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 401);
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
 async fn test_register_duplicate_email() {
     let pool = setup_pool().await;
     clean_db(&pool).await;

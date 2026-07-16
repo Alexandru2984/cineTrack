@@ -2,7 +2,8 @@ use actix_governor::governor::middleware::NoOpMiddleware;
 use actix_governor::{Governor, GovernorConfig, GovernorConfigBuilder};
 use actix_web::{
     cookie::{time::Duration as CookieDuration, Cookie, SameSite},
-    web, HttpRequest, HttpResponse,
+    http::header,
+    web, HttpRequest, HttpResponse, HttpResponseBuilder,
 };
 use sqlx::PgPool;
 use validator::Validate;
@@ -35,6 +36,10 @@ fn scope() -> actix_web::Scope {
         .route("/login", web::post().to(login))
         .route("/logout", web::post().to(logout))
         .route("/refresh", web::post().to(refresh))
+        .route("/mobile/register", web::post().to(mobile_register))
+        .route("/mobile/login", web::post().to(mobile_login))
+        .route("/mobile/logout", web::post().to(mobile_logout))
+        .route("/mobile/refresh", web::post().to(mobile_refresh))
         .route("/password", web::patch().to(change_password))
         .route("/password/forgot", web::post().to(forgot_password))
         .route("/password/reset", web::post().to(reset_password))
@@ -83,6 +88,63 @@ async fn login(
         .json(resp))
 }
 
+async fn mobile_register(
+    pool: web::Data<PgPool>,
+    config: web::Data<Config>,
+    req: HttpRequest,
+    body: web::Json<RegisterRequest>,
+) -> Result<HttpResponse, AppError> {
+    body.validate()?;
+    let client = client_info(&req);
+    let (resp, refresh_token) =
+        services::auth::register(pool.get_ref(), config.get_ref(), &client, body.into_inner())
+            .await?;
+    Ok(no_store(HttpResponse::Created()).json(MobileAuthResponse::new(resp, refresh_token)))
+}
+
+async fn mobile_login(
+    pool: web::Data<PgPool>,
+    config: web::Data<Config>,
+    req: HttpRequest,
+    body: web::Json<LoginRequest>,
+) -> Result<HttpResponse, AppError> {
+    body.validate()?;
+    let client = client_info(&req);
+    let (resp, refresh_token) =
+        services::auth::login(pool.get_ref(), config.get_ref(), &client, body.into_inner()).await?;
+    Ok(no_store(HttpResponse::Ok()).json(MobileAuthResponse::new(resp, refresh_token)))
+}
+
+async fn mobile_logout(
+    pool: web::Data<PgPool>,
+    body: web::Json<LogoutRequest>,
+) -> Result<HttpResponse, AppError> {
+    body.validate()?;
+    services::auth::logout(pool.get_ref(), &body.refresh_token).await?;
+    Ok(
+        no_store(HttpResponse::Ok())
+            .json(serde_json::json!({"message": "Logged out successfully"})),
+    )
+}
+
+async fn mobile_refresh(
+    pool: web::Data<PgPool>,
+    config: web::Data<Config>,
+    req: HttpRequest,
+    body: web::Json<RefreshRequest>,
+) -> Result<HttpResponse, AppError> {
+    body.validate()?;
+    let client = client_info(&req);
+    let (resp, refresh_token) = services::auth::refresh_token(
+        pool.get_ref(),
+        config.get_ref(),
+        &client,
+        &body.refresh_token,
+    )
+    .await?;
+    Ok(no_store(HttpResponse::Ok()).json(MobileAuthResponse::new(resp, refresh_token)))
+}
+
 async fn logout(
     pool: web::Data<PgPool>,
     config: web::Data<Config>,
@@ -98,6 +160,13 @@ async fn logout(
     Ok(HttpResponse::Ok()
         .cookie(clear_refresh_cookie(config.get_ref()))
         .json(serde_json::json!({"message": "Logged out successfully"})))
+}
+
+fn no_store(mut response: HttpResponseBuilder) -> HttpResponseBuilder {
+    response
+        .insert_header((header::CACHE_CONTROL, "no-store"))
+        .insert_header((header::PRAGMA, "no-cache"));
+    response
 }
 
 async fn refresh(
