@@ -1,0 +1,57 @@
+export const colors = {
+  light: {
+    background: '#FFFFFF',
+    surface: '#F7F7F8',
+    elevated: '#FFFFFF',
+    text: '#18181B',
+    mutedText: '#71717A',
+    border: '#E4E4E7',
+    primary: '#7C3AED',
+    primaryPressed: '#6D28D9',
+    primarySoft: '#F3E8FF',
+    success: '#059669',
+    successSoft: '#D1FAE5',
+    info: '#0891B2',
+    infoSoft: '#CFFAFE',
+    warning: '#D97706',
+    warningSoft: '#FEF3C7',
+    danger: '#DC2626',
+    dangerSoft: '#FEE2E2',
+    overlay: 'rgba(0, 0, 0, 0.56)',
+  },
+  dark: {
+    background: '#09090B',
+    surface: '#18181B',
+    elevated: '#18181B',
+    text: '#FAFAFA',
+    mutedText: '#A1A1AA',
+    border: '#27272A',
+    primary: '#A78BFA',
+    primaryPressed: '#8B5CF6',
+    primarySoft: '#2E1065',
+    success: '#34D399',
+    successSoft: '#052E26',
+    info: '#22D3EE',
+    infoSoft: '#083344',
+    warning: '#FBBF24',
+    warningSoft: '#451A03',
+    danger: '#F87171',
+    dangerSoft: '#450A0A',
+    overlay: 'rgba(0, 0, 0, 0.72)',
+  },
+} as const;
+
+export const spacing = {
+  xs: 4,
+  sm: 8,
+  md: 12,
+  lg: 16,
+  xl: 24,
+  xxl: 32,
+} as const;
+
+export const radius = {
+  sm: 4,
+  md: 6,
+  lg: 8,
+} as const;

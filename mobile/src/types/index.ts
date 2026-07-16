@@ -1,0 +1,201 @@
+export type MediaType = 'movie' | 'tv';
+export type TrackingStatus =
+  | 'watching'
+  | 'completed'
+  | 'plan_to_watch'
+  | 'dropped'
+  | 'on_hold';
+
+export interface User {
+  id: string;
+  username: string;
+  email: string;
+  avatar_url: string | null;
+  bio: string | null;
+  is_public: boolean;
+  created_at: string;
+}
+
+export interface MobileAuthResponse {
+  access_token: string;
+  refresh_token: string;
+  token_type: string;
+  expires_in: number;
+  user: User;
+}
+
+export interface Media {
+  id: string;
+  tmdb_id: number;
+  media_type: MediaType;
+  title: string;
+  original_title: string | null;
+  overview: string | null;
+  poster_path: string | null;
+  backdrop_path: string | null;
+  release_date: string | null;
+  status: string | null;
+  genres: { id: number; name: string }[] | null;
+  runtime_minutes: number | null;
+  vote_average: number | null;
+}
+
+export interface Season {
+  id: string;
+  season_number: number;
+  name: string | null;
+  episode_count: number | null;
+  air_date: string | null;
+}
+
+export interface Episode {
+  id: string;
+  episode_number: number;
+  name: string | null;
+  overview: string | null;
+  runtime_minutes: number | null;
+  air_date: string | null;
+  still_path: string | null;
+}
+
+export interface SeasonWatchProgress {
+  season_number: number;
+  episode_count: number | null;
+  available_episode_count: number;
+  watched_count: number;
+}
+
+export interface BulkWatchResponse {
+  media_id: string;
+  candidate_count: number;
+  marked_count: number;
+  already_watched_count: number;
+}
+
+export interface TmdbSearchResult {
+  id: number;
+  title?: string;
+  name?: string;
+  original_title?: string;
+  original_name?: string;
+  overview?: string;
+  poster_path?: string;
+  backdrop_path?: string;
+  release_date?: string;
+  first_air_date?: string;
+  vote_average?: number;
+  media_type?: string;
+  genre_ids?: number[];
+}
+
+export interface TmdbSearchResponse {
+  page: number;
+  total_pages: number;
+  total_results: number;
+  results: TmdbSearchResult[];
+}
+
+export interface DiscoveryResponse {
+  recommendations: TmdbSearchResult[];
+  personalized: boolean;
+  recommendation_basis: string[];
+  popular_movies: TmdbSearchResult[];
+  popular_shows: TmdbSearchResult[];
+}
+
+export interface TrackingItem {
+  id: string;
+  media_id: string;
+  tmdb_id: number;
+  media_type: MediaType;
+  title: string;
+  poster_path: string | null;
+  status: TrackingStatus;
+  rating: number | null;
+  review: string | null;
+  is_favorite: boolean;
+  started_at: string | null;
+  completed_at: string | null;
+}
+
+export interface CalendarEpisode {
+  episode_id: string;
+  media_id: string;
+  tmdb_id: number;
+  title: string;
+  poster_path: string | null;
+  season_number: number;
+  episode_number: number;
+  episode_name: string | null;
+  overview: string | null;
+  runtime_minutes: number | null;
+  air_date: string;
+  still_path: string | null;
+  is_planned: boolean;
+}
+
+export interface EpisodeCursor {
+  before_date: string;
+  before_id: string;
+}
+
+export interface CalendarEpisodePage {
+  items: CalendarEpisode[];
+  next_cursor: EpisodeCursor | null;
+}
+
+export interface UpNextResponse {
+  items: CalendarEpisode[];
+}
+
+export type UpcomingItemKind = 'episode' | 'movie';
+
+export interface UpcomingCalendarItem {
+  item_kind: UpcomingItemKind;
+  item_id: string;
+  media_id: string;
+  tmdb_id: number;
+  title: string;
+  poster_path: string | null;
+  release_date: string;
+  release_type: number | null;
+  season_number: number | null;
+  episode_number: number | null;
+  episode_name: string | null;
+  still_path: string | null;
+  is_planned: boolean;
+}
+
+export interface UpcomingCursor {
+  after_date: string;
+  after_kind: UpcomingItemKind;
+  after_key: string;
+}
+
+export interface UpcomingCalendarPage {
+  items: UpcomingCalendarItem[];
+  next_cursor: UpcomingCursor | null;
+  country_code: string;
+}
+
+export interface CalendarSummary {
+  new_count: number;
+  planned_count: number;
+  last_synced_at: string | null;
+}
+
+export interface CalendarWatchResponse {
+  history_id: string;
+  media_id: string;
+  episode_id: string;
+  already_watched: boolean;
+}
+
+export interface UserStats {
+  total_movies: number;
+  total_shows: number;
+  total_episodes: number;
+  total_hours: number;
+  current_streak: number;
+  longest_streak: number;
+}
