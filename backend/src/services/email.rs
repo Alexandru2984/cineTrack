@@ -126,7 +126,7 @@ mod tests {
             database_url: "postgres://example".to_string(),
             jwt_secret: "test_secret_must_be_64_chars_long_so_we_pad_it_here_abcdefghijklmnopq"
                 .to_string(),
-            jwt_expiry_hours: 1,
+            jwt_expiry_minutes: 15,
             jwt_refresh_expiry_days: 30,
             tmdb_api_key: "fake".to_string(),
             tmdb_read_access_token: None,

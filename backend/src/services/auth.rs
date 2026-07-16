@@ -58,7 +58,7 @@ pub async fn register(
     let resp = AuthResponse {
         access_token,
         token_type: "Bearer".to_string(),
-        expires_in: config.jwt_expiry_hours * 3600,
+        expires_in: config.jwt_expiry_minutes * 60,
         user: UserResponse::from(user),
     };
 
@@ -106,7 +106,7 @@ pub async fn login(
     let resp = AuthResponse {
         access_token,
         token_type: "Bearer".to_string(),
-        expires_in: config.jwt_expiry_hours * 3600,
+        expires_in: config.jwt_expiry_minutes * 60,
         user: UserResponse::from(user),
     };
 
@@ -176,7 +176,7 @@ pub async fn refresh_token(
         .ok_or_else(|| AppError::Unauthorized("User not found".to_string()))?;
 
     let access_token =
-        jwt::generate_access_token(user.id, &config.jwt_secret, config.jwt_expiry_hours)?;
+        jwt::generate_access_token(user.id, &config.jwt_secret, config.jwt_expiry_minutes)?;
     let new_refresh_token = jwt::generate_refresh_token();
     let new_token_hash = jwt::hash_refresh_token(&new_refresh_token);
     let expires_at = Utc::now() + Duration::days(config.jwt_refresh_expiry_days);
@@ -199,7 +199,7 @@ pub async fn refresh_token(
     let resp = AuthResponse {
         access_token,
         token_type: "Bearer".to_string(),
-        expires_in: config.jwt_expiry_hours * 3600,
+        expires_in: config.jwt_expiry_minutes * 60,
         user: UserResponse::from(user),
     };
 
@@ -390,7 +390,7 @@ async fn issue_token_pair(
     user: &User,
 ) -> Result<(String, String), AppError> {
     let access_token =
-        jwt::generate_access_token(user.id, &config.jwt_secret, config.jwt_expiry_hours)?;
+        jwt::generate_access_token(user.id, &config.jwt_secret, config.jwt_expiry_minutes)?;
     let refresh_token = jwt::generate_refresh_token();
     let token_hash = jwt::hash_refresh_token(&refresh_token);
     let expires_at = Utc::now() + Duration::days(config.jwt_refresh_expiry_days);

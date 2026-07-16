@@ -17,13 +17,13 @@ pub struct Claims {
 pub fn generate_access_token(
     user_id: Uuid,
     secret: &str,
-    expiry_hours: i64,
+    expiry_minutes: i64,
 ) -> Result<String, AppError> {
     let now = Utc::now();
     let claims = Claims {
         sub: user_id,
         iat: now.timestamp(),
-        exp: (now + Duration::hours(expiry_hours)).timestamp(),
+        exp: (now + Duration::minutes(expiry_minutes)).timestamp(),
     };
 
     encode(
@@ -37,6 +37,7 @@ pub fn generate_access_token(
 pub fn validate_token(token: &str, secret: &str) -> Result<Claims, AppError> {
     let mut validation = Validation::new(Algorithm::HS256);
     validation.validate_exp = true;
+    validation.leeway = 5;
     validation.set_required_spec_claims(&["exp", "sub"]);
 
     let token_data = decode::<Claims>(
@@ -71,7 +72,7 @@ mod tests {
     #[test]
     fn test_generate_access_token_valid() {
         let user_id = Uuid::new_v4();
-        let token = generate_access_token(user_id, "test_secret_key_long_enough", 1).unwrap();
+        let token = generate_access_token(user_id, "test_secret_key_long_enough", 15).unwrap();
         assert!(!token.is_empty());
         // Should be a valid JWT (three dot-separated parts)
         assert_eq!(token.split('.').count(), 3);
@@ -81,7 +82,7 @@ mod tests {
     fn test_validate_token_accepts_valid() {
         let user_id = Uuid::new_v4();
         let secret = "test_secret_key_long_enough";
-        let token = generate_access_token(user_id, secret, 1).unwrap();
+        let token = generate_access_token(user_id, secret, 15).unwrap();
         let claims = validate_token(&token, secret).unwrap();
         assert_eq!(claims.sub, user_id);
     }
@@ -89,7 +90,7 @@ mod tests {
     #[test]
     fn test_validate_token_rejects_wrong_secret() {
         let user_id = Uuid::new_v4();
-        let token = generate_access_token(user_id, "secret_one", 1).unwrap();
+        let token = generate_access_token(user_id, "secret_one", 15).unwrap();
         let result = validate_token(&token, "secret_two");
         assert!(result.is_err());
     }
@@ -98,7 +99,7 @@ mod tests {
     fn test_validate_token_rejects_expired() {
         let user_id = Uuid::new_v4();
         let secret = "test_secret";
-        // Create a token that expired 1 hour ago
+        // Create a token that expired one minute ago.
         let token = generate_access_token(user_id, secret, -1).unwrap();
         let result = validate_token(&token, secret);
         assert!(result.is_err());
@@ -183,12 +184,12 @@ mod tests {
     fn test_token_claims_contain_correct_timestamps() {
         let user_id = Uuid::new_v4();
         let secret = "test_secret";
-        let token = generate_access_token(user_id, secret, 2).unwrap();
+        let token = generate_access_token(user_id, secret, 15).unwrap();
         let claims = validate_token(&token, secret).unwrap();
         assert!(claims.iat > 0);
         assert!(claims.exp > claims.iat);
-        // Expiry should be ~2 hours from issued
+        // Expiry should be exactly 15 minutes from issuance.
         let diff = claims.exp - claims.iat;
-        assert!((7100..=7300).contains(&diff)); // ~7200 seconds = 2 hours
+        assert_eq!(diff, 900);
     }
 }

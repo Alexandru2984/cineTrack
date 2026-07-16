@@ -117,7 +117,7 @@ The application has been through multiple security audits. Key measures include:
    DATABASE_URL=postgresql://cinetrack_user:<password>@db:5432/cinetrack
 
    JWT_SECRET=<openssl rand -base64 64>
-   JWT_EXPIRY_HOURS=1
+   JWT_EXPIRY_MINUTES=15
    JWT_REFRESH_EXPIRY_DAYS=30
 
    TMDB_API_KEY=<your-tmdb-api-key>

@@ -21,7 +21,7 @@ pub struct Config {
     pub frontend_url: String,
     pub database_url: String,
     pub jwt_secret: String,
-    pub jwt_expiry_hours: i64,
+    pub jwt_expiry_minutes: i64,
     pub jwt_refresh_expiry_days: i64,
     pub tmdb_api_key: String,
     pub tmdb_read_access_token: Option<String>,
@@ -60,10 +60,7 @@ impl Config {
                 .unwrap_or_else(|_| "http://localhost:5173".to_string()),
             database_url: env::var("DATABASE_URL").expect("DATABASE_URL must be set"),
             jwt_secret,
-            jwt_expiry_hours: env::var("JWT_EXPIRY_HOURS")
-                .unwrap_or_else(|_| "1".to_string())
-                .parse()
-                .expect("JWT_EXPIRY_HOURS must be a number"),
+            jwt_expiry_minutes: jwt_expiry_minutes(),
             jwt_refresh_expiry_days: env::var("JWT_REFRESH_EXPIRY_DAYS")
                 .unwrap_or_else(|_| "30".to_string())
                 .parse()
@@ -122,6 +119,27 @@ fn validate_app_env(value: String) -> String {
         "APP_ENV must be development, test, or production"
     );
     value
+}
+
+fn jwt_expiry_minutes() -> i64 {
+    let minutes = match env::var("JWT_EXPIRY_MINUTES") {
+        Ok(value) => value.parse().expect("JWT_EXPIRY_MINUTES must be a number"),
+        Err(_) => env::var("JWT_EXPIRY_HOURS")
+            .ok()
+            .map(|value| {
+                value
+                    .parse::<i64>()
+                    .expect("JWT_EXPIRY_HOURS must be a number")
+                    .checked_mul(60)
+                    .expect("JWT_EXPIRY_HOURS is too large")
+            })
+            .unwrap_or(15),
+    };
+    assert!(
+        (5..=60).contains(&minutes),
+        "JWT access token expiry must be between 5 and 60 minutes"
+    );
+    minutes
 }
 
 impl R2Config {
