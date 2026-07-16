@@ -184,16 +184,16 @@ npm run dev
 
 ### Testing
 
-The project has **318 passing unit & integration tests** plus **19 Playwright E2E tests** across four layers. One credential-gated R2 test is ignored by default:
+The project has **322 passing unit & integration tests** plus **20 Playwright E2E tests** across four layers. One credential-gated R2 test is ignored by default:
 
 ```bash
 # Backend unit tests (175 passing) — no external dependencies
 cd backend && cargo test --lib
 
-# Frontend tests (67 passing) — Vitest + jsdom
+# Frontend tests (70 passing) — Vitest + jsdom
 cd frontend && npm test -- --run
 
-# Backend integration tests (76 passing) — needs a test DB
+# Backend integration tests (77 passing) — needs a test DB
 docker compose -p cinetrack-test -f docker-compose.test.yml up -d --wait
 cd backend && TEST_DATABASE_URL="postgres://test_user:test_pass@127.0.0.1:55433/cinetrack_test" \
   cargo test --test api_tests -- --ignored --test-threads=1
@@ -213,9 +213,9 @@ docker compose -f docker-compose.test.yml -p cinetrack_e2e down -v
 
 **What's tested:**
 - **Unit tests** — JWT generation/validation, Argon2id hashing, password policy, all DTO validators (boundary cases, XSS rejection), error mapping & sanitization
-- **Integration tests** — Full auth flows, access control, IDOR protection, user enumeration prevention, profile privacy, atomic tracking/history transitions, Calendar ownership and pagination, release-schedule persistence, statistics, lists, and imports
-- **Frontend tests** — Zustand stores, query hooks, utility functions, Calendar grouping/actions, route contracts, About attribution, and error-boundary fallback
-- **E2E tests (Playwright)** — route guards and login/logout/forgot-password against a mocked API, plus a real-stack suite (live backend + ephemeral Postgres) covering registration with an HttpOnly refresh cookie, real token rotation through the browser, active sessions, account deletion, and password reset via the emailed token
+- **Integration tests** — Full auth flows, access control, IDOR protection, user enumeration prevention, profile privacy, atomic tracking/history transitions, bulk episode history, Calendar ownership and pagination, release schedules, statistics, lists, and imports
+- **Frontend tests** — Zustand stores, query hooks, utility functions, full-backlog Calendar pagination, episode/season bulk controls, route contracts, About attribution, and error-boundary fallback
+- **E2E tests (Playwright)** — route guards, auth flows, discovery/social UI, and the watched-through confirmation against a mocked API, plus a real-stack suite covering cookies, token rotation, sessions, account deletion, private follows, and password reset
 
 ## Project Structure
 
@@ -282,7 +282,7 @@ All endpoints except auth (register/login/refresh) require a valid JWT access to
 | **Media** | Local catalog search, localized details, Seasons/Episodes, personalized discovery |
 | **Calendar** | New episodes, upcoming episodes/movies, regional preferences, episode plan/watched actions |
 | **Tracking** | CRUD for user's movie/show list with status, rating, review |
-| **History** | Log watched episodes/movies with timestamps |
+| **History** | Log watched episodes/movies, show season progress, mark a season watched, or backfill through an episode |
 | **Stats** | Heatmap data, watch time, streaks, genre distribution |
 | **Users** | Public profiles, follow/unfollow, activity feed |
 | **Lists** | Custom user-created lists (public/private) |

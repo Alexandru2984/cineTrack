@@ -193,6 +193,124 @@ test('shows followed episode activity on the dashboard', async ({ page }) => {
   ).toBe(true);
 });
 
+test('confirms and marks an episode together with previous gaps', async ({ page }) => {
+  await stubSession(page);
+  let watchedThroughRequests = 0;
+
+  await page.route('**/api/**', (route) => {
+    const request = route.request();
+    const path = new URL(request.url()).pathname;
+    if (path === '/api/auth/refresh') {
+      return route.fulfill({
+        json: {
+          access_token: 'session-access-token',
+          token_type: 'Bearer',
+          expires_in: 3600,
+          user: TEST_USER,
+        },
+      });
+    }
+    if (request.method() === 'POST' && path.endsWith('/watched-through')) {
+      watchedThroughRequests += 1;
+      return route.fulfill({
+        json: {
+          media_id: '00000000-0000-4000-8000-000000000100',
+          candidate_count: 2,
+          marked_count: 2,
+          already_watched_count: 0,
+        },
+      });
+    }
+    if (path === '/api/notifications') {
+      return route.fulfill({ json: { items: [], unread_count: 0, has_more: false } });
+    }
+    if (path === '/api/calendar/summary') {
+      return route.fulfill({
+        json: { new_count: 0, planned_count: 0, last_synced_at: null },
+      });
+    }
+    if (path === '/api/media/1399') {
+      return route.fulfill({
+        json: {
+          id: '1399',
+          tmdb_id: 1399,
+          media_type: 'tv',
+          title: 'Bulk Watch Show',
+          original_title: null,
+          overview: null,
+          poster_path: null,
+          backdrop_path: null,
+          release_date: '2020-01-01',
+          status: 'Returning Series',
+          genres: [],
+          runtime_minutes: 45,
+          vote_average: 8,
+        },
+      });
+    }
+    if (path === '/api/media/1399/seasons') {
+      return route.fulfill({
+        json: [
+          {
+            id: 'season-one',
+            season_number: 1,
+            name: 'Season 1',
+            episode_count: 2,
+            air_date: '2020-01-01',
+          },
+        ],
+      });
+    }
+    if (path === '/api/media/1399/seasons/1/episodes') {
+      return route.fulfill({
+        json: [
+          {
+            id: 'episode-one',
+            episode_number: 1,
+            name: 'First',
+            overview: null,
+            runtime_minutes: 45,
+            air_date: '2020-01-01',
+            still_path: null,
+          },
+          {
+            id: 'episode-two',
+            episode_number: 2,
+            name: 'Second',
+            overview: null,
+            runtime_minutes: 45,
+            air_date: '2020-01-08',
+            still_path: null,
+          },
+        ],
+      });
+    }
+    if (path === '/api/history/tv/1399/seasons/1/episodes') {
+      return route.fulfill({ json: [] });
+    }
+    if (path === '/api/history/tv/1399/progress') {
+      return route.fulfill({
+        json: [
+          {
+            season_number: 1,
+            episode_count: 2,
+            available_episode_count: 2,
+            watched_count: 0,
+          },
+        ],
+      });
+    }
+    return route.fulfill({ json: [] });
+  });
+
+  await page.goto('/media/1399?type=tv');
+  await page.getByTitle('Mark watched').last().click();
+  await expect(page.getByRole('dialog', { name: 'Mark S01E02 watched?' })).toBeVisible();
+  await page.getByRole('button', { name: 'This and previous' }).click();
+
+  await expect.poll(() => watchedThroughRequests).toBe(1);
+});
+
 test('renders local discovery shelves without viewport overflow', async ({ page }) => {
   await stubSession(page);
   const recommendations = Array.from({ length: 12 }, (_, index) => ({

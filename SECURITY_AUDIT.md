@@ -1,6 +1,6 @@
 # CineTrack Security Audit
 
-Date: 2026-07-14 (earlier rounds 2026-06-13 through 2026-07-13)
+Date: 2026-07-16 (earlier rounds 2026-06-13 through 2026-07-14)
 
 ## Summary
 
@@ -99,10 +99,23 @@ In the third round we reviewed the repo directly on the VPS/prod host and closed
 - The global TMDB footer was removed. Required attribution now lives on a public About page with the exact non-endorsement notice, while application navigation remains focused on repeated tracking work.
 - Full validation includes 175 passing backend unit tests, 76 PostgreSQL integration tests, 67 frontend tests, and 19 Playwright browser tests; the focused worker regression explicitly covers a not-yet-published season returning 404.
 
+## Changes applied (2026-07-16)
+
+- Removed the 30-day cutoff from the personalized unwatched feed. Keyset pagination remains bounded to 50 rows per request, and the frontend fetches the next page only as the user approaches the end of the rendered list. The recent-episode badge keeps its 30-day meaning.
+- Added show progress and idempotent bulk-history endpoints for an aired season and for every regular-season episode through a selected episode. Specials are only included when explicitly targeting season 0.
+- Bulk writes take the established per-user tracking lock before the history lock, calculate the exact additional quota under that lock, and insert all missing history rows in one transaction. Concurrent identical requests cannot create duplicate first-watch events.
+- A bulk request is capped at 100 seasons and 10,000 episodes, and stale/missing season data is refreshed with concurrency limited to two provider requests. Provider/cache failure can leave metadata refreshed but cannot leave partial user history.
+- Marking an episode resumes `plan_to_watch`, `on_hold`, or `dropped` tracking as `watching`; completed shows remain completed. The existing database trigger clears matching episode plans for every inserted history event.
+- Season-level actions exclude episodes with a known future air date. The watched-through action includes only the selected episode and regular-season episodes before it; future episodes after the selected point remain untouched.
+- The show detail page displays watched/total season progress, asks whether to include earlier gaps, confirms season-wide writes, locks background scrolling in the modal, and invalidates History, Tracking, Stats, Activity, Discovery, and Calendar caches after success.
+- Current validation covers 175 passing backend unit tests, 77 PostgreSQL integration tests, 70 frontend tests, and 20 Playwright browser tests.
+
 ## Residual risks
 
 - Calendar freshness depends on the scheduled worker and TMDB availability. The default 200-title run budget is intentionally bounded; monitor `release_schedule_sync_state` age/outcomes and the worker exit code before raising it.
 - PostgreSQL is the live metadata/query store; R2 is only the durable object/archive layer. Treating R2 as the primary movie database would remove relational indexes and personalized joins, so disaster recovery still requires restoring an R2 database snapshot into PostgreSQL.
+- A watched-through action may need to refresh many old seasons and can therefore take longer while TMDB is slow. The provider phase is bounded and the final history write is atomic, but it is still a synchronous user action.
+- Manual bulk history uses the current timestamp because the application cannot infer when old episodes were actually watched. Large backfills therefore appear on the current activity day and affect watch-time statistics accordingly.
 
 - The asset proxy and enabled poster cache make the backend a serving path for images. A dedicated `R2_PUBLIC_BASE_URL`/CDN would remove that bandwidth from the API while keeping the bucket private to writes.
 - The R2 keys in `.env.prod` are long-lived; rotate them periodically and scope the token's permissions to just the `vazute` bucket.
@@ -113,7 +126,7 @@ In the third round we reviewed the repo directly on the VPS/prod host and closed
 - `cargo audit` reports `RUSTSEC-2023-0071` via `sqlx-mysql` metadata in the lockfile, even though the build uses only the `postgres` feature. CI ignores it explicitly; revisit when `sqlx` resolves the lockfile.
 - `cargo audit` also reports transitive `spin` 0.9.8/0.10.0 releases as yanked (through Prometheus/SQLx metadata and AWS S3 dependencies). They have no RustSec advisory, but should be replaced when their upstream crates update.
 - The SMTP mailbox uses a long-lived credential stored in the git-ignored `.env.prod` file. Keep the file at mode `0600`, rotate the mailbox password periodically, and recreate the backend atomically after each rotation.
-- Browser E2E tests now exist at two levels: mocked (login/logout/refresh-401/forgot-password/error-boundary/discovery layout) and real-stack (HttpOnly cookie, refresh rotation, sessions, account deletion, reset with token). The tracking/episodes/lists flows remain uncovered by E2E (covered only by the backend integration tests).
+- Browser E2E tests now exist at two levels: mocked (auth, discovery/social UI, error boundary, and episode backfill confirmation) and real-stack (HttpOnly cookie, refresh rotation, private follows, sessions, account deletion, reset with token). Lists and general tracking edits remain covered only below the browser layer.
 - The secrets in `.env.prod` must be rotated if they were shown in a terminal, logs, or an audit transcript. In particular, avoid `docker compose config` without `--no-env-resolution` on machines or sessions that can persist the output.
 
 ## Next recommendations
