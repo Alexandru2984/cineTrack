@@ -76,7 +76,9 @@ pub struct UpdateTrackingRequest {
 pub struct TrackingQueryParams {
     #[validate(custom(function = "validate_tracking_status"))]
     pub status: Option<String>,
+    #[validate(range(min = 1, max = 1000, message = "Page must be between 1 and 1000"))]
     pub page: Option<u32>,
+    #[validate(range(min = 1, max = 100, message = "Limit must be between 1 and 100"))]
     pub limit: Option<u32>,
 }
 
@@ -132,6 +134,41 @@ mod tests {
             completed_at: None,
         };
         assert!(req.validate().is_ok());
+    }
+
+    #[test]
+    fn tracking_pagination_is_bounded() {
+        let valid = TrackingQueryParams {
+            status: None,
+            page: Some(1000),
+            limit: Some(100),
+        };
+        assert!(valid.validate().is_ok());
+
+        for invalid in [
+            TrackingQueryParams {
+                status: None,
+                page: Some(0),
+                limit: Some(50),
+            },
+            TrackingQueryParams {
+                status: None,
+                page: Some(1001),
+                limit: Some(50),
+            },
+            TrackingQueryParams {
+                status: None,
+                page: Some(1),
+                limit: Some(0),
+            },
+            TrackingQueryParams {
+                status: None,
+                page: Some(1),
+                limit: Some(101),
+            },
+        ] {
+            assert!(invalid.validate().is_err());
+        }
     }
 
     #[test]

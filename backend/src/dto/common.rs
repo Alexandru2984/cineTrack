@@ -1,5 +1,8 @@
 use serde::Deserialize;
 
+const MAX_PAGE: u32 = 1000;
+const MAX_PAGE_SIZE: u32 = 100;
+
 #[derive(Debug, Deserialize)]
 pub struct PaginationParams {
     pub page: Option<u32>,
@@ -8,12 +11,12 @@ pub struct PaginationParams {
 
 impl PaginationParams {
     pub fn offset(&self) -> i64 {
-        let page = self.page.unwrap_or(1).max(1);
+        let page = self.page.unwrap_or(1).clamp(1, MAX_PAGE);
         ((page - 1) as i64) * self.limit_val()
     }
 
     pub fn limit_val(&self) -> i64 {
-        self.limit.unwrap_or(50).min(100) as i64
+        self.limit.unwrap_or(50).clamp(1, MAX_PAGE_SIZE) as i64
     }
 }
 
@@ -103,5 +106,24 @@ mod tests {
         };
         assert_eq!(p.limit_val(), 1);
         assert_eq!(p.offset(), 4);
+    }
+
+    #[test]
+    fn extreme_values_are_bounded() {
+        let p = PaginationParams {
+            page: Some(u32::MAX),
+            limit: Some(u32::MAX),
+        };
+        assert_eq!(p.limit_val(), i64::from(MAX_PAGE_SIZE));
+        assert_eq!(
+            p.offset(),
+            i64::from(MAX_PAGE - 1) * i64::from(MAX_PAGE_SIZE)
+        );
+
+        let zero_limit = PaginationParams {
+            page: Some(1),
+            limit: Some(0),
+        };
+        assert_eq!(zero_limit.limit_val(), 1);
     }
 }
