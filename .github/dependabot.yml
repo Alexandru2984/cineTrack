@@ -28,6 +28,20 @@ updates:
           - minor
           - patch
 
+  # Native mobile npm packages
+  - package-ecosystem: npm
+    directory: /mobile
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 10
+    groups:
+      mobile-npm-minor-patch:
+        update-types:
+          - minor
+          - patch
+
   # GitHub Actions used by the workflows
   - package-ecosystem: github-actions
     directory: /
