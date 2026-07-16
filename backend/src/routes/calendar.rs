@@ -106,42 +106,21 @@ async fn up_next_episodes(
     let user_id = require_auth(&req).await?;
     let params = query.resolve()?;
     let items = sqlx::query_as::<_, CalendarEpisode>(
-        r#"SELECT
-            next_episode.episode_id,
-            next_episode.media_id,
-            next_episode.tmdb_id,
-            next_episode.title,
-            next_episode.poster_path,
-            next_episode.season_number,
-            next_episode.episode_number,
-            next_episode.episode_name,
-            next_episode.overview,
-            next_episode.runtime_minutes,
-            next_episode.air_date,
-            next_episode.still_path,
-            next_episode.is_planned
-        FROM user_media tracked
-        JOIN media ON media.id = tracked.media_id AND media.media_type = 'tv'
-        JOIN LATERAL (
-            SELECT
+        r#"WITH next_ids AS (
+            SELECT DISTINCT ON (tracked.media_id)
+                tracked.media_id,
                 episodes.id AS episode_id,
-                media.id AS media_id,
-                media.tmdb_id,
-                media.title,
-                media.poster_path,
                 seasons.season_number,
                 episodes.episode_number,
-                episodes.name AS episode_name,
-                episodes.overview,
-                episodes.runtime_minutes,
-                episodes.air_date,
-                episodes.still_path,
-                plans.episode_id IS NOT NULL AS is_planned
-            FROM seasons
+                episodes.air_date
+            FROM user_media tracked
+            JOIN media
+              ON media.id = tracked.media_id
+             AND media.media_type = 'tv'
+            JOIN seasons ON seasons.media_id = media.id
             JOIN episodes ON episodes.season_id = seasons.id
-            LEFT JOIN episode_plans plans
-              ON plans.user_id = $1 AND plans.episode_id = episodes.id
-            WHERE seasons.media_id = media.id
+            WHERE tracked.user_id = $1
+              AND tracked.status <> 'dropped'
               AND episodes.air_date <= $2
               AND ($3 OR seasons.season_number > 0)
               AND NOT EXISTS (
@@ -149,19 +128,51 @@ async fn up_next_episodes(
                   WHERE history.user_id = $1 AND history.episode_id = episodes.id
               )
             ORDER BY
-                seasons.season_number ASC,
-                episodes.episode_number ASC,
-                episodes.air_date ASC,
-                episodes.id ASC
-            LIMIT 1
-        ) next_episode ON TRUE
-        WHERE tracked.user_id = $1
-          AND tracked.status <> 'dropped'
+                tracked.media_id,
+                seasons.season_number,
+                episodes.episode_number,
+                episodes.air_date,
+                episodes.id
+        ),
+        selected AS (
+            SELECT
+                next_ids.media_id,
+                next_ids.episode_id,
+                next_ids.season_number,
+                next_ids.episode_number,
+                next_ids.air_date,
+                plans.episode_id IS NOT NULL AS is_planned
+            FROM next_ids
+            LEFT JOIN episode_plans plans
+              ON plans.user_id = $1
+             AND plans.episode_id = next_ids.episode_id
+            ORDER BY
+                plans.episode_id IS NOT NULL DESC,
+                next_ids.air_date DESC,
+                next_ids.episode_id DESC
+            LIMIT $4
+        )
+        SELECT
+            selected.episode_id,
+            media.id AS media_id,
+            media.tmdb_id,
+            media.title,
+            media.poster_path,
+            selected.season_number,
+            selected.episode_number,
+            episodes.name AS episode_name,
+            episodes.overview,
+            episodes.runtime_minutes,
+            selected.air_date,
+            episodes.still_path,
+            selected.is_planned
+        FROM selected
+        JOIN media ON media.id = selected.media_id
+        JOIN episodes ON episodes.id = selected.episode_id
         ORDER BY
-            next_episode.is_planned DESC,
-            next_episode.air_date DESC,
-            next_episode.episode_id DESC
-        LIMIT $4"#,
+            selected.is_planned DESC,
+            selected.air_date DESC,
+            selected.episode_id DESC"#,
     )
     .bind(user_id)
     .bind(params.today)
