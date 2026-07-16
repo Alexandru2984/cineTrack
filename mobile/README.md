@@ -34,8 +34,15 @@ npm audit --audit-level=high
 
 `eas.json` contains development, internal preview, and production profiles.
 An Expo account and signing credentials are required to run EAS Build.
+The app is linked to the EAS project
+[`@micu984/vazute`](https://expo.dev/accounts/micu984/projects/vazute).
 
 ```bash
 npx eas-cli build --profile preview --platform android
 npx eas-cli build --profile production --platform all
 ```
+
+The first audited Android preview build is recorded on
+[EAS Build](https://expo.dev/accounts/micu984/projects/vazute/builds/9d809f89-792c-43d7-8732-7173a78ac53c).
+It was built from `e38be8b`; create a newer build before release so the
+permission hardening in `76ca89d` is included.

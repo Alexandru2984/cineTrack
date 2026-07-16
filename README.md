@@ -77,7 +77,7 @@ The application has been through multiple security audits. Key measures include:
 - **Calendar Integrity** — Episode actions are owner-scoped and transactionally serialized; watched history is authoritative and a database trigger removes stale plans regardless of the write path
 - **PWA Cache Privacy** — The service worker never caches `/api` responses; only versioned application assets and public TMDB poster URLs are eligible for offline storage
 - **Native Session Isolation** — Web refresh tokens stay in HttpOnly cookies; native refresh tokens are returned only by dedicated no-store endpoints and saved in SecureStore, while access tokens are never persisted
-- **Mobile Platform Hardening** — Android release manifests block legacy storage, overlay, and vibration permissions; iOS keeps arbitrary HTTP disabled and does not declare unused Face ID access
+- **Mobile Platform Hardening** — Android release manifests block legacy storage, overlay, vibration, and unused biometric permissions; iOS keeps arbitrary HTTP disabled and does not declare unused Face ID access
 - **Data Attribution** — The public About page preserves the required TMDB notice and JustWatch source link; any future availability widget must repeat JustWatch attribution next to its data
 - **Privacy** — Private profiles require an approved follow request before details or activity become visible; public user endpoints never expose emails; no user enumeration on register
 - **Access Control** — Private lists return 404 to non-owners; all media endpoints require authentication; history entries validated against existing media
