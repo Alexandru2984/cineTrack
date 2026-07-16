@@ -15,6 +15,7 @@ use crate::errors::AppError;
 use crate::models::Media;
 
 const MAX_API_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
+const MAX_SEASON_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
 const MAX_CONCURRENT_API_REQUESTS: usize = 16;
 const MAX_CONCURRENT_IMAGE_REQUESTS: usize = 8;
 const OUTBOUND_PERMIT_WAIT: Duration = Duration::from_secs(1);
@@ -213,6 +214,16 @@ impl TmdbService {
         endpoint: &'static str,
         request: reqwest::RequestBuilder,
     ) -> Result<T, AppError> {
+        self.send_api_with_limit(endpoint, request, MAX_API_RESPONSE_BYTES)
+            .await
+    }
+
+    async fn send_api_with_limit<T: DeserializeOwned>(
+        &self,
+        endpoint: &'static str,
+        request: reqwest::RequestBuilder,
+        max_response_bytes: usize,
+    ) -> Result<T, AppError> {
         self.ensure_api_not_cooling_down().await?;
         let _permit = self.acquire_api_permit().await?;
         let started = Instant::now();
@@ -256,7 +267,7 @@ impl TmdbService {
         }
 
         let outcome = Self::response_outcome(status);
-        let result = Self::decode_api_response(response).await;
+        let result = Self::decode_api_response(response, max_response_bytes).await;
         let outcome = if result.is_err() && status.is_success() {
             "invalid"
         } else {
@@ -522,14 +533,12 @@ impl TmdbService {
 
     async fn decode_api_response<T: DeserializeOwned>(
         response: reqwest::Response,
+        max_bytes: usize,
     ) -> Result<T, AppError> {
         let response = response.error_for_status()?;
-        let bytes = Self::read_bounded_body(
-            response,
-            MAX_API_RESPONSE_BYTES,
-            "External API response is too large",
-        )
-        .await?;
+        let bytes =
+            Self::read_bounded_body(response, max_bytes, "External API response is too large")
+                .await?;
 
         serde_json::from_slice(&bytes).map_err(|error| {
             log::warn!("TMDB returned invalid JSON: {error}");
@@ -711,7 +720,8 @@ impl TmdbService {
                 ))
                 .query(&[("language", "en-US")]),
         );
-        self.send_api("season", request).await
+        self.send_api_with_limit("season", request, MAX_SEASON_RESPONSE_BYTES)
+            .await
     }
 
     pub async fn get_movie_release_dates(
@@ -1524,6 +1534,51 @@ mod tests {
         let service = TmdbService::new(&config);
 
         let result = service.get_movie_detail(1).await;
+
+        assert!(matches!(result, Err(AppError::TmdbError(_))));
+    }
+
+    #[tokio::test]
+    async fn season_response_accepts_payload_above_generic_limit() {
+        let body = format!(
+            r#"{{"episodes":[],"padding":"{}"}}"#,
+            "x".repeat(MAX_API_RESPONSE_BYTES)
+        );
+        assert!(body.len() > MAX_API_RESPONSE_BYTES);
+        assert!(body.len() <= MAX_SEASON_RESPONSE_BYTES);
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        )
+        .into_bytes();
+        let (base_url, request) = response_server(response).await;
+        let mut config = config_with_token(None);
+        config.tmdb_base_url = base_url;
+        let service = TmdbService::new(&config);
+
+        let result = service.get_season_episodes(1, 2).await.unwrap();
+        let request = request.await.unwrap();
+
+        assert!(result.episodes.is_empty());
+        assert!(request.starts_with("GET /tv/1/season/2?"));
+    }
+
+    #[tokio::test]
+    async fn season_response_rejects_payload_above_season_limit() {
+        let (base_url, _) = response_server(
+            format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                MAX_SEASON_RESPONSE_BYTES + 1
+            )
+            .into_bytes(),
+        )
+        .await;
+        let mut config = config_with_token(None);
+        config.tmdb_base_url = base_url;
+        let service = TmdbService::new(&config);
+
+        let result = service.get_season_episodes(1, 2).await;
 
         assert!(matches!(result, Err(AppError::TmdbError(_))));
     }

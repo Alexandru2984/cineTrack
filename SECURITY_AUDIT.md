@@ -109,7 +109,8 @@ In the third round we reviewed the repo directly on the VPS/prod host and closed
 - Season-level actions exclude episodes with a known future air date. The watched-through action includes only the selected episode and regular-season episodes before it; future episodes after the selected point remain untouched.
 - The show detail page displays watched/total season progress, asks whether to include earlier gaps, confirms season-wide writes, locks background scrolling in the modal, and invalidates History, Tracking, Stats, Activity, Discovery, and Calendar caches after success.
 - The candidate frontend image initially exposed `curl`/`libcurl` 8.19.0-r0 findings for CVE-2026-5773 and CVE-2026-6276. The production Dockerfile now pins the rebuilt official Nginx digest with `curl`/`libcurl` 8.21.0-r0 and verifies all audited package versions locally; the image must pass a HIGH/CRITICAL Trivy gate before rollout.
-- Current validation covers 175 passing backend unit tests, 77 PostgreSQL integration tests, 70 frontend tests, and 20 Playwright browser tests.
+- Valid TMDB season responses can exceed the generic 2 MiB API-body limit for long-running shows. Season detail now has an endpoint-specific 8 MiB streaming cap, while every other TMDB response remains capped at 2 MiB; regression tests cover both the larger valid response and rejection above the season limit.
+- Current validation covers 177 passing backend unit tests, 77 PostgreSQL integration tests, 70 frontend tests, and 20 Playwright browser tests.
 
 ## Residual risks
 
