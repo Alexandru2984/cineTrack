@@ -7,6 +7,7 @@ import {
   Database,
   ExternalLink,
   History,
+  ListPlus,
   LogOut,
   Settings,
   ShieldCheck,
@@ -169,6 +170,24 @@ export default function ProfileScreen() {
             <View style={styles.navigationLabel}>
               <History color={theme.mutedText} size={20} />
               <AppText variant="label">Watch history</AppText>
+            </View>
+            <ChevronRight color={theme.mutedText} size={18} />
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Open custom lists"
+            onPress={() => router.push('/lists')}
+            style={({ pressed }) => [
+              styles.navigationRow,
+              {
+                borderColor: theme.border,
+                opacity: pressed ? 0.72 : 1,
+              },
+            ]}
+          >
+            <View style={styles.navigationLabel}>
+              <ListPlus color={theme.mutedText} size={20} />
+              <AppText variant="label">Custom lists</AppText>
             </View>
             <ChevronRight color={theme.mutedText} size={18} />
           </Pressable>

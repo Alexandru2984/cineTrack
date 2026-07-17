@@ -5,6 +5,7 @@ import {
   Check,
   CheckCheck,
   Clock3,
+  ListPlus,
   Star,
 } from 'lucide-react-native';
 import { useMemo, useState } from 'react';
@@ -18,6 +19,7 @@ import {
 
 import { AppButton } from '@/components/app-button';
 import { AppText } from '@/components/app-text';
+import { AddToListSheet } from '@/components/add-to-list-sheet';
 import { imageUrl, Poster } from '@/components/poster';
 import { ErrorState, LoadingState } from '@/components/screen-state';
 import { SegmentedControl } from '@/components/segmented-control';
@@ -88,6 +90,8 @@ export default function MediaDetailScreen() {
   const createTracking = useCreateTracking();
   const updateTracking = useUpdateTracking();
   const [feedbackItem, setFeedbackItem] = useState<TrackingItem | null>(null);
+  const [listPickerOpen, setListPickerOpen] = useState(false);
+  const [listFeedback, setListFeedback] = useState<string | null>(null);
   const [statusSelection, setStatusSelection] = useState<{
     mediaKey: string;
     status: TrackingStatus;
@@ -323,6 +327,23 @@ export default function MediaDetailScreen() {
               Current status: {trackingStatusLabels[selectedStatus]}
             </AppText>
           ) : null}
+          <View style={styles.listAction}>
+            <AppButton
+              label="Custom list"
+              variant="secondary"
+              compact
+              icon={<ListPlus color={theme.mutedText} size={18} />}
+              onPress={() => {
+                setListFeedback(null);
+                setListPickerOpen(true);
+              }}
+            />
+            {listFeedback ? (
+              <AppText variant="caption" style={{ color: theme.success }}>
+                {listFeedback}
+              </AppText>
+            ) : null}
+          </View>
         </View>
 
         {existingTracking ? (
@@ -560,6 +581,17 @@ export default function MediaDetailScreen() {
           }
         />
       ) : null}
+      {listPickerOpen ? (
+        <AddToListSheet
+          mediaId={item.id}
+          title={item.title}
+          onClose={() => setListPickerOpen(false)}
+          onAdded={(listName) => {
+            setListFeedback(`Added to ${listName}.`);
+            setListPickerOpen(false);
+          }}
+        />
+      ) : null}
     </>
   );
 }
@@ -630,6 +662,10 @@ const styles = StyleSheet.create({
   section: {
     gap: spacing.md,
     paddingHorizontal: spacing.lg,
+  },
+  listAction: {
+    alignItems: 'flex-start',
+    gap: spacing.sm,
   },
   feedbackHeader: {
     minHeight: 46,

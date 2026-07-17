@@ -5473,6 +5473,116 @@ async fn test_create_list() {
 
 #[actix_web::test]
 #[ignore = "requires test DB"]
+async fn test_list_full_owner_flow_and_public_visibility() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (token, _, _) = register_user(&app, "listflow", "listflow@example.com", "Pass1234").await;
+    let media_id = sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO media (tmdb_id, media_type, title)
+        VALUES (1200001, 'movie', 'List Flow Movie')
+        RETURNING id"#,
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/lists")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .set_json(json!({
+            "name": "Shareable",
+            "description": "Public collection",
+            "is_public": true
+        }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 201);
+    let created: Value = actix_test::read_body_json(resp).await;
+    let list_id = Uuid::parse_str(created["id"].as_str().unwrap()).unwrap();
+
+    let req = actix_test::TestRequest::post()
+        .uri(&format!("/api/lists/{list_id}/items"))
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .set_json(json!({ "media_id": media_id }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 201);
+
+    let req = actix_test::TestRequest::get()
+        .uri("/api/lists/me?limit=50")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let mine: Value = actix_test::read_body_json(resp).await;
+    assert_eq!(mine[0]["item_count"], 1);
+
+    let req = actix_test::TestRequest::get()
+        .uri(&format!("/api/lists/{list_id}"))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let public_detail: Value = actix_test::read_body_json(resp).await;
+    assert_eq!(public_detail["list"]["name"], "Shareable");
+    assert_eq!(public_detail["items"][0]["id"], media_id.to_string());
+
+    let req = actix_test::TestRequest::patch()
+        .uri(&format!("/api/lists/{list_id}"))
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .set_json(json!({ "name": "Private now", "is_public": false }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+
+    let req = actix_test::TestRequest::get()
+        .uri(&format!("/api/lists/{list_id}"))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 404);
+
+    let req = actix_test::TestRequest::delete()
+        .uri(&format!("/api/lists/{list_id}/items/{media_id}"))
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+
+    let req = actix_test::TestRequest::get()
+        .uri(&format!("/api/lists/{list_id}"))
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let private_detail: Value = actix_test::read_body_json(resp).await;
+    assert_eq!(private_detail["items"].as_array().unwrap().len(), 0);
+
+    let req = actix_test::TestRequest::delete()
+        .uri(&format!("/api/lists/{list_id}"))
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+
+    let remaining = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM lists WHERE id = $1")
+        .bind(list_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(remaining, 0);
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
 async fn test_lists_are_private_by_default_and_quota_bound() {
     let pool = setup_pool().await;
     clean_db(&pool).await;

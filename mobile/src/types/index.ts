@@ -141,6 +141,29 @@ export interface HistoryItem {
   watched_at: string;
 }
 
+export interface CustomListSummary {
+  id: string;
+  name: string;
+  description: string | null;
+  is_public: boolean;
+  item_count: number;
+  created_at: string;
+}
+
+export interface CustomList {
+  id: string;
+  user_id: string;
+  name: string;
+  description: string | null;
+  is_public: boolean;
+  created_at: string;
+}
+
+export interface CustomListDetail {
+  list: CustomList;
+  items: Media[];
+}
+
 export type NotificationKind = 'follow_request' | 'follow_accepted' | 'new_follower';
 
 export interface SocialNotification {

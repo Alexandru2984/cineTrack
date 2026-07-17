@@ -71,6 +71,8 @@ export default function RootLayout() {
           <Stack.Screen name="notifications" options={{ title: 'Notifications' }} />
           <Stack.Screen name="statistics" options={{ title: 'Statistics' }} />
           <Stack.Screen name="history" options={{ title: 'Watch history' }} />
+          <Stack.Screen name="lists" options={{ title: 'Custom lists' }} />
+          <Stack.Screen name="lists/[id]" options={{ title: 'List' }} />
           <Stack.Screen name="social" options={{ title: 'Social' }} />
           <Stack.Screen name="people/[username]" options={{ title: 'Profile' }} />
           <Stack.Screen name="settings" options={{ title: 'Account settings' }} />
