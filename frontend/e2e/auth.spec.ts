@@ -489,6 +489,57 @@ test('uses a touch-safe primary tab bar on narrow authenticated screens', async 
   ).toBe(true);
 });
 
+test('edits library feedback on a narrow screen', async ({ page }) => {
+  await stubSession(page);
+  await stubAuthedReads(page);
+  const trackedTitle = {
+    id: '00000000-0000-4000-8000-000000000030',
+    media_id: '00000000-0000-4000-8000-000000000031',
+    tmdb_id: 42,
+    media_type: 'movie',
+    title: 'A Library Title With A Long Name',
+    poster_path: null,
+    status: 'completed',
+    rating: 7,
+    review: 'Original review',
+    is_favorite: false,
+    started_at: null,
+    completed_at: null,
+  };
+  await page.route('**/api/tracking', (route) => route.fulfill({ json: [trackedTitle] }));
+  let updatePayload: unknown;
+  await page.route(`**/api/tracking/${trackedTitle.id}`, async (route) => {
+    updatePayload = route.request().postDataJSON();
+    return route.fulfill({ json: { ...trackedTitle, ...(updatePayload as object) } });
+  });
+
+  await page.setViewportSize({ width: 320, height: 700 });
+  await page.goto('/tracking');
+  await page.getByRole('button', {
+    name: `Edit rating and review for ${trackedTitle.title}`,
+  }).click();
+
+  const dialog = page.getByRole('dialog', { name: 'Your rating and review' });
+  await expect(dialog).toBeVisible();
+  await page.getByRole('button', { name: 'Increase rating' }).click();
+  await dialog.getByRole('textbox', { name: 'Review' }).fill('  Better on a second viewing.  ');
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= document.documentElement.clientWidth
+    )
+  ).toBe(true);
+  const dialogBox = await dialog.boundingBox();
+  expect(dialogBox).not.toBeNull();
+  expect(dialogBox!.width).toBeLessThanOrEqual(320);
+
+  await page.getByRole('button', { name: 'Save' }).click();
+  await expect.poll(() => updatePayload).toEqual({
+    rating: 8,
+    review: 'Better on a second viewing.',
+  });
+  await expect(dialog).toHaveCount(0);
+});
+
 test('discovers and follows people from search', async ({ page }) => {
   await stubSession(page);
   await stubAuthedReads(page);

@@ -51,7 +51,7 @@ export function useCreateTracking() {
 export function useUpdateTracking() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async ({ id, ...data }: { id: string; status?: string; rating?: number; review?: string; is_favorite?: boolean }) => {
+    mutationFn: async ({ id, ...data }: { id: string; status?: string; rating?: number | null; review?: string | null; is_favorite?: boolean }) => {
       const res = await api.patch(`/tracking/${id}`, data);
       return res.data;
     },

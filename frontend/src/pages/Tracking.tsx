@@ -4,11 +4,15 @@ import { LoadingSpinner } from '@/components/LoadingSpinner';
 import { getPosterUrl, STATUS_LABELS, STATUS_COLORS } from '@/lib/utils';
 import { Star, Trash2, Heart } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { TrackingFeedbackDialog } from '@/components/TrackingFeedbackDialog';
+import { getApiErrorMessage } from '@/lib/api';
+import type { TrackingItem } from '@/types';
 
 const TABS = ['all', 'watching', 'plan_to_watch', 'completed', 'on_hold', 'dropped'] as const;
 
 export default function TrackingPage() {
   const [tab, setTab] = useState<string>('all');
+  const [feedbackItem, setFeedbackItem] = useState<TrackingItem | null>(null);
   const { data: items, isLoading } = useTracking(tab === 'all' ? undefined : tab);
   const updateTracking = useUpdateTracking();
   const deleteTracking = useDeleteTracking();
@@ -77,6 +81,11 @@ export default function TrackingPage() {
                   <span className="text-xs">{item.rating}/10</span>
                 </div>
               )}
+              {item.review && (
+                <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-[hsl(var(--muted-foreground))]">
+                  {item.review}
+                </p>
+              )}
             </div>
             <div className="flex w-full shrink-0 items-center gap-2 border-t border-[hsl(var(--border))] pt-3 sm:w-auto sm:border-0 sm:pt-0">
               <select
@@ -89,6 +98,18 @@ export default function TrackingPage() {
                   <option key={k} value={k}>{v}</option>
                 ))}
               </select>
+              <button
+                type="button"
+                title={`Edit rating and review for ${item.title}`}
+                aria-label={`Edit rating and review for ${item.title}`}
+                onClick={() => {
+                  updateTracking.reset();
+                  setFeedbackItem(item);
+                }}
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-[hsl(var(--border))]"
+              >
+                <Star className={`h-4 w-4 ${item.rating ? 'fill-yellow-400 text-yellow-400' : 'text-[hsl(var(--muted-foreground))]'}`} />
+              </button>
               <button
                 type="button"
                 title={item.is_favorite ? `Remove ${item.title} from favorites` : `Add ${item.title} to favorites`}
@@ -111,6 +132,22 @@ export default function TrackingPage() {
           </article>
         ))}
       </div>
+      {feedbackItem && (
+        <TrackingFeedbackDialog
+          item={feedbackItem}
+          pending={updateTracking.isPending}
+          error={updateTracking.error
+            ? getApiErrorMessage(updateTracking.error, 'Your rating could not be saved')
+            : undefined}
+          onClose={() => {
+            if (!updateTracking.isPending) setFeedbackItem(null);
+          }}
+          onSave={(payload) => updateTracking.mutate(
+            { id: feedbackItem.id, ...payload },
+            { onSuccess: () => setFeedbackItem(null) },
+          )}
+        />
+      )}
     </div>
   );
 }
