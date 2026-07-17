@@ -36,15 +36,26 @@ validate_password() {
   fi
 }
 
+validate_database() {
+  local name="$1"
+  local value="$2"
+  if [[ ! "$value" =~ ^[A-Za-z_][A-Za-z0-9._~-]{0,62}$ ]]; then
+    echo "$name must be a URL-safe PostgreSQL database name" >&2
+    exit 1
+  fi
+}
+
 APP_ROLE="${APP_DATABASE_USER:-$(read_env_value APP_DATABASE_USER)}"
 APP_ROLE="${APP_ROLE:-cinetrack_app}"
 APP_PASSWORD="${APP_DATABASE_PASSWORD:-$(read_env_value APP_DATABASE_PASSWORD)}"
 MIGRATION_ROLE="${MIGRATION_DATABASE_USER:-$(read_env_value MIGRATION_DATABASE_USER)}"
 MIGRATION_ROLE="${MIGRATION_ROLE:-cinetrack_migrator}"
 MIGRATION_PASSWORD="${MIGRATION_DATABASE_PASSWORD:-$(read_env_value MIGRATION_DATABASE_PASSWORD)}"
+DATABASE_NAME="${POSTGRES_DB:-$(read_env_value POSTGRES_DB)}"
 
 validate_role "APP_DATABASE_USER" "$APP_ROLE"
 validate_role "MIGRATION_DATABASE_USER" "$MIGRATION_ROLE"
+validate_database "POSTGRES_DB" "$DATABASE_NAME"
 if [[ "$APP_ROLE" == "$MIGRATION_ROLE" ]]; then
   echo "Runtime and migration roles must be different" >&2
   exit 1
@@ -54,21 +65,31 @@ APP_PASSWORD="${APP_PASSWORD:-$(openssl rand -hex 32)}"
 MIGRATION_PASSWORD="${MIGRATION_PASSWORD:-$(openssl rand -hex 32)}"
 validate_password "APP_DATABASE_PASSWORD" "$APP_PASSWORD"
 validate_password "MIGRATION_DATABASE_PASSWORD" "$MIGRATION_PASSWORD"
+DATABASE_SCHEME="postgresql"
+DATABASE_ENDPOINT="db:5432"
+printf -v APP_DATABASE_URL '%s://%s:%s@%s/%s' \
+  "$DATABASE_SCHEME" "$APP_ROLE" "$APP_PASSWORD" "$DATABASE_ENDPOINT" "$DATABASE_NAME"
+printf -v MIGRATION_DATABASE_URL '%s://%s:%s@%s/%s' \
+  "$DATABASE_SCHEME" "$MIGRATION_ROLE" "$MIGRATION_PASSWORD" "$DATABASE_ENDPOINT" "$DATABASE_NAME"
 
-# Keep exactly one copy of each credential and never print either secret.
+# Keep exactly one copy of each credential and connection string. Never print them.
 umask 077
 tmp_env="$(mktemp "${ENV_FILE}.tmp.XXXXXX")"
 trap 'rm -f "$tmp_env"' EXIT
 awk '
   !/^APP_DATABASE_USER=/ &&
   !/^APP_DATABASE_PASSWORD=/ &&
+  !/^APP_DATABASE_URL=/ &&
   !/^MIGRATION_DATABASE_USER=/ &&
-  !/^MIGRATION_DATABASE_PASSWORD=/
+  !/^MIGRATION_DATABASE_PASSWORD=/ &&
+  !/^MIGRATION_DATABASE_URL=/
 ' "$ENV_FILE" > "$tmp_env"
 printf '\nAPP_DATABASE_USER=%s\nAPP_DATABASE_PASSWORD=%s\n' \
   "$APP_ROLE" "$APP_PASSWORD" >> "$tmp_env"
+printf 'APP_DATABASE_URL=%s\n' "$APP_DATABASE_URL" >> "$tmp_env"
 printf 'MIGRATION_DATABASE_USER=%s\nMIGRATION_DATABASE_PASSWORD=%s\n' \
   "$MIGRATION_ROLE" "$MIGRATION_PASSWORD" >> "$tmp_env"
+printf 'MIGRATION_DATABASE_URL=%s\n' "$MIGRATION_DATABASE_URL" >> "$tmp_env"
 chmod 600 "$tmp_env"
 mv "$tmp_env" "$ENV_FILE"
 trap - EXIT

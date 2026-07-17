@@ -13,9 +13,9 @@ services:
       - no-new-privileges:true
     pids_limit: 256
     environment:
-      POSTGRES_DB: ${POSTGRES_DB}
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: "${POSTGRES_DB:?POSTGRES_DB must be set}"
+      POSTGRES_USER: "${POSTGRES_USER:?POSTGRES_USER must be set}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     restart: unless-stopped
@@ -42,7 +42,7 @@ services:
       APP_HOST: "${APP_HOST:-0.0.0.0}"
       APP_PORT: "${APP_PORT:-8080}"
       FRONTEND_URL: "${FRONTEND_URL}"
-      DATABASE_URL: "postgresql://${APP_DATABASE_USER:-cinetrack_app}:${APP_DATABASE_PASSWORD:-provision-runtime-role-first}@db:5432/${POSTGRES_DB}"
+      DATABASE_URL: "${APP_DATABASE_URL:?APP_DATABASE_URL must be set}"
       JWT_SECRET: "${JWT_SECRET}"
       JWT_EXPIRY_MINUTES: "${JWT_EXPIRY_MINUTES:-15}"
       JWT_REFRESH_EXPIRY_DAYS: "${JWT_REFRESH_EXPIRY_DAYS:-30}"
@@ -106,7 +106,7 @@ services:
     image: cinetrack-backend
     command: ["/usr/local/bin/cinetrack", "--migrate"]
     environment:
-      DATABASE_URL: "postgresql://${MIGRATION_DATABASE_USER:-cinetrack_migrator}:${MIGRATION_DATABASE_PASSWORD:-provision-migration-role-first}@db:5432/${POSTGRES_DB}"
+      DATABASE_URL: "${MIGRATION_DATABASE_URL:?MIGRATION_DATABASE_URL must be set}"
       RUST_LOG: "${RUST_LOG:-cinetrack=info}"
     read_only: true
     tmpfs:
