@@ -11,6 +11,14 @@
     "icon": "./assets/icon.png",
     "scheme": "vazute",
     "userInterfaceStyle": "automatic",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/b036a54f-066e-41e1-8c33-80f324d410fe",
+      "checkAutomatically": "ON_LOAD",
+      "fallbackToCacheTimeout": 0
+    },
     "ios": {
       "bundleIdentifier": "com.micutu.vazute",
       "supportsTablet": true,

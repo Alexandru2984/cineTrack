@@ -43,7 +43,24 @@ npx eas-cli build --profile preview --platform android
 npx eas-cli build --profile production --platform all
 ```
 
-The first audited Android preview build is recorded on
-[EAS Build](https://expo.dev/accounts/micu984/projects/vazute/builds/9d809f89-792c-43d7-8732-7173a78ac53c).
-It was built from `e38be8b`; create a newer build before release so the
-permission hardening in `76ca89d` is included.
+The latest audited Android preview build is recorded on
+[EAS Build](https://expo.dev/accounts/micu984/projects/vazute/builds/dda72b0d-2fdf-4e50-b760-a84a47c16949).
+It was built from `f19130c` and includes the permission hardening, but predates
+the current session, tracking lookup, account deletion, and privacy changes.
+Create a new preview build before distributing another APK.
+
+## OTA updates
+
+EAS Update is configured with a runtime tied to the native app version and
+isolated `development`, `preview`, and `production` channels. Publish only JS
+and asset changes that are compatible with the native modules already present
+in that runtime:
+
+```bash
+npx eas-cli update --channel preview --message "Describe the tested change"
+npx eas-cli update --channel production --message "Describe the tested change"
+```
+
+Adding or updating a native module, changing permissions, or changing native
+configuration still requires a new EAS Build. Test on `preview` before
+publishing the same commit to `production`.
