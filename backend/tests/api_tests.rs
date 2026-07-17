@@ -74,6 +74,7 @@ fn test_config() -> cinetrack::config::Config {
         smtp_username: None,
         smtp_password: None,
         smtp_from: "CineTrack <noreply@localhost>".into(),
+        smtp_timeout_seconds: 15,
         r2: None,
     }
 }

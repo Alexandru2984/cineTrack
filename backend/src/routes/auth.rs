@@ -404,6 +404,7 @@ mod tests {
             smtp_username: None,
             smtp_password: None,
             smtp_from: "CineTrack <noreply@localhost>".to_string(),
+            smtp_timeout_seconds: 15,
             r2: None,
         }
     }

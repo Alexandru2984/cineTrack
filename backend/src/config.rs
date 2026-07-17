@@ -36,6 +36,7 @@ pub struct Config {
     pub smtp_username: Option<String>,
     pub smtp_password: Option<String>,
     pub smtp_from: String,
+    pub smtp_timeout_seconds: u64,
     pub r2: Option<R2Config>,
 }
 
@@ -92,20 +93,22 @@ impl Config {
 
         let smtp_host = env::var("SMTP_HOST")
             .ok()
-            .filter(|value| !value.trim().is_empty());
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
         let smtp_username = env::var("SMTP_USERNAME")
             .ok()
             .filter(|value| !value.is_empty());
         let smtp_password = env::var("SMTP_PASSWORD")
             .ok()
             .filter(|value| !value.is_empty());
-        assert!(
-            smtp_username.is_some() == smtp_password.is_some(),
-            "SMTP_USERNAME and SMTP_PASSWORD must be configured together"
-        );
-        assert!(
-            smtp_host.is_some() || (smtp_username.is_none() && smtp_password.is_none()),
-            "SMTP_HOST is required when SMTP credentials are configured"
+        let smtp_from =
+            env::var("SMTP_FROM").unwrap_or_else(|_| "CineTrack <noreply@localhost>".to_string());
+        validate_smtp_config(
+            smtp_host.as_deref(),
+            smtp_username.as_deref(),
+            smtp_password.as_deref(),
+            &smtp_from,
+            is_production,
         );
 
         Self {
@@ -144,8 +147,8 @@ impl Config {
             smtp_port: bounded_env("SMTP_PORT", 587_u16, 1, u16::MAX),
             smtp_username,
             smtp_password,
-            smtp_from: env::var("SMTP_FROM")
-                .unwrap_or_else(|_| "CineTrack <noreply@localhost>".to_string()),
+            smtp_from,
+            smtp_timeout_seconds: bounded_env("SMTP_TIMEOUT_SECONDS", 15_u64, 1, 60),
             r2: R2Config::from_env(is_production),
         }
     }
@@ -216,6 +219,58 @@ fn parse_cors_origins(require_https: bool) -> Vec<String> {
         "CORS_ALLOWED_ORIGINS must not contain duplicates"
     );
     origins
+}
+
+fn validate_smtp_config(
+    host: Option<&str>,
+    username: Option<&str>,
+    password: Option<&str>,
+    from: &str,
+    is_production: bool,
+) {
+    assert!(
+        username.is_some() == password.is_some(),
+        "SMTP_USERNAME and SMTP_PASSWORD must be configured together"
+    );
+    assert!(
+        host.is_some() || (username.is_none() && password.is_none()),
+        "SMTP_HOST is required when SMTP credentials are configured"
+    );
+
+    if let Some(host) = host {
+        assert!(
+            host.len() <= 253
+                && !host.contains("://")
+                && !host.contains(':')
+                && !host.chars().any(char::is_whitespace)
+                && !host.chars().any(char::is_control),
+            "SMTP_HOST must be a hostname without a scheme or port"
+        );
+    }
+    if let Some(username) = username {
+        assert!(username.len() <= 512, "SMTP_USERNAME is too long");
+    }
+    if let Some(password) = password {
+        assert!(password.len() <= 1024, "SMTP_PASSWORD is too long");
+    }
+
+    let mailbox = from
+        .parse::<lettre::message::Mailbox>()
+        .expect("SMTP_FROM must be a valid mailbox");
+    if is_production {
+        assert!(host.is_some(), "SMTP_HOST is required in production");
+        assert!(
+            username.is_some() && password.is_some(),
+            "SMTP credentials are required in production"
+        );
+        let domain = mailbox.email.domain().to_ascii_lowercase();
+        assert!(
+            domain != "localhost"
+                && !domain.ends_with(".localhost")
+                && !domain.ends_with(".invalid"),
+            "SMTP_FROM must use a deliverable domain in production"
+        );
+    }
 }
 
 fn bounded_env<T>(name: &str, default: T, minimum: T, maximum: T) -> T
@@ -379,6 +434,51 @@ mod tests {
                 "TEST_URL",
                 "https://user:pass@example.com".to_string(),
                 true,
+                true,
+            )
+        })
+        .is_err());
+    }
+
+    #[test]
+    fn accepts_authenticated_production_smtp() {
+        validate_smtp_config(
+            Some("smtp.example.com"),
+            Some("relay-user"),
+            Some("relay-secret"),
+            "CineTrack <noreply@example.com>",
+            true,
+        );
+    }
+
+    #[test]
+    fn rejects_incomplete_or_invalid_production_smtp() {
+        assert!(std::panic::catch_unwind(|| {
+            validate_smtp_config(
+                Some("smtp.example.com:587"),
+                Some("relay-user"),
+                Some("relay-secret"),
+                "CineTrack <noreply@example.com>",
+                true,
+            )
+        })
+        .is_err());
+        assert!(std::panic::catch_unwind(|| {
+            validate_smtp_config(
+                Some("smtp.example.com"),
+                None,
+                None,
+                "CineTrack <noreply@example.com>",
+                true,
+            )
+        })
+        .is_err());
+        assert!(std::panic::catch_unwind(|| {
+            validate_smtp_config(
+                Some("smtp.example.com"),
+                Some("relay-user"),
+                Some("relay-secret"),
+                "CineTrack <noreply@localhost>",
                 true,
             )
         })

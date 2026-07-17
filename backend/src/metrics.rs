@@ -10,6 +10,38 @@ struct TmdbMetrics {
     cache_events: IntCounterVec,
 }
 
+#[derive(Clone)]
+struct EmailMetrics {
+    sends: IntCounterVec,
+    send_duration: HistogramVec,
+}
+
+impl EmailMetrics {
+    fn new() -> Self {
+        let sends = IntCounterVec::new(
+            Opts::new("email_send_total", "Transactional email send outcomes")
+                .namespace("cinetrack"),
+            &["kind", "outcome"],
+        )
+        .expect("Email send metric must be valid");
+        let send_duration = HistogramVec::new(
+            HistogramOpts::new(
+                "email_send_duration_seconds",
+                "SMTP transaction duration for transactional email",
+            )
+            .namespace("cinetrack")
+            .buckets(vec![0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 15.0, 30.0, 60.0]),
+            &["kind"],
+        )
+        .expect("Email duration metric must be valid");
+
+        Self {
+            sends,
+            send_duration,
+        }
+    }
+}
+
 impl TmdbMetrics {
     fn new() -> Self {
         let requests = IntCounterVec::new(
@@ -50,6 +82,7 @@ impl TmdbMetrics {
 }
 
 static TMDB_METRICS: LazyLock<TmdbMetrics> = LazyLock::new(TmdbMetrics::new);
+static EMAIL_METRICS: LazyLock<EmailMetrics> = LazyLock::new(EmailMetrics::new);
 
 pub fn record_tmdb_request(endpoint: &'static str, outcome: &'static str, duration: Duration) {
     TMDB_METRICS
@@ -67,6 +100,20 @@ pub fn record_tmdb_cache(cache: &'static str, result: &'static str) {
         .cache_events
         .with_label_values(&[cache, result])
         .inc();
+}
+
+pub fn record_email_send(kind: &'static str, outcome: &'static str) {
+    EMAIL_METRICS
+        .sends
+        .with_label_values(&[kind, outcome])
+        .inc();
+}
+
+pub fn record_email_send_duration(kind: &'static str, duration: Duration) {
+    EMAIL_METRICS
+        .send_duration
+        .with_label_values(&[kind])
+        .observe(duration.as_secs_f64());
 }
 
 /// Build the Prometheus metrics middleware. It records per-request count and
@@ -92,6 +139,14 @@ pub fn build() -> PrometheusMetrics {
         .register(Box::new(TMDB_METRICS.cache_events.clone()))
         .expect("Failed to register TMDB cache metric");
     prometheus
+        .registry
+        .register(Box::new(EMAIL_METRICS.sends.clone()))
+        .expect("Failed to register email send metric");
+    prometheus
+        .registry
+        .register(Box::new(EMAIL_METRICS.send_duration.clone()))
+        .expect("Failed to register email duration metric");
+    prometheus
 }
 
 #[cfg(test)]
@@ -102,6 +157,8 @@ mod tests {
     fn custom_tmdb_metrics_are_registered() {
         record_tmdb_request("search", "2xx", Duration::from_millis(20));
         record_tmdb_cache("search", "hit");
+        record_email_send("password_reset", "smtp_accepted");
+        record_email_send_duration("password_reset", Duration::from_millis(20));
         let prometheus = build();
         let names = prometheus
             .registry
@@ -119,5 +176,11 @@ mod tests {
         assert!(names
             .iter()
             .any(|name| name == "cinetrack_tmdb_cache_events_total"));
+        assert!(names
+            .iter()
+            .any(|name| name == "cinetrack_email_send_total"));
+        assert!(names
+            .iter()
+            .any(|name| name == "cinetrack_email_send_duration_seconds"));
     }
 }

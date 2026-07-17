@@ -1,7 +1,9 @@
 use lettre::transport::smtp::authentication::Credentials;
 use lettre::{AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor};
+use std::time::{Duration, Instant};
 
 use crate::config::Config;
+use crate::metrics;
 
 /// Sends transactional email over SMTP. When SMTP is unavailable the service
 /// logs reset URLs only outside production; production never exposes them.
@@ -43,7 +45,9 @@ impl EmailService {
         };
 
         let mut builder = match builder {
-            Ok(b) => b.port(config.smtp_port),
+            Ok(b) => b
+                .port(config.smtp_port)
+                .timeout(Some(Duration::from_secs(config.smtp_timeout_seconds))),
             Err(e) => {
                 log::error!("Failed to build SMTP transport: {e}");
                 return None;
@@ -69,6 +73,7 @@ impl EmailService {
         );
 
         let Some(transport) = &self.transport else {
+            metrics::record_email_send("password_reset", "not_configured");
             if self.log_reset_urls {
                 log::info!("[email:log-only] to={to} subject={subject:?} reset_url={reset_url}");
             } else {
@@ -82,6 +87,7 @@ impl EmailService {
         let from = match self.from.parse() {
             Ok(mailbox) => mailbox,
             Err(e) => {
+                metrics::record_email_send("password_reset", "invalid_message");
                 log::error!("Invalid SMTP_FROM address {:?}: {e}", self.from);
                 return;
             }
@@ -89,6 +95,7 @@ impl EmailService {
         let to = match to.parse() {
             Ok(mailbox) => mailbox,
             Err(e) => {
+                metrics::record_email_send("password_reset", "invalid_message");
                 log::error!("Invalid recipient address: {e}");
                 return;
             }
@@ -102,13 +109,23 @@ impl EmailService {
         {
             Ok(m) => m,
             Err(e) => {
+                metrics::record_email_send("password_reset", "invalid_message");
                 log::error!("Failed to build email message: {e}");
                 return;
             }
         };
 
-        if let Err(e) = transport.send(message).await {
-            log::error!("Failed to send password-reset email: {e}");
+        let started_at = Instant::now();
+        match transport.send(message).await {
+            Ok(_) => {
+                metrics::record_email_send("password_reset", "smtp_accepted");
+                metrics::record_email_send_duration("password_reset", started_at.elapsed());
+            }
+            Err(e) => {
+                metrics::record_email_send("password_reset", "smtp_error");
+                metrics::record_email_send_duration("password_reset", started_at.elapsed());
+                log::error!("Failed to send password-reset email: {e}");
+            }
         }
     }
 }
@@ -141,6 +158,7 @@ mod tests {
             smtp_username: None,
             smtp_password: None,
             smtp_from: "CineTrack <noreply@localhost>".to_string(),
+            smtp_timeout_seconds: 15,
             r2: None,
         }
     }
