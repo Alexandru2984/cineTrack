@@ -366,7 +366,7 @@ Apply the cache lifecycle rules once, then schedule the catalog sync after TMDB'
 ```cron
 15 9 * * * /path/to/cineTrack/scripts/sync_tmdb_catalog.py >> /var/log/vazute-catalog.log 2>&1
 0 10 * * * /path/to/cineTrack/scripts/hydrate_tmdb_catalog.sh >> /var/log/vazute-hydration.log 2>&1
-20 */6 * * * /path/to/cineTrack/scripts/sync_release_schedules.sh >> /var/log/vazute-release-schedules.log 2>&1
+20 * * * * /path/to/cineTrack/scripts/sync_release_schedules.sh >> /var/log/vazute-release-schedules.log 2>&1
 ```
 
 ## License

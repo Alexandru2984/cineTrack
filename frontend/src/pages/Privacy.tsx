@@ -33,6 +33,7 @@ export default function PrivacyPage() {
             <li>Preferences and imports: region, language, and TV Time import records supplied by the user.</li>
             <li>Security data: session token hashes, IP address, user agent, request timestamps, and security/audit logs.</li>
             <li>Mobile diagnostics: sanitized error name, message and stack, app version, platform, time, and whether the failure was fatal. Tokens, email addresses, URL parameters, device identifiers, and advertising identifiers are not included.</li>
+            <li>Release alerts, when enabled: an Expo push token, platform, app version, time-zone offset, enablement time, and a short-lived delivery record containing the relevant title and release.</li>
           </ul>
         </PolicySection>
 
@@ -40,7 +41,7 @@ export default function PrivacyPage() {
           <p>
             Data is used to authenticate accounts, synchronize the library across devices, build
             calendars and statistics, provide social features, deliver password-reset messages,
-            prevent abuse, diagnose failures, and protect the service. For users in the EEA, these
+            send release alerts requested by the user, prevent abuse, diagnose failures, and protect the service. For users in the EEA, these
             activities rely on performance of the service contract and legitimate interests in
             security and reliability. Văzute does not sell personal data and does not include
             advertising or third-party analytics SDKs.
@@ -52,6 +53,7 @@ export default function PrivacyPage() {
             <li>Cloudflare R2 stores profile avatars, cached public media assets, catalog exports, and encrypted-at-rest infrastructure backups.</li>
             <li>TMDB supplies movie and television metadata. Search terms, media identifiers, language, and region may be sent from the Văzute server without the user's email or Văzute account identifier.</li>
             <li>The self-hosted Mailcow service and the recipient's email provider process transactional email delivery.</li>
+            <li>For users who enable release alerts, Expo relays the push token and notification content to Google Firebase Cloud Messaging or Apple Push Notification service. No advertising identifier or Văzute account identifier is included in the notification payload.</li>
             <li>Apple, Google, and Expo may separately process app distribution or build information under their own policies; no advertising identifier is sent to Văzute.</li>
           </ul>
           <p>
@@ -69,7 +71,8 @@ export default function PrivacyPage() {
             until that backup expires. Web access logs are rotated daily and retained for up to 14
             days. Mobile diagnostic reports stay only in size-limited rotating server logs and are
             not stored in the application database. Shared media metadata that is not linked to an
-            account may remain cached.
+            account may remain cached. Disabling release alerts removes the registered device from
+            Văzute; completed or permanently failed delivery records are removed after 30 days.
           </p>
           <p>
             Use the <Link to="/account-deletion">account deletion page</Link> for the available
@@ -80,7 +83,8 @@ export default function PrivacyPage() {
         <PolicySection title="Your choices and rights" icon={<Mail className="h-5 w-5" />}>
           <p>
             Account settings allow users to correct profile information, control profile visibility,
-            manage sessions, and delete the account. Depending on local law, users may also request
+            manage sessions, disable release alerts, and delete the account. System notification
+            settings provide an additional platform-level control. Depending on local law, users may also request
             access, correction, restriction, portability, objection, or deletion by contacting the
             address above. EEA users may lodge a complaint with their local data-protection authority.
           </p>

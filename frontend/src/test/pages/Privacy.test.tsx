@@ -18,6 +18,9 @@ describe('Privacy page', () => {
     );
     expect(screen.getByText(/retained for at most 14 days/)).toBeVisible();
     expect(screen.getByText(/Mobile diagnostics:/)).toBeVisible();
+    expect(screen.getByText(/Release alerts, when enabled:/)).toBeVisible();
+    expect(screen.getByText(/Expo relays the push token/)).toBeVisible();
+    expect(screen.getByText(/delivery records are removed after 30 days/)).toBeVisible();
     expect(screen.getByText(/size-limited rotating server logs/)).toBeVisible();
     expect(screen.getByRole('link', { name: 'account deletion page' })).toHaveAttribute(
       'href',
