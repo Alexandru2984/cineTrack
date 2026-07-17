@@ -34,7 +34,7 @@ import {
 import { useTheme } from '@/hooks/use-theme';
 import { getErrorMessage } from '@/lib/http';
 import type { ListInput } from '@/lib/lists';
-import { useAuthStore } from '@/store/auth';
+import { hasLocalSession, useAuthStore } from '@/store/auth';
 import type { CustomListSummary } from '@/types';
 
 type EditorState =
@@ -45,14 +45,14 @@ type EditorState =
 export default function ListsScreen() {
   const theme = useTheme();
   const status = useAuthStore((state) => state.status);
-  const authenticated = status === 'authenticated';
-  const lists = useMyLists(authenticated);
+  const hasSession = hasLocalSession(status);
+  const lists = useMyLists(hasSession);
   const createList = useCreateList();
   const updateList = useUpdateList();
   const deleteList = useDeleteList();
   const [editor, setEditor] = useState<EditorState>(null);
 
-  if (!authenticated) return <Redirect href="/" />;
+  if (!hasSession) return <Redirect href="/" />;
 
   const save = (input: ListInput) => {
     if (!editor) return;

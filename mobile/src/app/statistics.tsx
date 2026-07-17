@@ -35,7 +35,7 @@ import {
   formatActivityMonth,
   type HeatmapCell,
 } from '@/lib/statistics';
-import { useAuthStore } from '@/store/auth';
+import { hasLocalSession, useAuthStore } from '@/store/auth';
 
 const HEATMAP_CELL = 12;
 const HEATMAP_GAP = 3;
@@ -48,11 +48,11 @@ export default function StatisticsScreen() {
   const [year, setYear] = useState(currentYear);
   const [selectedDay, setSelectedDay] = useState<HeatmapCell | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  const authenticated = status === 'authenticated';
-  const stats = useMyStats(authenticated);
-  const heatmap = useHeatmap(year, authenticated);
-  const genres = useGenreDistribution(authenticated);
-  const monthly = useMonthlyActivity(authenticated);
+  const hasSession = hasLocalSession(status);
+  const stats = useMyStats(hasSession);
+  const heatmap = useHeatmap(year, hasSession);
+  const genres = useGenreDistribution(hasSession);
+  const monthly = useMonthlyActivity(hasSession);
   const weeks = useMemo(
     () => buildHeatmapWeeks(year, heatmap.data ?? []),
     [heatmap.data, year],
@@ -62,7 +62,7 @@ export default function StatisticsScreen() {
   const maxGenreCount = Math.max(1, ...visibleGenres.map((entry) => entry.count));
   const hasError = stats.isError || heatmap.isError || genres.isError || monthly.isError;
 
-  if (!authenticated) return <Redirect href="/" />;
+  if (!hasSession) return <Redirect href="/" />;
 
   const refresh = async () => {
     setRefreshing(true);

@@ -53,6 +53,18 @@ the mobile rating/review editor, all tracking statuses, notification inbox,
 badges, complete statistics, profile/privacy editing, release-region controls,
 password changes, and active-session management.
 
+That build does **not** contain the AsyncStorage and NetInfo native modules
+used by the offline cache. Do not publish the current JavaScript as an OTA
+update to runtime `1.0.0`; create and test a new preview build first.
+
+## Offline cache
+
+Successful library, calendar, history, list, statistics, and media queries are
+kept for up to seven days. Cache restoration is scoped to the SecureStore user
+identity, and logout or an account change clears both memory and AsyncStorage.
+Tokens remain in SecureStore. Notifications, social data, account sessions,
+and user search results are excluded from persistence.
+
 ## OTA updates
 
 EAS Update is configured with a runtime tied to the native app version and

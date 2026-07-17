@@ -2,7 +2,16 @@ import { create } from 'zustand';
 
 import type { User } from '@/types';
 
-export type AuthStatus = 'loading' | 'authenticated' | 'anonymous' | 'restore_error';
+export type AuthStatus =
+  | 'loading'
+  | 'authenticated'
+  | 'offline'
+  | 'anonymous'
+  | 'restore_error';
+
+export function hasLocalSession(status: AuthStatus) {
+  return status === 'authenticated' || status === 'offline';
+}
 
 interface AuthState {
   status: AuthStatus;
@@ -11,6 +20,8 @@ interface AuthState {
   beginSessionRestore: () => void;
   failSessionRestore: () => void;
   setSession: (accessToken: string, user: User) => void;
+  setOfflineSession: (user: User) => void;
+  enterOfflineMode: () => void;
   setUser: (user: User) => void;
   clearSession: () => void;
 }
@@ -27,6 +38,16 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
   setSession: (accessToken, user) => {
     set({ status: 'authenticated', accessToken, user });
+  },
+  setOfflineSession: (user) => {
+    set({ status: 'offline', accessToken: null, user });
+  },
+  enterOfflineMode: () => {
+    set((state) =>
+      state.user
+        ? { status: 'offline', accessToken: null, user: state.user }
+        : state,
+    );
   },
   setUser: (user) => {
     set({ user });

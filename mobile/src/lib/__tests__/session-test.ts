@@ -1,7 +1,10 @@
 import { ApiError, rawRequest } from '@/lib/http';
 import {
+  readCachedSession,
   readRefreshToken,
+  removeCachedSession,
   removeRefreshToken,
+  writeCachedSession,
   writeRefreshToken,
 } from '@/lib/secure-session';
 import { hydrateSession, refreshSession } from '@/lib/session';
@@ -14,8 +17,11 @@ jest.mock('@/lib/http', () => ({
 }));
 
 jest.mock('@/lib/secure-session', () => ({
+  readCachedSession: jest.fn(),
   readRefreshToken: jest.fn(),
+  removeCachedSession: jest.fn(),
   removeRefreshToken: jest.fn(),
+  writeCachedSession: jest.fn(),
   writeRefreshToken: jest.fn(),
 }));
 
@@ -39,17 +45,49 @@ const response: MobileAuthResponse = {
 };
 
 const mockRawRequest = jest.mocked(rawRequest);
+const mockReadCachedSession = jest.mocked(readCachedSession);
 const mockReadRefreshToken = jest.mocked(readRefreshToken);
+const mockRemoveCachedSession = jest.mocked(removeCachedSession);
 const mockRemoveRefreshToken = jest.mocked(removeRefreshToken);
+const mockWriteCachedSession = jest.mocked(writeCachedSession);
 const mockWriteRefreshToken = jest.mocked(writeRefreshToken);
 
 describe('mobile session recovery', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     useAuthStore.getState().clearSession();
+    mockReadCachedSession.mockResolvedValue(null);
     mockReadRefreshToken.mockResolvedValue(refreshToken);
+    mockRemoveCachedSession.mockResolvedValue();
     mockRemoveRefreshToken.mockResolvedValue();
+    mockWriteCachedSession.mockResolvedValue();
     mockWriteRefreshToken.mockResolvedValue();
+  });
+
+  it('opens the saved account offline when refresh cannot reach the server', async () => {
+    mockReadCachedSession.mockResolvedValue({ refresh_token: refreshToken, user });
+    mockRawRequest.mockRejectedValueOnce(new ApiError('Offline', 0));
+
+    await hydrateSession();
+
+    expect(mockRemoveRefreshToken).not.toHaveBeenCalled();
+    expect(useAuthStore.getState()).toMatchObject({
+      status: 'offline',
+      accessToken: null,
+      user,
+    });
+  });
+
+  it('rejects cached identity data bound to another refresh token', async () => {
+    mockReadCachedSession.mockResolvedValue({
+      refresh_token: 'x'.repeat(64),
+      user,
+    });
+    mockRawRequest.mockRejectedValueOnce(new ApiError('Offline', 0));
+
+    await hydrateSession();
+
+    expect(useAuthStore.getState().status).toBe('restore_error');
   });
 
   it.each([
@@ -103,6 +141,7 @@ describe('mobile session recovery', () => {
     await hydrateSession();
 
     expect(mockWriteRefreshToken).toHaveBeenCalledWith(response.refresh_token);
+    expect(mockWriteCachedSession).toHaveBeenCalledWith(response.refresh_token, user);
     expect(useAuthStore.getState()).toMatchObject({
       status: 'authenticated',
       accessToken: response.access_token,

@@ -1,0 +1,20 @@
+export const PERSISTED_QUERY_ROOTS = [
+  'calendar',
+  'discovery',
+  'episodes',
+  'history',
+  'lists',
+  'media',
+  'seasons',
+  'show-progress',
+  'stats',
+  'tracking',
+  'watched-episodes',
+] as const;
+
+const persistedRoots = new Set<string>(PERSISTED_QUERY_ROOTS);
+
+export function shouldPersistQueryKey(queryKey: readonly unknown[]) {
+  const root = queryKey[0];
+  return typeof root === 'string' && persistedRoots.has(root);
+}

@@ -2,7 +2,7 @@ import { Redirect } from 'expo-router';
 
 import { ErrorState, LoadingState } from '@/components/screen-state';
 import { hydrateSession } from '@/lib/session';
-import { useAuthStore } from '@/store/auth';
+import { hasLocalSession, useAuthStore } from '@/store/auth';
 
 export default function HomeScreen() {
   const status = useAuthStore((state) => state.status);
@@ -15,5 +15,5 @@ export default function HomeScreen() {
       />
     );
   }
-  return <Redirect href={status === 'authenticated' ? '/(tabs)' : '/(auth)/login'} />;
+  return <Redirect href={hasLocalSession(status) ? '/(tabs)' : '/(auth)/login'} />;
 }

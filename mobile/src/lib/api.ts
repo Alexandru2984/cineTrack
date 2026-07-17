@@ -12,7 +12,11 @@ export async function apiRequest<T>(
   options: ApiRequestOptions = {},
 ): Promise<T> {
   const authenticated = options.authenticated ?? true;
-  const token = authenticated ? useAuthStore.getState().accessToken : null;
+  const auth = useAuthStore.getState();
+  if (authenticated && auth.status === 'offline') {
+    throw new ApiError('Connect to the internet to make changes', 0);
+  }
+  const token = authenticated ? auth.accessToken : null;
   const headers = token
     ? { ...options.headers, Authorization: `Bearer ${token}` }
     : options.headers;

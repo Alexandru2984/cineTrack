@@ -46,7 +46,7 @@ import {
   watchedAtFromDateInput,
 } from '@/lib/history';
 import { getErrorMessage } from '@/lib/http';
-import { useAuthStore } from '@/store/auth';
+import { hasLocalSession, useAuthStore } from '@/store/auth';
 import type { HistoryItem, MediaType, TrackingItem } from '@/types';
 
 interface HistoryTarget {
@@ -84,10 +84,10 @@ function targetFromHistory(item: HistoryItem): HistoryTarget {
 export default function HistoryScreen() {
   const theme = useTheme();
   const status = useAuthStore((state) => state.status);
-  const authenticated = status === 'authenticated';
+  const hasSession = hasLocalSession(status);
   const [pickerVisible, setPickerVisible] = useState(false);
-  const history = useHistory(authenticated);
-  const library = useTrackingInfinite(undefined, authenticated && pickerVisible);
+  const history = useHistory(hasSession);
+  const library = useTrackingInfinite(undefined, hasSession && pickerVisible);
   const create = useCreateHistory();
   const remove = useDeleteHistory();
   const [target, setTarget] = useState<HistoryTarget | null>(null);
@@ -114,7 +114,7 @@ export default function HistoryScreen() {
       : unique;
   }, [library.data?.pages, libraryQuery]);
 
-  if (!authenticated) return <Redirect href="/" />;
+  if (!hasSession) return <Redirect href="/" />;
 
   const openLog = (nextTarget: HistoryTarget) => {
     create.reset();

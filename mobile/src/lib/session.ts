@@ -2,8 +2,11 @@ import { z } from 'zod';
 
 import { ApiError, rawRequest } from '@/lib/http';
 import {
+  readCachedSession,
   readRefreshToken,
+  removeCachedSession,
   removeRefreshToken,
+  writeCachedSession,
   writeRefreshToken,
 } from '@/lib/secure-session';
 import { useAuthStore } from '@/store/auth';
@@ -27,6 +30,11 @@ const mobileAuthSchema = z.object({
   user: userSchema,
 });
 
+const cachedSessionSchema = z.object({
+  refresh_token: z.string().min(32),
+  user: userSchema,
+});
+
 let refreshPromise: Promise<string> | null = null;
 
 function isRejectedRefresh(error: unknown) {
@@ -34,7 +42,10 @@ function isRejectedRefresh(error: unknown) {
 }
 
 export async function clearLocalSession() {
-  await removeRefreshToken().catch(() => undefined);
+  await Promise.all([
+    removeRefreshToken().catch(() => undefined),
+    removeCachedSession().catch(() => undefined),
+  ]);
   useAuthStore.getState().clearSession();
 }
 
@@ -53,6 +64,11 @@ async function acceptSession(payload: unknown) {
     await revokeToken(session.refresh_token);
     useAuthStore.getState().clearSession();
     throw error;
+  }
+  try {
+    await writeCachedSession(session.refresh_token, session.user);
+  } catch {
+    await removeCachedSession().catch(() => undefined);
   }
   useAuthStore.getState().setSession(session.access_token, session.user);
   return session.access_token;
@@ -74,6 +90,10 @@ export async function hydrateSession() {
     return;
   }
 
+  const cachedSession = cachedSessionSchema.safeParse(
+    await readCachedSession().catch(() => null),
+  );
+
   try {
     const payload = await rawRequest('/auth/mobile/refresh', {
       method: 'POST',
@@ -83,10 +103,20 @@ export async function hydrateSession() {
   } catch (error) {
     if (isRejectedRefresh(error)) {
       await clearLocalSession();
+    } else if (
+      cachedSession.success &&
+      cachedSession.data.refresh_token === refreshToken
+    ) {
+      useAuthStore.getState().setOfflineSession(cachedSession.data.user);
     } else {
       useAuthStore.getState().failSessionRestore();
     }
   }
+}
+
+export async function resumeOfflineSession() {
+  if (useAuthStore.getState().status !== 'offline') return;
+  await refreshSession().catch(() => undefined);
 }
 
 export function refreshSession(): Promise<string> {
@@ -133,7 +163,9 @@ export async function registerSession(username: string, email: string, password:
 export async function logoutSession() {
   const refreshToken = await readRefreshToken().catch(() => null);
   try {
-    if (refreshToken) await revokeToken(refreshToken);
+    if (refreshToken && useAuthStore.getState().status !== 'offline') {
+      await revokeToken(refreshToken);
+    }
   } finally {
     await clearLocalSession();
   }
