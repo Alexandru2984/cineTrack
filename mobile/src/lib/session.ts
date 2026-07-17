@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import { rawRequest } from '@/lib/http';
+import { ApiError, rawRequest } from '@/lib/http';
 import {
   readRefreshToken,
   removeRefreshToken,
@@ -29,6 +29,15 @@ const mobileAuthSchema = z.object({
 
 let refreshPromise: Promise<string> | null = null;
 
+function isRejectedRefresh(error: unknown) {
+  return error instanceof ApiError && error.status === 401;
+}
+
+async function discardSession() {
+  await removeRefreshToken().catch(() => undefined);
+  useAuthStore.getState().clearSession();
+}
+
 async function revokeToken(refreshToken: string) {
   await rawRequest('/auth/mobile/logout', {
     method: 'POST',
@@ -50,7 +59,16 @@ async function acceptSession(payload: unknown) {
 }
 
 export async function hydrateSession() {
-  const refreshToken = await readRefreshToken().catch(() => null);
+  useAuthStore.getState().beginSessionRestore();
+
+  let refreshToken: string | null;
+  try {
+    refreshToken = await readRefreshToken();
+  } catch {
+    useAuthStore.getState().failSessionRestore();
+    return;
+  }
+
   if (!refreshToken) {
     useAuthStore.getState().clearSession();
     return;
@@ -62,9 +80,12 @@ export async function hydrateSession() {
       body: { refresh_token: refreshToken },
     });
     await acceptSession(payload);
-  } catch {
-    await removeRefreshToken().catch(() => undefined);
-    useAuthStore.getState().clearSession();
+  } catch (error) {
+    if (isRejectedRefresh(error)) {
+      await discardSession();
+    } else {
+      useAuthStore.getState().failSessionRestore();
+    }
   }
 }
 
@@ -72,7 +93,10 @@ export function refreshSession(): Promise<string> {
   if (!refreshPromise) {
     refreshPromise = (async () => {
       const refreshToken = await readRefreshToken();
-      if (!refreshToken) throw new Error('No refresh token');
+      if (!refreshToken) {
+        useAuthStore.getState().clearSession();
+        throw new Error('No refresh token');
+      }
       const payload = await rawRequest('/auth/mobile/refresh', {
         method: 'POST',
         body: { refresh_token: refreshToken },
@@ -80,8 +104,7 @@ export function refreshSession(): Promise<string> {
       return acceptSession(payload);
     })()
       .catch(async (error) => {
-        await removeRefreshToken().catch(() => undefined);
-        useAuthStore.getState().clearSession();
+        if (isRejectedRefresh(error)) await discardSession();
         throw error;
       })
       .finally(() => {

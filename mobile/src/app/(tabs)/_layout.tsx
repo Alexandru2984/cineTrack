@@ -16,7 +16,7 @@ export default function TabsLayout() {
   const status = useAuthStore((state) => state.status);
 
   if (status === 'loading') return <LoadingState label="Restoring session" />;
-  if (status === 'anonymous') return <Redirect href="/(auth)/login" />;
+  if (status !== 'authenticated') return <Redirect href="/" />;
 
   return (
     <Tabs
