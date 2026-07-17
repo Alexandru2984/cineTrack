@@ -27,3 +27,10 @@ export function formatRuntime(minutes: number | null | undefined) {
   const remainder = minutes % 60;
   return hours > 0 ? `${hours}h ${remainder}m` : `${remainder}m`;
 }
+
+export function formatDateTime(value: string) {
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  }).format(new Date(value));
+}

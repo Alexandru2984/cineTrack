@@ -2,6 +2,7 @@ import Constants from 'expo-constants';
 import { router } from 'expo-router';
 import {
   ChevronRight,
+  Bell,
   Database,
   ExternalLink,
   LogOut,
@@ -24,6 +25,7 @@ import { ScreenHeader } from '@/components/screen-header';
 import { TmdbLogo } from '@/components/tmdb-logo';
 import { spacing } from '@/constants/theme';
 import { useMyStats } from '@/hooks/use-stats';
+import { useNotificationSummary } from '@/hooks/use-notifications';
 import { useTheme } from '@/hooks/use-theme';
 import { logoutSession } from '@/lib/session';
 import { useAuthStore } from '@/store/auth';
@@ -32,6 +34,8 @@ export default function ProfileScreen() {
   const theme = useTheme();
   const user = useAuthStore((state) => state.user);
   const stats = useMyStats();
+  const notifications = useNotificationSummary();
+  const unreadCount = notifications.data?.unread_count ?? 0;
   const [loggingOut, setLoggingOut] = useState(false);
   const initial = user?.username.charAt(0).toUpperCase() || '?';
 
@@ -79,6 +83,37 @@ export default function ProfileScreen() {
 
         <View style={styles.section}>
           <AppText variant="section">Account</AppText>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`Open notifications${
+              unreadCount
+                ? `, ${unreadCount} unread`
+                : ''
+            }`}
+            onPress={() => router.push('/notifications')}
+            style={({ pressed }) => [
+              styles.navigationRow,
+              {
+                borderColor: theme.border,
+                opacity: pressed ? 0.72 : 1,
+              },
+            ]}
+          >
+            <View style={styles.navigationLabel}>
+              <Bell color={theme.mutedText} size={20} />
+              <AppText variant="label">Notifications</AppText>
+            </View>
+            <View style={styles.navigationMeta}>
+              {unreadCount > 0 ? (
+                <View style={[styles.countBadge, { backgroundColor: theme.danger }]}>
+                  <AppText variant="caption" style={styles.countBadgeText}>
+                    {unreadCount > 99 ? '99+' : unreadCount}
+                  </AppText>
+                </View>
+              ) : null}
+              <ChevronRight color={theme.mutedText} size={18} />
+            </View>
+          </Pressable>
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Open account settings"
@@ -241,6 +276,25 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
+  },
+  navigationMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  countBadge: {
+    minWidth: 22,
+    height: 22,
+    borderRadius: 11,
+    paddingHorizontal: spacing.xs,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  countBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 10,
+    lineHeight: 12,
+    fontWeight: '700',
   },
   sourceRow: {
     gap: spacing.md,

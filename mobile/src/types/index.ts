@@ -118,6 +118,24 @@ export interface TrackingItem {
   completed_at: string | null;
 }
 
+export type NotificationKind = 'follow_request' | 'follow_accepted' | 'new_follower';
+
+export interface SocialNotification {
+  id: string;
+  kind: NotificationKind;
+  actor_id: string;
+  actor_username: string;
+  actor_avatar_url: string | null;
+  read_at: string | null;
+  created_at: string;
+}
+
+export interface NotificationListResponse {
+  items: SocialNotification[];
+  unread_count: number;
+  has_more: boolean;
+}
+
 export interface CalendarEpisode {
   episode_id: string;
   media_id: string;

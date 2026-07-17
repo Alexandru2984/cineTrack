@@ -1,8 +1,9 @@
 import { router } from 'expo-router';
-import { Clock3, Film, ListVideo, Search, Tv } from 'lucide-react-native';
+import { Bell, Clock3, Film, ListVideo, Search, Tv } from 'lucide-react-native';
 import { useMemo } from 'react';
 import {
   RefreshControl,
+  Pressable,
   ScrollView,
   StyleSheet,
   View,
@@ -21,6 +22,7 @@ import {
   useUpNext,
 } from '@/hooks/use-calendar';
 import { useDiscovery } from '@/hooks/use-media';
+import { useNotificationSummary } from '@/hooks/use-notifications';
 import { useMyStats } from '@/hooks/use-stats';
 import { useTheme } from '@/hooks/use-theme';
 import { getErrorMessage } from '@/lib/http';
@@ -32,16 +34,26 @@ export default function HomeScreen() {
   const upNext = useUpNext();
   const stats = useMyStats();
   const discovery = useDiscovery();
+  const notificationSummary = useNotificationSummary();
   const plan = useSetEpisodePlanned();
   const watched = useMarkCalendarEpisodeWatched();
-  const refreshing = upNext.isRefetching || stats.isRefetching || discovery.isRefetching;
+  const refreshing =
+    upNext.isRefetching ||
+    stats.isRefetching ||
+    discovery.isRefetching;
+  const unreadCount = notificationSummary.data?.unread_count ?? 0;
   const recommendations = useMemo(
     () => discovery.data?.recommendations.slice(0, 12) ?? [],
     [discovery.data],
   );
 
   const refresh = () => {
-    void Promise.all([upNext.refetch(), stats.refetch(), discovery.refetch()]);
+    void Promise.all([
+      upNext.refetch(),
+      stats.refetch(),
+      discovery.refetch(),
+      notificationSummary.refetch(),
+    ]);
   };
 
   return (
@@ -60,6 +72,34 @@ export default function HomeScreen() {
         <ScreenHeader
           title={`Hello, ${user?.username || 'there'}`}
           subtitle="Your watching overview"
+          right={
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`Open notifications${
+                unreadCount
+                  ? `, ${unreadCount} unread`
+                  : ''
+              }`}
+              onPress={() => router.push('/notifications')}
+              style={({ pressed }) => [
+                styles.notificationButton,
+                {
+                  borderColor: theme.border,
+                  backgroundColor: theme.elevated,
+                  opacity: pressed ? 0.72 : 1,
+                },
+              ]}
+            >
+              <Bell color={theme.mutedText} size={21} />
+              {unreadCount > 0 ? (
+                <View style={[styles.notificationBadge, { backgroundColor: theme.danger }]}>
+                  <AppText variant="caption" style={styles.notificationBadgeText}>
+                    {unreadCount > 99 ? '99+' : unreadCount}
+                  </AppText>
+                </View>
+              ) : null}
+            </Pressable>
+          }
         />
 
         {stats.data ? (
@@ -177,6 +217,31 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: spacing.sm,
+  },
+  notificationButton: {
+    width: 46,
+    height: 46,
+    borderWidth: 1,
+    borderRadius: radius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  notificationBadge: {
+    position: 'absolute',
+    top: -5,
+    right: -5,
+    minWidth: 20,
+    height: 20,
+    borderRadius: 10,
+    paddingHorizontal: spacing.xs,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  notificationBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 10,
+    lineHeight: 12,
+    fontWeight: '700',
   },
   stat: {
     minWidth: '47%',
