@@ -188,7 +188,14 @@ export default function SocialScreen() {
                   username={person.username}
                   avatarUrl={person.avatar_url}
                   bio={person.bio}
-                  meta={`${person.followers_count} follower${person.followers_count === 1 ? '' : 's'}${person.is_public ? '' : ' · Private'}`}
+                  meta={[
+                    person.followers_count !== null
+                      ? `${person.followers_count} follower${person.followers_count === 1 ? '' : 's'}`
+                      : null,
+                    person.is_public ? null : 'Private',
+                  ]
+                    .filter(Boolean)
+                    .join(' · ')}
                   action={person.id === currentUser?.id
                     ? <AppText variant="caption" muted>You</AppText>
                     : relationshipAction(person.username, person.follow_status, person.is_public)}

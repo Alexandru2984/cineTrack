@@ -105,8 +105,12 @@ export default function ProfilePage() {
             </p>
           )}
           <div className="mt-3 flex flex-wrap gap-x-6 gap-y-2 text-sm">
-            <span><strong>{profile.followers_count}</strong> followers</span>
-            <span><strong>{profile.following_count}</strong> following</span>
+            {profile.followers_count !== null && (
+              <span><strong>{profile.followers_count}</strong> followers</span>
+            )}
+            {profile.following_count !== null && (
+              <span><strong>{profile.following_count}</strong> following</span>
+            )}
             <span className="flex items-center gap-1 text-[hsl(var(--muted-foreground))]">
               <Calendar className="h-3 w-3" /> Joined {formatDate(profile.created_at)}
             </span>

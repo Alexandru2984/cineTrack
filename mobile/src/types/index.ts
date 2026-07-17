@@ -190,8 +190,8 @@ export interface PublicUserProfile {
   avatar_url: string | null;
   bio: string | null;
   is_public: boolean;
-  followers_count: number;
-  following_count: number;
+  followers_count: number | null;
+  following_count: number | null;
   is_following: boolean;
   follow_status: FollowStatus;
   can_view_activity: boolean;
@@ -204,7 +204,7 @@ export interface UserSearchResult {
   avatar_url: string | null;
   bio: string | null;
   is_public: boolean;
-  followers_count: number;
+  followers_count: number | null;
   follow_status: FollowStatus;
 }
 

@@ -93,9 +93,11 @@ export function UserSearchResults({
                     {user.bio}
                   </p>
                 )}
-                <p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">
-                  {user.followers_count} {user.followers_count === 1 ? 'follower' : 'followers'}
-                </p>
+                {user.followers_count !== null && (
+                  <p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">
+                    {user.followers_count} {user.followers_count === 1 ? 'follower' : 'followers'}
+                  </p>
+                )}
               </div>
 
               {isSelf ? (

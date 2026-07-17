@@ -33,8 +33,8 @@ pub struct PublicUserProfile {
     pub avatar_url: Option<String>,
     pub bio: Option<String>,
     pub is_public: bool,
-    pub followers_count: i64,
-    pub following_count: i64,
+    pub followers_count: Option<i64>,
+    pub following_count: Option<i64>,
     pub is_following: bool,
     pub follow_status: Option<String>,
     pub can_view_activity: bool,
@@ -80,7 +80,7 @@ pub struct UserSearchResult {
     pub avatar_url: Option<String>,
     pub bio: Option<String>,
     pub is_public: bool,
-    pub followers_count: i64,
+    pub followers_count: Option<i64>,
     pub follow_status: Option<String>,
 }
 

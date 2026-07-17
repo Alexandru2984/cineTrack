@@ -4854,7 +4854,8 @@ async fn test_user_search_is_literal_paginated_and_privacy_safe() {
     assert_eq!(pending["follow_status"], "pending");
     assert!(pending["avatar_url"].is_null());
     assert!(pending["bio"].is_null());
-    assert_eq!(pending["followers_count"], 0);
+    // A private profile hides its follow-graph size from unapproved viewers.
+    assert!(pending["followers_count"].is_null());
 
     let friend = results
         .iter()
@@ -5148,7 +5149,8 @@ async fn test_private_follow_request_requires_owner_approval() {
     assert_eq!(body["is_following"], false);
     assert_eq!(body["can_view_activity"], false);
     assert!(body["bio"].is_null());
-    assert_eq!(body["followers_count"], 0);
+    assert!(body["followers_count"].is_null());
+    assert!(body["following_count"].is_null());
 
     let req = actix_test::TestRequest::get()
         .uri("/api/users/privateuser/activity")

@@ -66,10 +66,16 @@ export default function PublicProfileScreen() {
               {!person.is_public ? <LockKeyhole color={theme.mutedText} size={17} /> : null}
             </View>
             {person.bio ? <AppText muted>{person.bio}</AppText> : null}
-            <View style={styles.counts}>
-              <AppText><AppText variant="label">{person.followers_count}</AppText> followers</AppText>
-              <AppText><AppText variant="label">{person.following_count}</AppText> following</AppText>
-            </View>
+            {person.followers_count !== null || person.following_count !== null ? (
+              <View style={styles.counts}>
+                {person.followers_count !== null ? (
+                  <AppText><AppText variant="label">{person.followers_count}</AppText> followers</AppText>
+                ) : null}
+                {person.following_count !== null ? (
+                  <AppText><AppText variant="label">{person.following_count}</AppText> following</AppText>
+                ) : null}
+              </View>
+            ) : null}
             <View style={styles.joined}>
               <CalendarDays color={theme.mutedText} size={15} />
               <AppText variant="caption" muted>

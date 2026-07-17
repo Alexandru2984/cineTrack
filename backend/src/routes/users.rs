@@ -37,7 +37,7 @@ struct UserSearchRow {
     avatar_url: Option<String>,
     bio: Option<String>,
     is_public: bool,
-    followers_count: i64,
+    followers_count: Option<i64>,
     follow_status: Option<String>,
 }
 
@@ -159,7 +159,11 @@ async fn search_users(
                 ELSE NULL
             END AS bio,
             u.is_public,
-            COALESCE(follower_count.total, 0) AS followers_count,
+            CASE
+                WHEN u.is_public OR u.id = $1 OR relationship.status = 'accepted'
+                THEN COALESCE(follower_count.total, 0)
+                ELSE NULL
+            END AS followers_count,
             relationship.status AS follow_status
         FROM users u
         LEFT JOIN follows relationship
@@ -249,8 +253,10 @@ async fn get_profile(
             None
         },
         is_public: user.is_public,
-        followers_count,
-        following_count,
+        // Private profiles keep their follow graph size hidden from
+        // unapproved viewers, consistent with bio/avatar/activity.
+        followers_count: can_view_private_details.then_some(followers_count),
+        following_count: can_view_private_details.then_some(following_count),
         is_following,
         follow_status,
         can_view_activity: can_view_private_details,

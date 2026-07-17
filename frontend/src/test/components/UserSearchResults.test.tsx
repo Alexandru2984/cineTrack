@@ -58,7 +58,7 @@ const data: UserSearchResponse = {
       avatar_url: null,
       bio: null,
       is_public: false,
-      followers_count: 0,
+      followers_count: null,
       follow_status: 'pending',
     },
   ],
@@ -83,6 +83,9 @@ describe('UserSearchResults', () => {
 
     expect(screen.getByText('You')).toBeInTheDocument();
     expect(screen.getByText('Private')).toBeInTheDocument();
+    // Public users show their follower count; the private/unapproved one hides it.
+    expect(screen.getByText('1 follower')).toBeInTheDocument();
+    expect(screen.queryByText('0 followers')).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'public_user' })).toHaveAttribute(
       'href',
       '/profile/public_user',
