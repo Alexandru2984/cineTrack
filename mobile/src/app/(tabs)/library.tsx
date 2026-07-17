@@ -3,6 +3,7 @@ import {
   Check,
   Heart,
   SlidersHorizontal,
+  Star,
   Trash2,
 } from 'lucide-react-native';
 import { useState } from 'react';
@@ -23,6 +24,7 @@ import { Poster } from '@/components/poster';
 import { ScreenHeader } from '@/components/screen-header';
 import { EmptyState, ErrorState, LoadingState } from '@/components/screen-state';
 import { SegmentedControl } from '@/components/segmented-control';
+import { TrackingFeedbackSheet } from '@/components/tracking-feedback-sheet';
 import { radius, spacing } from '@/constants/theme';
 import {
   useDeleteTracking,
@@ -54,6 +56,7 @@ export default function LibraryScreen() {
   const theme = useTheme();
   const [filter, setFilter] = useState<LibraryFilter>('all');
   const [statusItem, setStatusItem] = useState<TrackingItem | null>(null);
+  const [feedbackItem, setFeedbackItem] = useState<TrackingItem | null>(null);
   const tracking = useTrackingInfinite(filter === 'all' ? undefined : filter);
   const update = useUpdateTracking();
   const remove = useDeleteTracking();
@@ -162,6 +165,21 @@ export default function LibraryScreen() {
             <View style={styles.actions}>
               <Pressable
                 accessibilityRole="button"
+                accessibilityLabel={`Edit rating and review for ${item.title}`}
+                onPress={() => {
+                  update.reset();
+                  setFeedbackItem(item);
+                }}
+                style={[styles.iconButton, { borderColor: theme.border }]}
+              >
+                <Star
+                  color={item.rating ? theme.warning : theme.mutedText}
+                  fill={item.rating ? theme.warning : 'transparent'}
+                  size={18}
+                />
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
                 accessibilityLabel={`Change status for ${item.title}`}
                 onPress={() => setStatusItem(item)}
                 style={({ pressed }) => [
@@ -259,6 +277,26 @@ export default function LibraryScreen() {
           </SafeAreaView>
         </Pressable>
       </Modal>
+      {feedbackItem ? (
+        <TrackingFeedbackSheet
+          item={feedbackItem}
+          pending={update.isPending}
+          error={
+            update.error
+              ? getErrorMessage(update.error, 'Your rating could not be saved')
+              : undefined
+          }
+          onClose={() => {
+            if (!update.isPending) setFeedbackItem(null);
+          }}
+          onSave={(payload) =>
+            update.mutate(
+              { id: feedbackItem.id, ...payload },
+              { onSuccess: () => setFeedbackItem(null) },
+            )
+          }
+        />
+      ) : null}
     </SafeAreaView>
   );
 }

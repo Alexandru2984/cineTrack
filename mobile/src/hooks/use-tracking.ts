@@ -98,6 +98,8 @@ export function useUpdateTracking() {
     }: {
       id: string;
       status?: TrackingStatus;
+      rating?: number | null;
+      review?: string | null;
       is_favorite?: boolean;
     }) => apiRequest<TrackingItem>(`/tracking/${id}`, { method: 'PATCH', body: data }),
     onSuccess: async () => {

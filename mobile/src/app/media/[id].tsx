@@ -21,6 +21,7 @@ import { AppText } from '@/components/app-text';
 import { imageUrl, Poster } from '@/components/poster';
 import { ErrorState, LoadingState } from '@/components/screen-state';
 import { SegmentedControl } from '@/components/segmented-control';
+import { TrackingFeedbackSheet } from '@/components/tracking-feedback-sheet';
 import { radius, spacing } from '@/constants/theme';
 import { useEpisodes, useMediaDetail, useSeasons } from '@/hooks/use-media';
 import {
@@ -30,6 +31,7 @@ import {
   useMarkSeasonWatched,
   useShowProgress,
   useTrackingLookup,
+  useUpdateTracking,
   useWatchedEpisodes,
 } from '@/hooks/use-tracking';
 import { useTheme } from '@/hooks/use-theme';
@@ -44,6 +46,7 @@ import type {
   Episode,
   MediaType,
   SeasonWatchProgress,
+  TrackingItem,
   TrackingStatus,
 } from '@/types';
 
@@ -82,6 +85,8 @@ export default function MediaDetailScreen() {
     id ? [{ tmdb_id: Number(id), media_type: type }] : [],
   );
   const createTracking = useCreateTracking();
+  const updateTracking = useUpdateTracking();
+  const [feedbackItem, setFeedbackItem] = useState<TrackingItem | null>(null);
   const [statusSelection, setStatusSelection] = useState<{
     mediaKey: string;
     status: PrimaryTrackingStatus;
@@ -91,10 +96,11 @@ export default function MediaDetailScreen() {
     seasonNumber: number;
   } | null>(null);
   const mediaKey = `${type}:${id}`;
-  const existingStatus = tracking.data?.find(
+  const existingTracking = tracking.data?.find(
     (trackingItem) =>
       trackingItem.tmdb_id === Number(id) && trackingItem.media_type === type,
-  )?.status;
+  );
+  const existingStatus = existingTracking?.status;
   const selectedStatus =
     statusSelection?.mediaKey === mediaKey
       ? statusSelection.status
@@ -144,7 +150,11 @@ export default function MediaDetailScreen() {
   const bulkPending = markSeason.isPending || markThrough.isPending;
   const backdrop = imageUrl(media.data?.backdrop_path, 'w780');
   const mutationError =
-    createTracking.error || markEpisode.error || markSeason.error || markThrough.error;
+    createTracking.error ||
+    updateTracking.error ||
+    markEpisode.error ||
+    markSeason.error ||
+    markThrough.error;
 
   if (media.isLoading) return <LoadingState label="Loading details" />;
   if (media.isError || !media.data) {
@@ -317,6 +327,42 @@ export default function MediaDetailScreen() {
             </AppText>
           ) : null}
         </View>
+
+        {existingTracking ? (
+          <View style={styles.section}>
+            <View style={styles.feedbackHeader}>
+              <View style={styles.feedbackCopy}>
+                <AppText variant="section">Your take</AppText>
+                <View style={styles.feedbackRating}>
+                  <Star
+                    color={theme.warning}
+                    fill={existingTracking.rating ? theme.warning : 'transparent'}
+                    size={18}
+                  />
+                  <AppText variant="label">
+                    {existingTracking.rating ? `${existingTracking.rating}/10` : 'Not rated'}
+                  </AppText>
+                </View>
+              </View>
+              <AppButton
+                label={existingTracking.rating || existingTracking.review ? 'Edit' : 'Add'}
+                variant="secondary"
+                compact
+                onPress={() => {
+                  updateTracking.reset();
+                  setFeedbackItem(existingTracking);
+                }}
+              />
+            </View>
+            {existingTracking.review ? (
+              <AppText muted>{existingTracking.review}</AppText>
+            ) : (
+              <AppText variant="caption" muted>
+                Add a private note about this title.
+              </AppText>
+            )}
+          </View>
+        ) : null}
 
         {item.overview ? (
           <View style={styles.section}>
@@ -497,6 +543,26 @@ export default function MediaDetailScreen() {
           </View>
         ) : null}
       </ScrollView>
+      {feedbackItem ? (
+        <TrackingFeedbackSheet
+          item={feedbackItem}
+          pending={updateTracking.isPending}
+          error={
+            updateTracking.error
+              ? getErrorMessage(updateTracking.error, 'Your rating could not be saved')
+              : undefined
+          }
+          onClose={() => {
+            if (!updateTracking.isPending) setFeedbackItem(null);
+          }}
+          onSave={(payload) =>
+            updateTracking.mutate(
+              { id: feedbackItem.id, ...payload },
+              { onSuccess: () => setFeedbackItem(null) },
+            )
+          }
+        />
+      ) : null}
     </>
   );
 }
@@ -567,6 +633,23 @@ const styles = StyleSheet.create({
   section: {
     gap: spacing.md,
     paddingHorizontal: spacing.lg,
+  },
+  feedbackHeader: {
+    minHeight: 46,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.md,
+  },
+  feedbackCopy: {
+    flex: 1,
+    minWidth: 0,
+    gap: spacing.xs,
+  },
+  feedbackRating: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
   },
   seasonTabs: {
     gap: spacing.sm,
