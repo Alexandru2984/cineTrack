@@ -473,6 +473,36 @@ pub async fn list_sessions(
         .collect())
 }
 
+/// Resolve a mobile session from its active refresh token, then return all
+/// active sessions while marking that exact token as current.
+pub async fn list_sessions_for_refresh_token(
+    pool: &PgPool,
+    refresh_token: &str,
+) -> Result<Vec<SessionResponse>, AppError> {
+    if !jwt::is_valid_refresh_token(refresh_token) {
+        return Err(AppError::Unauthorized("Invalid refresh token".to_string()));
+    }
+
+    let token_hash = jwt::hash_refresh_token(refresh_token);
+    let user_id = sqlx::query_scalar::<_, Uuid>(
+        r#"SELECT user_id FROM refresh_tokens
+        WHERE token_hash = $1
+          AND consumed_at IS NULL
+          AND revoked_at IS NULL
+          AND expires_at > NOW()"#,
+    )
+    .bind(&token_hash)
+    .fetch_optional(pool)
+    .await?
+    .ok_or_else(|| AppError::Unauthorized("Invalid refresh token".to_string()))?;
+
+    let sessions = list_sessions(pool, user_id, Some(refresh_token)).await?;
+    if !sessions.iter().any(|session| session.current) {
+        return Err(AppError::Unauthorized("Invalid refresh token".to_string()));
+    }
+    Ok(sessions)
+}
+
 /// Revoke a single session by id. Scoped to the owner so one user cannot revoke
 /// another's session; a missing/foreign id yields NotFound (no enumeration).
 pub async fn revoke_session(

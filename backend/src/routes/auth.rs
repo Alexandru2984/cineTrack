@@ -40,6 +40,7 @@ fn scope() -> actix_web::Scope {
         .route("/mobile/login", web::post().to(mobile_login))
         .route("/mobile/logout", web::post().to(mobile_logout))
         .route("/mobile/refresh", web::post().to(mobile_refresh))
+        .route("/mobile/sessions", web::post().to(list_mobile_sessions))
         .route("/password", web::patch().to(change_password))
         .route("/password/forgot", web::post().to(forgot_password))
         .route("/password/reset", web::post().to(reset_password))
@@ -143,6 +144,17 @@ async fn mobile_refresh(
     )
     .await?;
     Ok(no_store(HttpResponse::Ok()).json(MobileAuthResponse::new(resp, refresh_token)))
+}
+
+async fn list_mobile_sessions(
+    pool: web::Data<PgPool>,
+    body: web::Json<RefreshRequest>,
+) -> Result<HttpResponse, AppError> {
+    body.validate()?;
+    let sessions =
+        services::auth::list_sessions_for_refresh_token(pool.get_ref(), &body.refresh_token)
+            .await?;
+    Ok(no_store(HttpResponse::Ok()).json(sessions))
 }
 
 async fn logout(
@@ -263,7 +275,7 @@ async fn list_sessions(
         .filter(|token| !token.is_empty());
     let sessions =
         services::auth::list_sessions(pool.get_ref(), user_id, current.as_deref()).await?;
-    Ok(HttpResponse::Ok().json(sessions))
+    Ok(no_store(HttpResponse::Ok()).json(sessions))
 }
 
 async fn revoke_session(

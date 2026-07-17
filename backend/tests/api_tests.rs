@@ -350,6 +350,84 @@ async fn test_mobile_auth_returns_rotating_tokens_without_cookies() {
 
 #[actix_web::test]
 #[ignore = "requires test DB"]
+async fn test_mobile_session_list_identifies_current_refresh_token() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/auth/mobile/register")
+        .insert_header((header::USER_AGENT, "VazuteMobile/first"))
+        .set_json(json!({
+            "username": "mobilesessions",
+            "email": "mobilesessions@example.com",
+            "password": "Pass1234"
+        }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let registered: Value =
+        actix_test::read_body_json(actix_test::call_service(&app, req).await).await;
+    let first_refresh = registered["refresh_token"].as_str().unwrap();
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/auth/mobile/login")
+        .insert_header((header::USER_AGENT, "VazuteMobile/current"))
+        .set_json(json!({
+            "email": "mobilesessions@example.com",
+            "password": "Pass1234"
+        }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let logged_in: Value =
+        actix_test::read_body_json(actix_test::call_service(&app, req).await).await;
+    let current_refresh = logged_in["refresh_token"].as_str().unwrap();
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/auth/mobile/sessions")
+        .set_json(json!({ "refresh_token": current_refresh }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    assert_eq!(
+        resp.headers()
+            .get(header::CACHE_CONTROL)
+            .and_then(|value| value.to_str().ok()),
+        Some("no-store")
+    );
+    let sessions: Value = actix_test::read_body_json(resp).await;
+    let sessions = sessions.as_array().unwrap();
+    assert_eq!(sessions.len(), 2);
+    let current = sessions
+        .iter()
+        .find(|session| session["current"] == true)
+        .expect("one mobile session should be current");
+    assert_eq!(current["user_agent"], "VazuteMobile/current");
+    assert_eq!(
+        sessions
+            .iter()
+            .filter(|session| session["current"] == true)
+            .count(),
+        1
+    );
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/auth/mobile/sessions")
+        .set_json(json!({ "refresh_token": first_refresh }))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 200);
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/auth/mobile/sessions")
+        .set_json(json!({ "refresh_token": "a".repeat(128) }))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 401);
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
 async fn test_register_duplicate_email() {
     let pool = setup_pool().await;
     clean_db(&pool).await;
