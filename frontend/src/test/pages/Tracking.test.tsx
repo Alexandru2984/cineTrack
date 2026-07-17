@@ -9,12 +9,13 @@ const mocks = vi.hoisted(() => ({
   update: vi.fn(),
   resetUpdate: vi.fn(),
   remove: vi.fn(),
+  fetchNextPage: vi.fn(),
 }));
 
 vi.mock('@/hooks/useTracking', () => ({
-  useTracking: () => ({
-    data: [
-      {
+  useTrackingInfinite: () => ({
+    data: {
+      pages: [[{
         id: 'tracking-1',
         media_id: 'media-1',
         tmdb_id: 42,
@@ -27,9 +28,15 @@ vi.mock('@/hooks/useTracking', () => ({
         is_favorite: false,
         started_at: null,
         completed_at: null,
-      },
-    ],
+      }]],
+      pageParams: [1],
+    },
     isLoading: false,
+    isError: false,
+    hasNextPage: true,
+    isFetchingNextPage: false,
+    fetchNextPage: mocks.fetchNextPage,
+    refetch: vi.fn(),
   }),
   useUpdateTracking: () => ({
     mutate: mocks.update,
@@ -78,5 +85,13 @@ describe('Tracking rating and review editor', () => {
       { id: 'tracking-1', rating: null, review: null },
       expect.objectContaining({ onSuccess: expect.any(Function) }),
     );
+  });
+
+  it('loads the next library page on demand', async () => {
+    const user = userEvent.setup();
+    render(<MemoryRouter><TrackingPage /></MemoryRouter>);
+
+    await user.click(screen.getByRole('button', { name: 'Load more' }));
+    expect(mocks.fetchNextPage).toHaveBeenCalledOnce();
   });
 });

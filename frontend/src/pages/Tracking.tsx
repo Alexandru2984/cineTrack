@@ -1,8 +1,8 @@
 import { useState } from 'react';
-import { useTracking, useUpdateTracking, useDeleteTracking } from '@/hooks/useTracking';
+import { useTrackingInfinite, useUpdateTracking, useDeleteTracking } from '@/hooks/useTracking';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
 import { getPosterUrl, STATUS_LABELS, STATUS_COLORS } from '@/lib/utils';
-import { Star, Trash2, Heart } from 'lucide-react';
+import { Loader2, Star, Trash2, Heart } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { TrackingFeedbackDialog } from '@/components/TrackingFeedbackDialog';
 import { getApiErrorMessage } from '@/lib/api';
@@ -13,7 +13,8 @@ const TABS = ['all', 'watching', 'plan_to_watch', 'completed', 'on_hold', 'dropp
 export default function TrackingPage() {
   const [tab, setTab] = useState<string>('all');
   const [feedbackItem, setFeedbackItem] = useState<TrackingItem | null>(null);
-  const { data: items, isLoading } = useTracking(tab === 'all' ? undefined : tab);
+  const tracking = useTrackingInfinite(tab === 'all' ? undefined : tab);
+  const items = tracking.data?.pages.flatMap((page) => page) ?? [];
   const updateTracking = useUpdateTracking();
   const deleteTracking = useDeleteTracking();
 
@@ -45,16 +46,16 @@ export default function TrackingPage() {
         ))}
       </div>
 
-      {isLoading && <LoadingSpinner />}
+      {tracking.isLoading && <LoadingSpinner />}
 
-      {items && items.length === 0 && (
+      {!tracking.isLoading && !tracking.isError && items.length === 0 && (
         <div className="text-center py-16 text-[hsl(var(--muted-foreground))]">
           <p>No items yet. Start by searching and adding movies or shows!</p>
         </div>
       )}
 
       <div className="space-y-3">
-        {items?.map((item) => (
+        {items.map((item) => (
           <article
             key={item.id}
             className="flex flex-wrap items-center gap-3 rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-3 sm:flex-nowrap sm:gap-4"
@@ -132,6 +133,33 @@ export default function TrackingPage() {
           </article>
         ))}
       </div>
+      {tracking.isError && (
+        <div className="text-center text-sm text-[hsl(var(--destructive))]">
+          <p>Your library could not be loaded.</p>
+          <button
+            type="button"
+            onClick={() => tracking.refetch()}
+            className="mt-3 h-10 rounded-md border border-[hsl(var(--border))] px-4 font-medium"
+          >
+            Try again
+          </button>
+        </div>
+      )}
+      {tracking.hasNextPage && (
+        <div className="flex justify-center">
+          <button
+            type="button"
+            disabled={tracking.isFetchingNextPage}
+            onClick={() => tracking.fetchNextPage()}
+            className="flex h-10 items-center gap-2 rounded-md border border-[hsl(var(--border))] px-4 text-sm font-medium disabled:opacity-50"
+          >
+            {tracking.isFetchingNextPage && (
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+            )}
+            Load more
+          </button>
+        </div>
+      )}
       {feedbackItem && (
         <TrackingFeedbackDialog
           item={feedbackItem}

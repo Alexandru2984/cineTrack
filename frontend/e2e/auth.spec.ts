@@ -506,7 +506,11 @@ test('edits library feedback on a narrow screen', async ({ page }) => {
     started_at: null,
     completed_at: null,
   };
-  await page.route('**/api/tracking', (route) => route.fulfill({ json: [trackedTitle] }));
+  let trackingListUrl = '';
+  await page.route('**/api/tracking**', (route) => {
+    trackingListUrl = route.request().url();
+    return route.fulfill({ json: [trackedTitle] });
+  });
   let updatePayload: unknown;
   await page.route(`**/api/tracking/${trackedTitle.id}`, async (route) => {
     updatePayload = route.request().postDataJSON();
@@ -515,6 +519,8 @@ test('edits library feedback on a narrow screen', async ({ page }) => {
 
   await page.setViewportSize({ width: 320, height: 700 });
   await page.goto('/tracking');
+  await expect.poll(() => trackingListUrl).toContain('limit=100');
+  expect(new URL(trackingListUrl).searchParams.get('page')).toBe('1');
   await page.getByRole('button', {
     name: `Edit rating and review for ${trackedTitle.title}`,
   }).click();

@@ -1,4 +1,4 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '@/lib/api';
 import type {
   BulkWatchResponse,
@@ -21,14 +21,17 @@ function invalidateEpisodeWatchState(
   void queryClient.invalidateQueries({ queryKey: ['calendar'] });
 }
 
-export function useTracking(status?: string) {
-  return useQuery<TrackingItem[]>({
-    queryKey: ['tracking', status],
-    queryFn: async () => {
-      const params = status ? { status } : {};
+export function useTrackingInfinite(status?: string) {
+  return useInfiniteQuery({
+    queryKey: ['tracking', status, 'infinite'],
+    queryFn: async ({ pageParam }) => {
+      const params = { ...(status && { status }), page: pageParam, limit: 100 };
       const res = await api.get('/tracking', { params });
-      return res.data;
+      return res.data as TrackingItem[];
     },
+    initialPageParam: 1,
+    getNextPageParam: (lastPage, pages) =>
+      lastPage.length === 100 ? pages.length + 1 : undefined,
   });
 }
 
