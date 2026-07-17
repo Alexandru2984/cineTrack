@@ -9,6 +9,7 @@ import {
   writeCachedSession,
   writeRefreshToken,
 } from '@/lib/secure-session';
+import { detachStoredReleaseNotifications } from '@/lib/secure-release-notifications';
 import { useAuthStore } from '@/store/auth';
 import type { MobileAuthResponse } from '@/types';
 
@@ -45,6 +46,7 @@ export async function clearLocalSession() {
   await Promise.all([
     removeRefreshToken().catch(() => undefined),
     removeCachedSession().catch(() => undefined),
+    detachStoredReleaseNotifications().catch(() => undefined),
   ]);
   useAuthStore.getState().clearSession();
 }
@@ -86,7 +88,7 @@ export async function hydrateSession() {
   }
 
   if (!refreshToken) {
-    useAuthStore.getState().clearSession();
+    await clearLocalSession();
     return;
   }
 

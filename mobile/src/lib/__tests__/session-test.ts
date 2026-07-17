@@ -7,6 +7,7 @@ import {
   writeCachedSession,
   writeRefreshToken,
 } from '@/lib/secure-session';
+import { detachStoredReleaseNotifications } from '@/lib/secure-release-notifications';
 import { hydrateSession, refreshSession } from '@/lib/session';
 import { useAuthStore } from '@/store/auth';
 import type { MobileAuthResponse, User } from '@/types';
@@ -23,6 +24,10 @@ jest.mock('@/lib/secure-session', () => ({
   removeRefreshToken: jest.fn(),
   writeCachedSession: jest.fn(),
   writeRefreshToken: jest.fn(),
+}));
+
+jest.mock('@/lib/secure-release-notifications', () => ({
+  detachStoredReleaseNotifications: jest.fn(),
 }));
 
 const user: User = {
@@ -51,6 +56,7 @@ const mockRemoveCachedSession = jest.mocked(removeCachedSession);
 const mockRemoveRefreshToken = jest.mocked(removeRefreshToken);
 const mockWriteCachedSession = jest.mocked(writeCachedSession);
 const mockWriteRefreshToken = jest.mocked(writeRefreshToken);
+const mockDetachReleaseNotifications = jest.mocked(detachStoredReleaseNotifications);
 
 describe('mobile session recovery', () => {
   beforeEach(() => {
@@ -62,6 +68,7 @@ describe('mobile session recovery', () => {
     mockRemoveRefreshToken.mockResolvedValue();
     mockWriteCachedSession.mockResolvedValue();
     mockWriteRefreshToken.mockResolvedValue();
+    mockDetachReleaseNotifications.mockResolvedValue(false);
   });
 
   it('opens the saved account offline when refresh cannot reach the server', async () => {
@@ -108,6 +115,7 @@ describe('mobile session recovery', () => {
     await hydrateSession();
 
     expect(mockRemoveRefreshToken).toHaveBeenCalledTimes(1);
+    expect(mockDetachReleaseNotifications).toHaveBeenCalledTimes(1);
     expect(useAuthStore.getState().status).toBe('anonymous');
   });
 

@@ -1,6 +1,7 @@
 import { Redirect, router } from 'expo-router';
 import {
   AlertTriangle,
+  Bell,
   ExternalLink,
   Eye,
   EyeOff,
@@ -46,6 +47,7 @@ import {
   useCalendarPreferences,
   useUpdateCalendarPreferences,
 } from '@/hooks/use-calendar';
+import { useReleaseNotifications } from '@/hooks/use-release-notifications';
 import { useTheme } from '@/hooks/use-theme';
 import {
   deleteAccountSession,
@@ -86,6 +88,10 @@ export default function SettingsScreen() {
   const revokeSession = useRevokeAccountSession();
   const logoutAllSessions = useLogoutAllAccountSessions();
   const changePassword = useChangeAccountPassword();
+  const releaseAlerts = useReleaseNotifications(
+    user?.id ?? '',
+    status === 'authenticated',
+  );
 
   const [username, setUsername] = useState(user?.username ?? '');
   const [bio, setBio] = useState(user?.bio ?? '');
@@ -358,6 +364,75 @@ export default function SettingsScreen() {
             {updatePreferences.error ? (
               <FormMessage
                 message={getErrorMessage(updatePreferences.error, 'Could not update the region')}
+              />
+            ) : null}
+          </View>
+
+          <View style={[styles.section, { borderBottomColor: theme.border }]}>
+            <View style={styles.sectionHeading}>
+              <Bell color={theme.primary} size={20} />
+              <View style={styles.headingCopy}>
+                <AppText variant="section">Release alerts</AppText>
+                <AppText variant="caption" muted>
+                  Episodes and planned movie releases.
+                </AppText>
+              </View>
+            </View>
+            <View style={[styles.switchRow, { borderColor: theme.border }]}>
+              <View style={styles.switchCopy}>
+                <AppText variant="label">
+                  {releaseAlerts.state.enabled ? 'On' : 'Off'}
+                </AppText>
+                <AppText variant="caption" muted>
+                  {releaseAlerts.state.permission === 'denied'
+                    ? 'Blocked in system settings.'
+                    : releaseAlerts.state.permission === 'unavailable' ||
+                        releaseAlerts.state.permission === 'unsupported'
+                      ? 'Unavailable in this build.'
+                      : releaseAlerts.state.pending
+                        ? 'Waiting to finish registration.'
+                        : 'New releases from your library.'}
+                </AppText>
+              </View>
+              {releaseAlerts.isLoading ? (
+                <ActivityIndicator color={theme.primary} />
+              ) : (
+                <Switch
+                  accessibilityLabel="Release alerts"
+                  value={releaseAlerts.state.enabled}
+                  disabled={
+                    releaseAlerts.isUpdating ||
+                    (!releaseAlerts.state.enabled &&
+                      (releaseAlerts.state.permission === 'unavailable' ||
+                        releaseAlerts.state.permission === 'unsupported'))
+                  }
+                  onValueChange={(value) => {
+                    if (
+                      value &&
+                      releaseAlerts.state.permission === 'denied' &&
+                      !releaseAlerts.state.canAskAgain
+                    ) {
+                      void Linking.openSettings();
+                      return;
+                    }
+                    void releaseAlerts.setEnabled(value);
+                  }}
+                  trackColor={{ false: theme.border, true: theme.primarySoft }}
+                  thumbColor={
+                    releaseAlerts.state.enabled ? theme.primary : theme.mutedText
+                  }
+                />
+              )}
+            </View>
+            {releaseAlerts.error ? (
+              <FormMessage message={releaseAlerts.error} />
+            ) : null}
+            {releaseAlerts.state.permission === 'denied' ? (
+              <AppButton
+                label="Open system settings"
+                icon={<ExternalLink color={theme.text} size={18} />}
+                variant="secondary"
+                onPress={() => void Linking.openSettings()}
               />
             ) : null}
           </View>

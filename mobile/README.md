@@ -53,9 +53,11 @@ the mobile rating/review editor, all tracking statuses, notification inbox,
 badges, complete statistics, profile/privacy editing, release-region controls,
 password changes, and active-session management.
 
-That build does **not** contain the AsyncStorage and NetInfo native modules
-used by the offline cache. Do not publish the current JavaScript as an OTA
-update to runtime `1.0.0`; create and test a new preview build first.
+That build does **not** contain the AsyncStorage, NetInfo, Crypto, or
+Notifications native modules used by the current client. The current native
+runtime is `1.1.0`; never publish this JavaScript as an OTA update to runtime
+`1.0.0`. Because `eas.json` uses remote app-version management, verify that the
+next EAS build resolves to app/runtime version `1.1.0` before distributing it.
 
 ## Offline cache
 
@@ -75,6 +77,32 @@ identifiers are excluded. Reports stay in the self-hosted rotating server logs;
 no third-party crash-reporting SDK is used. Deploy the matching backend endpoint
 before distributing this client. The reporter adds no native dependency, but
 the offline-cache modules described above still require a new native build.
+
+## Release alerts
+
+Release alerts are off by default and the operating-system permission prompt is
+shown only after the user enables them in Account settings. The installation
+keeps a random revocation secret in SecureStore, while the backend stores only
+its SHA-256 hash. Logout, an account change, permission withdrawal, or an
+explicit opt-out removes the device; failed offline revocations stay in a
+bounded SecureStore queue until connectivity returns.
+
+The backend creates a per-device outbox for unwatched episodes airing on the
+device's local date and planned movies released in the user's selected region.
+Expo tickets and receipts are checked without logging tokens, transient errors
+are retried, `DeviceNotRegistered` removes the device, and terminal delivery
+rows expire after 30 days. `scripts/sync_release_schedules.sh` also dispatches
+the outbox; run it hourly so receipts and retries are not delayed even though
+fresh TMDB schedule data remains subject to its own bounded cadence.
+
+Expo Push Service is free, but Android delivery still requires FCM v1
+credentials to be added to the EAS project and a fresh native build. Remote
+notifications are not available in Expo Go on Android. Enhanced Expo push
+security is optional; after enabling it in the Expo dashboard, set the matching
+`EXPO_PUSH_ACCESS_TOKEN` only in the backend environment. iOS delivery remains
+blocked until a paid Apple Developer team and APNs credentials exist. No FCM,
+APNs, Expo access token, remote build, or test notification was created by this
+change.
 
 ## OTA updates
 

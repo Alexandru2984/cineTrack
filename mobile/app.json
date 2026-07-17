@@ -2,7 +2,7 @@
   "expo": {
     "name": "Văzute",
     "slug": "vazute",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "platforms": [
       "ios",
       "android"
@@ -62,6 +62,13 @@
     },
     "plugins": [
       "expo-router",
+      [
+        "expo-notifications",
+        {
+          "color": "#7C3AED",
+          "defaultChannel": "releases"
+        }
+      ],
       [
         "expo-splash-screen",
         {

@@ -4,6 +4,7 @@ import {
   Stack,
   ThemeProvider,
   type ErrorBoundaryProps,
+  router,
 } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect, useState } from 'react';
@@ -18,9 +19,15 @@ import {
 import { OfflineBanner } from '@/components/offline-banner';
 import { captureClientError, installGlobalErrorHandler } from '@/lib/client-errors';
 import { hydrateSession } from '@/lib/session';
+import {
+  installReleaseNotificationHandler,
+  installReleaseNotificationResponseHandler,
+} from '@/lib/release-notifications';
 import { AppProviders } from '@/providers/app-providers';
+import { hasLocalSession, useAuthStore } from '@/store/auth';
 
 void SplashScreen.preventAutoHideAsync();
+installReleaseNotificationHandler();
 
 export function ErrorBoundary({ error, retry }: ErrorBoundaryProps) {
   useEffect(() => {
@@ -44,6 +51,14 @@ export default function RootLayout() {
 
   useEffect(() => {
     if (ready) void SplashScreen.hideAsync();
+  }, [ready]);
+
+  useEffect(() => {
+    if (!ready) return;
+    return installReleaseNotificationResponseHandler((route) => {
+      const auth = useAuthStore.getState();
+      if (hasLocalSession(auth.status)) router.push(route);
+    });
   }, [ready]);
 
   if (!ready) return null;

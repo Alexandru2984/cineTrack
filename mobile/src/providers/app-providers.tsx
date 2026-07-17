@@ -18,8 +18,20 @@ import {
   queryDehydrateOptions,
   queryPersister,
 } from '@/lib/query-persistence';
+import {
+  flushPendingPushRevocations,
+  syncReleaseNotifications,
+} from '@/lib/release-notifications';
 import { resumeOfflineSession } from '@/lib/session';
 import { useAuthStore } from '@/store/auth';
+
+function refreshReleaseNotifications() {
+  void flushPendingPushRevocations().catch(() => undefined);
+  const auth = useAuthStore.getState();
+  if (auth.status === 'authenticated' && auth.user) {
+    void syncReleaseNotifications(auth.user.id).catch(() => undefined);
+  }
+}
 
 export function AppProviders({ children }: PropsWithChildren) {
   const userId = useAuthStore((state) => state.user?.id);
@@ -43,9 +55,13 @@ export function AppProviders({ children }: PropsWithChildren) {
   );
 
   useEffect(() => {
+    refreshReleaseNotifications();
     const subscription = AppState.addEventListener('change', (state) => {
       focusManager.setFocused(state === 'active');
-      if (state === 'active') void flushClientErrorReports();
+      if (state === 'active') {
+        void flushClientErrorReports();
+        refreshReleaseNotifications();
+      }
     });
     return () => subscription.remove();
   }, []);
@@ -65,7 +81,10 @@ export function AppProviders({ children }: PropsWithChildren) {
 
       if (auth.status !== 'offline') {
         onlineManager.setOnline(true);
-        if (auth.status === 'authenticated') void flushClientErrorReports();
+        if (auth.status === 'authenticated') {
+          void flushClientErrorReports();
+          refreshReleaseNotifications();
+        }
         return;
       }
 
@@ -77,7 +96,10 @@ export function AppProviders({ children }: PropsWithChildren) {
         if (!disposed) {
           const authenticated = useAuthStore.getState().status === 'authenticated';
           onlineManager.setOnline(authenticated);
-          if (authenticated) void flushClientErrorReports();
+          if (authenticated) {
+            void flushClientErrorReports();
+            refreshReleaseNotifications();
+          }
         }
       });
     });
@@ -97,7 +119,10 @@ export function AppProviders({ children }: PropsWithChildren) {
     };
     const initialStatus = useAuthStore.getState().status;
     if (initialStatus === 'anonymous') clearCache();
-    if (initialStatus === 'authenticated') void flushClientErrorReports();
+    if (initialStatus === 'authenticated') {
+      void flushClientErrorReports();
+      refreshReleaseNotifications();
+    }
 
     return useAuthStore.subscribe((state, previousState) => {
       const accountChanged = state.user?.id !== previousState.user?.id;
@@ -105,11 +130,16 @@ export function AppProviders({ children }: PropsWithChildren) {
         state.status === 'anonymous' && previousState.status !== 'anonymous';
       if ((accountChanged && previousState.user) || signedOut) {
         clearCache();
+      }
+      if (signedOut) {
+        void flushPendingPushRevocations().catch(() => undefined);
       } else if (
         state.status === 'authenticated' &&
-        previousState.status !== 'authenticated'
+        (previousState.status !== 'authenticated' || accountChanged) &&
+        state.user
       ) {
         void flushClientErrorReports();
+        void syncReleaseNotifications(state.user.id).catch(() => undefined);
       }
     });
   }, [queryClient]);
