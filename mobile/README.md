@@ -48,9 +48,10 @@ The latest audited Android preview build is recorded on
 It is Android `versionCode` 3 with runtime `1.0.0`, built from `9952eb4`, and
 includes the current native permission, secure session, account deletion,
 Android App Link, and EAS Update configuration. The tested preview OTA group
-`f5a472a9-35ff-4112-804a-a182bdba4bb6` was published from `f4e5eeb` and adds
+`faa835bc-cb68-41e1-8731-885c78daa2a1` was published from `db943a0` and adds
 the mobile rating/review editor, all tracking statuses, notification inbox,
-badges, and complete statistics.
+badges, complete statistics, profile/privacy editing, release-region controls,
+password changes, and active-session management.
 
 ## OTA updates
 
