@@ -1,9 +1,10 @@
 import { Redirect, router } from 'expo-router';
-import { AlertTriangle, Eye, EyeOff, Trash2 } from 'lucide-react-native';
+import { AlertTriangle, ExternalLink, Eye, EyeOff, ShieldCheck, Trash2 } from 'lucide-react-native';
 import { useState } from 'react';
 import {
   Alert,
   KeyboardAvoidingView,
+  Linking,
   Platform,
   Pressable,
   ScrollView,
@@ -101,6 +102,25 @@ export default function SettingsScreen() {
                 </AppText>
               </View>
             </View>
+          </View>
+
+          <View style={styles.privacySection}>
+            <View style={styles.privacyHeading}>
+              <ShieldCheck color={theme.info} size={20} />
+              <AppText variant="section">Privacy & data</AppText>
+            </View>
+            <Pressable
+              accessibilityRole="link"
+              accessibilityLabel="Open Văzute privacy policy"
+              onPress={() => void Linking.openURL('https://vazute.micutu.com/privacy')}
+              style={({ pressed }) => [
+                styles.privacyLink,
+                { borderColor: theme.border, opacity: pressed ? 0.72 : 1 },
+              ]}
+            >
+              <AppText variant="label">Privacy policy</AppText>
+              <ExternalLink color={theme.mutedText} size={18} />
+            </Pressable>
           </View>
 
           <View style={[styles.dangerZone, { borderColor: theme.danger }]}>
@@ -232,6 +252,24 @@ const styles = StyleSheet.create({
   summaryCopy: {
     minWidth: 0,
     gap: spacing.xs,
+  },
+  privacySection: {
+    gap: spacing.md,
+  },
+  privacyHeading: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  privacyLink: {
+    minHeight: 52,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.md,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: spacing.xs,
   },
   dangerZone: {
     gap: spacing.lg,

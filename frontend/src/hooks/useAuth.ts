@@ -130,12 +130,10 @@ export function useLogoutAllSessions() {
 }
 
 export function useDeleteAccount() {
-  const logout = useAuthStore((s) => s.logout);
   return useMutation({
     mutationFn: async (data: { password: string }) => {
       await api.delete('/users/me', { data });
     },
-    onSuccess: () => logout(),
   });
 }
 

@@ -74,8 +74,37 @@ test.beforeEach(async ({ page }) => {
 
 test('redirects unauthenticated users to the login page', async ({ page }) => {
   await page.goto('/');
-  await expect(page).toHaveURL(/\/login$/);
+  await expect(page).toHaveURL(/\/login\?returnTo=%2F$/);
   await expect(page.getByRole('heading', { name: 'Welcome back' })).toBeVisible();
+});
+
+test('publishes privacy controls and returns to account deletion after login', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/privacy');
+  await expect(page.getByRole('heading', { name: 'Privacy policy' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'account deletion page' })).toBeVisible();
+
+  await page.goto('/account-deletion');
+  await page.getByRole('link', { name: 'Continue to account deletion' }).click();
+  await expect(page).toHaveURL(/\/login\?returnTo=%2Fsettings%23delete-account$/);
+
+  await stubAuthedReads(page);
+  await page.route('**/api/auth/login', (route) =>
+    route.fulfill({
+      json: { access_token: 'access-1', token_type: 'Bearer', expires_in: 3600, user: TEST_USER },
+    })
+  );
+  await page.getByLabel('Email').fill('e2e@example.com');
+  await page.getByLabel('Password').fill('Password1');
+  await page.getByRole('button', { name: 'Sign in' }).click();
+
+  await expect(page).toHaveURL(/\/settings#delete-account$/);
+  await expect(page.getByRole('heading', { name: 'Delete account' })).toBeVisible();
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= document.documentElement.clientWidth
+    )
+  ).toBe(true);
 });
 
 test('shows an error message on invalid credentials', async ({ page }) => {
@@ -614,7 +643,7 @@ test('logs the user out when the token refresh fails', async ({ page }) => {
   // trigger a fresh protected query from a real navigation.
   rejectProtectedRequests = true;
   await page.getByRole('link', { name: 'Settings' }).click();
-  await expect(page).toHaveURL(/\/login$/);
+  await expect(page).toHaveURL(/\/login\?returnTo=%2Fsettings$/);
   expect(refreshAttempts).toBe(2);
 });
 

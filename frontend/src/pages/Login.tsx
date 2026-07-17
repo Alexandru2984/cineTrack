@@ -1,19 +1,22 @@
 import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useLogin } from '@/hooks/useAuth';
 import { getApiErrorMessage } from '@/lib/api';
 import { Film, Loader2 } from 'lucide-react';
+import { safeReturnTo } from '@/lib/navigation';
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const login = useLogin();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const returnTo = safeReturnTo(searchParams.get('returnTo'));
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     login.mutate({ email, password }, {
-      onSuccess: () => navigate('/'),
+      onSuccess: () => navigate(returnTo, { replace: true }),
     });
   };
 

@@ -6,6 +6,7 @@ import { bootstrapSession } from '@/lib/api';
 import { Navbar } from '@/components/Navbar';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { MobileTabBar } from '@/components/MobileTabBar';
+import { loginPathFor, safeReturnTo } from '@/lib/navigation';
 
 const LoginPage = lazy(() => import('@/pages/Login'));
 const RegisterPage = lazy(() => import('@/pages/Register'));
@@ -21,6 +22,8 @@ const ProfilePage = lazy(() => import('@/pages/Profile'));
 const SettingsPage = lazy(() => import('@/pages/Settings'));
 const NotificationsPage = lazy(() => import('@/pages/Notifications'));
 const AboutPage = lazy(() => import('@/pages/About'));
+const PrivacyPage = lazy(() => import('@/pages/Privacy'));
+const AccountDeletionPage = lazy(() => import('@/pages/AccountDeletion'));
 
 function PageLoader() {
   return (
@@ -35,13 +38,17 @@ function PageLoader() {
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated)();
-  if (!isAuthenticated) return <Navigate to="/login" replace />;
+  const location = useLocation();
+  const returnTo = `${location.pathname}${location.search}${location.hash}`;
+  if (!isAuthenticated) return <Navigate to={loginPathFor(returnTo)} replace />;
   return <>{children}</>;
 }
 
 function PublicOnlyRoute({ children }: { children: React.ReactNode }) {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated)();
-  if (isAuthenticated) return <Navigate to="/" replace />;
+  const location = useLocation();
+  const returnTo = safeReturnTo(new URLSearchParams(location.search).get('returnTo'));
+  if (isAuthenticated) return <Navigate to={returnTo} replace />;
   return <>{children}</>;
 }
 
@@ -85,6 +92,8 @@ export default function App() {
               <Route path="/forgot-password" element={<PublicOnlyRoute><ForgotPasswordPage /></PublicOnlyRoute>} />
               <Route path="/reset-password" element={<PublicOnlyRoute><ResetPasswordPage /></PublicOnlyRoute>} />
               <Route path="/about" element={<AboutPage />} />
+              <Route path="/privacy" element={<PrivacyPage />} />
+              <Route path="/account-deletion" element={<AccountDeletionPage />} />
               <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
               <Route path="/search" element={<ProtectedRoute><SearchPage /></ProtectedRoute>} />
               <Route path="/calendar" element={<ProtectedRoute><CalendarPage /></ProtectedRoute>} />

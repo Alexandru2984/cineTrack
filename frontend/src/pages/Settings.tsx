@@ -33,6 +33,7 @@ import {
   Loader2,
   LogOut,
   Monitor,
+  ShieldCheck,
   Trash2,
   UploadCloud,
   UserCircle2,
@@ -40,6 +41,7 @@ import {
   X,
 } from 'lucide-react';
 import { InstallAppCard } from '@/components/InstallAppCard';
+import { useAuthStore } from '@/store/auth';
 
 function SignOutCard() {
   const navigate = useNavigate();
@@ -572,18 +574,28 @@ function SessionsCard() {
 }
 
 function DangerZoneCard() {
-  const navigate = useNavigate();
+  const logout = useAuthStore((state) => state.logout);
   const [confirming, setConfirming] = useState(false);
   const [password, setPassword] = useState('');
   const deleteAccount = useDeleteAccount();
 
-  const handleDelete = (e: React.FormEvent) => {
+  const handleDelete = async (e: React.FormEvent) => {
     e.preventDefault();
-    deleteAccount.mutate({ password }, { onSuccess: () => navigate('/login') });
+    try {
+      await deleteAccount.mutateAsync({ password });
+      logout();
+      window.location.replace('/login');
+    } catch {
+      // The mutation keeps the sanitized API error for the inline message.
+    }
   };
 
   return (
-    <section className="rounded-lg border border-[hsl(var(--destructive))] p-6">
+    <section
+      id="delete-account"
+      tabIndex={-1}
+      className="scroll-mt-20 rounded-lg border border-[hsl(var(--destructive))] p-6 focus:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--ring))]"
+    >
       <h2 className="flex items-center gap-2 text-lg font-semibold text-[hsl(var(--destructive))]">
         <AlertTriangle className="h-5 w-5" /> Delete account
       </h2>
@@ -652,11 +664,17 @@ export default function SettingsPage() {
   const location = useLocation();
 
   useEffect(() => {
-    if (location.hash !== '#follow-requests') return;
+    const targetId =
+      location.hash === '#follow-requests'
+        ? 'follow-requests'
+        : location.hash === '#delete-account'
+          ? 'delete-account'
+          : null;
+    if (!targetId) return;
     const frame = requestAnimationFrame(() => {
-      const requests = document.getElementById('follow-requests');
-      requests?.scrollIntoView({ block: 'start' });
-      requests?.focus({ preventScroll: true });
+      const target = document.getElementById(targetId);
+      target?.scrollIntoView({ block: 'start' });
+      target?.focus({ preventScroll: true });
     });
     return () => cancelAnimationFrame(frame);
   }, [location.hash]);
@@ -679,6 +697,16 @@ export default function SettingsPage() {
         <span className="flex items-center gap-2">
           <Info className="h-5 w-5 text-[hsl(var(--muted-foreground))]" aria-hidden="true" />
           About &amp; data sources
+        </span>
+        <ChevronRight className="h-4 w-4" aria-hidden="true" />
+      </Link>
+      <Link
+        to="/privacy"
+        className="flex items-center justify-between gap-4 border-b border-[hsl(var(--border))] px-1 py-4 text-sm font-medium hover:text-[hsl(var(--primary))]"
+      >
+        <span className="flex items-center gap-2">
+          <ShieldCheck className="h-5 w-5 text-[hsl(var(--muted-foreground))]" aria-hidden="true" />
+          Privacy policy
         </span>
         <ChevronRight className="h-4 w-4" aria-hidden="true" />
       </Link>
