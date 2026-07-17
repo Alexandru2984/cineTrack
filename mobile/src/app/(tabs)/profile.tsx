@@ -6,6 +6,7 @@ import {
   ChartNoAxesColumnIncreasing,
   Database,
   ExternalLink,
+  History,
   LogOut,
   Settings,
   ShieldCheck,
@@ -150,6 +151,24 @@ export default function ProfileScreen() {
             <View style={styles.navigationLabel}>
               <ChartNoAxesColumnIncreasing color={theme.mutedText} size={20} />
               <AppText variant="label">Statistics</AppText>
+            </View>
+            <ChevronRight color={theme.mutedText} size={18} />
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Open watch history"
+            onPress={() => router.push('/history')}
+            style={({ pressed }) => [
+              styles.navigationRow,
+              {
+                borderColor: theme.border,
+                opacity: pressed ? 0.72 : 1,
+              },
+            ]}
+          >
+            <View style={styles.navigationLabel}>
+              <History color={theme.mutedText} size={20} />
+              <AppText variant="label">Watch history</AppText>
             </View>
             <ChevronRight color={theme.mutedText} size={18} />
           </Pressable>

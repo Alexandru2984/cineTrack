@@ -70,6 +70,7 @@ export default function RootLayout() {
           <Stack.Screen name="media/[id]" options={{ title: 'Details' }} />
           <Stack.Screen name="notifications" options={{ title: 'Notifications' }} />
           <Stack.Screen name="statistics" options={{ title: 'Statistics' }} />
+          <Stack.Screen name="history" options={{ title: 'Watch history' }} />
           <Stack.Screen name="social" options={{ title: 'Social' }} />
           <Stack.Screen name="people/[username]" options={{ title: 'Profile' }} />
           <Stack.Screen name="settings" options={{ title: 'Account settings' }} />

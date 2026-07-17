@@ -127,6 +127,20 @@ export interface TrackingItem {
   completed_at: string | null;
 }
 
+export interface HistoryItem {
+  id: string;
+  media_id: string;
+  tmdb_id: number;
+  media_title: string;
+  media_type: MediaType;
+  poster_path: string | null;
+  episode_id: string | null;
+  episode_name: string | null;
+  season_number: number | null;
+  episode_number: number | null;
+  watched_at: string;
+}
+
 export type NotificationKind = 'follow_request' | 'follow_accepted' | 'new_follower';
 
 export interface SocialNotification {

@@ -57,7 +57,7 @@ export function useTrackingLookup(targets: readonly TrackingLookupTarget[]) {
   });
 }
 
-export function useTrackingInfinite(status?: TrackingStatus) {
+export function useTrackingInfinite(status?: TrackingStatus, enabled = true) {
   return useInfiniteQuery({
     queryKey: ['tracking', status, 'infinite'],
     queryFn: ({ pageParam }) =>
@@ -67,6 +67,7 @@ export function useTrackingInfinite(status?: TrackingStatus) {
     initialPageParam: 1,
     getNextPageParam: (lastPage, pages) =>
       lastPage.length === 100 ? pages.length + 1 : undefined,
+    enabled,
   });
 }
 
