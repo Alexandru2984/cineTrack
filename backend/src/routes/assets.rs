@@ -1,13 +1,13 @@
 use actix_multipart::Multipart;
 use actix_web::{web, HttpRequest, HttpResponse};
 use futures_util::StreamExt;
-use sqlx::PgPool;
+use sqlx::{PgPool, Postgres, Transaction};
 use uuid::Uuid;
 
 use crate::config::Config;
 use crate::errors::AppError;
 use crate::middleware::auth::require_auth;
-use crate::services::storage::StorageService;
+use crate::services::storage::{StorageService, AVATAR_EXTENSIONS};
 use crate::services::tmdb::TmdbService;
 
 const MAX_AVATAR_BYTES: usize = 3 * 1024 * 1024; // 3 MB
@@ -16,7 +16,6 @@ const MAX_AVATAR_DIMENSION: u32 = 4096;
 const MAX_AVATAR_PIXELS: u64 = 16_000_000;
 const MAX_POSTER_DIMENSION: u32 = 8192;
 const MAX_POSTER_PIXELS: u64 = 40_000_000;
-const AVATAR_EXTS: &[&str] = &["png", "jpg", "webp", "gif"];
 /// TMDB image sizes the poster cache is allowed to fetch.
 const POSTER_SIZES: &[&str] = &[
     "w45", "w92", "w154", "w185", "w300", "w342", "w500", "w780", "w1280", "original",
@@ -62,7 +61,7 @@ fn valid_public_asset_key(key: &str) -> bool {
         };
         return !id.contains('/')
             && Uuid::parse_str(id).is_ok()
-            && AVATAR_EXTS.contains(&extension);
+            && AVATAR_EXTENSIONS.contains(&extension);
     }
     key.strip_prefix("posters/").is_some_and(valid_poster_spec)
 }
@@ -273,6 +272,25 @@ fn storage_or_503(storage: &Option<StorageService>) -> Result<&StorageService, A
         .ok_or_else(|| AppError::BadRequest("File storage is not configured".to_string()))
 }
 
+async fn lock_user(tx: &mut Transaction<'_, Postgres>, user_id: Uuid) -> Result<(), AppError> {
+    let exists = sqlx::query_scalar::<_, Uuid>("SELECT id FROM users WHERE id = $1 FOR UPDATE")
+        .bind(user_id)
+        .fetch_optional(&mut **tx)
+        .await?
+        .is_some();
+    if !exists {
+        return Err(AppError::NotFound("User not found".to_string()));
+    }
+    Ok(())
+}
+
+fn avatar_storage_unavailable(operation: &str, user_id: Uuid, error: anyhow::Error) -> AppError {
+    log::error!("avatar {operation} failed user_id={user_id}: {error:#}");
+    AppError::ServiceUnavailable(
+        "Avatar storage is temporarily unavailable. Try again later.".to_string(),
+    )
+}
+
 async fn upload_avatar(
     pool: web::Data<PgPool>,
     storage: web::Data<Option<StorageService>>,
@@ -314,23 +332,27 @@ async fn upload_avatar(
         data.ok_or_else(|| AppError::BadRequest("No image uploaded".to_string()))?;
     let info = validate_avatar_image(&bytes, declared_type)?;
 
+    let mut tx = pool.begin().await?;
+    lock_user(&mut tx, user_id).await?;
+
     let key = format!("avatars/{user_id}.{}", info.extension);
-    // Drop any earlier avatar for this user in a different format (best-effort).
-    for old in AVATAR_EXTS.iter().filter(|ext| **ext != info.extension) {
-        let _ = store.delete(&format!("avatars/{user_id}.{old}")).await;
-    }
+    store
+        .delete_other_avatar_variants(user_id, info.extension)
+        .await
+        .map_err(|error| avatar_storage_unavailable("replacement cleanup", user_id, error))?;
 
     store
         .put(&key, &bytes, info.content_type)
         .await
-        .map_err(AppError::from)?;
+        .map_err(|error| avatar_storage_unavailable("upload", user_id, error))?;
 
     let avatar_url = format!("{}?v={}", store.public_url(&key), Uuid::new_v4().simple());
     sqlx::query("UPDATE users SET avatar_url = $2, updated_at = NOW() WHERE id = $1")
         .bind(user_id)
         .bind(&avatar_url)
-        .execute(pool.get_ref())
+        .execute(&mut *tx)
         .await?;
+    tx.commit().await?;
 
     Ok(HttpResponse::Ok().json(serde_json::json!({ "avatar_url": avatar_url })))
 }
@@ -343,15 +365,17 @@ async fn delete_avatar(
     let user_id = require_auth(&req).await?;
     let store = storage_or_503(storage.get_ref())?;
 
-    for ext in AVATAR_EXTS {
-        if let Err(e) = store.delete(&format!("avatars/{user_id}.{ext}")).await {
-            log::warn!("avatar delete {user_id}.{ext}: {e:#}");
-        }
-    }
+    let mut tx = pool.begin().await?;
+    lock_user(&mut tx, user_id).await?;
+    store
+        .delete_avatar_variants(user_id)
+        .await
+        .map_err(|error| avatar_storage_unavailable("delete", user_id, error))?;
     sqlx::query("UPDATE users SET avatar_url = NULL, updated_at = NOW() WHERE id = $1")
         .bind(user_id)
-        .execute(pool.get_ref())
+        .execute(&mut *tx)
         .await?;
+    tx.commit().await?;
     Ok(HttpResponse::Ok().json(serde_json::json!({ "message": "Avatar removed" })))
 }
 

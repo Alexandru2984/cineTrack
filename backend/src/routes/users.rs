@@ -10,6 +10,7 @@ use crate::dto::user::*;
 use crate::errors::AppError;
 use crate::middleware::auth::require_auth;
 use crate::models::User;
+use crate::services::storage::StorageService;
 use crate::services::{notifications, quota};
 use crate::utils::password;
 
@@ -323,15 +324,17 @@ async fn update_profile(
 async fn delete_account(
     pool: web::Data<PgPool>,
     config: web::Data<Config>,
+    storage: web::Data<Option<StorageService>>,
     req: HttpRequest,
     body: web::Json<DeleteAccountRequest>,
 ) -> Result<HttpResponse, AppError> {
     let user_id = require_auth(&req).await?;
     body.validate()?;
 
-    let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = $1")
+    let mut tx = pool.begin().await?;
+    let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = $1 FOR UPDATE")
         .bind(user_id)
-        .fetch_optional(pool.get_ref())
+        .fetch_optional(&mut *tx)
         .await?
         .ok_or_else(|| AppError::NotFound("User not found".to_string()))?;
 
@@ -344,10 +347,27 @@ async fn delete_account(
         return Err(AppError::Unauthorized("Password is incorrect".to_string()));
     }
 
+    if let Some(store) = storage.get_ref() {
+        store
+            .delete_avatar_variants(user_id)
+            .await
+            .map_err(|error| {
+                log::error!("account avatar cleanup failed user_id={user_id}: {error:#}");
+                AppError::ServiceUnavailable(
+                    "Stored account data could not be deleted. Try again later.".to_string(),
+                )
+            })?;
+    } else if user.avatar_url.is_some() {
+        return Err(AppError::ServiceUnavailable(
+            "Stored account data could not be deleted. Try again later.".to_string(),
+        ));
+    }
+
     sqlx::query("DELETE FROM users WHERE id = $1")
         .bind(user_id)
-        .execute(pool.get_ref())
+        .execute(&mut *tx)
         .await?;
+    tx.commit().await?;
 
     log::info!("audit: account deleted user_id={user_id}");
 

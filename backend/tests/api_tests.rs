@@ -4326,6 +4326,35 @@ async fn test_delete_account_success() {
     assert_eq!(resp.status(), 404);
 }
 
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn test_delete_account_keeps_account_when_stored_avatar_cannot_be_removed() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+
+    let (token, _, user_id) =
+        register_user(&app, "storedavatar", "storedavatar@example.com", "Pass1234").await;
+    let user_id = Uuid::parse_str(&user_id).unwrap();
+    sqlx::query("UPDATE users SET avatar_url = $2 WHERE id = $1")
+        .bind(user_id)
+        .bind("https://assets.example.com/avatars/storedavatar.png")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let req = actix_test::TestRequest::delete()
+        .uri("/api/users/me")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .set_json(json!({ "password": "Pass1234" }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 503);
+
+    login_user(&app, "storedavatar@example.com", "Pass1234").await;
+}
+
 // ── Follow System Tests ───────────────────────────────────────
 
 #[actix_web::test]

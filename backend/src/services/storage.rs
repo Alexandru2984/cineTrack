@@ -8,6 +8,8 @@ use aws_smithy_types::timeout::TimeoutConfig;
 
 use crate::config::R2Config;
 
+pub const AVATAR_EXTENSIONS: &[&str] = &["png", "jpg", "webp", "gif"];
+
 /// Thin wrapper over a Cloudflare R2 (S3-compatible) bucket. Cheap to clone.
 #[derive(Clone)]
 pub struct StorageService {
@@ -113,6 +115,43 @@ impl StorageService {
             .await
             .context("R2 delete failed")?;
         Ok(())
+    }
+
+    pub async fn delete_avatar_variants(&self, user_id: uuid::Uuid) -> anyhow::Result<()> {
+        self.delete_avatar_variants_except(user_id, None).await
+    }
+
+    pub async fn delete_other_avatar_variants(
+        &self,
+        user_id: uuid::Uuid,
+        retained_extension: &str,
+    ) -> anyhow::Result<()> {
+        self.delete_avatar_variants_except(user_id, Some(retained_extension))
+            .await
+    }
+
+    async fn delete_avatar_variants_except(
+        &self,
+        user_id: uuid::Uuid,
+        retained_extension: Option<&str>,
+    ) -> anyhow::Result<()> {
+        let mut first_error = None;
+        for extension in AVATAR_EXTENSIONS {
+            if retained_extension == Some(*extension) {
+                continue;
+            }
+            let key = format!("avatars/{user_id}.{extension}");
+            if let Err(error) = self.delete(&key).await {
+                if first_error.is_none() {
+                    first_error = Some(error.context(format!("failed to delete {key}")));
+                }
+            }
+        }
+
+        match first_error {
+            Some(error) => Err(error),
+            None => Ok(()),
+        }
     }
 
     /// Absolute public URL for an object: the configured bucket domain when set,
