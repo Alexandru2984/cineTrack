@@ -1210,6 +1210,73 @@ async fn test_tracking_requires_auth() {
         .to_request();
     let resp = actix_test::call_service(&app, req).await;
     assert_eq!(resp.status(), 401);
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/tracking/lookup")
+        .set_json(json!({
+            "items": [{ "tmdb_id": 1, "media_type": "movie" }]
+        }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 401);
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn test_tracking_lookup_is_complete_beyond_first_list_page() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (token, _, user_id) =
+        register_user(&app, "lookupuser", "lookup@example.com", "Pass1234").await;
+    let user_id = Uuid::parse_str(&user_id).unwrap();
+    const TMDB_BASE: i32 = 1_310_000;
+
+    sqlx::query(
+        r#"INSERT INTO media (tmdb_id, media_type, title)
+        SELECT $1 + value, 'movie', 'Lookup movie ' || value
+        FROM generate_series(1, 150) AS value"#,
+    )
+    .bind(TMDB_BASE)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO user_media (user_id, media_id, status)
+        SELECT $1, id, 'plan_to_watch'
+        FROM media WHERE tmdb_id > $2 AND tmdb_id <= $2 + 150"#,
+    )
+    .bind(user_id)
+    .bind(TMDB_BASE)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let requested_tmdb_id = TMDB_BASE + 149;
+    let req = actix_test::TestRequest::post()
+        .uri("/api/tracking/lookup")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .set_json(json!({
+            "items": [
+                { "tmdb_id": requested_tmdb_id, "media_type": "movie" },
+                { "tmdb_id": requested_tmdb_id, "media_type": "movie" },
+                { "tmdb_id": TMDB_BASE + 999, "media_type": "movie" }
+            ]
+        }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let body: Value = actix_test::read_body_json(resp).await;
+    let matches = body.as_array().unwrap();
+    assert_eq!(
+        matches.len(),
+        1,
+        "duplicates and untracked titles are omitted"
+    );
+    assert_eq!(matches[0]["tmdb_id"], requested_tmdb_id);
+    assert_eq!(matches[0]["status"], "plan_to_watch");
 }
 
 #[actix_web::test]

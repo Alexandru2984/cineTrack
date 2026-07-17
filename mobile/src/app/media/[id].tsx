@@ -29,7 +29,7 @@ import {
   useMarkEpisodesWatchedThrough,
   useMarkSeasonWatched,
   useShowProgress,
-  useTracking,
+  useTrackingLookup,
   useWatchedEpisodes,
 } from '@/hooks/use-tracking';
 import { useTheme } from '@/hooks/use-theme';
@@ -78,7 +78,9 @@ export default function MediaDetailScreen() {
   const type: MediaType = rawType === 'tv' ? 'tv' : 'movie';
   const media = useMediaDetail(id, type);
   const seasons = useSeasons(id, type === 'tv');
-  const tracking = useTracking();
+  const tracking = useTrackingLookup(
+    id ? [{ tmdb_id: Number(id), media_type: type }] : [],
+  );
   const createTracking = useCreateTracking();
   const [statusSelection, setStatusSelection] = useState<{
     mediaKey: string;

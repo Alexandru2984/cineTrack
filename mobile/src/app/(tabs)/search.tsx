@@ -18,7 +18,7 @@ import { SegmentedControl } from '@/components/segmented-control';
 import { radius, spacing } from '@/constants/theme';
 import { useDebouncedValue } from '@/hooks/use-debounced-value';
 import { useMediaSearch } from '@/hooks/use-media';
-import { useCreateTracking, useTracking } from '@/hooks/use-tracking';
+import { useCreateTracking, useTrackingLookup } from '@/hooks/use-tracking';
 import { useTheme } from '@/hooks/use-theme';
 import { getErrorMessage } from '@/lib/http';
 import type { MediaType, TmdbSearchResult } from '@/types';
@@ -43,7 +43,6 @@ export default function SearchScreen() {
     type === 'all' ? undefined : type,
   );
   const add = useCreateTracking();
-  const tracking = useTracking();
   const columns = width >= 900 ? 4 : width >= 600 ? 3 : 2;
   const availableWidth = Math.min(width, 980) - spacing.lg * 2;
   const tileWidth = (availableWidth - spacing.md * (columns - 1)) / columns;
@@ -58,6 +57,12 @@ export default function SearchScreen() {
       ).values(),
     );
   }, [search.data, type]);
+  const tracking = useTrackingLookup(
+    results.map((item) => ({
+      tmdb_id: item.id,
+      media_type: mediaResultType(item, type === 'all' ? undefined : type),
+    })),
+  );
   const totalResults = search.data?.pages[0]?.total_results ?? 0;
   const trackedKeys = useMemo(
     () =>

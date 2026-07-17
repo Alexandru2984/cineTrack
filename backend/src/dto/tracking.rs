@@ -82,6 +82,26 @@ pub struct TrackingQueryParams {
     pub limit: Option<u32>,
 }
 
+#[derive(Debug, Deserialize, Serialize, Validate)]
+#[serde(deny_unknown_fields)]
+pub struct TrackingLookupItem {
+    #[validate(range(min = 1, message = "TMDB id must be positive"))]
+    pub tmdb_id: i32,
+    #[validate(custom(function = "validate_media_type"))]
+    pub media_type: String,
+}
+
+#[derive(Debug, Deserialize, Validate)]
+#[serde(deny_unknown_fields)]
+pub struct TrackingLookupRequest {
+    #[validate(length(
+        min = 1,
+        max = 100,
+        message = "Lookup must contain between 1 and 100 items"
+    ))]
+    pub items: Vec<TrackingLookupItem>,
+}
+
 #[derive(Debug, Serialize)]
 pub struct TrackingResponse {
     pub id: Uuid,
@@ -169,6 +189,38 @@ mod tests {
         ] {
             assert!(invalid.validate().is_err());
         }
+    }
+
+    #[test]
+    fn tracking_lookup_is_bounded_and_validated() {
+        assert!(TrackingLookupRequest { items: vec![] }.validate().is_err());
+        assert!(TrackingLookupRequest {
+            items: (1..=100)
+                .map(|tmdb_id| TrackingLookupItem {
+                    tmdb_id,
+                    media_type: "movie".to_string(),
+                })
+                .collect(),
+        }
+        .validate()
+        .is_ok());
+        assert!(TrackingLookupRequest {
+            items: (1..=101)
+                .map(|tmdb_id| TrackingLookupItem {
+                    tmdb_id,
+                    media_type: "movie".to_string(),
+                })
+                .collect(),
+        }
+        .validate()
+        .is_err());
+
+        assert!(TrackingLookupItem {
+            tmdb_id: 0,
+            media_type: "person".to_string(),
+        }
+        .validate()
+        .is_err());
     }
 
     #[test]

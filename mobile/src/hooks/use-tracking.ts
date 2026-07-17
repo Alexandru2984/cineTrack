@@ -8,6 +8,10 @@ import {
 import { calendarKeys } from '@/hooks/use-calendar';
 import { apiRequest } from '@/lib/api';
 import { withQuery } from '@/lib/http';
+import {
+  buildTrackingLookupBatches,
+  type TrackingLookupTarget,
+} from '@/lib/tracking-lookup';
 import type {
   BulkWatchResponse,
   MediaType,
@@ -30,13 +34,26 @@ async function invalidateWatchState(
   ]);
 }
 
-export function useTracking(status?: TrackingStatus) {
+export function useTrackingLookup(targets: readonly TrackingLookupTarget[]) {
+  const batches = buildTrackingLookupBatches(targets);
+  const lookupKey = batches.flatMap((batch) =>
+    batch.map((item) => `${item.media_type}:${item.tmdb_id}`),
+  );
+
   return useQuery({
-    queryKey: ['tracking', status],
-    queryFn: () =>
-      apiRequest<TrackingItem[]>(
-        withQuery('/tracking', { status, limit: 100 }),
-      ),
+    queryKey: ['tracking', 'lookup', lookupKey],
+    queryFn: async () => {
+      const pages = await Promise.all(
+        batches.map((items) =>
+          apiRequest<TrackingItem[]>('/tracking/lookup', {
+            method: 'POST',
+            body: { items },
+          }),
+        ),
+      );
+      return pages.flat();
+    },
+    enabled: batches.length > 0,
   });
 }
 

@@ -1,6 +1,7 @@
 use actix_web::{web, HttpRequest, HttpResponse};
 use chrono::{NaiveDate, Utc};
 use sqlx::{PgPool, Postgres, Transaction};
+use std::collections::HashSet;
 use uuid::Uuid;
 use validator::Validate;
 
@@ -15,9 +16,57 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
         web::scope("/tracking")
             .route("", web::get().to(list_tracking))
             .route("", web::post().to(create_tracking))
+            .route("/lookup", web::post().to(lookup_tracking))
             .route("/{id}", web::patch().to(update_tracking))
             .route("/{id}", web::delete().to(delete_tracking)),
     );
+}
+
+type TrackingRow = (
+    Uuid,
+    Uuid,
+    i32,
+    String,
+    String,
+    Option<String>,
+    String,
+    Option<i16>,
+    Option<String>,
+    bool,
+    Option<NaiveDate>,
+    Option<NaiveDate>,
+);
+
+fn tracking_response(
+    (
+        id,
+        media_id,
+        tmdb_id,
+        media_type,
+        title,
+        poster_path,
+        status,
+        rating,
+        review,
+        is_favorite,
+        started_at,
+        completed_at,
+    ): TrackingRow,
+) -> TrackingResponse {
+    TrackingResponse {
+        id,
+        media_id,
+        tmdb_id,
+        media_type,
+        title,
+        poster_path,
+        status,
+        rating,
+        review,
+        is_favorite,
+        started_at,
+        completed_at,
+    }
 }
 
 async fn list_tracking(
@@ -32,7 +81,7 @@ async fn list_tracking(
     let offset = ((params.page.unwrap_or(1).max(1) - 1) as i64) * limit;
 
     let rows = if let Some(status) = params.status {
-        sqlx::query_as::<_, (Uuid, Uuid, i32, String, String, Option<String>, String, Option<i16>, Option<String>, bool, Option<chrono::NaiveDate>, Option<chrono::NaiveDate>)>(
+        sqlx::query_as::<_, TrackingRow>(
             r#"SELECT um.id, um.media_id, m.tmdb_id, m.media_type, m.title, m.poster_path, um.status, um.rating, um.review, um.is_favorite, um.started_at, um.completed_at
             FROM user_media um JOIN media m ON um.media_id = m.id
             WHERE um.user_id = $1 AND um.status = $2
@@ -46,7 +95,7 @@ async fn list_tracking(
         .fetch_all(pool.get_ref())
         .await?
     } else {
-        sqlx::query_as::<_, (Uuid, Uuid, i32, String, String, Option<String>, String, Option<i16>, Option<String>, bool, Option<chrono::NaiveDate>, Option<chrono::NaiveDate>)>(
+        sqlx::query_as::<_, TrackingRow>(
             r#"SELECT um.id, um.media_id, m.tmdb_id, m.media_type, m.title, m.poster_path, um.status, um.rating, um.review, um.is_favorite, um.started_at, um.completed_at
             FROM user_media um JOIN media m ON um.media_id = m.id
             WHERE um.user_id = $1
@@ -60,41 +109,50 @@ async fn list_tracking(
         .await?
     };
 
-    let response: Vec<TrackingResponse> = rows
-        .into_iter()
-        .map(
-            |(
-                id,
-                media_id,
-                tmdb_id,
-                media_type,
-                title,
-                poster_path,
-                status,
-                rating,
-                review,
-                is_favorite,
-                started_at,
-                completed_at,
-            )| {
-                TrackingResponse {
-                    id,
-                    media_id,
-                    tmdb_id,
-                    media_type,
-                    title,
-                    poster_path,
-                    status,
-                    rating,
-                    review,
-                    is_favorite,
-                    started_at,
-                    completed_at,
-                }
-            },
-        )
-        .collect();
+    let response: Vec<TrackingResponse> = rows.into_iter().map(tracking_response).collect();
 
+    Ok(HttpResponse::Ok().json(response))
+}
+
+async fn lookup_tracking(
+    pool: web::Data<PgPool>,
+    req: HttpRequest,
+    body: web::Json<TrackingLookupRequest>,
+) -> Result<HttpResponse, AppError> {
+    let user_id = require_auth(&req).await?;
+    body.validate()?;
+    for item in &body.items {
+        item.validate()?;
+    }
+
+    let mut seen = HashSet::with_capacity(body.items.len());
+    let mut tmdb_ids = Vec::with_capacity(body.items.len());
+    let mut media_types = Vec::with_capacity(body.items.len());
+    for item in &body.items {
+        if seen.insert((item.tmdb_id, item.media_type.as_str())) {
+            tmdb_ids.push(item.tmdb_id);
+            media_types.push(item.media_type.clone());
+        }
+    }
+
+    let rows = sqlx::query_as::<_, TrackingRow>(
+        r#"WITH requested AS (
+            SELECT *
+            FROM UNNEST($2::integer[], $3::text[]) AS item(tmdb_id, media_type)
+        )
+        SELECT um.id, um.media_id, m.tmdb_id, m.media_type, m.title, m.poster_path,
+               um.status, um.rating, um.review, um.is_favorite, um.started_at, um.completed_at
+        FROM requested item
+        JOIN media m ON m.tmdb_id = item.tmdb_id AND m.media_type = item.media_type
+        JOIN user_media um ON um.media_id = m.id AND um.user_id = $1"#,
+    )
+    .bind(user_id)
+    .bind(&tmdb_ids)
+    .bind(&media_types)
+    .fetch_all(pool.get_ref())
+    .await?;
+
+    let response: Vec<TrackingResponse> = rows.into_iter().map(tracking_response).collect();
     Ok(HttpResponse::Ok().json(response))
 }
 
