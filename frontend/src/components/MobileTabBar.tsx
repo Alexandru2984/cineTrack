@@ -41,7 +41,8 @@ export function MobileTabBar() {
       label: 'Library',
       href: '/tracking',
       icon: List,
-      active: (pathname) => pathname.startsWith('/tracking'),
+      active: (pathname) =>
+        pathname.startsWith('/tracking') || pathname.startsWith('/lists'),
     },
     {
       label: 'Profile',

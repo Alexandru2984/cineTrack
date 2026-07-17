@@ -309,6 +309,20 @@ export interface ListResponse {
   created_at: string;
 }
 
+export interface CustomList {
+  id: string;
+  user_id: string;
+  name: string;
+  description: string | null;
+  is_public: boolean;
+  created_at: string;
+}
+
+export interface CustomListDetail {
+  list: CustomList;
+  items: Media[];
+}
+
 export interface Session {
   id: string;
   user_agent: string | null;

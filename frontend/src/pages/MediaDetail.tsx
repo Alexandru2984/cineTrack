@@ -10,6 +10,7 @@ import {
   useWatchedEpisodes,
 } from '@/hooks/useTracking';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
+import { AddToListDialog } from '@/components/AddToListDialog';
 import { getPosterUrl, getBackdropUrl, formatDate, formatRuntime } from '@/lib/utils';
 import { getApiErrorMessage } from '@/lib/api';
 import {
@@ -19,6 +20,7 @@ import {
   CheckCircle2,
   Clock,
   Loader2,
+  ListPlus,
   Plus,
   Star,
   X,
@@ -84,6 +86,8 @@ export default function MediaDetail() {
   const markEpisodesWatchedThrough = useMarkEpisodesWatchedThrough();
   const [trackingStatus, setTrackingStatus] = useState('');
   const [watchConfirmation, setWatchConfirmation] = useState<WatchConfirmation | null>(null);
+  const [listPickerOpen, setListPickerOpen] = useState(false);
+  const [listFeedback, setListFeedback] = useState<string | null>(null);
 
   if (isLoading) return <LoadingSpinner />;
   if (!media) return <div className="text-center py-16">Media not found</div>;
@@ -241,7 +245,23 @@ export default function MediaDetail() {
                   {status === 'watching' ? 'Watching' : status === 'plan_to_watch' ? 'Plan to Watch' : 'Completed'}
                 </button>
               ))}
+              <button
+                type="button"
+                onClick={() => {
+                  setListFeedback(null);
+                  setListPickerOpen(true);
+                }}
+                className="flex items-center gap-2 rounded-md border border-[hsl(var(--border))] px-4 py-2 text-sm font-medium transition-colors hover:bg-[hsl(var(--secondary))]"
+              >
+                <ListPlus className="h-4 w-4" aria-hidden="true" />
+                Custom list
+              </button>
             </div>
+            {listFeedback ? (
+              <p className="text-sm text-emerald-600 dark:text-emerald-400" role="status">
+                {listFeedback}
+              </p>
+            ) : null}
             {createTracking.error && (
               <p className="text-sm text-[hsl(var(--destructive))]">
                 {getApiErrorMessage(createTracking.error, 'Could not update your list')}
@@ -415,6 +435,17 @@ export default function MediaDetail() {
           }}
         />
       )}
+      {listPickerOpen ? (
+        <AddToListDialog
+          mediaId={media.id}
+          title={media.title}
+          onClose={() => setListPickerOpen(false)}
+          onAdded={(listName) => {
+            setListFeedback(`Added to ${listName}.`);
+            setListPickerOpen(false);
+          }}
+        />
+      ) : null}
     </div>
   );
 }

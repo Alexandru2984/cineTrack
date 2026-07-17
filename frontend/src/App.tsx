@@ -21,6 +21,8 @@ const StatsPage = lazy(() => import('@/pages/Stats'));
 const ProfilePage = lazy(() => import('@/pages/Profile'));
 const SettingsPage = lazy(() => import('@/pages/Settings'));
 const NotificationsPage = lazy(() => import('@/pages/Notifications'));
+const ListsPage = lazy(() => import('@/pages/Lists'));
+const ListDetailPage = lazy(() => import('@/pages/ListDetail'));
 const AboutPage = lazy(() => import('@/pages/About'));
 const PrivacyPage = lazy(() => import('@/pages/Privacy'));
 const AccountDeletionPage = lazy(() => import('@/pages/AccountDeletion'));
@@ -103,6 +105,8 @@ export default function App() {
               <Route path="/profile/:username" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
               <Route path="/settings" element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />
               <Route path="/notifications" element={<ProtectedRoute><NotificationsPage /></ProtectedRoute>} />
+              <Route path="/lists" element={<ProtectedRoute><ListsPage /></ProtectedRoute>} />
+              <Route path="/lists/:id" element={<ListDetailPage />} />
             </Routes>
           </Suspense>
         </ErrorBoundary>

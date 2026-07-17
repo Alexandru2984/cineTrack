@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useTrackingInfinite, useUpdateTracking, useDeleteTracking } from '@/hooks/useTracking';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
 import { getPosterUrl, STATUS_LABELS, STATUS_COLORS } from '@/lib/utils';
-import { Loader2, Star, Trash2, Heart } from 'lucide-react';
+import { Loader2, Star, Trash2, Heart, ListPlus } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { TrackingFeedbackDialog } from '@/components/TrackingFeedbackDialog';
 import { getApiErrorMessage } from '@/lib/api';
@@ -20,7 +20,16 @@ export default function TrackingPage() {
 
   return (
     <div className="mx-auto max-w-7xl space-y-6 px-4 py-6 sm:py-8">
-      <h1 className="text-2xl font-bold sm:text-3xl">My List</h1>
+      <div className="flex items-center justify-between gap-4">
+        <h1 className="text-2xl font-bold sm:text-3xl">My List</h1>
+        <Link
+          to="/lists"
+          className="flex h-10 shrink-0 items-center gap-2 rounded-md border border-[hsl(var(--border))] px-3 text-sm font-medium"
+        >
+          <ListPlus className="h-4 w-4" aria-hidden="true" />
+          Custom lists
+        </Link>
+      </div>
 
       {/* Tabs */}
       <div

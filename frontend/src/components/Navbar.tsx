@@ -7,6 +7,7 @@ import {
   CheckCheck,
   Film,
   LogOut,
+  ListPlus,
   Menu,
   Moon,
   Search,
@@ -132,6 +133,12 @@ export function Navbar() {
                 className="flex items-center gap-1 text-sm transition-colors hover:text-[hsl(var(--primary))]"
               >
                 <BarChart3 className="h-4 w-4" /> Stats
+              </Link>
+              <Link
+                to="/lists"
+                className="flex items-center gap-1 text-sm transition-colors hover:text-[hsl(var(--primary))]"
+              >
+                <ListPlus className="h-4 w-4" /> Lists
               </Link>
 
               <div ref={notificationsRef} className="relative">
