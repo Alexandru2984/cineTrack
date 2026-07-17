@@ -66,14 +66,32 @@ async fn list_history(
     let limit = pagination.limit_val();
     let offset = pagination.offset();
 
-    let rows = sqlx::query_as::<_, (Uuid, Uuid, String, String, Option<String>, Option<Uuid>, Option<String>, chrono::DateTime<chrono::Utc>)>(
-        r#"SELECT wh.id, wh.media_id, m.title, m.media_type, m.poster_path, wh.episode_id, e.name as episode_name, wh.watched_at
+    let rows = sqlx::query_as::<
+        _,
+        (
+            Uuid,
+            Uuid,
+            i32,
+            String,
+            String,
+            Option<String>,
+            Option<Uuid>,
+            Option<String>,
+            Option<i32>,
+            Option<i32>,
+            chrono::DateTime<chrono::Utc>,
+        ),
+    >(
+        r#"SELECT wh.id, wh.media_id, m.tmdb_id, m.title, m.media_type, m.poster_path,
+            wh.episode_id, e.name as episode_name, s.season_number, e.episode_number,
+            wh.watched_at
         FROM watch_history wh
         JOIN media m ON wh.media_id = m.id
         LEFT JOIN episodes e ON wh.episode_id = e.id
+        LEFT JOIN seasons s ON e.season_id = s.id
         WHERE wh.user_id = $1
-        ORDER BY wh.watched_at DESC
-        LIMIT $2 OFFSET $3"#
+        ORDER BY wh.watched_at DESC, wh.id DESC
+        LIMIT $2 OFFSET $3"#,
     )
     .bind(user_id)
     .bind(limit)
@@ -87,21 +105,27 @@ async fn list_history(
             |(
                 id,
                 media_id,
+                tmdb_id,
                 media_title,
                 media_type,
                 poster_path,
                 episode_id,
                 episode_name,
+                season_number,
+                episode_number,
                 watched_at,
             )| {
                 HistoryResponse {
                     id,
                     media_id,
+                    tmdb_id,
                     media_title,
                     media_type,
                     poster_path,
                     episode_id,
                     episode_name,
+                    season_number,
+                    episode_number,
                     watched_at,
                 }
             },

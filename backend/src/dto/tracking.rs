@@ -173,11 +173,14 @@ pub struct CreateHistoryRequest {
 pub struct HistoryResponse {
     pub id: Uuid,
     pub media_id: Uuid,
+    pub tmdb_id: i32,
     pub media_title: String,
     pub media_type: String,
     pub poster_path: Option<String>,
     pub episode_id: Option<Uuid>,
     pub episode_name: Option<String>,
+    pub season_number: Option<i32>,
+    pub episode_number: Option<i32>,
     pub watched_at: chrono::DateTime<chrono::Utc>,
 }
 

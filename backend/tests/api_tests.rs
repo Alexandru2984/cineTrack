@@ -1637,6 +1637,77 @@ async fn test_history_requires_auth() {
 
 #[actix_web::test]
 #[ignore = "requires test DB"]
+async fn test_history_lists_manual_rewatches_with_episode_context() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (token, _, _) = register_user(
+        &app,
+        "historycontext",
+        "historycontext@example.com",
+        "Pass1234",
+    )
+    .await;
+
+    let media_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO media (id, tmdb_id, media_type, title) VALUES ($1, 771001, 'tv', 'History Show')",
+    )
+    .bind(media_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let season_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO seasons (id, media_id, season_number, name) VALUES ($1, $2, 3, 'Season 3')",
+    )
+    .bind(season_id)
+    .bind(media_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let episode_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO episodes (id, season_id, episode_number, name) VALUES ($1, $2, 7, 'Again')",
+    )
+    .bind(episode_id)
+    .bind(season_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    for watched_at in ["2026-07-10T20:00:00Z", "2026-07-12T20:00:00Z"] {
+        let req = actix_test::TestRequest::post()
+            .uri("/api/history")
+            .insert_header(("Authorization", format!("Bearer {token}")))
+            .set_json(json!({
+                "media_id": media_id,
+                "episode_id": episode_id,
+                "watched_at": watched_at
+            }))
+            .peer_addr(peer_addr())
+            .to_request();
+        assert_eq!(actix_test::call_service(&app, req).await.status(), 201);
+    }
+
+    let req = actix_test::TestRequest::get()
+        .uri("/api/history?limit=20&page=1")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let response: Value =
+        actix_test::read_body_json(actix_test::call_service(&app, req).await).await;
+    let items = response.as_array().unwrap();
+    assert_eq!(items.len(), 2, "rewatches remain separate history events");
+    assert_eq!(items[0]["tmdb_id"], 771001);
+    assert_eq!(items[0]["season_number"], 3);
+    assert_eq!(items[0]["episode_number"], 7);
+    assert_eq!(items[0]["episode_name"], "Again");
+    assert_eq!(items[0]["watched_at"], "2026-07-12T20:00:00Z");
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
 async fn test_persistent_storage_quotas_release_deleted_slots() {
     let pool = setup_pool().await;
     clean_db(&pool).await;
