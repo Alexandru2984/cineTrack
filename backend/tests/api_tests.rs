@@ -173,6 +173,10 @@ async fn clean_db(pool: &PgPool) {
         .execute(pool)
         .await
         .ok();
+    sqlx::query("DELETE FROM email_verification_tokens")
+        .execute(pool)
+        .await
+        .ok();
     sqlx::query("DELETE FROM refresh_tokens")
         .execute(pool)
         .await
@@ -827,6 +831,124 @@ async fn test_change_password_revokes_refresh_tokens() {
         .to_request();
     let resp = actix_test::call_service(&app, req).await;
     assert_eq!(resp.status(), 401);
+}
+
+// ── Email Verification Tests ──────────────────────────────────
+
+/// Overwrite the account's issued verification token with one whose raw value
+/// we know, so the endpoint can be exercised without reading it from email.
+async fn set_known_verification_token(pool: &PgPool, email: &str) -> String {
+    let raw = cinetrack::utils::jwt::generate_refresh_token();
+    let token_hash = cinetrack::utils::jwt::hash_refresh_token(&raw);
+    sqlx::query(
+        "UPDATE email_verification_tokens
+         SET token_hash = $2, consumed_at = NULL, expires_at = NOW() + INTERVAL '1 hour'
+         WHERE user_id = (SELECT id FROM users WHERE email = $1)",
+    )
+    .bind(email)
+    .bind(&token_hash)
+    .execute(pool)
+    .await
+    .expect("set verification token");
+    raw
+}
+
+async fn fetch_email_verified(
+    app: &impl actix_web::dev::Service<
+        actix_http::Request,
+        Response = actix_web::dev::ServiceResponse<impl actix_web::body::MessageBody>,
+        Error = actix_web::Error,
+    >,
+    token: &str,
+) -> bool {
+    let req = actix_test::TestRequest::get()
+        .uri("/api/auth/me")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(app, req).await;
+    assert_eq!(resp.status(), 200);
+    let body: Value = actix_test::read_body_json(resp).await;
+    body["email_verified"].as_bool().expect("email_verified flag")
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn test_email_verification_flow() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+
+    let (access, _, _) =
+        register_user(&app, "verifyme", "verify@example.com", "Pass1234").await;
+
+    // A new account starts unverified and has a pending token row.
+    assert!(!fetch_email_verified(&app, &access).await);
+    let pending = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM email_verification_tokens
+         WHERE user_id = (SELECT id FROM users WHERE email = $1)",
+    )
+    .bind("verify@example.com")
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(pending, 1);
+
+    let raw = set_known_verification_token(&pool, "verify@example.com").await;
+
+    // Confirming with the token flips the flag.
+    let req = actix_test::TestRequest::post()
+        .uri("/api/auth/email/verify")
+        .set_json(json!({ "token": raw }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    assert!(fetch_email_verified(&app, &access).await);
+
+    // The one-time token cannot be replayed.
+    let req = actix_test::TestRequest::post()
+        .uri("/api/auth/email/verify")
+        .set_json(json!({ "token": raw }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 400);
+
+    // Resending for an already-verified account is a uniform no-op success.
+    let req = actix_test::TestRequest::post()
+        .uri("/api/auth/email/resend")
+        .insert_header(("Authorization", format!("Bearer {access}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn test_email_verification_rejects_bad_token() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+
+    // Well-formed but unknown token → generic 400 (no account probing).
+    let req = actix_test::TestRequest::post()
+        .uri("/api/auth/email/verify")
+        .set_json(json!({ "token": "a".repeat(128) }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 400);
+
+    // Malformed token shape → 400 from validation.
+    let req = actix_test::TestRequest::post()
+        .uri("/api/auth/email/verify")
+        .set_json(json!({ "token": "too-short" }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 400);
 }
 
 // ── Forgot / Reset Password Tests ─────────────────────────────

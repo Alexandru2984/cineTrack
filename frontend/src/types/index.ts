@@ -5,6 +5,7 @@ export interface User {
   avatar_url: string | null;
   bio: string | null;
   is_public: boolean;
+  email_verified: boolean;
   created_at: string;
 }
 

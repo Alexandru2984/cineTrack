@@ -45,6 +45,8 @@ fn scope() -> actix_web::Scope {
         .route("/password", web::patch().to(change_password))
         .route("/password/forgot", web::post().to(forgot_password))
         .route("/password/reset", web::post().to(reset_password))
+        .route("/email/verify", web::post().to(verify_email))
+        .route("/email/resend", web::post().to(resend_email_verification))
         .route("/sessions", web::get().to(list_sessions))
         .route("/sessions/logout-all", web::post().to(logout_all_sessions))
         .route("/sessions/{id}", web::delete().to(revoke_session))
@@ -62,6 +64,7 @@ pub fn configure_rate_limited(cfg: &mut web::ServiceConfig, rate_limiter: &AuthG
 async fn register(
     pool: web::Data<PgPool>,
     config: web::Data<Config>,
+    email_service: web::Data<EmailService>,
     breach: web::Data<BreachChecker>,
     req: HttpRequest,
     body: web::Json<RegisterRequest>,
@@ -69,9 +72,14 @@ async fn register(
     body.validate()?;
     breach.ensure_not_breached(&body.password).await?;
     let client = client_info(&req);
-    let (resp, refresh_token) =
-        services::auth::register(pool.get_ref(), config.get_ref(), &client, body.into_inner())
-            .await?;
+    let (resp, refresh_token) = services::auth::register(
+        pool.get_ref(),
+        config.get_ref(),
+        email_service.get_ref(),
+        &client,
+        body.into_inner(),
+    )
+    .await?;
     Ok(HttpResponse::Created()
         .cookie(refresh_cookie(&refresh_token, config.get_ref()))
         .json(resp))
@@ -95,6 +103,7 @@ async fn login(
 async fn mobile_register(
     pool: web::Data<PgPool>,
     config: web::Data<Config>,
+    email_service: web::Data<EmailService>,
     breach: web::Data<BreachChecker>,
     req: HttpRequest,
     body: web::Json<RegisterRequest>,
@@ -102,9 +111,14 @@ async fn mobile_register(
     body.validate()?;
     breach.ensure_not_breached(&body.password).await?;
     let client = client_info(&req);
-    let (resp, refresh_token) =
-        services::auth::register(pool.get_ref(), config.get_ref(), &client, body.into_inner())
-            .await?;
+    let (resp, refresh_token) = services::auth::register(
+        pool.get_ref(),
+        config.get_ref(),
+        email_service.get_ref(),
+        &client,
+        body.into_inner(),
+    )
+    .await?;
     Ok(no_store(HttpResponse::Created()).json(MobileAuthResponse::new(resp, refresh_token)))
 }
 
@@ -271,6 +285,35 @@ async fn reset_password(
     Ok(HttpResponse::Ok()
         .cookie(clear_refresh_cookie(config.get_ref()))
         .json(serde_json::json!({"message": "Password reset successfully"})))
+}
+
+async fn verify_email(
+    pool: web::Data<PgPool>,
+    body: web::Json<VerifyEmailRequest>,
+) -> Result<HttpResponse, AppError> {
+    body.validate()?;
+    services::auth::verify_email(pool.get_ref(), &body.token).await?;
+    Ok(HttpResponse::Ok().json(serde_json::json!({"message": "Email verified successfully"})))
+}
+
+async fn resend_email_verification(
+    pool: web::Data<PgPool>,
+    config: web::Data<Config>,
+    email_service: web::Data<EmailService>,
+    req: HttpRequest,
+) -> Result<HttpResponse, AppError> {
+    let user_id = require_auth(&req).await?;
+    services::auth::resend_email_verification(
+        pool.get_ref(),
+        config.get_ref(),
+        email_service.get_ref(),
+        user_id,
+    )
+    .await?;
+    // Uniform response whether or not a new link was actually sent.
+    Ok(HttpResponse::Ok().json(serde_json::json!({
+        "message": "If your email needs confirming, a new link has been sent"
+    })))
 }
 
 async fn list_sessions(

@@ -13,6 +13,7 @@ pub struct User {
     pub avatar_url: Option<String>,
     pub bio: Option<String>,
     pub is_public: bool,
+    pub email_verified: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -42,6 +43,16 @@ pub struct RefreshToken {
 
 #[derive(Debug, Clone, FromRow)]
 pub struct PasswordResetToken {
+    pub id: Uuid,
+    pub user_id: Uuid,
+    pub token_hash: String,
+    pub expires_at: DateTime<Utc>,
+    pub consumed_at: Option<DateTime<Utc>>,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, FromRow)]
+pub struct EmailVerificationToken {
     pub id: Uuid,
     pub user_id: Uuid,
     pub token_hash: String,

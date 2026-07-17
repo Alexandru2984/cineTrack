@@ -84,15 +84,33 @@ impl EmailService {
              Open this link to choose a new password (valid for 1 hour):\n{reset_url}\n\n\
              If you didn't request this, you can safely ignore this email."
         );
+        self.deliver("password_reset", to, subject, body, reset_url)
+            .await;
+    }
 
+    /// Send an address-confirmation email after registration. Like the reset
+    /// mail, delivery failures are logged rather than propagated.
+    pub async fn send_email_verification(&self, to: &str, verify_url: &str) {
+        let subject = "Confirm your Văzute email";
+        let body = format!(
+            "Welcome to Văzute!\n\n\
+             Confirm this address to finish securing your account (link valid for 24 hours):\n{verify_url}\n\n\
+             If you didn't create this account, you can safely ignore this email."
+        );
+        self.deliver("email_verification", to, subject, body, verify_url)
+            .await;
+    }
+
+    /// Shared transactional delivery: builds and sends the message, records the
+    /// outcome metric, and never propagates errors. Outside production, when SMTP
+    /// is unconfigured, the actionable link is logged so dev flows still work.
+    async fn deliver(&self, kind: &'static str, to: &str, subject: &str, body: String, link: &str) {
         let Some(transport) = &self.transport else {
-            metrics::record_email_send("password_reset", "not_configured");
+            metrics::record_email_send(kind, "not_configured");
             if self.log_reset_urls {
-                log::info!("[email:log-only] to={to} subject={subject:?} reset_url={reset_url}");
+                log::info!("[email:log-only] to={to} subject={subject:?} link={link}");
             } else {
-                log::warn!(
-                    "SMTP unavailable; password-reset email was not sent and reset URL was not logged"
-                );
+                log::warn!("SMTP unavailable; {kind} email was not sent and its link was not logged");
             }
             return;
         };
@@ -100,7 +118,7 @@ impl EmailService {
         let from = match self.from.parse() {
             Ok(mailbox) => mailbox,
             Err(e) => {
-                metrics::record_email_send("password_reset", "invalid_message");
+                metrics::record_email_send(kind, "invalid_message");
                 log::error!("Invalid SMTP_FROM address {:?}: {e}", self.from);
                 return;
             }
@@ -108,7 +126,7 @@ impl EmailService {
         let to = match to.parse() {
             Ok(mailbox) => mailbox,
             Err(e) => {
-                metrics::record_email_send("password_reset", "invalid_message");
+                metrics::record_email_send(kind, "invalid_message");
                 log::error!("Invalid recipient address: {e}");
                 return;
             }
@@ -122,7 +140,7 @@ impl EmailService {
         {
             Ok(m) => m,
             Err(e) => {
-                metrics::record_email_send("password_reset", "invalid_message");
+                metrics::record_email_send(kind, "invalid_message");
                 log::error!("Failed to build email message: {e}");
                 return;
             }
@@ -131,13 +149,13 @@ impl EmailService {
         let started_at = Instant::now();
         match transport.send(message).await {
             Ok(_) => {
-                metrics::record_email_send("password_reset", "smtp_accepted");
-                metrics::record_email_send_duration("password_reset", started_at.elapsed());
+                metrics::record_email_send(kind, "smtp_accepted");
+                metrics::record_email_send_duration(kind, started_at.elapsed());
             }
             Err(e) => {
-                metrics::record_email_send("password_reset", "smtp_error");
-                metrics::record_email_send_duration("password_reset", started_at.elapsed());
-                log::error!("Failed to send password-reset email: {e}");
+                metrics::record_email_send(kind, "smtp_error");
+                metrics::record_email_send_duration(kind, started_at.elapsed());
+                log::error!("Failed to send {kind} email: {e}");
             }
         }
     }

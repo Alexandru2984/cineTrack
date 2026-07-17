@@ -6,12 +6,14 @@ import { bootstrapSession } from '@/lib/api';
 import { Navbar } from '@/components/Navbar';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { MobileTabBar } from '@/components/MobileTabBar';
+import { EmailVerificationBanner } from '@/components/EmailVerificationBanner';
 import { loginPathFor, safeReturnTo } from '@/lib/navigation';
 
 const LoginPage = lazy(() => import('@/pages/Login'));
 const RegisterPage = lazy(() => import('@/pages/Register'));
 const ForgotPasswordPage = lazy(() => import('@/pages/ForgotPassword'));
 const ResetPasswordPage = lazy(() => import('@/pages/ResetPassword'));
+const VerifyEmailPage = lazy(() => import('@/pages/VerifyEmail'));
 const Dashboard = lazy(() => import('@/pages/Dashboard'));
 const SearchPage = lazy(() => import('@/pages/Search'));
 const CalendarPage = lazy(() => import('@/pages/Calendar'));
@@ -79,6 +81,7 @@ export default function App() {
   return (
     <div className="flex min-h-dvh flex-col bg-[hsl(var(--background))] text-[hsl(var(--foreground))]">
       <Navbar />
+      {authenticated && <EmailVerificationBanner />}
       <main
         className={`flex-1 ${
           authenticated
@@ -93,6 +96,8 @@ export default function App() {
               <Route path="/register" element={<PublicOnlyRoute><RegisterPage /></PublicOnlyRoute>} />
               <Route path="/forgot-password" element={<PublicOnlyRoute><ForgotPasswordPage /></PublicOnlyRoute>} />
               <Route path="/reset-password" element={<PublicOnlyRoute><ResetPasswordPage /></PublicOnlyRoute>} />
+              {/* Reachable whether or not a session is active — a user may open the link on any device. */}
+              <Route path="/verify-email" element={<VerifyEmailPage />} />
               <Route path="/about" element={<AboutPage />} />
               <Route path="/privacy" element={<PrivacyPage />} />
               <Route path="/account-deletion" element={<AccountDeletionPage />} />

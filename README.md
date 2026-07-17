@@ -321,7 +321,7 @@ All endpoints except auth (register/login/refresh) require a valid JWT access to
 
 | Area | Endpoints |
 |------|-----------|
-| **Auth** | Web and native Register/Login/Logout/Refresh, Me, sessions, password reset |
+| **Auth** | Web and native Register/Login/Logout/Refresh, Me, sessions, password reset, email verification (verify/resend) |
 | **Media** | Local catalog search, localized details, Seasons/Episodes, personalized discovery |
 | **Calendar** | Sequential Up Next episodes, full unwatched backlog, upcoming episodes/movies, regional preferences, episode plan/watched actions |
 | **Tracking** | CRUD for user's movie/show list with status, rating, review |

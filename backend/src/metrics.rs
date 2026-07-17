@@ -64,17 +64,17 @@ impl EmailMetrics {
             sends,
             send_duration,
         };
-        for outcome in [
-            "smtp_accepted",
-            "smtp_error",
-            "not_configured",
-            "invalid_message",
-        ] {
-            metrics
-                .sends
-                .with_label_values(&["password_reset", outcome]);
+        for kind in ["password_reset", "email_verification"] {
+            for outcome in [
+                "smtp_accepted",
+                "smtp_error",
+                "not_configured",
+                "invalid_message",
+            ] {
+                metrics.sends.with_label_values(&[kind, outcome]);
+            }
+            metrics.send_duration.with_label_values(&[kind]);
         }
-        metrics.send_duration.with_label_values(&["password_reset"]);
         metrics
     }
 }

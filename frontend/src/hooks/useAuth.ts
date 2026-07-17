@@ -83,6 +83,39 @@ export function useResetPassword() {
   });
 }
 
+export function useVerifyEmail() {
+  const setUser = useAuthStore((s) => s.setUser);
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (data: { token: string }) => {
+      const res = await api.post('/auth/email/verify', data);
+      return res.data as { message: string };
+    },
+    onSuccess: async () => {
+      // If a session is active, refresh the cached identity so the "confirm
+      // your email" banner clears without a reload.
+      if (useAuthStore.getState().token) {
+        try {
+          const res = await api.get<User>('/auth/me');
+          setUser(res.data);
+          qc.setQueryData(['me'], res.data);
+        } catch {
+          // Non-fatal: the banner will clear on the next natural refresh.
+        }
+      }
+    },
+  });
+}
+
+export function useResendVerification() {
+  return useMutation({
+    mutationFn: async () => {
+      const res = await api.post('/auth/email/resend');
+      return res.data as { message: string };
+    },
+  });
+}
+
 export function useChangePassword() {
   const logout = useAuthStore((s) => s.logout);
   return useMutation({

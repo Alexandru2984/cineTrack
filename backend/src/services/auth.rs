@@ -7,12 +7,14 @@ use uuid::Uuid;
 use crate::config::Config;
 use crate::dto::auth::*;
 use crate::errors::AppError;
-use crate::models::{PasswordResetToken, RefreshToken, User};
+use crate::models::{EmailVerificationToken, PasswordResetToken, RefreshToken, User};
 use crate::services::email::EmailService;
 use crate::utils::{jwt, password};
 
 const PASSWORD_RESET_RESPONSE_FLOOR: StdDuration = StdDuration::from_millis(250);
 const PASSWORD_RESET_COOLDOWN_SECONDS: i64 = 10 * 60;
+const EMAIL_VERIFICATION_TTL_HOURS: i64 = 24;
+const EMAIL_VERIFICATION_COOLDOWN_SECONDS: i64 = 2 * 60;
 
 /// Normalize an email for storage and lookup: trimmed and lowercased, so
 /// `Test@X.com ` and `test@x.com` resolve to the same account.
@@ -31,6 +33,7 @@ pub struct ClientInfo {
 pub async fn register(
     pool: &PgPool,
     config: &Config,
+    email_service: &EmailService,
     client: &ClientInfo,
     req: RegisterRequest,
 ) -> Result<(AuthResponse, String), AppError> {
@@ -57,6 +60,17 @@ pub async fn register(
     })?;
 
     log::info!("audit: account registered user_id={}", user.id);
+
+    // Best-effort: a verification email failure must not block account creation;
+    // the user can request a fresh link later from the app.
+    if let Err(error) =
+        issue_email_verification(pool, config, email_service, user.id, &user.email).await
+    {
+        log::warn!(
+            "failed to issue email verification at register user_id={}: {error}",
+            user.id
+        );
+    }
 
     let (access_token, refresh_token) = issue_token_pair(pool, config, client, &user).await?;
 
@@ -395,6 +409,125 @@ pub async fn reset_password(
 
     log::info!("audit: password reset completed user_id={}", stored.user_id);
 
+    Ok(())
+}
+
+/// Issue (or refresh) a one-time email-verification token and send the link.
+/// Returns whether a new email was dispatched; a still-active token inside the
+/// cooldown window is preserved and reported as `false` so callers can stay
+/// uniform without generating repeat mail. Best-effort delivery (spawned).
+pub async fn issue_email_verification(
+    pool: &PgPool,
+    config: &Config,
+    email_service: &EmailService,
+    user_id: Uuid,
+    email: &str,
+) -> Result<bool, AppError> {
+    let token = jwt::generate_refresh_token();
+    let token_hash = jwt::hash_refresh_token(&token);
+    let expires_at = Utc::now() + Duration::hours(EMAIL_VERIFICATION_TTL_HOURS);
+
+    let issued = sqlx::query_as::<_, EmailVerificationToken>(
+        "INSERT INTO email_verification_tokens (user_id, token_hash, expires_at)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (user_id) DO UPDATE
+         SET token_hash = EXCLUDED.token_hash,
+             expires_at = EXCLUDED.expires_at,
+             consumed_at = NULL,
+             created_at = NOW()
+         WHERE email_verification_tokens.consumed_at IS NOT NULL
+            OR email_verification_tokens.expires_at <= NOW()
+            OR email_verification_tokens.created_at
+               <= NOW() - ($4 * INTERVAL '1 second')
+         RETURNING *",
+    )
+    .bind(user_id)
+    .bind(&token_hash)
+    .bind(expires_at)
+    .bind(EMAIL_VERIFICATION_COOLDOWN_SECONDS)
+    .fetch_optional(pool)
+    .await?;
+
+    if issued.is_none() {
+        return Ok(false);
+    }
+
+    let verify_url = format!(
+        "{}/verify-email#token={}",
+        config.frontend_url.trim_end_matches('/'),
+        token
+    );
+    let email_service = email_service.clone();
+    let recipient = email.to_string();
+    actix_web::rt::spawn(async move {
+        email_service
+            .send_email_verification(&recipient, &verify_url)
+            .await;
+    });
+
+    Ok(true)
+}
+
+/// Confirm an email address from a one-time token. Consumes the token and marks
+/// the account verified. Invalid, consumed, or expired tokens are rejected with
+/// the same generic error.
+pub async fn verify_email(pool: &PgPool, token: &str) -> Result<(), AppError> {
+    if !jwt::is_valid_refresh_token(token) {
+        return Err(AppError::BadRequest(
+            "Invalid or expired verification token".to_string(),
+        ));
+    }
+    let token_hash = jwt::hash_refresh_token(token);
+    let mut tx = pool.begin().await?;
+
+    let stored = sqlx::query_as::<_, EmailVerificationToken>(
+        "SELECT * FROM email_verification_tokens WHERE token_hash = $1 FOR UPDATE",
+    )
+    .bind(&token_hash)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(|| AppError::BadRequest("Invalid or expired verification token".to_string()))?;
+
+    if stored.consumed_at.is_some() || stored.expires_at < Utc::now() {
+        return Err(AppError::BadRequest(
+            "Invalid or expired verification token".to_string(),
+        ));
+    }
+
+    sqlx::query("UPDATE email_verification_tokens SET consumed_at = NOW() WHERE id = $1")
+        .bind(stored.id)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("UPDATE users SET email_verified = TRUE, updated_at = NOW() WHERE id = $1")
+        .bind(stored.user_id)
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await?;
+
+    log::info!("audit: email verified user_id={}", stored.user_id);
+
+    Ok(())
+}
+
+/// Re-send a verification link for the authenticated user. Already-verified
+/// accounts are a no-op so the response cannot be used to probe account state.
+pub async fn resend_email_verification(
+    pool: &PgPool,
+    config: &Config,
+    email_service: &EmailService,
+    user_id: Uuid,
+) -> Result<(), AppError> {
+    let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = $1")
+        .bind(user_id)
+        .fetch_optional(pool)
+        .await?
+        .ok_or_else(|| AppError::NotFound("User not found".to_string()))?;
+
+    if user.email_verified {
+        return Ok(());
+    }
+
+    issue_email_verification(pool, config, email_service, user.id, &user.email).await?;
     Ok(())
 }
 

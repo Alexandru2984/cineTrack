@@ -20,6 +20,7 @@ describe('Type contracts', () => {
       avatar_url: null,
       bio: null,
       is_public: true,
+      email_verified: true,
       created_at: '2024-01-01',
     };
     expect(user.id).toBeDefined();
@@ -48,6 +49,7 @@ describe('Type contracts', () => {
         avatar_url: null,
         bio: null,
         is_public: true,
+        email_verified: true,
         created_at: '2024-01-01',
       },
     };

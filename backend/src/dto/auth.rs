@@ -100,6 +100,7 @@ pub struct UserResponse {
     pub avatar_url: Option<String>,
     pub bio: Option<String>,
     pub is_public: bool,
+    pub email_verified: bool,
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
@@ -112,6 +113,7 @@ impl From<crate::models::User> for UserResponse {
             avatar_url: user.avatar_url,
             bio: user.bio,
             is_public: user.is_public,
+            email_verified: user.email_verified,
             created_at: user.created_at,
         }
     }
@@ -185,6 +187,13 @@ pub struct SessionResponse {
     pub last_used_at: Option<chrono::DateTime<chrono::Utc>>,
     /// True for the session making the request (matched by refresh-cookie hash).
     pub current: bool,
+}
+
+#[derive(Debug, Deserialize, Validate)]
+#[serde(deny_unknown_fields)]
+pub struct VerifyEmailRequest {
+    #[validate(custom(function = "validate_refresh_token"))]
+    pub token: String,
 }
 
 #[derive(Debug, Deserialize, Validate)]

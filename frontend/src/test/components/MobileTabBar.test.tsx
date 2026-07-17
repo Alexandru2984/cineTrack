@@ -26,6 +26,7 @@ describe('MobileTabBar', () => {
         avatar_url: null,
         bio: null,
         is_public: true,
+        email_verified: true,
         created_at: '2026-01-01T00:00:00Z',
       },
     });
