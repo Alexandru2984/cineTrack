@@ -787,6 +787,36 @@ async fn test_forgot_password_always_ok() {
     let resp = actix_test::call_service(&app, req).await;
     assert_eq!(resp.status(), 200);
 
+    let first_token = sqlx::query_as::<_, (Uuid, String, chrono::DateTime<chrono::Utc>)>(
+        "SELECT id, token_hash, created_at
+         FROM password_reset_tokens
+         WHERE user_id = (SELECT id FROM users WHERE email = $1)",
+    )
+    .bind("forgot@example.com")
+    .fetch_one(&pool)
+    .await
+    .expect("first reset token");
+
+    // An immediate retry stays indistinguishable but reuses the active token.
+    let req = actix_test::TestRequest::post()
+        .uri("/api/auth/password/forgot")
+        .set_json(json!({ "email": "forgot@example.com" }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+
+    let second_token = sqlx::query_as::<_, (Uuid, String, chrono::DateTime<chrono::Utc>)>(
+        "SELECT id, token_hash, created_at
+         FROM password_reset_tokens
+         WHERE user_id = (SELECT id FROM users WHERE email = $1)",
+    )
+    .bind("forgot@example.com")
+    .fetch_one(&pool)
+    .await
+    .expect("second reset token");
+    assert_eq!(second_token, first_token);
+
     // Unknown email → still 200 (no user enumeration)
     let req = actix_test::TestRequest::post()
         .uri("/api/auth/password/forgot")
@@ -795,6 +825,102 @@ async fn test_forgot_password_always_ok() {
         .to_request();
     let resp = actix_test::call_service(&app, req).await;
     assert_eq!(resp.status(), 200);
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn test_concurrent_password_reset_requests_issue_one_token() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    register_user(&app, "reset-race", "reset-race@example.com", "Pass1234").await;
+
+    let config = test_config();
+    let email_service = cinetrack::services::email::EmailService::new(&config);
+    let first = cinetrack::services::auth::forgot_password(
+        &pool,
+        &config,
+        &email_service,
+        "reset-race@example.com",
+    );
+    let second = cinetrack::services::auth::forgot_password(
+        &pool,
+        &config,
+        &email_service,
+        "reset-race@example.com",
+    );
+    let (first_result, second_result) = tokio::join!(first, second);
+    first_result.expect("first request");
+    second_result.expect("second request");
+
+    let token_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*)
+         FROM password_reset_tokens
+         WHERE user_id = (SELECT id FROM users WHERE email = $1)",
+    )
+    .bind("reset-race@example.com")
+    .fetch_one(&pool)
+    .await
+    .expect("token count");
+    assert_eq!(token_count, 1);
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn test_consumed_password_reset_token_can_be_reissued_immediately() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    register_user(
+        &app,
+        "reset-reissue",
+        "reset-reissue@example.com",
+        "Pass1234",
+    )
+    .await;
+
+    let config = test_config();
+    let email_service = cinetrack::services::email::EmailService::new(&config);
+    cinetrack::services::auth::forgot_password(
+        &pool,
+        &config,
+        &email_service,
+        "reset-reissue@example.com",
+    )
+    .await
+    .expect("first request");
+    let first_hash: String = sqlx::query_scalar(
+        "UPDATE password_reset_tokens
+         SET consumed_at = NOW()
+         WHERE user_id = (SELECT id FROM users WHERE email = $1)
+         RETURNING token_hash",
+    )
+    .bind("reset-reissue@example.com")
+    .fetch_one(&pool)
+    .await
+    .expect("consume first token");
+
+    cinetrack::services::auth::forgot_password(
+        &pool,
+        &config,
+        &email_service,
+        "reset-reissue@example.com",
+    )
+    .await
+    .expect("second request");
+    let (second_hash, consumed_at): (String, Option<chrono::DateTime<chrono::Utc>>) =
+        sqlx::query_as(
+            "SELECT token_hash, consumed_at
+             FROM password_reset_tokens
+             WHERE user_id = (SELECT id FROM users WHERE email = $1)",
+        )
+        .bind("reset-reissue@example.com")
+        .fetch_one(&pool)
+        .await
+        .expect("reissued token");
+
+    assert_ne!(second_hash, first_hash);
+    assert!(consumed_at.is_none());
 }
 
 #[actix_web::test]

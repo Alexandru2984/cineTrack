@@ -12,6 +12,7 @@ use crate::services::email::EmailService;
 use crate::utils::{jwt, password};
 
 const PASSWORD_RESET_RESPONSE_FLOOR: StdDuration = StdDuration::from_millis(250);
+const PASSWORD_RESET_COOLDOWN_SECONDS: i64 = 10 * 60;
 
 /// Normalize an email for storage and lookup: trimmed and lowercased, so
 /// `Test@X.com ` and `test@x.com` resolve to the same account.
@@ -295,19 +296,34 @@ pub async fn forgot_password(
     let token_hash = jwt::hash_refresh_token(&token);
     let expires_at = Utc::now() + Duration::hours(1);
 
-    // Invalidate any outstanding reset tokens before issuing a fresh one.
-    sqlx::query("DELETE FROM password_reset_tokens WHERE user_id = $1")
-        .bind(user.id)
-        .execute(pool)
-        .await?;
-    sqlx::query(
-        "INSERT INTO password_reset_tokens (user_id, token_hash, expires_at) VALUES ($1, $2, $3)",
+    // The unique user index and conditional upsert make concurrent requests
+    // atomic. A recent active token remains valid instead of generating more
+    // email, while consumed or expired tokens can be replaced immediately.
+    let issued = sqlx::query_as::<_, PasswordResetToken>(
+        "INSERT INTO password_reset_tokens (user_id, token_hash, expires_at)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (user_id) DO UPDATE
+         SET token_hash = EXCLUDED.token_hash,
+             expires_at = EXCLUDED.expires_at,
+             consumed_at = NULL,
+             created_at = NOW()
+         WHERE password_reset_tokens.consumed_at IS NOT NULL
+            OR password_reset_tokens.expires_at <= NOW()
+            OR password_reset_tokens.created_at
+               <= NOW() - ($4 * INTERVAL '1 second')
+         RETURNING *",
     )
     .bind(user.id)
     .bind(&token_hash)
     .bind(expires_at)
-    .execute(pool)
+    .bind(PASSWORD_RESET_COOLDOWN_SECONDS)
+    .fetch_optional(pool)
     .await?;
+
+    if issued.is_none() {
+        tokio::time::sleep_until(respond_at).await;
+        return Ok(());
+    }
 
     let reset_url = format!(
         "{}/reset-password#token={}",
