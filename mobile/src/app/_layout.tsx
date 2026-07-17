@@ -1,15 +1,34 @@
-import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from 'expo-router';
+import {
+  DarkTheme,
+  DefaultTheme,
+  Stack,
+  ThemeProvider,
+  type ErrorBoundaryProps,
+} from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect, useState } from 'react';
 import { useColorScheme, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 
 import { colors } from '@/constants/theme';
+import {
+  MobileErrorBoundary,
+  MobileErrorFallback,
+} from '@/components/mobile-error-boundary';
 import { OfflineBanner } from '@/components/offline-banner';
+import { captureClientError, installGlobalErrorHandler } from '@/lib/client-errors';
 import { hydrateSession } from '@/lib/session';
 import { AppProviders } from '@/providers/app-providers';
 
 void SplashScreen.preventAutoHideAsync();
+
+export function ErrorBoundary({ error, retry }: ErrorBoundaryProps) {
+  useEffect(() => {
+    void captureClientError(error, { isFatal: true });
+  }, [error]);
+
+  return <MobileErrorFallback onRetry={() => void retry()} />;
+}
 
 export default function RootLayout() {
   const scheme = useColorScheme() === 'dark' ? 'dark' : 'light';
@@ -20,6 +39,8 @@ export default function RootLayout() {
     hydrateSession()
       .finally(() => setReady(true));
   }, []);
+
+  useEffect(() => installGlobalErrorHandler(), []);
 
   useEffect(() => {
     if (ready) void SplashScreen.hideAsync();
@@ -55,32 +76,34 @@ export default function RootLayout() {
     <AppProviders>
       <ThemeProvider value={navigationTheme}>
         <StatusBar style={scheme === 'dark' ? 'light' : 'dark'} />
-        <View style={{ flex: 1 }}>
-          <OfflineBanner />
-          <Stack
-            screenOptions={{
-              contentStyle: { backgroundColor: theme.background },
-              headerStyle: { backgroundColor: theme.elevated },
-              headerTintColor: theme.text,
-              headerShadowVisible: false,
-              headerBackButtonDisplayMode: 'minimal',
-            }}
-          >
-            <Stack.Screen name="index" options={{ headerShown: false }} />
-            <Stack.Screen name="(auth)" options={{ headerShown: false }} />
-            <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-            <Stack.Screen name="reset-password" options={{ headerShown: false }} />
-            <Stack.Screen name="media/[id]" options={{ title: 'Details' }} />
-            <Stack.Screen name="notifications" options={{ title: 'Notifications' }} />
-            <Stack.Screen name="statistics" options={{ title: 'Statistics' }} />
-            <Stack.Screen name="history" options={{ title: 'Watch history' }} />
-            <Stack.Screen name="lists" options={{ title: 'Custom lists' }} />
-            <Stack.Screen name="lists/[id]" options={{ title: 'List' }} />
-            <Stack.Screen name="social" options={{ title: 'Social' }} />
-            <Stack.Screen name="people/[username]" options={{ title: 'Profile' }} />
-            <Stack.Screen name="settings" options={{ title: 'Account settings' }} />
-          </Stack>
-        </View>
+        <MobileErrorBoundary>
+          <View style={{ flex: 1 }}>
+            <OfflineBanner />
+            <Stack
+              screenOptions={{
+                contentStyle: { backgroundColor: theme.background },
+                headerStyle: { backgroundColor: theme.elevated },
+                headerTintColor: theme.text,
+                headerShadowVisible: false,
+                headerBackButtonDisplayMode: 'minimal',
+              }}
+            >
+              <Stack.Screen name="index" options={{ headerShown: false }} />
+              <Stack.Screen name="(auth)" options={{ headerShown: false }} />
+              <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+              <Stack.Screen name="reset-password" options={{ headerShown: false }} />
+              <Stack.Screen name="media/[id]" options={{ title: 'Details' }} />
+              <Stack.Screen name="notifications" options={{ title: 'Notifications' }} />
+              <Stack.Screen name="statistics" options={{ title: 'Statistics' }} />
+              <Stack.Screen name="history" options={{ title: 'Watch history' }} />
+              <Stack.Screen name="lists" options={{ title: 'Custom lists' }} />
+              <Stack.Screen name="lists/[id]" options={{ title: 'List' }} />
+              <Stack.Screen name="social" options={{ title: 'Social' }} />
+              <Stack.Screen name="people/[username]" options={{ title: 'Profile' }} />
+              <Stack.Screen name="settings" options={{ title: 'Account settings' }} />
+            </Stack>
+          </View>
+        </MobileErrorBoundary>
       </ThemeProvider>
     </AppProviders>
   );

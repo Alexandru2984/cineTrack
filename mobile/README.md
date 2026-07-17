@@ -65,6 +65,17 @@ identity, and logout or an account change clears both memory and AsyncStorage.
 Tokens remain in SecureStore. Notifications, social data, account sessions,
 and user search results are excluded from persistence.
 
+## Crash diagnostics
+
+Render failures and uncaught JavaScript errors are sanitized on-device and
+reported to the authenticated Văzute API. A bounded queue keeps at most ten
+reports while offline and is cleared on logout or an account change. Tokens,
+email addresses, URL parameters, device identifiers, and advertising
+identifiers are excluded. Reports stay in the self-hosted rotating server logs;
+no third-party crash-reporting SDK is used. Deploy the matching backend endpoint
+before distributing this client. The reporter adds no native dependency, but
+the offline-cache modules described above still require a new native build.
+
 ## OTA updates
 
 EAS Update is configured with a runtime tied to the native app version and

@@ -7,6 +7,10 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { ApiError } from '@/lib/http';
+import {
+  clearClientErrorReports,
+  flushClientErrorReports,
+} from '@/lib/client-errors';
 import { PERSISTED_QUERY_ROOTS } from '@/lib/query-cache-policy';
 import {
   QUERY_CACHE_BUSTER,
@@ -41,6 +45,7 @@ export function AppProviders({ children }: PropsWithChildren) {
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (state) => {
       focusManager.setFocused(state === 'active');
+      if (state === 'active') void flushClientErrorReports();
     });
     return () => subscription.remove();
   }, []);
@@ -60,6 +65,7 @@ export function AppProviders({ children }: PropsWithChildren) {
 
       if (auth.status !== 'offline') {
         onlineManager.setOnline(true);
+        if (auth.status === 'authenticated') void flushClientErrorReports();
         return;
       }
 
@@ -69,9 +75,9 @@ export function AppProviders({ children }: PropsWithChildren) {
       void resumeOfflineSession().finally(() => {
         resuming = false;
         if (!disposed) {
-          onlineManager.setOnline(
-            useAuthStore.getState().status === 'authenticated',
-          );
+          const authenticated = useAuthStore.getState().status === 'authenticated';
+          onlineManager.setOnline(authenticated);
+          if (authenticated) void flushClientErrorReports();
         }
       });
     });
@@ -84,15 +90,27 @@ export function AppProviders({ children }: PropsWithChildren) {
   useEffect(() => {
     const clearCache = () => {
       queryClient.clear();
-      void queryPersister.removeClient();
+      void Promise.all([
+        queryPersister.removeClient(),
+        clearClientErrorReports(),
+      ]);
     };
-    if (useAuthStore.getState().status === 'anonymous') clearCache();
+    const initialStatus = useAuthStore.getState().status;
+    if (initialStatus === 'anonymous') clearCache();
+    if (initialStatus === 'authenticated') void flushClientErrorReports();
 
     return useAuthStore.subscribe((state, previousState) => {
       const accountChanged = state.user?.id !== previousState.user?.id;
       const signedOut =
         state.status === 'anonymous' && previousState.status !== 'anonymous';
-      if ((accountChanged && previousState.user) || signedOut) clearCache();
+      if ((accountChanged && previousState.user) || signedOut) {
+        clearCache();
+      } else if (
+        state.status === 'authenticated' &&
+        previousState.status !== 'authenticated'
+      ) {
+        void flushClientErrorReports();
+      }
     });
   }, [queryClient]);
 

@@ -17,6 +17,8 @@ describe('Privacy page', () => {
       'mailto:postmaster@micutu.com',
     );
     expect(screen.getByText(/retained for at most 14 days/)).toBeVisible();
+    expect(screen.getByText(/Mobile diagnostics:/)).toBeVisible();
+    expect(screen.getByText(/size-limited rotating server logs/)).toBeVisible();
     expect(screen.getByRole('link', { name: 'account deletion page' })).toHaveAttribute(
       'href',
       '/account-deletion',

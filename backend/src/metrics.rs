@@ -16,6 +16,31 @@ struct EmailMetrics {
     send_duration: HistogramVec,
 }
 
+#[derive(Clone)]
+struct ClientErrorMetrics {
+    reports: IntCounterVec,
+}
+
+impl ClientErrorMetrics {
+    fn new() -> Self {
+        let reports = IntCounterVec::new(
+            Opts::new(
+                "client_error_reports_total",
+                "Accepted mobile client error reports",
+            )
+            .namespace("cinetrack"),
+            &["platform", "fatal"],
+        )
+        .expect("Client error report metric must be valid");
+        for platform in ["android", "ios"] {
+            for fatal in ["true", "false"] {
+                reports.with_label_values(&[platform, fatal]);
+            }
+        }
+        Self { reports }
+    }
+}
+
 impl EmailMetrics {
     fn new() -> Self {
         let sends = IntCounterVec::new(
@@ -95,6 +120,7 @@ impl TmdbMetrics {
 
 static TMDB_METRICS: LazyLock<TmdbMetrics> = LazyLock::new(TmdbMetrics::new);
 static EMAIL_METRICS: LazyLock<EmailMetrics> = LazyLock::new(EmailMetrics::new);
+static CLIENT_ERROR_METRICS: LazyLock<ClientErrorMetrics> = LazyLock::new(ClientErrorMetrics::new);
 
 pub fn record_tmdb_request(endpoint: &'static str, outcome: &'static str, duration: Duration) {
     TMDB_METRICS
@@ -128,6 +154,13 @@ pub fn record_email_send_duration(kind: &'static str, duration: Duration) {
         .observe(duration.as_secs_f64());
 }
 
+pub fn record_client_error(platform: &'static str, fatal: bool) {
+    CLIENT_ERROR_METRICS
+        .reports
+        .with_label_values(&[platform, if fatal { "true" } else { "false" }])
+        .inc();
+}
+
 /// Build the Prometheus metrics middleware. It records per-request count and
 /// latency and serves them at `/metrics`. That endpoint lives on the app's own
 /// port and is not proxied by nginx (which only forwards `/api/`), so it stays
@@ -159,6 +192,10 @@ pub fn build() -> PrometheusMetrics {
         .register(Box::new(EMAIL_METRICS.send_duration.clone()))
         .expect("Failed to register email duration metric");
     prometheus
+        .registry
+        .register(Box::new(CLIENT_ERROR_METRICS.reports.clone()))
+        .expect("Failed to register client error report metric");
+    prometheus
 }
 
 #[cfg(test)]
@@ -171,6 +208,7 @@ mod tests {
         record_tmdb_cache("search", "hit");
         record_email_send("password_reset", "smtp_accepted");
         record_email_send_duration("password_reset", Duration::from_millis(20));
+        record_client_error("android", false);
         let prometheus = build();
         let names = prometheus
             .registry
@@ -194,6 +232,9 @@ mod tests {
         assert!(names
             .iter()
             .any(|name| name == "cinetrack_email_send_duration_seconds"));
+        assert!(names
+            .iter()
+            .any(|name| name == "cinetrack_client_error_reports_total"));
     }
 
     #[test]

@@ -1,5 +1,6 @@
 pub mod auth;
 pub mod calendar;
+pub mod client_error;
 pub mod common;
 pub mod import;
 pub mod media;

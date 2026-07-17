@@ -5735,6 +5735,83 @@ async fn test_list_name_too_long_rejected() {
     assert_eq!(resp.status(), 400);
 }
 
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn test_client_error_reports_require_auth_and_validate_payloads() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let payload = json!({
+        "error_name": "TypeError",
+        "message": "Cannot read property",
+        "stack": "TypeError: Cannot read property at App.tsx:10",
+        "component_stack": "at App",
+        "platform": "android",
+        "app_version": "1.1.0",
+        "is_fatal": false,
+        "occurred_at": chrono::Utc::now().to_rfc3339(),
+    });
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/client-errors")
+        .set_json(&payload)
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 401);
+
+    let (token, _, _) = register_user(
+        &app,
+        "crashreporter",
+        "crashreporter@example.com",
+        "Pass1234",
+    )
+    .await;
+    let req = actix_test::TestRequest::post()
+        .uri("/api/client-errors")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .set_json(&payload)
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 202);
+
+    let invalid = json!({
+        "error_name": "   ",
+        "message": "x".repeat(1001),
+        "platform": "desktop",
+        "app_version": "1.0.0?token=secret",
+        "is_fatal": false,
+        "occurred_at": chrono::Utc::now().to_rfc3339(),
+        "unexpected": true,
+    });
+    let req = actix_test::TestRequest::post()
+        .uri("/api/client-errors")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .set_json(invalid)
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 400);
+
+    let stale = json!({
+        "error_name": "Error",
+        "message": "Old report",
+        "platform": "ios",
+        "app_version": "1.1.0",
+        "is_fatal": true,
+        "occurred_at": (chrono::Utc::now() - chrono::Duration::days(8)).to_rfc3339(),
+    });
+    let req = actix_test::TestRequest::post()
+        .uri("/api/client-errors")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .set_json(stale)
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 400);
+}
+
 // ── Observability Tests ───────────────────────────────────────
 
 #[actix_web::test]

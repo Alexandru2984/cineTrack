@@ -32,6 +32,7 @@ export default function PrivacyPage() {
             <li>Social data: follows, follow requests, notifications, and activity visible under the selected privacy setting.</li>
             <li>Preferences and imports: region, language, and TV Time import records supplied by the user.</li>
             <li>Security data: session token hashes, IP address, user agent, request timestamps, and security/audit logs.</li>
+            <li>Mobile diagnostics: sanitized error name, message and stack, app version, platform, time, and whether the failure was fatal. Tokens, email addresses, URL parameters, device identifiers, and advertising identifiers are not included.</li>
           </ul>
         </PolicySection>
 
@@ -66,7 +67,9 @@ export default function PrivacyPage() {
             reviews, social relationships, and notifications. Daily disaster-recovery backups are
             retained for at most 14 days, so deleted records may remain inaccessible in a backup
             until that backup expires. Web access logs are rotated daily and retained for up to 14
-            days. Shared media metadata that is not linked to an account may remain cached.
+            days. Mobile diagnostic reports stay only in size-limited rotating server logs and are
+            not stored in the application database. Shared media metadata that is not linked to an
+            account may remain cached.
           </p>
           <p>
             Use the <Link to="/account-deletion">account deletion page</Link> for the available
