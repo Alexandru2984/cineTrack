@@ -13,6 +13,7 @@ use cinetrack::{
     routes,
     services::catalog_hydration::{hydrate_popular_catalog, HydrationOptions},
     services::email::EmailService,
+    services::push::{dispatch_release_pushes, ExpoPushService},
     services::release_schedule::{sync_tracked_release_schedules, ReleaseScheduleOptions},
     services::tmdb::TmdbService,
     utils::password,
@@ -238,6 +239,23 @@ async fn main() -> std::io::Result<()> {
             summary.invalid,
             summary.skipped_locked,
         );
+        let push_summary = dispatch_release_pushes(&pool, &ExpoPushService::new(&config))
+            .await
+            .map_err(|error| {
+                log::error!("Release notification dispatch failed: {error}");
+                std::io::Error::other("release notification dispatch failed")
+            })?;
+        log::info!(
+            "Release notification dispatch complete: enqueued={} submitted={} delivered={} retried={} failed={} disabled_devices={} pruned={} locked={}",
+            push_summary.enqueued,
+            push_summary.submitted,
+            push_summary.delivered,
+            push_summary.retried,
+            push_summary.failed,
+            push_summary.disabled_devices,
+            push_summary.pruned,
+            push_summary.skipped_locked,
+        );
         if summary.stopped_early {
             return Err(std::io::Error::other(
                 "release schedule sync stopped after a provider failure",
@@ -318,12 +336,14 @@ async fn main() -> std::io::Result<()> {
     // inside route configuration would multiply scoped bursts by worker count.
     let auth_governor_conf = routes::auth::build_rate_limiter();
     let client_error_governor_conf = routes::client_errors::build_rate_limiter();
+    let push_governor_conf = routes::push::build_rate_limiter();
 
     log::info!("Starting server at {}:{}", host, port);
 
     HttpServer::new(move || {
         let auth_governor_conf = auth_governor_conf.clone();
         let client_error_governor_conf = client_error_governor_conf.clone();
+        let push_governor_conf = push_governor_conf.clone();
         // Cap request bodies at the application layer (defense-in-depth: nginx
         // also limits, but this protects direct access and returns a clean 400).
         let json_cfg = web::JsonConfig::default()
@@ -381,6 +401,7 @@ async fn main() -> std::io::Result<()> {
                     cfg,
                     &auth_governor_conf,
                     &client_error_governor_conf,
+                    &push_governor_conf,
                 )
             })
     })

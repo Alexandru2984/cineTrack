@@ -37,6 +37,8 @@ pub struct Config {
     pub smtp_password: Option<String>,
     pub smtp_from: String,
     pub smtp_timeout_seconds: u64,
+    pub expo_push_access_token: Option<String>,
+    pub expo_push_timeout_seconds: u64,
     pub r2: Option<R2Config>,
 }
 
@@ -110,6 +112,18 @@ impl Config {
             &smtp_from,
             is_production,
         );
+        let expo_push_access_token = env::var("EXPO_PUSH_ACCESS_TOKEN")
+            .ok()
+            .filter(|value| !value.trim().is_empty());
+        if let Some(token) = &expo_push_access_token {
+            assert!(
+                token.len() <= 4096
+                    && !token
+                        .bytes()
+                        .any(|byte| byte.is_ascii_control() || byte.is_ascii_whitespace()),
+                "EXPO_PUSH_ACCESS_TOKEN has an invalid shape"
+            );
+        }
 
         Self {
             app_env,
@@ -149,6 +163,8 @@ impl Config {
             smtp_password,
             smtp_from,
             smtp_timeout_seconds: bounded_env("SMTP_TIMEOUT_SECONDS", 15_u64, 1, 60),
+            expo_push_access_token,
+            expo_push_timeout_seconds: bounded_env("EXPO_PUSH_TIMEOUT_SECONDS", 15_u64, 1, 60),
             r2: R2Config::from_env(is_production),
         }
     }

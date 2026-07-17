@@ -8,6 +8,7 @@ pub mod import;
 pub mod lists;
 pub mod media;
 pub mod notifications;
+pub mod push;
 pub mod stats;
 pub mod tracking;
 pub mod users;
@@ -24,6 +25,7 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
             .configure(assets::configure)
             .configure(users::configure)
             .configure(notifications::configure)
+            .configure(push::configure)
             .configure(calendar::configure)
             .configure(client_errors::configure)
             .configure(media::configure)
@@ -39,6 +41,7 @@ pub fn configure_with_rate_limits(
     cfg: &mut web::ServiceConfig,
     auth_rate_limiter: &auth::AuthGovernorConfig,
     client_error_rate_limiter: &client_errors::ClientErrorGovernorConfig,
+    push_rate_limiter: &push::PushGovernorConfig,
 ) {
     cfg.service(
         web::scope("/api")
@@ -47,6 +50,7 @@ pub fn configure_with_rate_limits(
             .configure(assets::configure)
             .configure(users::configure)
             .configure(notifications::configure)
+            .configure(|cfg| push::configure_rate_limited(cfg, push_rate_limiter))
             .configure(calendar::configure)
             .configure(|cfg| client_errors::configure_rate_limited(cfg, client_error_rate_limiter))
             .configure(media::configure)

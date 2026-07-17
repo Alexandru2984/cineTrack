@@ -1368,6 +1368,8 @@ mod tests {
             smtp_password: None,
             smtp_from: "CineTrack <noreply@localhost>".to_string(),
             smtp_timeout_seconds: 15,
+            expo_push_access_token: None,
+            expo_push_timeout_seconds: 15,
             r2: None,
         }
     }

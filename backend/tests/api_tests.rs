@@ -75,6 +75,8 @@ fn test_config() -> cinetrack::config::Config {
         smtp_password: None,
         smtp_from: "CineTrack <noreply@localhost>".into(),
         smtp_timeout_seconds: 15,
+        expo_push_access_token: None,
+        expo_push_timeout_seconds: 15,
         r2: None,
     }
 }
@@ -5810,6 +5812,277 @@ async fn test_client_error_reports_require_auth_and_validate_payloads() {
         .to_request();
     let resp = actix_test::call_service(&app, req).await;
     assert_eq!(resp.status(), 400);
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn test_push_device_registration_and_secret_revocation() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let token = "ExpoPushToken[abcdefghijklmnopqrstuv]";
+    let secret = "ab".repeat(32);
+    let payload = json!({
+        "expo_push_token": token,
+        "unregister_secret": secret,
+        "platform": "android",
+        "app_version": "1.1.0",
+        "utc_offset_minutes": 180,
+    });
+
+    let req = actix_test::TestRequest::put()
+        .uri("/api/push/devices")
+        .set_json(&payload)
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 401);
+
+    let (access_token, _, user_id) =
+        register_user(&app, "pushdevice", "pushdevice@example.com", "Pass1234").await;
+    let req = actix_test::TestRequest::put()
+        .uri("/api/push/devices")
+        .insert_header(("Authorization", format!("Bearer {access_token}")))
+        .set_json(&payload)
+        .peer_addr(peer_addr())
+        .to_request();
+    let response = actix_test::call_service(&app, req).await;
+    assert_eq!(response.status(), 200);
+    let response: Value = actix_test::read_body_json(response).await;
+    assert_eq!(response, json!({ "enabled": true }));
+
+    let stored = sqlx::query_as::<_, (String, String, String, i16)>(
+        "SELECT user_id::text, unregister_secret_hash, platform, utc_offset_minutes
+         FROM push_devices WHERE expo_push_token = $1",
+    )
+    .bind(token)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(stored.0, user_id);
+    assert_eq!(stored.1.len(), 64);
+    assert_ne!(stored.1, secret);
+    assert_eq!(stored.2, "android");
+    assert_eq!(stored.3, 180);
+
+    let push_device_id =
+        sqlx::query_scalar::<_, Uuid>("SELECT id FROM push_devices WHERE expo_push_token = $1")
+            .bind(token)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    sqlx::query(
+        "INSERT INTO release_push_deliveries
+            (push_device_id, event_key, event_kind, title, body, tmdb_id, media_type)
+         VALUES ($1, $2, 'episode', 'Old account show', 'S01E01 is available today', 42, 'tv')",
+    )
+    .bind(push_device_id)
+    .bind(format!("episode:{}", Uuid::new_v4()))
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // A token claimed by another account/installation must not inherit queued content.
+    let (second_access_token, _, second_user_id) =
+        register_user(&app, "pushdevice2", "pushdevice2@example.com", "Pass1234").await;
+    let replacement_secret = "ef".repeat(32);
+    let req = actix_test::TestRequest::put()
+        .uri("/api/push/devices")
+        .insert_header(("Authorization", format!("Bearer {second_access_token}")))
+        .set_json(json!({
+            "expo_push_token": token,
+            "unregister_secret": &replacement_secret,
+            "platform": "android",
+            "app_version": "1.1.0",
+            "utc_offset_minutes": 180,
+        }))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 200);
+    let replacement_owner = sqlx::query_scalar::<_, String>(
+        "SELECT user_id::text FROM push_devices WHERE expo_push_token = $1",
+    )
+    .bind(token)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(replacement_owner, second_user_id);
+    let delivery_count =
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM release_push_deliveries")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(delivery_count, 0);
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/push/devices/revoke")
+        .set_json(json!({
+            "expo_push_token": token,
+            "unregister_secret": &secret,
+        }))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 200);
+    let count = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM push_devices")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(count, 1);
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/push/devices/revoke")
+        .set_json(json!({
+            "expo_push_token": token,
+            "unregister_secret": &replacement_secret,
+        }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let response = actix_test::call_service(&app, req).await;
+    assert_eq!(response.status(), 200);
+    let response: Value = actix_test::read_body_json(response).await;
+    assert_eq!(response, json!({ "enabled": false }));
+    let count = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM push_devices")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(count, 0);
+
+    let invalid = json!({
+        "expo_push_token": "not-a-token",
+        "unregister_secret": "not-a-secret",
+        "platform": "android",
+        "app_version": "1.1.0?bad",
+        "utc_offset_minutes": 900,
+        "unexpected": true,
+    });
+    let req = actix_test::TestRequest::put()
+        .uri("/api/push/devices")
+        .insert_header(("Authorization", format!("Bearer {access_token}")))
+        .set_json(invalid)
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 400);
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn test_release_push_outbox_is_local_personalized_and_idempotent() {
+    use cinetrack::services::push::enqueue_due_release_pushes;
+
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let user_id = sqlx::query_scalar::<_, Uuid>(
+        "INSERT INTO users (username, email)
+         VALUES ('pushoutbox', 'pushoutbox@example.com') RETURNING id",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO push_devices
+            (user_id, expo_push_token, unregister_secret_hash, platform,
+             app_version, utc_offset_minutes, enabled_at)
+         VALUES ($1, 'ExpoPushToken[abcdefghijklmnopqrstuv]', repeat('a', 64),
+                 'android', '1.1.0', 0, NOW() - INTERVAL '1 hour')",
+    )
+    .bind(user_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let show_id = sqlx::query_scalar::<_, Uuid>(
+        "INSERT INTO media (tmdb_id, media_type, title)
+         VALUES (880001, 'tv', 'Push Show') RETURNING id",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let season_id = sqlx::query_scalar::<_, Uuid>(
+        "INSERT INTO seasons (media_id, season_number, name)
+         VALUES ($1, 1, 'Season 1') RETURNING id",
+    )
+    .bind(show_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let due_episode_id = sqlx::query_scalar::<_, Uuid>(
+        "INSERT INTO episodes (season_id, episode_number, name, air_date)
+         VALUES ($1, 1, 'Today', CURRENT_DATE) RETURNING id",
+    )
+    .bind(season_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let watched_episode_id = sqlx::query_scalar::<_, Uuid>(
+        "INSERT INTO episodes (season_id, episode_number, name, air_date)
+         VALUES ($1, 2, 'Already watched', CURRENT_DATE) RETURNING id",
+    )
+    .bind(season_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO user_media (user_id, media_id, status)
+         VALUES ($1, $2, 'watching')",
+    )
+    .bind(user_id)
+    .bind(show_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO watch_history (user_id, media_id, episode_id)
+         VALUES ($1, $2, $3)",
+    )
+    .bind(user_id)
+    .bind(show_id)
+    .bind(watched_episode_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let movie_id = sqlx::query_scalar::<_, Uuid>(
+        "INSERT INTO media (tmdb_id, media_type, title, release_date)
+         VALUES (880002, 'movie', 'Push Movie', CURRENT_DATE + 10) RETURNING id",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO user_media (user_id, media_id, status)
+         VALUES ($1, $2, 'plan_to_watch')",
+    )
+    .bind(user_id)
+    .bind(movie_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO media_release_dates
+            (media_id, country_code, release_type, release_date)
+         VALUES ($1, 'RO', 4, CURRENT_DATE)",
+    )
+    .bind(movie_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    assert_eq!(enqueue_due_release_pushes(&pool).await.unwrap(), 2);
+    assert_eq!(enqueue_due_release_pushes(&pool).await.unwrap(), 0);
+    let deliveries = sqlx::query_as::<_, (String, String, i32, String)>(
+        "SELECT event_kind, event_key, tmdb_id, status
+         FROM release_push_deliveries ORDER BY event_kind",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(deliveries.len(), 2);
+    assert_eq!(deliveries[0].0, "episode");
+    assert_eq!(deliveries[0].1, format!("episode:{due_episode_id}"));
+    assert_eq!(deliveries[0].2, 880001);
+    assert_eq!(deliveries[0].3, "pending");
+    assert_eq!(deliveries[1].0, "movie");
+    assert_eq!(deliveries[1].2, 880002);
+    assert_eq!(deliveries[1].3, "pending");
 }
 
 // ── Observability Tests ───────────────────────────────────────
