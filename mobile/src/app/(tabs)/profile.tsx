@@ -3,6 +3,7 @@ import { router } from 'expo-router';
 import {
   ChevronRight,
   Bell,
+  ChartNoAxesColumnIncreasing,
   Database,
   ExternalLink,
   LogOut,
@@ -83,6 +84,7 @@ export default function ProfileScreen() {
 
         <View style={styles.section}>
           <AppText variant="section">Account</AppText>
+          <View style={[styles.navigationGroup, { borderTopColor: theme.border }]}>
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={`Open notifications${
@@ -116,6 +118,24 @@ export default function ProfileScreen() {
           </Pressable>
           <Pressable
             accessibilityRole="button"
+            accessibilityLabel="Open statistics"
+            onPress={() => router.push('/statistics')}
+            style={({ pressed }) => [
+              styles.navigationRow,
+              {
+                borderColor: theme.border,
+                opacity: pressed ? 0.72 : 1,
+              },
+            ]}
+          >
+            <View style={styles.navigationLabel}>
+              <ChartNoAxesColumnIncreasing color={theme.mutedText} size={20} />
+              <AppText variant="label">Statistics</AppText>
+            </View>
+            <ChevronRight color={theme.mutedText} size={18} />
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
             accessibilityLabel="Open account settings"
             onPress={() => router.push('/settings')}
             style={({ pressed }) => [
@@ -132,6 +152,7 @@ export default function ProfileScreen() {
             </View>
             <ChevronRight color={theme.mutedText} size={18} />
           </Pressable>
+          </View>
         </View>
 
         <View style={styles.section}>
@@ -266,9 +287,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: spacing.md,
-    borderTopWidth: StyleSheet.hairlineWidth,
     borderBottomWidth: StyleSheet.hairlineWidth,
     paddingHorizontal: spacing.xs,
+  },
+  navigationGroup: {
+    borderTopWidth: StyleSheet.hairlineWidth,
   },
   navigationLabel: {
     flex: 1,

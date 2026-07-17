@@ -217,3 +217,19 @@ export interface UserStats {
   current_streak: number;
   longest_streak: number;
 }
+
+export interface HeatmapDay {
+  date: string;
+  count: number;
+}
+
+export interface GenreDistribution {
+  genre: string;
+  count: number;
+}
+
+export interface MonthlyActivity {
+  month: string;
+  hours: number;
+  count: number;
+}
