@@ -61,6 +61,19 @@ impl EmailService {
         Some(builder.build())
     }
 
+    /// Verify TLS negotiation and SMTP authentication without submitting mail.
+    pub async fn check_connection(&self) -> Result<(), String> {
+        let transport = self
+            .transport
+            .as_ref()
+            .ok_or_else(|| "SMTP transport is not configured".to_string())?;
+        match transport.test_connection().await {
+            Ok(true) => Ok(()),
+            Ok(false) => Err("SMTP server did not confirm the connection".to_string()),
+            Err(error) => Err(format!("SMTP connection check failed: {error}")),
+        }
+    }
+
     /// Send a password-reset email. Errors are logged, never propagated, so the
     /// caller can keep its response uniform and avoid leaking whether the address
     /// exists.
@@ -173,5 +186,14 @@ mod tests {
     fn log_only_reset_urls_remain_enabled_outside_production() {
         let service = EmailService::new(&test_config("development"));
         assert!(service.log_reset_urls);
+    }
+
+    #[tokio::test]
+    async fn connection_check_rejects_an_unconfigured_transport() {
+        let service = EmailService::new(&test_config("development"));
+        assert_eq!(
+            service.check_connection().await,
+            Err("SMTP transport is not configured".to_string())
+        );
     }
 }

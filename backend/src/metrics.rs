@@ -35,10 +35,22 @@ impl EmailMetrics {
         )
         .expect("Email duration metric must be valid");
 
-        Self {
+        let metrics = Self {
             sends,
             send_duration,
+        };
+        for outcome in [
+            "smtp_accepted",
+            "smtp_error",
+            "not_configured",
+            "invalid_message",
+        ] {
+            metrics
+                .sends
+                .with_label_values(&["password_reset", outcome]);
         }
+        metrics.send_duration.with_label_values(&["password_reset"]);
+        metrics
     }
 }
 
@@ -180,6 +192,24 @@ mod tests {
             .iter()
             .any(|name| name == "cinetrack_email_send_total"));
         assert!(names
+            .iter()
+            .any(|name| name == "cinetrack_email_send_duration_seconds"));
+    }
+
+    #[test]
+    fn email_metrics_exist_before_the_first_send() {
+        let prometheus = build();
+        let encoded = prometheus
+            .registry
+            .gather()
+            .into_iter()
+            .map(|family| family.get_name().to_string())
+            .collect::<Vec<_>>();
+
+        assert!(encoded
+            .iter()
+            .any(|name| name == "cinetrack_email_send_total"));
+        assert!(encoded
             .iter()
             .any(|name| name == "cinetrack_email_send_duration_seconds"));
     }

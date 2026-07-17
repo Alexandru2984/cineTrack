@@ -30,6 +30,7 @@ enum RunMode {
     SyncReleaseSchedules,
     Migrate,
     CheckConfig,
+    CheckSmtp,
 }
 
 fn bounded_env_u32(name: &str, default: u32, minimum: u32, maximum: u32) -> std::io::Result<u32> {
@@ -109,10 +110,11 @@ async fn main() -> std::io::Result<()> {
         [argument] if argument == "--sync-release-schedules" => RunMode::SyncReleaseSchedules,
         [argument] if argument == "--migrate" => RunMode::Migrate,
         [argument] if argument == "--check-config" => RunMode::CheckConfig,
+        [argument] if argument == "--check-smtp" => RunMode::CheckSmtp,
         _ => {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
-                "supported arguments are --healthcheck, --hydrate-catalog, --sync-release-schedules, --migrate and --check-config",
+                "supported arguments are --healthcheck, --hydrate-catalog, --sync-release-schedules, --migrate, --check-config and --check-smtp",
             ));
         }
     };
@@ -134,6 +136,14 @@ async fn main() -> std::io::Result<()> {
     let config = config::Config::from_env();
     if matches!(mode, RunMode::CheckConfig) {
         log::info!("Application configuration is valid");
+        return Ok(());
+    }
+    if matches!(mode, RunMode::CheckSmtp) {
+        EmailService::new(&config)
+            .check_connection()
+            .await
+            .map_err(std::io::Error::other)?;
+        log::info!("SMTP TLS and authentication check succeeded");
         return Ok(());
     }
     password::initialize().await.map_err(|error| {

@@ -166,6 +166,7 @@ docker compose -f docker-compose.prod.yml --env-file .env.prod up -d db
 ./scripts/provision_db_role.sh .env.prod
 docker compose -f docker-compose.prod.yml --env-file .env.prod build backend frontend
 docker compose -f docker-compose.prod.yml --env-file .env.prod run --rm --no-deps backend /usr/local/bin/cinetrack --check-config
+docker compose -f docker-compose.prod.yml --env-file .env.prod run --rm --no-deps backend /usr/local/bin/cinetrack --check-smtp
 docker compose --profile ops -f docker-compose.prod.yml --env-file .env.prod run --rm migrate
 docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
 ```
