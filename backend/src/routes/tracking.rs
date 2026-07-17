@@ -304,14 +304,18 @@ async fn update_tracking(
     }
 
     let entering_completed = current.status != "completed" && effective_status == "completed";
+    let rating_supplied = data.rating.is_some();
+    let rating = data.rating.flatten();
+    let review_supplied = data.review.is_some();
+    let review = data.review.flatten();
     let updated = sqlx::query_as::<_, crate::models::UserMedia>(
         r#"UPDATE user_media SET
             status = $3,
-            rating = COALESCE($4, rating),
-            review = COALESCE($5, review),
-            is_favorite = COALESCE($6, is_favorite),
-            started_at = $7,
-            completed_at = $8,
+            rating = CASE WHEN $4 THEN $5 ELSE rating END,
+            review = CASE WHEN $6 THEN $7 ELSE review END,
+            is_favorite = COALESCE($8, is_favorite),
+            started_at = $9,
+            completed_at = $10,
             updated_at = NOW()
         WHERE id = $1 AND user_id = $2
         RETURNING *"#,
@@ -319,8 +323,10 @@ async fn update_tracking(
     .bind(tracking_id)
     .bind(user_id)
     .bind(&effective_status)
-    .bind(data.rating)
-    .bind(&data.review)
+    .bind(rating_supplied)
+    .bind(rating)
+    .bind(review_supplied)
+    .bind(&review)
     .bind(data.is_favorite)
     .bind(effective_started_at)
     .bind(effective_completed_at)

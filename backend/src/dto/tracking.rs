@@ -1,6 +1,6 @@
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use uuid::Uuid;
-use validator::Validate;
+use validator::{Validate, ValidationError, ValidationErrors};
 
 pub const VALID_MEDIA_TYPES: &[&str] = &["movie", "tv"];
 pub const VALID_TRACKING_STATUSES: &[&str] = &[
@@ -58,18 +58,61 @@ pub struct CreateTrackingRequest {
     pub status: String,
 }
 
-#[derive(Debug, Deserialize, Validate)]
+fn deserialize_nullable_patch<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(deserializer).map(Some)
+}
+
+#[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct UpdateTrackingRequest {
-    #[validate(custom(function = "validate_tracking_status"))]
     pub status: Option<String>,
-    #[validate(range(min = 1, max = 10, message = "Rating must be between 1 and 10"))]
-    pub rating: Option<i16>,
-    #[validate(length(max = 5000, message = "Review must be at most 5000 characters"))]
-    pub review: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_nullable_patch")]
+    pub rating: Option<Option<i16>>,
+    #[serde(default, deserialize_with = "deserialize_nullable_patch")]
+    pub review: Option<Option<String>>,
     pub is_favorite: Option<bool>,
     pub started_at: Option<chrono::NaiveDate>,
     pub completed_at: Option<chrono::NaiveDate>,
+}
+
+impl UpdateTrackingRequest {
+    pub fn validate(&self) -> Result<(), ValidationErrors> {
+        let mut errors = ValidationErrors::new();
+
+        if let Some(status) = self.status.as_deref() {
+            if let Err(error) = validate_tracking_status(status) {
+                errors.add("status", error);
+            }
+        }
+        if self
+            .rating
+            .is_some_and(|rating| rating.is_some_and(|value| !(1..=10).contains(&value)))
+        {
+            let mut error = ValidationError::new("range");
+            error.message = Some("Rating must be between 1 and 10".into());
+            errors.add("rating", error);
+        }
+        if self
+            .review
+            .as_ref()
+            .and_then(|review| review.as_ref())
+            .is_some_and(|review| review.chars().count() > 5000)
+        {
+            let mut error = ValidationError::new("length");
+            error.message = Some("Review must be at most 5000 characters".into());
+            errors.add("review", error);
+        }
+
+        if errors.errors().is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, Validate)]
@@ -228,7 +271,7 @@ mod tests {
         let req = UpdateTrackingRequest {
             status: None,
             rating: None,
-            review: Some("x".repeat(5001)),
+            review: Some(Some("x".repeat(5001))),
             is_favorite: None,
             started_at: None,
             completed_at: None,
@@ -241,7 +284,7 @@ mod tests {
         let req = UpdateTrackingRequest {
             status: None,
             rating: None,
-            review: Some("x".repeat(5000)),
+            review: Some(Some("x".repeat(5000))),
             is_favorite: None,
             started_at: None,
             completed_at: None,
@@ -253,8 +296,8 @@ mod tests {
     fn test_update_tracking_with_valid_fields() {
         let req = UpdateTrackingRequest {
             status: Some("completed".to_string()),
-            rating: Some(8),
-            review: Some("Great movie!".to_string()),
+            rating: Some(Some(8)),
+            review: Some(Some("Great movie!".to_string())),
             is_favorite: Some(true),
             started_at: None,
             completed_at: None,
@@ -293,6 +336,49 @@ mod tests {
             completed_at: None,
         };
         assert!(req.validate().is_err());
+    }
+
+    #[test]
+    fn update_tracking_distinguishes_omitted_null_and_present_feedback() {
+        let omitted = serde_json::from_value::<UpdateTrackingRequest>(serde_json::json!({}))
+            .expect("omitted feedback should deserialize");
+        assert_eq!(omitted.rating, None);
+        assert_eq!(omitted.review, None);
+
+        let cleared = serde_json::from_value::<UpdateTrackingRequest>(serde_json::json!({
+            "rating": null,
+            "review": null
+        }))
+        .expect("nullable feedback should deserialize");
+        assert_eq!(cleared.rating, Some(None));
+        assert_eq!(cleared.review, Some(None));
+
+        let present = serde_json::from_value::<UpdateTrackingRequest>(serde_json::json!({
+            "rating": 10,
+            "review": "Excellent"
+        }))
+        .expect("present feedback should deserialize");
+        assert_eq!(present.rating, Some(Some(10)));
+        assert_eq!(
+            present.review.as_ref().and_then(|review| review.as_deref()),
+            Some("Excellent")
+        );
+        assert!(present.validate().is_ok());
+    }
+
+    #[test]
+    fn update_tracking_rejects_out_of_range_rating() {
+        for rating in [0, 11] {
+            let req = UpdateTrackingRequest {
+                status: None,
+                rating: Some(Some(rating)),
+                review: None,
+                is_favorite: None,
+                started_at: None,
+                completed_at: None,
+            };
+            assert!(req.validate().is_err());
+        }
     }
 
     #[test]

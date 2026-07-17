@@ -1314,6 +1314,45 @@ async fn test_tracking_status_transitions_only_record_completions() {
     let tracking_id = body["id"].as_str().unwrap().to_string();
     assert!(body["completed_at"].is_null());
 
+    let req = actix_test::TestRequest::patch()
+        .uri(&format!("/api/tracking/{tracking_id}"))
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .set_json(json!({ "rating": 9, "review": "Very good" }))
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let body: Value = actix_test::read_body_json(resp).await;
+    assert_eq!(body["rating"], 9);
+    assert_eq!(body["review"], "Very good");
+
+    let req = actix_test::TestRequest::patch()
+        .uri(&format!("/api/tracking/{tracking_id}"))
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .set_json(json!({ "is_favorite": true }))
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let body: Value = actix_test::read_body_json(resp).await;
+    assert_eq!(body["rating"], 9, "omitted rating must be preserved");
+    assert_eq!(
+        body["review"], "Very good",
+        "omitted review must be preserved"
+    );
+
+    let req = actix_test::TestRequest::patch()
+        .uri(&format!("/api/tracking/{tracking_id}"))
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .set_json(json!({ "rating": null, "review": null }))
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let body: Value = actix_test::read_body_json(resp).await;
+    assert!(body["rating"].is_null());
+    assert!(body["review"].is_null());
+
     let history_count = sqlx::query_scalar::<_, i64>(
         "SELECT COUNT(*) FROM watch_history WHERE user_id = $1 AND media_id = $2",
     )
