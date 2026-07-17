@@ -44,10 +44,13 @@ npx eas-cli build --profile production --platform all
 ```
 
 The latest audited Android preview build is recorded on
-[EAS Build](https://expo.dev/accounts/micu984/projects/vazute/builds/dda72b0d-2fdf-4e50-b760-a84a47c16949).
-It was built from `f19130c` and includes the permission hardening, but predates
-the current session, tracking lookup, account deletion, and privacy changes.
-Create a new preview build before distributing another APK.
+[EAS Build](https://expo.dev/accounts/micu984/projects/vazute/builds/35737b10-2c3a-47c8-b7f7-d79dc5181a01).
+It is Android `versionCode` 3 with runtime `1.0.0`, built from `9952eb4`, and
+includes the current native permission, secure session, account deletion,
+Android App Link, and EAS Update configuration. The tested preview OTA group
+`f5a472a9-35ff-4112-804a-a182bdba4bb6` was published from `f4e5eeb` and adds
+the mobile rating/review editor, all tracking statuses, notification inbox,
+badges, and complete statistics.
 
 ## OTA updates
 
@@ -57,8 +60,8 @@ and asset changes that are compatible with the native modules already present
 in that runtime:
 
 ```bash
-npx eas-cli update --channel preview --message "Describe the tested change"
-npx eas-cli update --channel production --message "Describe the tested change"
+npx eas-cli update --channel preview --environment preview --platform android --message "Describe the tested change"
+npx eas-cli update --channel production --environment production --platform all --message "Describe the tested change"
 ```
 
 Adding or updating a native module, changing permissions, or changing native
