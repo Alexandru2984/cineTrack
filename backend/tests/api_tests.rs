@@ -77,6 +77,7 @@ fn test_config() -> cinetrack::config::Config {
         smtp_timeout_seconds: 15,
         expo_push_access_token: None,
         expo_push_timeout_seconds: 15,
+        breached_password_check: false,
         r2: None,
     }
 }
@@ -109,6 +110,8 @@ fn create_app_with_config(
 > {
     let tmdb_service = cinetrack::services::tmdb::TmdbService::new(&config);
     let email_service = cinetrack::services::email::EmailService::new(&config);
+    // Disabled outside production, so it never contacts the breach API in tests.
+    let breach_checker = cinetrack::services::password_breach::BreachChecker::new(&config);
 
     // No rate limiter in tests — actix-governor needs real peer_addr from TCP.
     // request_id + metrics mirror the production middleware stack.
@@ -121,6 +124,7 @@ fn create_app_with_config(
         .app_data(web::Data::new(config))
         .app_data(web::Data::new(tmdb_service))
         .app_data(web::Data::new(email_service))
+        .app_data(web::Data::new(breach_checker))
         .app_data(web::Data::new(
             None::<cinetrack::services::storage::StorageService>,
         ))

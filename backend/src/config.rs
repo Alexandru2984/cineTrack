@@ -39,6 +39,10 @@ pub struct Config {
     pub smtp_timeout_seconds: u64,
     pub expo_push_access_token: Option<String>,
     pub expo_push_timeout_seconds: u64,
+    /// Reject passwords found in the Have I Been Pwned breach corpus (k-anonymity).
+    /// Defaults on in production, off in development/test so offline runs and the
+    /// integration suite are not tied to a third-party lookup.
+    pub breached_password_check: bool,
     pub r2: Option<R2Config>,
 }
 
@@ -165,6 +169,7 @@ impl Config {
             smtp_timeout_seconds: bounded_env("SMTP_TIMEOUT_SECONDS", 15_u64, 1, 60),
             expo_push_access_token,
             expo_push_timeout_seconds: bounded_env("EXPO_PUSH_TIMEOUT_SECONDS", 15_u64, 1, 60),
+            breached_password_check: bool_env("BREACHED_PASSWORD_CHECK", is_production),
             r2: R2Config::from_env(is_production),
         }
     }
@@ -302,6 +307,17 @@ where
         "{name} must be between {minimum} and {maximum}"
     );
     value
+}
+
+fn bool_env(name: &str, default: bool) -> bool {
+    match env::var(name) {
+        Ok(value) => match value.trim().to_ascii_lowercase().as_str() {
+            "true" | "1" | "yes" | "on" => true,
+            "false" | "0" | "no" | "off" => false,
+            _ => panic!("{name} must be a boolean (true/false)"),
+        },
+        Err(_) => default,
+    }
 }
 
 fn jwt_expiry_minutes() -> i64 {

@@ -1370,6 +1370,7 @@ mod tests {
             smtp_timeout_seconds: 15,
             expo_push_access_token: None,
             expo_push_timeout_seconds: 15,
+            breached_password_check: false,
             r2: None,
         }
     }

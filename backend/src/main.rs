@@ -13,6 +13,7 @@ use cinetrack::{
     routes,
     services::catalog_hydration::{hydrate_popular_catalog, HydrationOptions},
     services::email::EmailService,
+    services::password_breach::BreachChecker,
     services::push::{dispatch_release_pushes, ExpoPushService},
     services::release_schedule::{sync_tracked_release_schedules, ReleaseScheduleOptions},
     services::tmdb::TmdbService,
@@ -299,6 +300,10 @@ async fn main() -> std::io::Result<()> {
 
     let tmdb_service = TmdbService::new(&config);
     let email_service = EmailService::new(&config);
+    let breach_checker = BreachChecker::new(&config);
+    if breach_checker.is_enabled() {
+        log::info!("Breached-password check enabled (HIBP k-anonymity)");
+    }
 
     // Object storage (Cloudflare R2). Optional — features degrade if unset.
     let storage_service = match &config.r2 {
@@ -395,6 +400,7 @@ async fn main() -> std::io::Result<()> {
             .app_data(web::Data::new(config.clone()))
             .app_data(web::Data::new(tmdb_service.clone()))
             .app_data(web::Data::new(email_service.clone()))
+            .app_data(web::Data::new(breach_checker.clone()))
             .app_data(web::Data::new(storage_service.clone()))
             .configure(move |cfg| {
                 routes::configure_with_rate_limits(

@@ -922,6 +922,7 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
+ "sha1 0.10.6",
  "sha2",
  "sqlx",
  "thiserror 2.0.18",

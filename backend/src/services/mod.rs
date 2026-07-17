@@ -6,6 +6,7 @@ pub mod email;
 pub mod importer;
 pub mod media_cache;
 pub mod notifications;
+pub mod password_breach;
 pub mod push;
 pub mod quota;
 pub mod release_schedule;

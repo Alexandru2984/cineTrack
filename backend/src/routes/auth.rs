@@ -15,6 +15,7 @@ use crate::middleware::auth::require_auth;
 use crate::middleware::rate_limit::TrustedProxyIpKeyExtractor;
 use crate::services;
 use crate::services::email::EmailService;
+use crate::services::password_breach::BreachChecker;
 
 const REFRESH_COOKIE_NAME: &str = "cinetrack_refresh";
 const REFRESH_COOKIE_PATH: &str = "/api/auth";
@@ -61,10 +62,12 @@ pub fn configure_rate_limited(cfg: &mut web::ServiceConfig, rate_limiter: &AuthG
 async fn register(
     pool: web::Data<PgPool>,
     config: web::Data<Config>,
+    breach: web::Data<BreachChecker>,
     req: HttpRequest,
     body: web::Json<RegisterRequest>,
 ) -> Result<HttpResponse, AppError> {
     body.validate()?;
+    breach.ensure_not_breached(&body.password).await?;
     let client = client_info(&req);
     let (resp, refresh_token) =
         services::auth::register(pool.get_ref(), config.get_ref(), &client, body.into_inner())
@@ -92,10 +95,12 @@ async fn login(
 async fn mobile_register(
     pool: web::Data<PgPool>,
     config: web::Data<Config>,
+    breach: web::Data<BreachChecker>,
     req: HttpRequest,
     body: web::Json<RegisterRequest>,
 ) -> Result<HttpResponse, AppError> {
     body.validate()?;
+    breach.ensure_not_breached(&body.password).await?;
     let client = client_info(&req);
     let (resp, refresh_token) =
         services::auth::register(pool.get_ref(), config.get_ref(), &client, body.into_inner())
@@ -209,11 +214,13 @@ async fn me(pool: web::Data<PgPool>, req: HttpRequest) -> Result<HttpResponse, A
 async fn change_password(
     pool: web::Data<PgPool>,
     config: web::Data<Config>,
+    breach: web::Data<BreachChecker>,
     req: HttpRequest,
     body: web::Json<ChangePasswordRequest>,
 ) -> Result<HttpResponse, AppError> {
     let user_id = require_auth(&req).await?;
     body.validate()?;
+    breach.ensure_not_breached(&body.new_password).await?;
     let data = body.into_inner();
     services::auth::change_password(
         pool.get_ref(),
@@ -253,9 +260,11 @@ async fn forgot_password(
 async fn reset_password(
     pool: web::Data<PgPool>,
     config: web::Data<Config>,
+    breach: web::Data<BreachChecker>,
     body: web::Json<ResetPasswordRequest>,
 ) -> Result<HttpResponse, AppError> {
     body.validate()?;
+    breach.ensure_not_breached(&body.new_password).await?;
     let data = body.into_inner();
     services::auth::reset_password(pool.get_ref(), &data.token, &data.new_password).await?;
 
@@ -419,6 +428,7 @@ mod tests {
             smtp_timeout_seconds: 15,
             expo_push_access_token: None,
             expo_push_timeout_seconds: 15,
+            breached_password_check: false,
             r2: None,
         }
     }
