@@ -9,6 +9,7 @@ import {
   LogOut,
   Settings,
   ShieldCheck,
+  Users,
 } from 'lucide-react-native';
 import { useState } from 'react';
 import {
@@ -85,6 +86,24 @@ export default function ProfileScreen() {
         <View style={styles.section}>
           <AppText variant="section">Account</AppText>
           <View style={[styles.navigationGroup, { borderTopColor: theme.border }]}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Open social"
+            onPress={() => router.push('/social')}
+            style={({ pressed }) => [
+              styles.navigationRow,
+              {
+                borderColor: theme.border,
+                opacity: pressed ? 0.72 : 1,
+              },
+            ]}
+          >
+            <View style={styles.navigationLabel}>
+              <Users color={theme.mutedText} size={20} />
+              <AppText variant="label">Social</AppText>
+            </View>
+            <ChevronRight color={theme.mutedText} size={18} />
+          </Pressable>
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={`Open notifications${

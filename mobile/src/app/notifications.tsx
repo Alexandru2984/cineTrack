@@ -1,5 +1,5 @@
 import { Image } from 'expo-image';
-import { Redirect } from 'expo-router';
+import { Redirect, router } from 'expo-router';
 import { Bell, CheckCheck, UserRound } from 'lucide-react-native';
 import { useState } from 'react';
 import {
@@ -139,13 +139,16 @@ export default function NotificationsScreen() {
           const unread = item.read_at === null;
           return (
             <Pressable
-              accessibilityRole={unread ? 'button' : undefined}
+              accessibilityRole="button"
               accessibilityLabel={`${item.actor_username} ${notificationAction(item.kind)}${
                 unread ? ', unread' : ''
               }`}
-              disabled={!unread}
               onPress={() => {
                 if (unread) markRead.mutate(item.id);
+                router.push({
+                  pathname: '/people/[username]',
+                  params: { username: item.actor_username },
+                });
               }}
               style={({ pressed }) => [
                 styles.row,

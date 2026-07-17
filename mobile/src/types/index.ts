@@ -145,6 +145,68 @@ export interface NotificationListResponse {
   has_more: boolean;
 }
 
+export type FollowStatus = 'pending' | 'accepted' | null;
+
+export interface PublicUserProfile {
+  id: string;
+  username: string;
+  avatar_url: string | null;
+  bio: string | null;
+  is_public: boolean;
+  followers_count: number;
+  following_count: number;
+  is_following: boolean;
+  follow_status: FollowStatus;
+  can_view_activity: boolean;
+  created_at: string;
+}
+
+export interface UserSearchResult {
+  id: string;
+  username: string;
+  avatar_url: string | null;
+  bio: string | null;
+  is_public: boolean;
+  followers_count: number;
+  follow_status: FollowStatus;
+}
+
+export interface UserSearchResponse {
+  results: UserSearchResult[];
+  page: number;
+  has_more: boolean;
+}
+
+export interface UserSummary {
+  id: string;
+  username: string;
+  avatar_url: string | null;
+  bio: string | null;
+}
+
+export interface FollowRequest {
+  user_id: string;
+  username: string;
+  avatar_url: string | null;
+  requested_at: string;
+}
+
+export interface ActivityItem {
+  id: string;
+  user_id: string;
+  username: string;
+  avatar_url: string | null;
+  action: string;
+  tmdb_id: number;
+  media_title: string;
+  media_type: MediaType;
+  poster_path: string | null;
+  episode_name: string | null;
+  season_number: number | null;
+  episode_number: number | null;
+  timestamp: string;
+}
+
 export interface CalendarEpisode {
   episode_id: string;
   media_id: string;
