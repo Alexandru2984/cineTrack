@@ -32,7 +32,7 @@ A personal movie and TV show tracker with social features, inspired by TV Time. 
 - **Rust** + **Actix-Web 4** — High-performance async web framework
 - **SQLx** — Async PostgreSQL driver with compile-time checked queries
 - **PostgreSQL 16** — Primary database
-- **JWT** — Authentication with short-lived access tokens (1h) + refresh token rotation
+- **JWT** — Authentication with short-lived access tokens (15 min) + refresh token rotation
 - **Argon2id** — Password hashing
 - **actix-governor** — Rate limiting (global + auth-specific)
 - **actix-multipart** — Streaming file uploads (imports, avatars)
@@ -67,7 +67,7 @@ A personal movie and TV show tracker with social features, inspired by TV Time. 
 
 The application has been through multiple security audits. Key measures include:
 
-- **Authentication** — Short-lived JWT access tokens (1h) with SHA-256 hashed refresh tokens, automatic rotation, and per-user token cap (max 5 sessions)
+- **Authentication** — Short-lived JWT access tokens (15 min) with SHA-256 hashed refresh tokens, automatic rotation, and per-user token cap (max 5 sessions)
 - **Rate Limiting** — Global rate limiter (10 req/s, burst 50) + stricter auth-specific limiter (3 req/s, burst 10) to prevent brute-force
 - **Password Policy** — Minimum 8 characters, must contain at least one letter and one digit, rejects all-same-character passwords
 - **Input Validation** — All user inputs validated with length limits (bio 500, review 5000, list names 200, etc.) and content validation
@@ -214,16 +214,16 @@ Native simulator/device builds require Android Studio or Xcode. See
 
 ### Testing
 
-The project has **336 passing unit & integration tests** plus **24 Playwright E2E tests** across backend unit, frontend unit, PostgreSQL integration, and three browser suites. The native client additionally has lint, strict TypeScript, Expo Doctor, dependency-audit, prebuild, and Android-export gates. One credential-gated R2 test is ignored by default:
+The project has **386 passing unit & integration tests** (201 backend unit + 88 PostgreSQL integration + 97 frontend) plus **24 Playwright E2E tests** across three browser suites, and **53 mobile tests**. The native client additionally has lint, strict TypeScript, Expo Doctor, dependency-audit, prebuild, and Android-export gates. One credential-gated R2 test is ignored by default:
 
 ```bash
-# Backend unit tests (177 passing) — no external dependencies
+# Backend unit tests (201 passing) — no external dependencies
 cd backend && cargo test --lib
 
-# Frontend tests (81 passing) — Vitest + jsdom
+# Frontend tests (97 passing) — Vitest + jsdom
 cd frontend && npm test -- --run
 
-# Backend integration tests (78 passing) — needs a test DB
+# Backend integration tests (88 passing) — needs a test DB
 docker compose -p cinetrack-test -f docker-compose.test.yml up -d --wait
 cd backend && TEST_DATABASE_URL="postgres://test_user:test_pass@127.0.0.1:55433/cinetrack_test" \
   cargo test --test api_tests -- --ignored --test-threads=1
@@ -328,6 +328,9 @@ All endpoints except auth (register/login/refresh) require a valid JWT access to
 | **History** | Log watched episodes/movies, show season progress, mark a season watched, or backfill through an episode |
 | **Stats** | Heatmap data, watch time, streaks, genre distribution |
 | **Users** | Public profiles, follow/unfollow, activity feed |
+| **Notifications** | In-app inbox and unread badge counts |
+| **Push** | Opt-in native release alerts: device registration and per-installation revocation (Expo Push) |
+| **Diagnostics** | Authenticated, self-hosted mobile crash reports (redacted, rate-limited) |
 | **Lists** | Custom user-created lists (public/private) |
 | **Import** | Start a TV Time import (`POST /import/tvtime`, multipart); poll job status |
 | **Avatars** | Upload / remove profile picture (`POST`/`DELETE /users/me/avatar`) |
