@@ -8,7 +8,7 @@ x-logging: &default-logging
 
 services:
   db:
-    image: postgres:16-alpine@sha256:e013e867e712fec275706a6c51c966f0bb0c93cfa8f51000f85a15f9865a28cb
+    image: postgres:18-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15
     security_opt:
       - no-new-privileges:true
     pids_limit: 256
