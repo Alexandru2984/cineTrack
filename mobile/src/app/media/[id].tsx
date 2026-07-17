@@ -50,13 +50,14 @@ import type {
   TrackingStatus,
 } from '@/types';
 
-type PrimaryTrackingStatus = 'watching' | 'plan_to_watch' | 'completed';
 const MAX_TMDB_ID = 2_147_483_647;
 
 const statusOptions = [
   { value: 'watching', label: 'Watching' },
   { value: 'plan_to_watch', label: 'Plan to watch' },
   { value: 'completed', label: 'Completed' },
+  { value: 'on_hold', label: 'On hold' },
+  { value: 'dropped', label: 'Dropped' },
 ] as const;
 
 function localDateKey() {
@@ -89,7 +90,7 @@ export default function MediaDetailScreen() {
   const [feedbackItem, setFeedbackItem] = useState<TrackingItem | null>(null);
   const [statusSelection, setStatusSelection] = useState<{
     mediaKey: string;
-    status: PrimaryTrackingStatus;
+    status: TrackingStatus;
   } | null>(null);
   const [seasonSelection, setSeasonSelection] = useState<{
     mediaId: string;
@@ -104,11 +105,7 @@ export default function MediaDetailScreen() {
   const selectedStatus =
     statusSelection?.mediaKey === mediaKey
       ? statusSelection.status
-      : existingStatus === 'watching' ||
-          existingStatus === 'plan_to_watch' ||
-          existingStatus === 'completed'
-        ? existingStatus
-        : null;
+      : existingStatus ?? null;
   const availableSeasons = seasons.data ?? [];
   const requestedSeason =
     seasonSelection && seasonSelection.mediaId === id
@@ -169,7 +166,7 @@ export default function MediaDetailScreen() {
   const item = media.data;
   const runtime = formatRuntime(item.runtime_minutes);
 
-  const changeStatus = (status: PrimaryTrackingStatus) => {
+  const changeStatus = (status: TrackingStatus) => {
     setStatusSelection({ mediaKey, status });
     createTracking.mutate(
       { tmdb_id: item.tmdb_id, media_type: type, status },
@@ -323,7 +320,7 @@ export default function MediaDetailScreen() {
           />
           {selectedStatus ? (
             <AppText variant="caption" muted>
-              Current status: {trackingStatusLabels[selectedStatus as TrackingStatus]}
+              Current status: {trackingStatusLabels[selectedStatus]}
             </AppText>
           ) : null}
         </View>
