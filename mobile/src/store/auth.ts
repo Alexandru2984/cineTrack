@@ -11,6 +11,7 @@ interface AuthState {
   beginSessionRestore: () => void;
   failSessionRestore: () => void;
   setSession: (accessToken: string, user: User) => void;
+  setUser: (user: User) => void;
   clearSession: () => void;
 }
 
@@ -26,6 +27,9 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
   setSession: (accessToken, user) => {
     set({ status: 'authenticated', accessToken, user });
+  },
+  setUser: (user) => {
+    set({ user });
   },
   clearSession: () => {
     set({ status: 'anonymous', accessToken: null, user: null });

@@ -9,6 +9,7 @@ import { apiRequest } from '@/lib/api';
 import { withQuery } from '@/lib/http';
 import type {
   CalendarEpisodePage,
+  CalendarPreferences,
   CalendarSummary,
   CalendarWatchResponse,
   EpisodeCursor,
@@ -28,6 +29,7 @@ export function localDateKey(date = new Date()) {
 
 export const calendarKeys = {
   all: ['calendar'] as const,
+  preferences: ['calendar', 'preferences'] as const,
   summary: (today: string) => ['calendar', 'summary', today] as const,
   upNext: (today: string, limit: number) => ['calendar', 'up-next', today, limit] as const,
   new: (today: string, includeSpecials: boolean) =>
@@ -35,6 +37,29 @@ export const calendarKeys = {
   upcoming: (today: string, type: string, includeSpecials: boolean) =>
     ['calendar', 'upcoming', today, type, includeSpecials] as const,
 };
+
+export function useCalendarPreferences(enabled = true) {
+  return useQuery({
+    queryKey: calendarKeys.preferences,
+    queryFn: () => apiRequest<CalendarPreferences>('/calendar/preferences'),
+    enabled,
+  });
+}
+
+export function useUpdateCalendarPreferences() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (countryCode: string) =>
+      apiRequest<CalendarPreferences>('/calendar/preferences', {
+        method: 'PUT',
+        body: { country_code: countryCode },
+      }),
+    onSuccess: (preferences) => {
+      queryClient.setQueryData(calendarKeys.preferences, preferences);
+      return queryClient.invalidateQueries({ queryKey: calendarKeys.all });
+    },
+  });
+}
 
 export function useCalendarSummary() {
   const today = localDateKey();

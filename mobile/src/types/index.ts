@@ -16,6 +16,15 @@ export interface User {
   created_at: string;
 }
 
+export interface AccountSession {
+  id: string;
+  user_agent: string | null;
+  ip_address: string | null;
+  created_at: string;
+  last_used_at: string | null;
+  current: boolean;
+}
+
 export interface MobileAuthResponse {
   access_token: string;
   refresh_token: string;
@@ -200,6 +209,10 @@ export interface CalendarSummary {
   new_count: number;
   planned_count: number;
   last_synced_at: string | null;
+}
+
+export interface CalendarPreferences {
+  country_code: string;
 }
 
 export interface CalendarWatchResponse {
