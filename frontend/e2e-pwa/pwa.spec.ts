@@ -29,6 +29,24 @@ test('ships an installable manifest with adaptive icons', async ({ page, request
   );
 });
 
+test('publishes the Android app-link association', async ({ request }) => {
+  const response = await request.get('/.well-known/assetlinks.json');
+  expect(response.ok()).toBe(true);
+  expect(response.headers()['content-type']).toContain('application/json');
+  expect(await response.json()).toEqual([
+    {
+      relation: ['delegate_permission/common.handle_all_urls'],
+      target: {
+        namespace: 'android_app',
+        package_name: 'com.micutu.vazute',
+        sha256_cert_fingerprints: [
+          '25:24:D5:B1:54:25:45:1E:00:1C:6B:8E:65:A4:F5:19:58:E5:B0:A3:4C:A5:35:0A:41:58:BD:7A:10:63:60:0F',
+        ],
+      },
+    },
+  ]);
+});
+
 test('registers the service worker and launches its shell offline', async ({
   context,
   page,

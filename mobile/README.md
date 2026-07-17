@@ -64,3 +64,17 @@ npx eas-cli update --channel production --message "Describe the tested change"
 Adding or updating a native module, changing permissions, or changing native
 configuration still requires a new EAS Build. Test on `preview` before
 publishing the same commit to `production`.
+
+## Password-reset links
+
+Android App Links are enabled for
+`https://vazute.micutu.com/reset-password`. The domain association contains the
+SHA-256 fingerprint of the EAS Android keystore, and the reset token stays in
+the URL fragment so it is not sent in HTTP requests. After Google Play App
+Signing is enabled, add the Play signing certificate fingerprint to
+`frontend/public/.well-known/assetlinks.json` alongside the EAS fingerprint.
+
+The custom `vazute` scheme remains available for local testing. iOS universal
+links require the Apple Developer Team ID and an Apple App Site Association
+file; until those credentials exist, the HTTPS reset link intentionally opens
+the web reset flow on iOS.

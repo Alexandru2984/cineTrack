@@ -78,9 +78,9 @@ impl EmailService {
     /// caller can keep its response uniform and avoid leaking whether the address
     /// exists.
     pub async fn send_password_reset(&self, to: &str, reset_url: &str) {
-        let subject = "Reset your CineTrack password";
+        let subject = "Reset your Văzute password";
         let body = format!(
-            "We received a request to reset your CineTrack password.\n\n\
+            "We received a request to reset your Văzute password.\n\n\
              Open this link to choose a new password (valid for 1 hour):\n{reset_url}\n\n\
              If you didn't request this, you can safely ignore this email."
         );

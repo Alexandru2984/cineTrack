@@ -1,0 +1,14 @@
+[
+  {
+    "relation": [
+      "delegate_permission/common.handle_all_urls"
+    ],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.micutu.vazute",
+      "sha256_cert_fingerprints": [
+        "25:24:D5:B1:54:25:45:1E:00:1C:6B:8E:65:A4:F5:19:58:E5:B0:A3:4C:A5:35:0A:41:58:BD:7A:10:63:60:0F"
+      ]
+    }
+  }
+]
