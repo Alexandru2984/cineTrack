@@ -5,6 +5,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { ApiError } from '@/lib/http';
+import { useAuthStore } from '@/store/auth';
 
 export function AppProviders({ children }: PropsWithChildren) {
   const [queryClient] = useState(
@@ -27,6 +28,15 @@ export function AppProviders({ children }: PropsWithChildren) {
     });
     return () => subscription.remove();
   }, []);
+
+  useEffect(() => {
+    if (useAuthStore.getState().status === 'anonymous') queryClient.clear();
+
+    return useAuthStore.subscribe((state, previousState) => {
+      const accountChanged = state.user?.id !== previousState.user?.id;
+      if (accountChanged && previousState.user) queryClient.clear();
+    });
+  }, [queryClient]);
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>

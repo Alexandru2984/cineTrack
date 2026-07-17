@@ -1,8 +1,11 @@
 import Constants from 'expo-constants';
+import { router } from 'expo-router';
 import {
+  ChevronRight,
   Database,
   ExternalLink,
   LogOut,
+  Settings,
   ShieldCheck,
 } from 'lucide-react-native';
 import { useState } from 'react';
@@ -73,6 +76,28 @@ export default function ProfileScreen() {
             <ProfileStat label="Hours" value={Math.round(stats.data.total_hours)} />
           </View>
         ) : null}
+
+        <View style={styles.section}>
+          <AppText variant="section">Account</AppText>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Open account settings"
+            onPress={() => router.push('/settings')}
+            style={({ pressed }) => [
+              styles.navigationRow,
+              {
+                borderColor: theme.border,
+                opacity: pressed ? 0.72 : 1,
+              },
+            ]}
+          >
+            <View style={styles.navigationLabel}>
+              <Settings color={theme.mutedText} size={20} />
+              <AppText variant="label">Account settings</AppText>
+            </View>
+            <ChevronRight color={theme.mutedText} size={18} />
+          </Pressable>
+        </View>
 
         <View style={styles.section}>
           <View style={styles.sectionTitle}>
@@ -196,6 +221,23 @@ const styles = StyleSheet.create({
     gap: spacing.md,
   },
   sectionTitle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  navigationRow: {
+    minHeight: 52,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.md,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: spacing.xs,
+  },
+  navigationLabel: {
+    flex: 1,
+    minWidth: 0,
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,

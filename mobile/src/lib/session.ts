@@ -33,7 +33,7 @@ function isRejectedRefresh(error: unknown) {
   return error instanceof ApiError && error.status === 401;
 }
 
-async function discardSession() {
+export async function clearLocalSession() {
   await removeRefreshToken().catch(() => undefined);
   useAuthStore.getState().clearSession();
 }
@@ -82,7 +82,7 @@ export async function hydrateSession() {
     await acceptSession(payload);
   } catch (error) {
     if (isRejectedRefresh(error)) {
-      await discardSession();
+      await clearLocalSession();
     } else {
       useAuthStore.getState().failSessionRestore();
     }
@@ -104,7 +104,7 @@ export function refreshSession(): Promise<string> {
       return acceptSession(payload);
     })()
       .catch(async (error) => {
-        if (isRejectedRefresh(error)) await discardSession();
+        if (isRejectedRefresh(error)) await clearLocalSession();
         throw error;
       })
       .finally(() => {
@@ -135,7 +135,6 @@ export async function logoutSession() {
   try {
     if (refreshToken) await revokeToken(refreshToken);
   } finally {
-    await removeRefreshToken().catch(() => undefined);
-    useAuthStore.getState().clearSession();
+    await clearLocalSession();
   }
 }
