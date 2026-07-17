@@ -1,6 +1,6 @@
 # CineTrack Security Audit
 
-Date: 2026-07-16 (earlier rounds 2026-06-13 through 2026-07-14)
+Date: 2026-07-17 (earlier rounds 2026-06-13 through 2026-07-16)
 
 ## Summary
 
@@ -134,6 +134,19 @@ In the third round we reviewed the repo directly on the VPS/prod host and closed
 - The 112,128,240-byte APK has SHA-256 `379d23fe19678e7778f93205ca984d89bf52c13476ab2a17fee2a100aac00b04`. ZIP validation found no corruption; `apksigner` verified APK Signature Scheme v2 with one RSA-2048 signer whose certificate SHA-256 is `2524d5b15425451e001c6b8e65a4f51958e5b0a34ca5350a4158bd7a1063600f`. The artifact contains the production HTTPS API origin, SecureStore backup exclusions, no credential-like filenames, and no secret-scanner findings.
 - Final-manifest inspection found unused `USE_BIOMETRIC` and deprecated `USE_FINGERPRINT` permissions inherited through AndroidX. The app never enables SecureStore `requireAuthentication`, so both permissions are now blocked in commit `76ca89d`; CNG verification generated the expected `tools:node="remove"` entries. The first signed artifact predates this fix and must be superseded before release.
 
+## Changes applied (2026-07-17)
+
+- The Gmail delivery failure was traced to a persistent PDF Editor Grafana alert, not CineTrack or a compromised mailbox. Prometheus sent each replica's container IP as the HTTP host, Django rejected every `/metrics` scrape, and Grafana repeated the resulting alert. The scrape path now rewrites the host only for direct requests from the explicit monitoring CIDR; both replicas remain `up=1` without weakening public `ALLOWED_HOSTS`.
+- Grafana SMTP now requires STARTTLS. Its invalid SLO annotation templates use the supported `humanizePercentage` helper, and the primary dashboard no longer collides with the alert folder name. All 13 rules evaluate with `health=ok`, the dashboard provisions cleanly, and no notification has been submitted since the final resolution message at 01:20 UTC.
+- Production now refuses missing, partial, malformed, unauthenticated, or local-domain SMTP configuration. SMTP transactions have a configurable 1-60 second timeout and continue to use certificate-validated implicit TLS on port 465 or mandatory STARTTLS on every other port.
+- Added `--check-smtp`, which verifies TLS negotiation and SMTP authentication without submitting a message. It succeeded against the production Mailcow service; the Postfix session contained `STARTTLS`, authentication, `NOOP`, and `QUIT`, with no sender, recipient, queue entry, or external delivery.
+- Password-reset email outcomes and SMTP duration are exposed as bounded Prometheus series without recipient addresses. Every known outcome is initialized to zero so monitoring can distinguish a healthy idle service from a missing metric.
+- Password-reset issuance is atomic and limited to one active token per account. Requests inside a 10-minute cooldown preserve the existing token and return the same public response; concurrent requests cannot create multiple tokens. Consumed or expired tokens can be replaced immediately.
+- The production migration deduplicates any legacy reset rows before replacing the user index with a unique index. Production contained zero reset rows before migration, migration `20240202000000` succeeded, and the unique index was verified in PostgreSQL.
+- Validation covered 190 passing backend unit tests (one credential-gated R2 test ignored), all 80 PostgreSQL integration tests, Clippy with warnings denied, production config and SMTP checks, and a Trivy 0.72.0 scan with zero HIGH/CRITICAL findings in the final backend image.
+- Deployment was bracketed by verified R2 snapshots `cinetrack_20260717_013134.sql.gz` and `cinetrack_20260717_013730.sql.gz`. Backend moved from image `758a5a5a9fdf` to `21a1072b2db7`; PostgreSQL and the frontend were not recreated. The backend remains healthy, non-root, read-only, capability-free, and protected by `no-new-privileges`.
+- A 24-hour Mailcow authentication review found 20 failed attempts spread across 10 external IPs and no successful SMTP submission from an unrecognized external source. Mailcow netfilter observed the failures; each source remained below its configured 10-attempt/10-minute ban threshold.
+
 ## Residual risks
 
 - Calendar freshness depends on the scheduled worker and TMDB availability. The default 200-title run budget is intentionally bounded; monitor `release_schedule_sync_state` age/outcomes and the worker exit code before raising it.
@@ -149,13 +162,15 @@ In the third round we reviewed the repo directly on the VPS/prod host and closed
 
 - The asset proxy and enabled poster cache make the backend a serving path for images. A dedicated `R2_PUBLIC_BASE_URL`/CDN would remove that bandwidth from the API while keeping the bucket private to writes.
 - The R2 keys in `.env.prod` are long-lived; rotate them periodically and scope the token's permissions to just the `vazute` bucket.
-- Access tokens stay stateless until they expire. The default lifetime is 1h; `logout-all` and a password change revoke the refresh tokens, but an already-issued access token stays valid until it expires. Instant revocation would require token versioning or a denylist.
-- The refresh cookie uses `SameSite=Lax`. That's fine for a same-site deploy, but if the frontend and API end up on entirely different sites it will need `SameSite=None; Secure` plus explicit CSRF protection.
+- Access tokens stay stateless until they expire. The default lifetime is 15 minutes; `logout-all` and a password change revoke the refresh tokens, but an already-issued access token stays valid until it expires. Instant revocation would require token versioning or a denylist.
+- The refresh cookie uses `SameSite=Strict`. If the frontend and API move to different sites, it will need `SameSite=None; Secure` plus explicit CSRF protection.
 - `current` for sessions is determined from the refresh cookie; a client that calls without the cookie (with only an access token) sees all sessions as non-current, but this is not a security issue.
 - `/metrics` has no authentication; its protection is that it isn't proxied by Nginx, so it depends on the deploy network's isolation. If the backend port becomes directly reachable, the endpoint must be restricted.
 - `cargo audit` reports `RUSTSEC-2023-0071` via `sqlx-mysql` metadata in the lockfile, even though the build uses only the `postgres` feature. CI ignores it explicitly; revisit when `sqlx` resolves the lockfile.
 - `cargo audit` also reports transitive `spin` 0.9.8/0.10.0 releases as yanked (through Prometheus/SQLx metadata and AWS S3 dependencies). They have no RustSec advisory, but should be replaced when their upstream crates update.
 - The SMTP mailbox uses a long-lived credential stored in the git-ignored `.env.prod` file. Keep the file at mode `0600`, rotate the mailbox password periodically, and recreate the backend atomically after each rotation.
+- Direct delivery from the VPS IP is currently rejected by Gmail as likely unsolicited mail despite aligned SPF, DKIM, DMARC, forward DNS, and reverse DNS. Do not resume repeated Gmail tests; complete Google Postmaster verification, establish a reputable transactional SMTP relay, and then perform one controlled test after a quiet period.
+- CineTrack exposes its metrics only on the loopback-bound backend port, but neither Prometheus instance on this host currently scrapes that target. The metrics are safe from public access, but retention, dashboards, and alerts remain pending a deliberate shared-monitoring design.
 - Browser E2E tests now exist at three levels: mocked (auth, mobile navigation, discovery/social UI, Up Next, error boundary, and episode backfill confirmation), production-build PWA (manifest, service worker, API-cache exclusion, offline launch), and real-stack (HttpOnly cookie, refresh rotation, private follows, sessions, account deletion, reset with token). Lists and general tracking edits remain covered only below the browser layer.
 - The secrets in `.env.prod` must be rotated if they were shown in a terminal, logs, or an audit transcript. In particular, avoid `docker compose config` without `--no-env-resolution` on machines or sessions that can persist the output.
 
@@ -167,6 +182,8 @@ In the third round we reviewed the repo directly on the VPS/prod host and closed
 - Produce a fresh Android internal EAS build from `76ca89d` or later plus the first iOS internal build, test each on at least one current and one older device class, then add Maestro or Detox coverage for login/rotation, Calendar pagination, watched-through confirmation, and logout.
 - Add native push notifications for planned and newly released episodes only after token registration, consent, delivery retries, and account/device revocation are designed.
 - Extend observability: propagate the request-id into the audit/error lines too (it currently appears only in the access log), and wire up alerts on `security: refresh token reuse` plus dashboards over the Prometheus metrics.
+- Add CineTrack to a centrally managed Prometheus target and alert on SMTP errors, refresh-token reuse, stale schedule synchronization, and elevated 5xx rates. Use a notification channel that does not depend on the same failing transport it monitors.
+- After Google Postmaster verification, configure a transactional relay through the existing `SMTP_*` contract, run `--check-smtp`, wait through the sender-reputation quiet period, and send one real Gmail test. Tighten DMARC only after aggregate reports confirm every legitimate sender is aligned.
 - Decide on the privacy policy for follower/following counts on private profiles; right now bio/avatar and activity are hidden, but the counters are not.
 - Run the gitleaks/CodeQL report periodically and treat Dependabot PRs as part of maintenance.
 - Rotate the JWT secret, the DB password, and the TMDB key after audit sessions where the values were accidentally shown. The DB password rotation must be done atomically: `ALTER USER`, update `.env.prod`, then recreate/restart the backend.
