@@ -277,7 +277,7 @@ impl TmdbService {
         result
     }
 
-    fn provider_cache_key(endpoint: &str, parts: &[&str]) -> String {
+    pub fn provider_cache_key(endpoint: &str, parts: &[&str]) -> String {
         let mut digest = Sha256::new();
         digest.update(b"tmdb\0");
         digest.update(endpoint.as_bytes());
@@ -736,6 +736,69 @@ impl TmdbService {
                 .get(format!("{}/movie/{}/release_dates", self.base_url, tmdb_id)),
         );
         self.send_api("movie_release_dates", request).await
+    }
+
+    /// Fetch a title's streaming availability (TMDB `watch/providers`, data by
+    /// JustWatch). The whole multi-region payload is cached for 24h (stale up to
+    /// 72h) since availability changes slowly; on a fetch failure a stale copy is
+    /// served rather than erroring.
+    pub async fn get_watch_providers(
+        &self,
+        pool: &PgPool,
+        media_type: &str,
+        tmdb_id: i32,
+    ) -> Result<TmdbWatchProvidersResponse, AppError> {
+        if !matches!(media_type, "movie" | "tv") {
+            return Err(AppError::BadRequest("Invalid media type".to_string()));
+        }
+        if tmdb_id <= 0 {
+            return Err(AppError::BadRequest("Invalid TMDB ID".to_string()));
+        }
+
+        let cache_key =
+            Self::provider_cache_key("watch_providers", &[media_type, &tmdb_id.to_string()]);
+        let cached =
+            Self::load_provider_response::<TmdbWatchProvidersResponse>(pool, &cache_key)
+                .await
+                .ok()
+                .flatten();
+        if let Some(cached) = &cached {
+            if cached.expires_at >= Utc::now() {
+                return Ok(cached.value.clone());
+            }
+        }
+
+        let request = self.authed(self.client.get(format!(
+            "{}/{}/{}/watch/providers",
+            self.base_url, media_type, tmdb_id
+        )));
+        match self
+            .send_api::<TmdbWatchProvidersResponse>("watch_providers", request)
+            .await
+        {
+            Ok(response) => {
+                if let Err(error) = Self::store_provider_response(
+                    pool,
+                    &cache_key,
+                    "watch/providers",
+                    &response,
+                    chrono::Duration::hours(24),
+                    chrono::Duration::hours(72),
+                )
+                .await
+                {
+                    log::warn!("watch providers cache store failed: {error}");
+                }
+                Ok(response)
+            }
+            Err(error) => match cached {
+                Some(cached) => {
+                    log::warn!("watch providers fetch failed, serving stale cache: {error}");
+                    Ok(cached.value)
+                }
+                None => Err(error),
+            },
+        }
     }
 
     /// Map an external id (TVDB/IMDB) to TMDB via `/find`. `source` is e.g.

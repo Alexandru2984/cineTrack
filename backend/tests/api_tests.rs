@@ -2489,6 +2489,78 @@ async fn test_media_search_requires_auth() {
 
 #[actix_web::test]
 #[ignore = "requires test DB"]
+async fn test_watch_providers_require_auth_and_serve_from_cache() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+
+    // Unauthenticated access is rejected before any upstream call.
+    let req = actix_test::TestRequest::get()
+        .uri("/api/media/603/watch-providers?type=movie&region=RO")
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 401);
+
+    let (token, _, _) = register_user(&app, "wpuser", "wp@example.com", "Pass1234").await;
+
+    // Seed a fresh cache entry so the handler never contacts TMDB in tests.
+    let payload = json!({
+        "results": {
+            "RO": {
+                "link": "https://www.themoviedb.org/movie/603/watch",
+                "flatrate": [
+                    {"provider_id": 8, "provider_name": "Netflix", "logo_path": "/nf.jpg", "display_priority": 1}
+                ],
+                "rent": [
+                    {"provider_id": 3, "provider_name": "Apple TV", "logo_path": "/apple.jpg", "display_priority": 0}
+                ]
+            }
+        }
+    });
+    let cache_key = cinetrack::services::tmdb::TmdbService::provider_cache_key(
+        "watch_providers",
+        &["movie", "603"],
+    );
+    sqlx::query(
+        "INSERT INTO provider_response_cache
+            (provider, cache_key, endpoint, payload, fetched_at, expires_at, stale_until)
+         VALUES ('tmdb', $1, 'watch/providers', $2, NOW(), NOW() + INTERVAL '1 hour', NOW() + INTERVAL '3 hours')",
+    )
+    .bind(&cache_key)
+    .bind(&payload)
+    .execute(&pool)
+    .await
+    .expect("seed watch providers cache");
+
+    let req = actix_test::TestRequest::get()
+        .uri("/api/media/603/watch-providers?type=movie&region=RO")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let body: Value = actix_test::read_body_json(resp).await;
+    assert_eq!(body["region"], "RO");
+    assert_eq!(body["stream"][0]["name"], "Netflix");
+    assert_eq!(body["rent"][0]["name"], "Apple TV");
+    assert!(body["buy"].as_array().unwrap().is_empty());
+
+    // An unknown region yields empty buckets, not an error.
+    let req = actix_test::TestRequest::get()
+        .uri("/api/media/603/watch-providers?type=movie&region=JP")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let body: Value = actix_test::read_body_json(resp).await;
+    assert_eq!(body["region"], "JP");
+    assert!(body["stream"].as_array().unwrap().is_empty());
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
 async fn test_media_search_uses_fresh_and_stale_provider_cache() {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 

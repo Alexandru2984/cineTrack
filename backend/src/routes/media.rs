@@ -17,6 +17,7 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
             .route("/search", web::get().to(search))
             .route("/discovery", web::get().to(discovery))
             .route("/{id}", web::get().to(get_detail))
+            .route("/{id}/watch-providers", web::get().to(get_watch_providers))
             .route("/{id}/seasons", web::get().to(get_seasons))
             .route(
                 "/{id}/seasons/{season_number}/episodes",
@@ -214,6 +215,67 @@ async fn get_detail(
     // Keep the existing response contract for numeric detail URLs.
     response.id = tmdb_id.to_string();
     Ok(HttpResponse::Ok().json(response))
+}
+
+fn normalize_region(raw: &str) -> Result<String, AppError> {
+    let region = raw.trim().to_ascii_uppercase();
+    if region.len() == 2 && region.bytes().all(|byte| byte.is_ascii_uppercase()) {
+        Ok(region)
+    } else {
+        Err(AppError::BadRequest(
+            "region must be a two-letter ISO code".to_string(),
+        ))
+    }
+}
+
+async fn get_watch_providers(
+    pool: web::Data<PgPool>,
+    tmdb: web::Data<TmdbService>,
+    req: HttpRequest,
+    path: web::Path<String>,
+    query: web::Query<WatchProvidersQuery>,
+) -> Result<HttpResponse, AppError> {
+    let user_id = require_auth(&req).await?;
+    let id_str = path.into_inner();
+
+    // Resolve the TMDB id + media type: a UUID names a local row; otherwise the
+    // path is a numeric TMDB id and the type comes from the query (default movie).
+    let (tmdb_id, media_type) = if let Ok(uuid) = id_str.parse::<Uuid>() {
+        let media = sqlx::query_as::<_, Media>("SELECT * FROM media WHERE id = $1")
+            .bind(uuid)
+            .fetch_optional(pool.get_ref())
+            .await?
+            .ok_or_else(|| AppError::NotFound("Media not found".to_string()))?;
+        (media.tmdb_id, media.media_type)
+    } else {
+        let tmdb_id = parse_tmdb_id(&id_str)?;
+        let media_type = query.media_type.as_deref().unwrap_or("movie");
+        if !matches!(media_type, "movie" | "tv") {
+            return Err(AppError::BadRequest("Invalid media type".to_string()));
+        }
+        (tmdb_id, media_type.to_string())
+    };
+
+    // Region: an explicit query wins, else the user's saved calendar country
+    // (default RO), so availability matches where they watch.
+    let region = match query.region.as_deref() {
+        Some(raw) => normalize_region(raw)?,
+        None => sqlx::query_scalar::<_, String>(
+            "SELECT COALESCE(
+                (SELECT country_code FROM user_calendar_preferences WHERE user_id = $1),
+                'RO'
+            )",
+        )
+        .bind(user_id)
+        .fetch_one(pool.get_ref())
+        .await?,
+    };
+
+    let providers = tmdb
+        .get_watch_providers(pool.get_ref(), &media_type, tmdb_id)
+        .await?;
+    let region_data = providers.results.get(&region).cloned().unwrap_or_default();
+    Ok(HttpResponse::Ok().json(region_data.into_response(region)))
 }
 
 async fn get_seasons(

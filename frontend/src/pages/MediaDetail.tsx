@@ -11,6 +11,7 @@ import {
 } from '@/hooks/useTracking';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
 import { AddToListDialog } from '@/components/AddToListDialog';
+import { WatchProviders } from '@/components/WatchProviders';
 import { getPosterUrl, getBackdropUrl, formatDate, formatRuntime } from '@/lib/utils';
 import { getApiErrorMessage } from '@/lib/api';
 import {
@@ -277,6 +278,9 @@ export default function MediaDetail() {
             )}
           </div>
         </div>
+
+        {/* Where to watch (JustWatch via TMDB) */}
+        <WatchProviders tmdbId={media.tmdb_id} mediaType={media.media_type || type} />
 
         {/* Seasons */}
         {type === 'tv' && seasons.length > 0 && (

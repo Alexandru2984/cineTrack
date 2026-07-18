@@ -27,6 +27,11 @@ export function getBackdropUrl(path: string | null | undefined, size = 'w1280'):
   return tmdbImage(path, size);
 }
 
+export function getLogoUrl(path: string | null | undefined, size = 'w92'): string {
+  if (!path) return '';
+  return tmdbImage(path, size);
+}
+
 export function formatDate(date: string | null | undefined): string {
   if (!date) return 'N/A';
   return new Date(date).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });

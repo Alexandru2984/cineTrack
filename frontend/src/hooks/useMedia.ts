@@ -6,6 +6,7 @@ import type {
   Media,
   Season,
   TmdbSearchResponse,
+  WatchProviders,
 } from '@/types';
 
 function preferredLanguage() {
@@ -48,6 +49,20 @@ export function useMediaDetail(id: string, type: string) {
       return res.data;
     },
     enabled: !!id,
+  });
+}
+
+export function useWatchProviders(id: string, type: string, region?: string) {
+  return useQuery<WatchProviders>({
+    queryKey: ['watch-providers', id, type, region ?? 'default'],
+    queryFn: async () => {
+      const params: Record<string, string> = { type };
+      if (region) params.region = region;
+      const res = await api.get(`/media/${id}/watch-providers`, { params });
+      return res.data;
+    },
+    enabled: !!id,
+    staleTime: 60 * 60 * 1000,
   });
 }
 
