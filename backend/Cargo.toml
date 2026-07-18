@@ -33,7 +33,7 @@ lettre = { version = "0.11", default-features = false, features = ["builder", "s
 actix-web-prom = "0.9"
 prometheus = { version = "0.13", default-features = false }
 aws-sdk-s3 = { version = "=1.124.0", default-features = false, features = ["behavior-version-latest", "default-https-client", "http-1x", "rt-tokio"] }
-aws-smithy-types = "=1.4.5"
+aws-smithy-types = "=1.6.1"
 
 [dev-dependencies]
 actix-http = "3"
