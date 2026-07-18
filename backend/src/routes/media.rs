@@ -260,15 +260,17 @@ async fn get_watch_providers(
     // (default RO), so availability matches where they watch.
     let region = match query.region.as_deref() {
         Some(raw) => normalize_region(raw)?,
-        None => sqlx::query_scalar::<_, String>(
-            "SELECT COALESCE(
+        None => {
+            sqlx::query_scalar::<_, String>(
+                "SELECT COALESCE(
                 (SELECT country_code FROM user_calendar_preferences WHERE user_id = $1),
                 'RO'
             )",
-        )
-        .bind(user_id)
-        .fetch_one(pool.get_ref())
-        .await?,
+            )
+            .bind(user_id)
+            .fetch_one(pool.get_ref())
+            .await?
+        }
     };
 
     let providers = tmdb

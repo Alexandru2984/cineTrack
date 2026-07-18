@@ -66,7 +66,11 @@ fn hotp(secret: &[u8], counter: u64, digits: u32) -> u32 {
 /// The current 6-digit code for a secret at a given unix time, zero-padded.
 pub fn code_at(secret: &[u8], unix_time: u64) -> String {
     let counter = unix_time / PERIOD_SECONDS;
-    format!("{:0width$}", hotp(secret, counter, DIGITS), width = DIGITS as usize)
+    format!(
+        "{:0width$}",
+        hotp(secret, counter, DIGITS),
+        width = DIGITS as usize
+    )
 }
 
 /// Verify a submitted code against the current step and the adjacent steps.
@@ -92,11 +96,7 @@ pub fn verify(secret: &[u8], code: &str, unix_time: u64) -> bool {
 
 /// Build the `otpauth://totp/...` provisioning URI an authenticator scans.
 pub fn otpauth_uri(issuer: &str, account: &str, secret: &[u8]) -> String {
-    let label = format!(
-        "{}:{}",
-        percent_encode(issuer),
-        percent_encode(account)
-    );
+    let label = format!("{}:{}", percent_encode(issuer), percent_encode(account));
     format!(
         "otpauth://totp/{label}?secret={}&issuer={}&algorithm=SHA1&digits={DIGITS}&period={PERIOD_SECONDS}",
         base32_encode(secret),
@@ -155,7 +155,10 @@ mod tests {
     #[test]
     fn base32_encodes_known_ascii_secret() {
         // Base32 of "12345678901234567890" per RFC 4648.
-        assert_eq!(base32_encode(RFC_SECRET), "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ");
+        assert_eq!(
+            base32_encode(RFC_SECRET),
+            "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"
+        );
     }
 
     #[test]
@@ -165,10 +168,22 @@ mod tests {
         let code = code_at(&secret, now);
         assert!(verify(&secret, &code, now));
         // One step earlier/later still validates via the skew window.
-        assert!(verify(&secret, &code_at(&secret, now - PERIOD_SECONDS), now));
-        assert!(verify(&secret, &code_at(&secret, now + PERIOD_SECONDS), now));
+        assert!(verify(
+            &secret,
+            &code_at(&secret, now - PERIOD_SECONDS),
+            now
+        ));
+        assert!(verify(
+            &secret,
+            &code_at(&secret, now + PERIOD_SECONDS),
+            now
+        ));
         // Two steps away must not.
-        assert!(!verify(&secret, &code_at(&secret, now + 2 * PERIOD_SECONDS), now));
+        assert!(!verify(
+            &secret,
+            &code_at(&secret, now + 2 * PERIOD_SECONDS),
+            now
+        ));
     }
 
     #[test]

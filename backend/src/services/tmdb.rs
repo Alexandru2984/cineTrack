@@ -757,11 +757,10 @@ impl TmdbService {
 
         let cache_key =
             Self::provider_cache_key("watch_providers", &[media_type, &tmdb_id.to_string()]);
-        let cached =
-            Self::load_provider_response::<TmdbWatchProvidersResponse>(pool, &cache_key)
-                .await
-                .ok()
-                .flatten();
+        let cached = Self::load_provider_response::<TmdbWatchProvidersResponse>(pool, &cache_key)
+            .await
+            .ok()
+            .flatten();
         if let Some(cached) = &cached {
             if cached.expires_at >= Utc::now() {
                 return Ok(cached.value.clone());

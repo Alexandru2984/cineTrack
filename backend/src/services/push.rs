@@ -450,13 +450,8 @@ async fn process_receipts(
                 .await?;
             summary.disabled_devices += 1;
         } else if error_code == "MessageRateExceeded" {
-            let failed = schedule_retry(
-                pool,
-                delivery.id,
-                delivery.attempt_count,
-                error_code,
-            )
-            .await?;
+            let failed =
+                schedule_retry(pool, delivery.id, delivery.attempt_count, error_code).await?;
             if failed {
                 summary.failed += 1;
             } else {
@@ -556,13 +551,9 @@ async fn submit_pending(
                 .await?;
                 summary.disabled_devices += 1;
             } else if error_code == "MessageRateExceeded" || ticket.status == "ok" {
-                let failed = schedule_retry(
-                    pool,
-                    delivery.id,
-                    delivery.attempt_count + 1,
-                    error_code,
-                )
-                .await?;
+                let failed =
+                    schedule_retry(pool, delivery.id, delivery.attempt_count + 1, error_code)
+                        .await?;
                 if failed {
                     summary.failed += 1;
                 } else {

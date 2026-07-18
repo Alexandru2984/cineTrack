@@ -873,7 +873,9 @@ async fn fetch_email_verified(
     let resp = actix_test::call_service(app, req).await;
     assert_eq!(resp.status(), 200);
     let body: Value = actix_test::read_body_json(resp).await;
-    body["email_verified"].as_bool().expect("email_verified flag")
+    body["email_verified"]
+        .as_bool()
+        .expect("email_verified flag")
 }
 
 #[actix_web::test]
@@ -883,8 +885,7 @@ async fn test_email_verification_flow() {
     clean_db(&pool).await;
     let app = actix_test::init_service(create_app(pool.clone())).await;
 
-    let (access, _, _) =
-        register_user(&app, "verifyme", "verify@example.com", "Pass1234").await;
+    let (access, _, _) = register_user(&app, "verifyme", "verify@example.com", "Pass1234").await;
 
     // A new account starts unverified and has a pending token row.
     assert!(!fetch_email_verified(&app, &access).await);
@@ -958,12 +959,11 @@ async fn test_email_verification_rejects_bad_token() {
 // ── Two-Factor (TOTP) Tests ───────────────────────────────────
 
 async fn totp_secret_bytes(pool: &PgPool, email: &str) -> Vec<u8> {
-    let secret_hex: String =
-        sqlx::query_scalar("SELECT totp_secret FROM users WHERE email = $1")
-            .bind(email)
-            .fetch_one(pool)
-            .await
-            .expect("totp secret present after setup");
+    let secret_hex: String = sqlx::query_scalar("SELECT totp_secret FROM users WHERE email = $1")
+        .bind(email)
+        .fetch_one(pool)
+        .await
+        .expect("totp secret present after setup");
     hex::decode(secret_hex).expect("stored secret is valid hex")
 }
 
@@ -1037,7 +1037,10 @@ async fn test_two_factor_enable_login_and_recovery() {
     let resp = actix_test::call_service(&app, req).await;
     assert_eq!(resp.status(), 200);
     let body: Value = actix_test::read_body_json(resp).await;
-    assert!(body["otpauth_uri"].as_str().unwrap().starts_with("otpauth://totp/"));
+    assert!(body["otpauth_uri"]
+        .as_str()
+        .unwrap()
+        .starts_with("otpauth://totp/"));
     assert!(body["secret"].as_str().unwrap().len() >= 16);
 
     let secret = totp_secret_bytes(&pool, "mfa@example.com").await;
@@ -1077,8 +1080,11 @@ async fn test_two_factor_enable_login_and_recovery() {
     assert_eq!(resp.status(), 409);
 
     // Password alone no longer logs in: the challenge flag appears.
-    let (status, body) =
-        login_json(&app, json!({ "email": "mfa@example.com", "password": "Pass1234" })).await;
+    let (status, body) = login_json(
+        &app,
+        json!({ "email": "mfa@example.com", "password": "Pass1234" }),
+    )
+    .await;
     assert_eq!(status, 401);
     assert_eq!(body["two_factor_required"], true);
 
@@ -1127,8 +1133,11 @@ async fn test_two_factor_enable_login_and_recovery() {
     let resp = actix_test::call_service(&app, req).await;
     assert_eq!(resp.status(), 200);
 
-    let (status, _) =
-        login_json(&app, json!({ "email": "mfa@example.com", "password": "Pass1234" })).await;
+    let (status, _) = login_json(
+        &app,
+        json!({ "email": "mfa@example.com", "password": "Pass1234" }),
+    )
+    .await;
     assert_eq!(status, 200);
 }
 

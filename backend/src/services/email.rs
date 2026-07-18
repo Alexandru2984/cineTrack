@@ -110,7 +110,9 @@ impl EmailService {
             if self.log_reset_urls {
                 log::info!("[email:log-only] to={to} subject={subject:?} link={link}");
             } else {
-                log::warn!("SMTP unavailable; {kind} email was not sent and its link was not logged");
+                log::warn!(
+                    "SMTP unavailable; {kind} email was not sent and its link was not logged"
+                );
             }
             return;
         };

@@ -136,12 +136,18 @@ mod tests {
     fn absent_suffix_is_not_breached() {
         let body = "0018A45C4D1DEF81644B54AB7F969B88D65:1\r\n\
                     003D68EB55068C33ACE09247EE4C639306B:0";
-        assert_eq!(breach_count(body, "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF"), None);
+        assert_eq!(
+            breach_count(body, "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF"),
+            None
+        );
     }
 
     #[test]
     fn padding_row_reports_zero_count() {
         let body = "1E4C9B93F3F0682250B6CF8331B7EE68FD8:0";
-        assert_eq!(breach_count(body, "1E4C9B93F3F0682250B6CF8331B7EE68FD8"), Some(0));
+        assert_eq!(
+            breach_count(body, "1E4C9B93F3F0682250B6CF8331B7EE68FD8"),
+            Some(0)
+        );
     }
 }

@@ -111,7 +111,12 @@ pub async fn login(
     // Second factor: only revealed after the password is confirmed, so it never
     // discloses whether an address has 2FA before credentials are correct.
     if user.totp_enabled {
-        match req.totp_code.as_deref().map(str::trim).filter(|c| !c.is_empty()) {
+        match req
+            .totp_code
+            .as_deref()
+            .map(str::trim)
+            .filter(|c| !c.is_empty())
+        {
             None => return Err(AppError::TwoFactorRequired),
             Some(code) => {
                 if !verify_second_factor(pool, &user, code).await? {
@@ -668,13 +673,11 @@ pub async fn enable_two_factor(
         .execute(&mut *tx)
         .await?;
     for code in &codes {
-        sqlx::query(
-            "INSERT INTO two_factor_recovery_codes (user_id, code_hash) VALUES ($1, $2)",
-        )
-        .bind(user_id)
-        .bind(jwt::hash_refresh_token(code))
-        .execute(&mut *tx)
-        .await?;
+        sqlx::query("INSERT INTO two_factor_recovery_codes (user_id, code_hash) VALUES ($1, $2)")
+            .bind(user_id)
+            .bind(jwt::hash_refresh_token(code))
+            .execute(&mut *tx)
+            .await?;
     }
     tx.commit().await?;
 
@@ -730,7 +733,13 @@ fn generate_recovery_code() -> String {
     let mut bytes = [0u8; 8];
     rand::rngs::OsRng.fill_bytes(&mut bytes);
     let hex = hex::encode(bytes);
-    format!("{}-{}-{}-{}", &hex[0..4], &hex[4..8], &hex[8..12], &hex[12..16])
+    format!(
+        "{}-{}-{}-{}",
+        &hex[0..4],
+        &hex[4..8],
+        &hex[8..12],
+        &hex[12..16]
+    )
 }
 
 pub async fn get_current_user(pool: &PgPool, user_id: Uuid) -> Result<UserResponse, AppError> {
