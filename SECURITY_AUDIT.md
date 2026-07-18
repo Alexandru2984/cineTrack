@@ -134,6 +134,12 @@ In the third round we reviewed the repo directly on the VPS/prod host and closed
 - The 112,128,240-byte APK has SHA-256 `379d23fe19678e7778f93205ca984d89bf52c13476ab2a17fee2a100aac00b04`. ZIP validation found no corruption; `apksigner` verified APK Signature Scheme v2 with one RSA-2048 signer whose certificate SHA-256 is `2524d5b15425451e001c6b8e65a4f51958e5b0a34ca5350a4158bd7a1063600f`. The artifact contains the production HTTPS API origin, SecureStore backup exclusions, no credential-like filenames, and no secret-scanner findings.
 - Final-manifest inspection found unused `USE_BIOMETRIC` and deprecated `USE_FINGERPRINT` permissions inherited through AndroidX. The app never enables SecureStore `requireAuthentication`, so both permissions are now blocked in commit `76ca89d`; CNG verification generated the expected `tools:node="remove"` entries. The first signed artifact predates this fix and must be superseded before release.
 
+## Changes applied (2026-07-18, round 4 — social previews)
+
+- Added Open Graph / Twitter Card meta and a branded 1200x630 og-image to `index.html`, plus a `usePageTitle` hook that sets per-page document titles (list, profile, media, Wrapped). Public lists and profiles were already shareable (public read API + Share button); this fills the missing social preview. The og-image is excluded from the PWA precache since only server-side crawlers fetch it. Static crawlers get the site-level card; per-list dynamic previews would require server-side/dynamic rendering (noted as a follow-up).
+- Validation: 110 frontend tests (new page-title hook and OG meta tests), 18 mocked and 3 PWA Playwright tests, TypeScript/lint clean, and a production build with the precache back to ~960 KiB.
+- Frontend-only rollout (no backend or schema change) bracketed by verified R2 snapshots `cinetrack_20260718_181032.sql.gz` and `cinetrack_20260718_181151.sql.gz`; frontend image `77d4d37b2b82`. Live checks confirmed the OG title/image and `twitter:card` in the served `index.html`, `og-image.png` returning `200 image/png`, health `200`, and no frontend error-log entries.
+
 ## Changes applied (2026-07-18, round 3 — Wrapped)
 
 - Added a yearly "Wrapped" recap: `GET /api/stats/me/wrapped?year=` aggregates the year's watch history into totals (plays, movies, episodes, distinct titles, hours), top genres (counted once per distinct title), most-watched titles, a back-filled 12-month series, and the longest daily streak. The authenticated request reads only the caller's own history; a new `/wrapped` page renders it responsively.
