@@ -19,7 +19,7 @@ export default function RegisterPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center px-4">
+    <div className="flex min-h-[calc(100dvh-3.5rem)] items-center justify-center px-4 md:min-h-[calc(100dvh-4rem)]">
       <div className="w-full max-w-md space-y-8">
         <div className="text-center">
           <Film className="mx-auto h-12 w-12 text-[hsl(var(--primary))]" />
