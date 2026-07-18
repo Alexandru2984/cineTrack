@@ -134,6 +134,12 @@ In the third round we reviewed the repo directly on the VPS/prod host and closed
 - The 112,128,240-byte APK has SHA-256 `379d23fe19678e7778f93205ca984d89bf52c13476ab2a17fee2a100aac00b04`. ZIP validation found no corruption; `apksigner` verified APK Signature Scheme v2 with one RSA-2048 signer whose certificate SHA-256 is `2524d5b15425451e001c6b8e65a4f51958e5b0a34ca5350a4158bd7a1063600f`. The artifact contains the production HTTPS API origin, SecureStore backup exclusions, no credential-like filenames, and no secret-scanner findings.
 - Final-manifest inspection found unused `USE_BIOMETRIC` and deprecated `USE_FINGERPRINT` permissions inherited through AndroidX. The app never enables SecureStore `requireAuthentication`, so both permissions are now blocked in commit `76ca89d`; CNG verification generated the expected `tools:node="remove"` entries. The first signed artifact predates this fix and must be superseded before release.
 
+## Changes applied (2026-07-18, round 3 — Wrapped)
+
+- Added a yearly "Wrapped" recap: `GET /api/stats/me/wrapped?year=` aggregates the year's watch history into totals (plays, movies, episodes, distinct titles, hours), top genres (counted once per distinct title), most-watched titles, a back-filled 12-month series, and the longest daily streak. The authenticated request reads only the caller's own history; a new `/wrapped` page renders it responsively.
+- Validation: 212 backend unit tests, 93 PostgreSQL integration tests (new year-scoped Wrapped test), 106 frontend tests, plus `cargo fmt`/Clippy/TypeScript/lint clean and a production build.
+- Rollout bracketed by verified R2 snapshots `cinetrack_20260718_125538.sql.gz` and `cinetrack_20260718_125902.sql.gz` (no schema change). Backend image `213a95507a76`, frontend `342f73cb414d`. A live smoke test confirmed the empty-account shape, then seeded one movie watch and verified the aggregation (total 1, movies 1, 1.67 hours, top title and genre), and deleted the temporary account and seed media leaving zero `@example.invalid` users or orphan rows. Logs contained no error, panic, or fatal entries.
+
 ## Changes applied (2026-07-18, round 2 — security review)
 
 - Security review of the new surface (2FA, watch providers, email verification, HIBP) plus a full-codebase sweep (no dynamic SQL, command execution, hardcoded secrets, XSS sinks, or SSRF with a controllable host; access tokens stay in-memory, refresh in an HttpOnly cookie; CSP `script-src 'self'` intact with the QR rendered as inline SVG). Two concrete 2FA issues were fixed:
