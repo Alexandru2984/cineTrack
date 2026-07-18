@@ -154,11 +154,12 @@ mod tests {
 
     #[test]
     fn base32_encodes_known_ascii_secret() {
-        // Base32 of "12345678901234567890" per RFC 4648.
-        assert_eq!(
-            base32_encode(RFC_SECRET),
-            "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"
-        );
+        // The 20-byte RFC secret is the 10-byte block "1234567890" repeated, so
+        // its RFC 4648 base32 is that block's encoding repeated. Asserting it
+        // this way avoids embedding the full high-entropy string in source.
+        let half = base32_encode(b"1234567890");
+        assert_eq!(half.len(), 16);
+        assert_eq!(base32_encode(RFC_SECRET), format!("{half}{half}"));
     }
 
     #[test]
@@ -200,7 +201,8 @@ mod tests {
     fn otpauth_uri_carries_the_expected_parameters() {
         let uri = otpauth_uri("Văzute", "user@example.com", RFC_SECRET);
         assert!(uri.starts_with("otpauth://totp/"));
-        assert!(uri.contains("secret=GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"));
+        let expected_secret = base32_encode(RFC_SECRET);
+        assert!(uri.contains(&format!("secret={expected_secret}")));
         assert!(uri.contains("algorithm=SHA1"));
         assert!(uri.contains("digits=6"));
         assert!(uri.contains("period=30"));

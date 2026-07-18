@@ -19,3 +19,13 @@ paths = [
 regexes = [
   '''(?:New)?Passw0rd\d{3}''',
 ]
+
+[[allowlists]]
+description = "RFC 6238 TOTP reference test vector (published in the standard, not a real secret). Current code computes it; this covers older commits in the full-history scan."
+condition = "AND"
+paths = [
+  '''backend/src/utils/totp\.rs''',
+]
+regexes = [
+  '''GEZDGNBVGY3TQOJQ''',
+]
