@@ -723,12 +723,14 @@ pub async fn disable_two_factor(
     Ok(())
 }
 
-/// A grouped, human-legible recovery code (10 hex chars as `xxxxx-xxxxx`).
+/// A grouped, human-legible recovery code (64 bits of entropy as
+/// `xxxx-xxxx-xxxx-xxxx`), so the global unique index on the code hash has a
+/// negligible collision probability across accounts.
 fn generate_recovery_code() -> String {
-    let mut bytes = [0u8; 5];
+    let mut bytes = [0u8; 8];
     rand::rngs::OsRng.fill_bytes(&mut bytes);
     let hex = hex::encode(bytes);
-    format!("{}-{}", &hex[..5], &hex[5..])
+    format!("{}-{}-{}-{}", &hex[0..4], &hex[4..8], &hex[8..12], &hex[12..16])
 }
 
 pub async fn get_current_user(pool: &PgPool, user_id: Uuid) -> Result<UserResponse, AppError> {
