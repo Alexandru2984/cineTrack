@@ -507,13 +507,15 @@ function TwoFactorCard() {
   const enable = useEnableTwoFactor();
   const disable = useDisableTwoFactor();
   const [code, setCode] = useState('');
+  const [setupPassword, setSetupPassword] = useState('');
   const [password, setPassword] = useState('');
   const [recoveryCodes, setRecoveryCodes] = useState<string[] | null>(null);
 
-  const startSetup = () => {
+  const startSetup = (e: React.FormEvent) => {
+    e.preventDefault();
     setRecoveryCodes(null);
     setCode('');
-    setup.mutate();
+    setup.mutate(setupPassword, { onSuccess: () => setSetupPassword('') });
   };
 
   const cancelSetup = () => {
@@ -650,22 +652,33 @@ function TwoFactorCard() {
           </div>
         </form>
       ) : (
-        <div className="mt-4 space-y-2">
+        <form onSubmit={startSetup} className="mt-4 max-w-sm space-y-3">
+          <label htmlFor="twofa-setup-password" className="block text-sm font-medium">
+            Confirm your password to set up two-factor
+          </label>
+          <input
+            id="twofa-setup-password"
+            type="password"
+            autoComplete="current-password"
+            value={setupPassword}
+            onChange={(e) => setSetupPassword(e.target.value)}
+            required
+            className="w-full rounded-md border border-[hsl(var(--input))] bg-transparent px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[hsl(var(--ring))]"
+          />
           {setup.error && (
             <p className="text-sm text-[hsl(var(--destructive))]">
               {getApiErrorMessage(setup.error, 'Could not start two-factor setup')}
             </p>
           )}
           <button
-            type="button"
-            onClick={startSetup}
+            type="submit"
             disabled={setup.isPending}
             className="flex items-center justify-center gap-2 rounded-md bg-[hsl(var(--primary))] px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
           >
             {setup.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
             Enable two-factor
           </button>
-        </div>
+        </form>
       )}
     </section>
   );

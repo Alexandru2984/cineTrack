@@ -118,8 +118,10 @@ export function useResendVerification() {
 
 export function useSetupTwoFactor() {
   return useMutation({
-    mutationFn: async () => {
-      const res = await api.post<{ secret: string; otpauth_uri: string }>('/auth/2fa/setup');
+    mutationFn: async (password: string) => {
+      const res = await api.post<{ secret: string; otpauth_uri: string }>('/auth/2fa/setup', {
+        password,
+      });
       return res.data;
     },
   });

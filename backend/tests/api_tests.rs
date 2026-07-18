@@ -1017,10 +1017,21 @@ async fn test_two_factor_enable_login_and_recovery() {
 
     let (access, _, _) = register_user(&app, "mfauser", "mfa@example.com", "Pass1234").await;
 
+    // Setup requires the account password: a stolen token alone cannot enroll.
+    let req = actix_test::TestRequest::post()
+        .uri("/api/auth/2fa/setup")
+        .insert_header(("Authorization", format!("Bearer {access}")))
+        .set_json(json!({ "password": "WrongPass9" }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 401);
+
     // Setup issues a pending secret + otpauth URI without activating 2FA.
     let req = actix_test::TestRequest::post()
         .uri("/api/auth/2fa/setup")
         .insert_header(("Authorization", format!("Bearer {access}")))
+        .set_json(json!({ "password": "Pass1234" }))
         .peer_addr(peer_addr())
         .to_request();
     let resp = actix_test::call_service(&app, req).await;
@@ -1059,6 +1070,7 @@ async fn test_two_factor_enable_login_and_recovery() {
     let req = actix_test::TestRequest::post()
         .uri("/api/auth/2fa/setup")
         .insert_header(("Authorization", format!("Bearer {access}")))
+        .set_json(json!({ "password": "Pass1234" }))
         .peer_addr(peer_addr())
         .to_request();
     let resp = actix_test::call_service(&app, req).await;

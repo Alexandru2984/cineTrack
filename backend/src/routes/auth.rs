@@ -322,9 +322,11 @@ async fn resend_email_verification(
 async fn setup_two_factor(
     pool: web::Data<PgPool>,
     req: HttpRequest,
+    body: web::Json<SetupTwoFactorRequest>,
 ) -> Result<HttpResponse, AppError> {
     let user_id = require_auth(&req).await?;
-    let setup = services::auth::setup_two_factor(pool.get_ref(), user_id).await?;
+    body.validate()?;
+    let setup = services::auth::setup_two_factor(pool.get_ref(), user_id, &body.password).await?;
     Ok(no_store(HttpResponse::Ok()).json(setup))
 }
 

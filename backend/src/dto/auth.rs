@@ -72,6 +72,13 @@ pub struct LoginRequest {
     pub totp_code: Option<String>,
 }
 
+#[derive(Debug, Deserialize, Validate)]
+#[serde(deny_unknown_fields)]
+pub struct SetupTwoFactorRequest {
+    #[validate(length(min = 1, max = 128, message = "Password must be 1-128 characters"))]
+    pub password: String,
+}
+
 #[derive(Debug, Serialize)]
 pub struct TwoFactorSetupResponse {
     /// Base32 secret for manual entry when a QR scan isn't possible.

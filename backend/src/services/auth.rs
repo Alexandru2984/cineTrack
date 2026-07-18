@@ -586,12 +586,23 @@ async fn verify_second_factor(pool: &PgPool, user: &User, code: &str) -> Result<
 pub async fn setup_two_factor(
     pool: &PgPool,
     user_id: Uuid,
+    password_input: &str,
 ) -> Result<TwoFactorSetupResponse, AppError> {
     let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = $1")
         .bind(user_id)
         .fetch_optional(pool)
         .await?
         .ok_or_else(|| AppError::NotFound("User not found".to_string()))?;
+
+    // Re-confirm the password so a stolen access token alone cannot enroll a
+    // second factor and lock the real owner out.
+    let password_hash = user
+        .password_hash
+        .as_ref()
+        .ok_or_else(|| AppError::BadRequest("Password login is not enabled".to_string()))?;
+    if !password::verify_password(password_input, password_hash).await? {
+        return Err(AppError::Unauthorized("Password is incorrect".to_string()));
+    }
 
     if user.totp_enabled {
         return Err(AppError::Conflict(
