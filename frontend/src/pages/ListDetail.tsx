@@ -23,6 +23,7 @@ import {
 import { getApiErrorMessage } from '@/lib/api';
 import { getPosterUrl } from '@/lib/utils';
 import { useAuthStore } from '@/store/auth';
+import { usePageTitle } from '@/hooks/usePageTitle';
 
 export default function ListDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -34,6 +35,7 @@ export default function ListDetailPage() {
   const removeItem = useRemoveListItem();
   const [editing, setEditing] = useState(false);
   const [shared, setShared] = useState(false);
+  usePageTitle(detail.data?.list?.name);
 
   if (detail.isLoading) return <LoadingSpinner />;
   if (detail.isError || !detail.data) {

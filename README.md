@@ -219,7 +219,7 @@ Native simulator/device builds require Android Studio or Xcode. See
 
 ### Testing
 
-The project has **411 passing unit & integration tests** (212 backend unit + 93 PostgreSQL integration + 106 frontend) plus **24 Playwright E2E tests** across three browser suites, and **53 mobile tests**. The native client additionally has lint, strict TypeScript, Expo Doctor, dependency-audit, prebuild, and Android-export gates. One credential-gated R2 test is ignored by default:
+The project has **415 passing unit & integration tests** (212 backend unit + 93 PostgreSQL integration + 110 frontend) plus **24 Playwright E2E tests** across three browser suites, and **53 mobile tests**. The native client additionally has lint, strict TypeScript, Expo Doctor, dependency-audit, prebuild, and Android-export gates. One credential-gated R2 test is ignored by default:
 
 ```bash
 # Backend unit tests (201 passing) — no external dependencies

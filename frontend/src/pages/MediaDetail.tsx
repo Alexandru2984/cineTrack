@@ -12,6 +12,7 @@ import {
 import { LoadingSpinner } from '@/components/LoadingSpinner';
 import { AddToListDialog } from '@/components/AddToListDialog';
 import { WatchProviders } from '@/components/WatchProviders';
+import { usePageTitle } from '@/hooks/usePageTitle';
 import { getPosterUrl, getBackdropUrl, formatDate, formatRuntime } from '@/lib/utils';
 import { getApiErrorMessage } from '@/lib/api';
 import {
@@ -58,6 +59,7 @@ export default function MediaDetail() {
   const [searchParams] = useSearchParams();
   const type = searchParams.get('type') || 'movie';
   const { data: media, isLoading } = useMediaDetail(id!, type);
+  usePageTitle(media?.title);
   const [seasonSelection, setSeasonSelection] = useState<{
     mediaId: string;
     seasonNumber: number;

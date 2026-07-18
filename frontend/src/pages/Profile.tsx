@@ -3,6 +3,7 @@ import { useUserProfile, useUserActivity, useFollow, useUnfollow } from '@/hooks
 import { LoadingSpinner } from '@/components/LoadingSpinner';
 import { ActivityList } from '@/components/ActivityList';
 import { useAuthStore } from '@/store/auth';
+import { usePageTitle } from '@/hooks/usePageTitle';
 import { formatDate } from '@/lib/utils';
 import { getApiErrorMessage } from '@/lib/api';
 import {
@@ -25,6 +26,7 @@ export default function ProfilePage() {
     isError: activityError,
   } = useUserActivity(username!, profile?.can_view_activity ?? false);
   const currentUser = useAuthStore((s) => s.user);
+  usePageTitle(profile ? `@${profile.username}` : null);
   const follow = useFollow();
   const unfollow = useUnfollow();
 

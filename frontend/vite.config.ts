@@ -65,7 +65,9 @@ export default defineConfig({
       workbox: {
         cleanupOutdatedCaches: true,
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}'],
-        globIgnores: ['**/pwa-*.png', '**/maskable-icon-*.png'],
+        // og-image.png is only fetched server-side by social crawlers, so keep
+        // it out of the install-time precache along with the launcher icons.
+        globIgnores: ['**/pwa-*.png', '**/maskable-icon-*.png', '**/og-image.png'],
         maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
         navigateFallback: '/index.html',
         navigateFallbackDenylist: [/^\/api\//],

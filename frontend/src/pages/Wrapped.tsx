@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { CalendarRange, Clapperboard, Clock, Film, Flame, Sparkles, Tv } from 'lucide-react';
 import { useWrapped } from '@/hooks/useStats';
+import { usePageTitle } from '@/hooks/usePageTitle';
 import { getPosterUrl, formatDate } from '@/lib/utils';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
 import type { WrappedStats } from '@/types';
@@ -131,6 +132,7 @@ function Recap({ data }: { data: WrappedStats }) {
 export default function WrappedPage() {
   const currentYear = new Date().getFullYear();
   const [year, setYear] = useState(currentYear);
+  usePageTitle(`${year} Wrapped`);
   const { data, isLoading, isError } = useWrapped(year);
   const years = Array.from({ length: 5 }, (_, index) => currentYear - index);
 
