@@ -19,6 +19,7 @@ A personal movie and TV show tracker with social features, inspired by TV Time. 
 - **Native Mobile Client** — Expo SDK 57 app for iOS and Android with rotating native sessions, Home, Calendar, Search, Library, Profile, season-wide watched actions, and watched-through confirmation
 - **Activity Heatmap** — GitHub-style contribution calendar for your viewing history
 - **Detailed Stats** — Total watch time, streak tracking, genre distribution, monthly activity charts
+- **Yearly Wrapped** — A per-year recap: titles, hours, top genres, most-watched titles, monthly activity, and longest streak
 - **Where to Watch** — Region-aware streaming/rent/buy availability on each title (TMDB Watch Providers, powered by JustWatch, cached in PostgreSQL)
 - **TMDB Integration** — Search a daily local catalog and refresh focused metadata/release schedules through bounded background jobs
 - **Import from TV Time** — Upload your TV Time export and bring over your whole library, episode history and rewatches (background job with progress + a matched/unmatched summary)
@@ -218,7 +219,7 @@ Native simulator/device builds require Android Studio or Xcode. See
 
 ### Testing
 
-The project has **408 passing unit & integration tests** (212 backend unit + 92 PostgreSQL integration + 104 frontend) plus **24 Playwright E2E tests** across three browser suites, and **53 mobile tests**. The native client additionally has lint, strict TypeScript, Expo Doctor, dependency-audit, prebuild, and Android-export gates. One credential-gated R2 test is ignored by default:
+The project has **411 passing unit & integration tests** (212 backend unit + 93 PostgreSQL integration + 106 frontend) plus **24 Playwright E2E tests** across three browser suites, and **53 mobile tests**. The native client additionally has lint, strict TypeScript, Expo Doctor, dependency-audit, prebuild, and Android-export gates. One credential-gated R2 test is ignored by default:
 
 ```bash
 # Backend unit tests (201 passing) — no external dependencies
@@ -330,7 +331,7 @@ All endpoints except auth (register/login/refresh) require a valid JWT access to
 | **Calendar** | Sequential Up Next episodes, full unwatched backlog, upcoming episodes/movies, regional preferences, episode plan/watched actions |
 | **Tracking** | CRUD for user's movie/show list with status, rating, review |
 | **History** | Log watched episodes/movies, show season progress, mark a season watched, or backfill through an episode |
-| **Stats** | Heatmap data, watch time, streaks, genre distribution |
+| **Stats** | Heatmap data, watch time, streaks, genre distribution, yearly Wrapped recap |
 | **Users** | Public profiles, follow/unfollow, activity feed |
 | **Notifications** | In-app inbox and unread badge counts |
 | **Push** | Opt-in native release alerts: device registration and per-installation revocation (Expo Push) |

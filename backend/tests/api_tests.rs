@@ -2349,6 +2349,92 @@ async fn test_stats_requires_auth() {
 
 #[actix_web::test]
 #[ignore = "requires test DB"]
+async fn test_wrapped_year_scoped_recap() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+
+    let (token, _, user_id_str) =
+        register_user(&app, "wrapped", "wrapped@example.com", "Pass1234").await;
+    let user_id = Uuid::parse_str(&user_id_str).unwrap();
+
+    let movie_id = sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO media (tmdb_id, media_type, title, runtime_minutes, genres)
+        VALUES (881001, 'movie', 'Wrapped Movie', 120, '[{"name": "Action"}]')
+        RETURNING id"#,
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let show_id = sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO media (tmdb_id, media_type, title, runtime_minutes, genres)
+        VALUES (881002, 'tv', 'Wrapped Show', 30, '[{"name": "Drama"}]')
+        RETURNING id"#,
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    for (media_id, watched_at) in [
+        (movie_id, "2023-03-15T20:00:00Z"),
+        (show_id, "2023-06-01T20:00:00Z"),
+        (show_id, "2023-06-02T20:00:00Z"), // consecutive day → streak of 2
+        (show_id, "2023-07-10T20:00:00Z"),
+        (movie_id, "2024-01-05T20:00:00Z"), // different year → excluded from 2023
+    ] {
+        sqlx::query(
+            "INSERT INTO watch_history (user_id, media_id, watched_at) VALUES ($1, $2, $3::timestamptz)",
+        )
+        .bind(user_id)
+        .bind(media_id)
+        .bind(watched_at)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+
+    let req = actix_test::TestRequest::get()
+        .uri("/api/stats/me/wrapped?year=2023")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let body: Value = actix_test::read_body_json(resp).await;
+
+    assert_eq!(body["year"], 2023);
+    assert_eq!(body["total_watches"], 4); // the 2024 event is excluded
+    assert_eq!(body["movies_watched"], 1);
+    assert_eq!(body["episodes_watched"], 3);
+    assert_eq!(body["distinct_titles"], 2);
+    assert_eq!(body["total_hours"], 3.5); // (120 + 3*30) / 60
+    assert_eq!(body["longest_streak"], 2);
+    assert_eq!(body["first_watch"], "2023-03-15");
+    assert_eq!(body["last_watch"], "2023-07-10");
+
+    // Most-watched title first.
+    assert_eq!(body["top_shows"][0]["title"], "Wrapped Show");
+    assert_eq!(body["top_shows"][0]["count"], 3);
+    assert_eq!(body["top_shows"][1]["title"], "Wrapped Movie");
+
+    // Full 12-month series with June carrying two events.
+    let monthly = body["monthly"].as_array().unwrap();
+    assert_eq!(monthly.len(), 12);
+    let june = monthly.iter().find(|m| m["month"] == 6).unwrap();
+    assert_eq!(june["count"], 2);
+
+    // Genres counted once per distinct title.
+    let genres: Vec<&str> = body["top_genres"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|g| g["genre"].as_str().unwrap())
+        .collect();
+    assert!(genres.contains(&"Action") && genres.contains(&"Drama"));
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
 async fn test_stats_count_events_rewatches_and_completed_show_gaps() {
     let pool = setup_pool().await;
     clean_db(&pool).await;

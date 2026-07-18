@@ -3,7 +3,8 @@ import { LoadingSpinner } from '@/components/LoadingSpinner';
 import CalendarHeatmap from 'react-calendar-heatmap';
 import 'react-calendar-heatmap/dist/styles.css';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import { Film, Tv, Clock, Flame, Trophy, Zap } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { Film, Tv, Clock, Flame, Trophy, Zap, Sparkles } from 'lucide-react';
 
 const COLORS = ['#8b5cf6', '#a78bfa', '#c4b5fd', '#ddd6fe', '#ede9fe', '#6d28d9', '#5b21b6', '#7c3aed'];
 
@@ -25,7 +26,15 @@ export default function StatsPage() {
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-8 space-y-8">
-      <h1 className="text-3xl font-bold">Statistics</h1>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="text-3xl font-bold">Statistics</h1>
+        <Link
+          to="/wrapped"
+          className="flex items-center gap-2 rounded-md bg-gradient-to-br from-[hsl(var(--primary))] to-purple-600 px-4 py-2 text-sm font-medium text-white hover:opacity-90"
+        >
+          <Sparkles className="h-4 w-4" aria-hidden="true" /> Your Wrapped
+        </Link>
+      </div>
 
       {/* Stats overview */}
       {stats && (

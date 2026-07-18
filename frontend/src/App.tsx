@@ -20,6 +20,7 @@ const CalendarPage = lazy(() => import('@/pages/Calendar'));
 const MediaDetail = lazy(() => import('@/pages/MediaDetail'));
 const TrackingPage = lazy(() => import('@/pages/Tracking'));
 const StatsPage = lazy(() => import('@/pages/Stats'));
+const WrappedPage = lazy(() => import('@/pages/Wrapped'));
 const ProfilePage = lazy(() => import('@/pages/Profile'));
 const SettingsPage = lazy(() => import('@/pages/Settings'));
 const NotificationsPage = lazy(() => import('@/pages/Notifications'));
@@ -107,6 +108,7 @@ export default function App() {
               <Route path="/media/:id" element={<ProtectedRoute><MediaDetail /></ProtectedRoute>} />
               <Route path="/tracking" element={<ProtectedRoute><TrackingPage /></ProtectedRoute>} />
               <Route path="/stats" element={<ProtectedRoute><StatsPage /></ProtectedRoute>} />
+              <Route path="/wrapped" element={<ProtectedRoute><WrappedPage /></ProtectedRoute>} />
               <Route path="/profile/:username" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
               <Route path="/settings" element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />
               <Route path="/notifications" element={<ProtectedRoute><NotificationsPage /></ProtectedRoute>} />

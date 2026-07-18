@@ -12,8 +12,178 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
             .route("/me", web::get().to(my_stats))
             .route("/me/heatmap", web::get().to(my_heatmap))
             .route("/me/genres", web::get().to(my_genres))
-            .route("/me/monthly", web::get().to(my_monthly)),
+            .route("/me/monthly", web::get().to(my_monthly))
+            .route("/me/wrapped", web::get().to(my_wrapped)),
     );
+}
+
+fn parse_year(query: &std::collections::HashMap<String, String>) -> Result<i32, AppError> {
+    let year = query
+        .get("year")
+        .and_then(|value| value.parse().ok())
+        .unwrap_or_else(|| Utc::now().year());
+    if !(1900..=2100).contains(&year) {
+        return Err(AppError::BadRequest(
+            "Year must be between 1900 and 2100".to_string(),
+        ));
+    }
+    Ok(year)
+}
+
+async fn my_wrapped(
+    pool: web::Data<PgPool>,
+    req: HttpRequest,
+    query: web::Query<std::collections::HashMap<String, String>>,
+) -> Result<HttpResponse, AppError> {
+    let user_id = require_auth(&req).await?;
+    let year = parse_year(&query)?;
+
+    // Headline totals over the year's watch events.
+    let (
+        total_watches,
+        movies_watched,
+        episodes_watched,
+        distinct_titles,
+        total_minutes,
+        first,
+        last,
+    ) = sqlx::query_as::<
+        _,
+        (
+            i64,
+            i64,
+            i64,
+            i64,
+            i64,
+            Option<NaiveDate>,
+            Option<NaiveDate>,
+        ),
+    >(
+        r#"SELECT
+                COUNT(*)::bigint,
+                COUNT(*) FILTER (WHERE m.media_type = 'movie')::bigint,
+                COUNT(*) FILTER (WHERE m.media_type = 'tv')::bigint,
+                COUNT(DISTINCT wh.media_id)::bigint,
+                COALESCE(SUM(CASE
+                    WHEN wh.episode_id IS NOT NULL
+                        THEN COALESCE(e.runtime_minutes, m.runtime_minutes, 0)
+                    ELSE COALESCE(m.runtime_minutes, 0)
+                END), 0)::bigint,
+                MIN((wh.watched_at AT TIME ZONE 'UTC')::date),
+                MAX((wh.watched_at AT TIME ZONE 'UTC')::date)
+            FROM watch_history wh
+            JOIN media m ON wh.media_id = m.id
+            LEFT JOIN episodes e ON wh.episode_id = e.id
+            WHERE wh.user_id = $1
+              AND EXTRACT(YEAR FROM wh.watched_at AT TIME ZONE 'UTC')::int = $2"#,
+    )
+    .bind(user_id)
+    .bind(year)
+    .fetch_one(pool.get_ref())
+    .await?;
+
+    // Top genres, counted once per distinct title watched this year.
+    let top_genres = sqlx::query_as::<_, (String, i64)>(
+        r#"SELECT genre->>'name' AS genre_name, COUNT(*)::bigint
+        FROM (
+            SELECT DISTINCT wh.media_id
+            FROM watch_history wh
+            WHERE wh.user_id = $1
+              AND EXTRACT(YEAR FROM wh.watched_at AT TIME ZONE 'UTC')::int = $2
+        ) watched
+        JOIN media m ON m.id = watched.media_id,
+        jsonb_array_elements(
+            CASE WHEN jsonb_typeof(m.genres) = 'array' THEN m.genres ELSE '[]'::jsonb END
+        ) AS genre
+        WHERE NULLIF(btrim(genre->>'name'), '') IS NOT NULL
+        GROUP BY genre_name
+        ORDER BY COUNT(*) DESC, genre_name
+        LIMIT 5"#,
+    )
+    .bind(user_id)
+    .bind(year)
+    .fetch_all(pool.get_ref())
+    .await?
+    .into_iter()
+    .map(|(genre, count)| GenreDistribution { genre, count })
+    .collect::<Vec<_>>();
+
+    // Most-watched titles by event count (a binged show ranks high).
+    let top_shows = sqlx::query_as::<_, (i32, String, String, Option<String>, i64)>(
+        r#"SELECT m.tmdb_id, m.media_type, m.title, m.poster_path, COUNT(*)::bigint
+        FROM watch_history wh
+        JOIN media m ON wh.media_id = m.id
+        WHERE wh.user_id = $1
+          AND EXTRACT(YEAR FROM wh.watched_at AT TIME ZONE 'UTC')::int = $2
+        GROUP BY m.tmdb_id, m.media_type, m.title, m.poster_path
+        ORDER BY COUNT(*) DESC, m.title
+        LIMIT 5"#,
+    )
+    .bind(user_id)
+    .bind(year)
+    .fetch_all(pool.get_ref())
+    .await?
+    .into_iter()
+    .map(
+        |(tmdb_id, media_type, title, poster_path, count)| WrappedTitle {
+            tmdb_id,
+            media_type,
+            title,
+            poster_path,
+            count,
+        },
+    )
+    .collect::<Vec<_>>();
+
+    // Per-month counts, back-filled to a full 12-month series.
+    let month_rows = sqlx::query_as::<_, (i32, i64)>(
+        r#"SELECT EXTRACT(MONTH FROM wh.watched_at AT TIME ZONE 'UTC')::int AS month, COUNT(*)::bigint
+        FROM watch_history wh
+        WHERE wh.user_id = $1
+          AND EXTRACT(YEAR FROM wh.watched_at AT TIME ZONE 'UTC')::int = $2
+        GROUP BY month"#,
+    )
+    .bind(user_id)
+    .bind(year)
+    .fetch_all(pool.get_ref())
+    .await?;
+    let monthly: Vec<WrappedMonth> = (1..=12)
+        .map(|month| WrappedMonth {
+            month,
+            count: month_rows
+                .iter()
+                .find(|(m, _)| *m == month)
+                .map_or(0, |(_, count)| *count),
+        })
+        .collect();
+
+    // Longest daily streak within the year.
+    let year_dates = sqlx::query_as::<_, (NaiveDate,)>(
+        r#"SELECT DISTINCT (watched_at AT TIME ZONE 'UTC')::date AS watch_date
+        FROM watch_history
+        WHERE user_id = $1
+          AND EXTRACT(YEAR FROM watched_at AT TIME ZONE 'UTC')::int = $2"#,
+    )
+    .bind(user_id)
+    .bind(year)
+    .fetch_all(pool.get_ref())
+    .await?;
+    let (_, longest_streak) = calculate_streaks(&year_dates);
+
+    Ok(HttpResponse::Ok().json(WrappedStats {
+        year,
+        total_watches,
+        movies_watched,
+        episodes_watched,
+        distinct_titles,
+        total_hours: total_minutes as f64 / 60.0,
+        longest_streak,
+        first_watch: first.map(|date| date.to_string()),
+        last_watch: last.map(|date| date.to_string()),
+        top_genres,
+        top_shows,
+        monthly,
+    }))
 }
 
 async fn my_stats(pool: web::Data<PgPool>, req: HttpRequest) -> Result<HttpResponse, AppError> {

@@ -245,6 +245,34 @@ export interface MonthlyActivity {
   count: number;
 }
 
+export interface WrappedTitle {
+  tmdb_id: number;
+  media_type: string;
+  title: string;
+  poster_path: string | null;
+  count: number;
+}
+
+export interface WrappedMonth {
+  month: number;
+  count: number;
+}
+
+export interface WrappedStats {
+  year: number;
+  total_watches: number;
+  movies_watched: number;
+  episodes_watched: number;
+  distinct_titles: number;
+  total_hours: number;
+  longest_streak: number;
+  first_watch: string | null;
+  last_watch: string | null;
+  top_genres: GenreDistribution[];
+  top_shows: WrappedTitle[];
+  monthly: WrappedMonth[];
+}
+
 export interface PublicUserProfile {
   id: string;
   username: string;

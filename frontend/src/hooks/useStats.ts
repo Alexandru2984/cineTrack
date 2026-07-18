@@ -1,6 +1,12 @@
 import { useQuery } from '@tanstack/react-query';
 import api from '@/lib/api';
-import type { UserStats, HeatmapDay, GenreDistribution, MonthlyActivity } from '@/types';
+import type {
+  UserStats,
+  HeatmapDay,
+  GenreDistribution,
+  MonthlyActivity,
+  WrappedStats,
+} from '@/types';
 
 export function useMyStats() {
   return useQuery<UserStats>({
@@ -38,6 +44,16 @@ export function useMonthlyActivity() {
     queryKey: ['stats', 'monthly'],
     queryFn: async () => {
       const res = await api.get('/stats/me/monthly');
+      return res.data;
+    },
+  });
+}
+
+export function useWrapped(year: number) {
+  return useQuery<WrappedStats>({
+    queryKey: ['stats', 'wrapped', year],
+    queryFn: async () => {
+      const res = await api.get('/stats/me/wrapped', { params: { year: String(year) } });
       return res.data;
     },
   });
