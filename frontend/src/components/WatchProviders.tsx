@@ -56,11 +56,16 @@ export function WatchProviders({ tmdbId, mediaType }: { tmdbId: number; mediaTyp
   if (isLoading && !data) return null;
   if (!data) return null;
 
-  const activeRegion = region ?? data.region;
+  // Default every field so an unexpected response shape renders an empty
+  // widget instead of throwing into the page's error boundary.
+  const stream = data.stream ?? [];
+  const rent = data.rent ?? [];
+  const buy = data.buy ?? [];
+  const activeRegion = region ?? data.region ?? 'US';
   const options = REGIONS.some(([code]) => code === activeRegion)
     ? REGIONS
     : [[activeRegion, activeRegion] as [string, string], ...REGIONS];
-  const hasAny = data.stream.length > 0 || data.rent.length > 0 || data.buy.length > 0;
+  const hasAny = stream.length > 0 || rent.length > 0 || buy.length > 0;
 
   return (
     <section className="mt-8 rounded-lg border border-[hsl(var(--border))] p-4 sm:p-6">
@@ -86,9 +91,9 @@ export function WatchProviders({ tmdbId, mediaType }: { tmdbId: number; mediaTyp
 
       {hasAny ? (
         <div className="space-y-3">
-          <ProviderRow label="Stream" providers={data.stream} />
-          <ProviderRow label="Rent" providers={data.rent} />
-          <ProviderRow label="Buy" providers={data.buy} />
+          <ProviderRow label="Stream" providers={stream} />
+          <ProviderRow label="Rent" providers={rent} />
+          <ProviderRow label="Buy" providers={buy} />
         </div>
       ) : (
         <p className="text-sm text-[hsl(var(--muted-foreground))]">

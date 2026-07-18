@@ -60,6 +60,9 @@ async function stubAuthedReads(page: Page, discovery = EMPTY_DISCOVERY) {
     }
     if (url.includes('/api/calendar/up-next')) return route.fulfill({ json: { items: [] } });
     if (url.includes('/api/media/discovery')) return route.fulfill({ json: discovery });
+    if (url.includes('/watch-providers')) {
+      return route.fulfill({ json: { region: 'US', link: null, stream: [], rent: [], buy: [] } });
+    }
     if (url.includes('/api/stats/me/heatmap')) return route.fulfill({ json: [] });
     if (url.includes('/api/stats/me')) return route.fulfill({ json: EMPTY_STATS });
     return route.fulfill({ json: [] });
