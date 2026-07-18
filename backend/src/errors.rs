@@ -12,6 +12,9 @@ pub enum AppError {
     #[error("Unauthorized: {0}")]
     Unauthorized(String),
 
+    #[error("Two-factor authentication required")]
+    TwoFactorRequired,
+
     #[error("Forbidden: {0}")]
     Forbidden(String),
 
@@ -45,10 +48,25 @@ struct ErrorResponse {
 
 impl ResponseError for AppError {
     fn error_response(&self) -> HttpResponse {
+        // A 2FA challenge carries an extra flag so clients can switch to the
+        // code entry step instead of treating it as a plain credential error.
+        if matches!(self, AppError::TwoFactorRequired) {
+            return HttpResponse::Unauthorized().json(serde_json::json!({
+                "error": "401 Unauthorized",
+                "message": "Two-factor authentication code required",
+                "two_factor_required": true,
+            }));
+        }
+
         let (status, message) = match self {
             AppError::NotFound(msg) => (actix_web::http::StatusCode::NOT_FOUND, msg.clone()),
             AppError::BadRequest(msg) => (actix_web::http::StatusCode::BAD_REQUEST, msg.clone()),
             AppError::Unauthorized(msg) => (actix_web::http::StatusCode::UNAUTHORIZED, msg.clone()),
+            // Handled by the early return above; mapped here only for exhaustiveness.
+            AppError::TwoFactorRequired => (
+                actix_web::http::StatusCode::UNAUTHORIZED,
+                "Two-factor authentication code required".to_string(),
+            ),
             AppError::Forbidden(msg) => (actix_web::http::StatusCode::FORBIDDEN, msg.clone()),
             AppError::Conflict(msg) => (actix_web::http::StatusCode::CONFLICT, msg.clone()),
             AppError::TooManyRequests(msg) => {

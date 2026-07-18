@@ -14,6 +14,9 @@ pub struct User {
     pub bio: Option<String>,
     pub is_public: bool,
     pub email_verified: bool,
+    #[serde(skip_serializing)]
+    pub totp_secret: Option<String>,
+    pub totp_enabled: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }

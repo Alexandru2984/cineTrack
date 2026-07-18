@@ -68,6 +68,9 @@ A personal movie and TV show tracker with social features, inspired by TV Time. 
 The application has been through multiple security audits. Key measures include:
 
 - **Authentication** — Short-lived JWT access tokens (15 min) with SHA-256 hashed refresh tokens, automatic rotation, and per-user token cap (max 5 sessions)
+- **Two-Factor Auth (TOTP)** — Optional RFC 6238 authenticator codes, gated at login after the password check; single-use recovery codes stored only as SHA-256 hashes; disabling requires the account password
+- **Breached-Password Rejection** — Register/change/reset check the password against Have I Been Pwned via k-anonymity (only a 5-char SHA-1 prefix leaves the server; fail-open)
+- **Email Verification** — One-time confirmation link on registration (hashed token, 24h TTL, resend cooldown); existing accounts grandfathered
 - **Rate Limiting** — Global rate limiter (10 req/s, burst 50) + stricter auth-specific limiter (3 req/s, burst 10) to prevent brute-force
 - **Password Policy** — Minimum 8 characters, must contain at least one letter and one digit, rejects all-same-character passwords
 - **Input Validation** — All user inputs validated with length limits (bio 500, review 5000, list names 200, etc.) and content validation
@@ -214,7 +217,7 @@ Native simulator/device builds require Android Studio or Xcode. See
 
 ### Testing
 
-The project has **386 passing unit & integration tests** (201 backend unit + 88 PostgreSQL integration + 97 frontend) plus **24 Playwright E2E tests** across three browser suites, and **53 mobile tests**. The native client additionally has lint, strict TypeScript, Expo Doctor, dependency-audit, prebuild, and Android-export gates. One credential-gated R2 test is ignored by default:
+The project has **402 passing unit & integration tests** (210 backend unit + 91 PostgreSQL integration + 101 frontend) plus **24 Playwright E2E tests** across three browser suites, and **53 mobile tests**. The native client additionally has lint, strict TypeScript, Expo Doctor, dependency-audit, prebuild, and Android-export gates. One credential-gated R2 test is ignored by default:
 
 ```bash
 # Backend unit tests (201 passing) — no external dependencies
@@ -321,7 +324,7 @@ All endpoints except auth (register/login/refresh) require a valid JWT access to
 
 | Area | Endpoints |
 |------|-----------|
-| **Auth** | Web and native Register/Login/Logout/Refresh, Me, sessions, password reset, email verification (verify/resend) |
+| **Auth** | Web and native Register/Login/Logout/Refresh, Me, sessions, password reset, email verification (verify/resend), TOTP two-factor (setup/enable/disable) |
 | **Media** | Local catalog search, localized details, Seasons/Episodes, personalized discovery |
 | **Calendar** | Sequential Up Next episodes, full unwatched backlog, upcoming episodes/movies, regional preferences, episode plan/watched actions |
 | **Tracking** | CRUD for user's movie/show list with status, rating, review |

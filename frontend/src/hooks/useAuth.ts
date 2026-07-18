@@ -17,7 +17,7 @@ export function useRegister() {
 export function useLogin() {
   const setAuth = useAuthStore((s) => s.setAuth);
   return useMutation({
-    mutationFn: async (data: { email: string; password: string }) => {
+    mutationFn: async (data: { email: string; password: string; totp_code?: string }) => {
       const res = await api.post<AuthResponse>('/auth/login', data);
       return res.data;
     },
@@ -112,6 +112,54 @@ export function useResendVerification() {
     mutationFn: async () => {
       const res = await api.post('/auth/email/resend');
       return res.data as { message: string };
+    },
+  });
+}
+
+export function useSetupTwoFactor() {
+  return useMutation({
+    mutationFn: async () => {
+      const res = await api.post<{ secret: string; otpauth_uri: string }>('/auth/2fa/setup');
+      return res.data;
+    },
+  });
+}
+
+export function useEnableTwoFactor() {
+  const setUser = useAuthStore((s) => s.setUser);
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (code: string) => {
+      const res = await api.post<{ recovery_codes: string[] }>('/auth/2fa/enable', { code });
+      return res.data;
+    },
+    onSuccess: async () => {
+      try {
+        const res = await api.get<User>('/auth/me');
+        setUser(res.data);
+        qc.setQueryData(['me'], res.data);
+      } catch {
+        // Non-fatal: the enabled state reflects on the next natural refresh.
+      }
+    },
+  });
+}
+
+export function useDisableTwoFactor() {
+  const setUser = useAuthStore((s) => s.setUser);
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (password: string) => {
+      await api.post('/auth/2fa/disable', { password });
+    },
+    onSuccess: async () => {
+      try {
+        const res = await api.get<User>('/auth/me');
+        setUser(res.data);
+        qc.setQueryData(['me'], res.data);
+      } catch {
+        // Non-fatal.
+      }
     },
   });
 }

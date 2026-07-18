@@ -6,6 +6,7 @@ export interface User {
   bio: string | null;
   is_public: boolean;
   email_verified: boolean;
+  two_factor_enabled: boolean;
   created_at: string;
 }
 

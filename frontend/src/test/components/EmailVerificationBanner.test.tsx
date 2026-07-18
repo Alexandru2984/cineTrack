@@ -27,6 +27,7 @@ function setUser(emailVerified: boolean) {
       bio: null,
       is_public: true,
       email_verified: emailVerified,
+      two_factor_enabled: false,
       created_at: '2026-01-01T00:00:00Z',
     },
   });

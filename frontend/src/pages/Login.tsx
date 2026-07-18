@@ -1,13 +1,23 @@
 import { useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import type { AxiosError } from 'axios';
 import { useLogin } from '@/hooks/useAuth';
 import { getApiErrorMessage } from '@/lib/api';
-import { Film, Loader2 } from 'lucide-react';
+import { Film, Loader2, ShieldCheck } from 'lucide-react';
 import { safeReturnTo } from '@/lib/navigation';
+
+function isTwoFactorRequired(error: unknown): boolean {
+  return (
+    (error as AxiosError<{ two_factor_required?: boolean }>)?.response?.data
+      ?.two_factor_required === true
+  );
+}
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [mfaRequired, setMfaRequired] = useState(false);
+  const [code, setCode] = useState('');
   const login = useLogin();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -15,9 +25,15 @@ export default function LoginPage() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    login.mutate({ email, password }, {
-      onSuccess: () => navigate(returnTo, { replace: true }),
-    });
+    login.mutate(
+      { email, password, totp_code: mfaRequired ? code.trim() : undefined },
+      {
+        onSuccess: () => navigate(returnTo, { replace: true }),
+        onError: (error) => {
+          if (isTwoFactorRequired(error)) setMfaRequired(true);
+        },
+      },
+    );
   };
 
   return (
@@ -62,7 +78,31 @@ export default function LoginPage() {
             />
           </div>
 
-          {login.error && (
+          {mfaRequired && (
+            <div>
+              <label htmlFor="login-totp" className="mb-1 flex items-center gap-1.5 text-sm font-medium">
+                <ShieldCheck className="h-4 w-4 text-[hsl(var(--primary))]" aria-hidden="true" />
+                Authentication code
+              </label>
+              <input
+                id="login-totp"
+                type="text"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                value={code}
+                onChange={(e) => setCode(e.target.value)}
+                required
+                autoFocus
+                className="w-full rounded-md border border-[hsl(var(--input))] bg-transparent px-3 py-2 text-sm tracking-widest focus:outline-none focus:ring-2 focus:ring-[hsl(var(--ring))]"
+                placeholder="123456"
+              />
+              <p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">
+                Enter the 6-digit code from your authenticator app, or a recovery code.
+              </p>
+            </div>
+          )}
+
+          {login.error && !isTwoFactorRequired(login.error) && (
             <p className="text-sm text-[hsl(var(--destructive))]">
               {getApiErrorMessage(login.error, 'Login failed')}
             </p>
@@ -74,7 +114,7 @@ export default function LoginPage() {
             className="w-full rounded-md bg-[hsl(var(--primary))] py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-2"
           >
             {login.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
-            Sign in
+            {mfaRequired ? 'Verify' : 'Sign in'}
           </button>
         </form>
 

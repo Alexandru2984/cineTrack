@@ -11,6 +11,7 @@ const mockUser: User = {
   bio: null,
   is_public: true,
   email_verified: true,
+  two_factor_enabled: false,
   created_at: '2024-01-01T00:00:00Z',
 };
 

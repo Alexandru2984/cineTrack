@@ -66,6 +66,38 @@ pub struct LoginRequest {
     pub email: String,
     #[validate(length(min = 1, max = 128, message = "Password must be 1-128 characters"))]
     pub password: String,
+    /// Present on the second step when the account has 2FA enabled: either a
+    /// 6-digit TOTP code or a recovery code.
+    #[validate(length(max = 64, message = "Two-factor code is too long"))]
+    pub totp_code: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TwoFactorSetupResponse {
+    /// Base32 secret for manual entry when a QR scan isn't possible.
+    pub secret: String,
+    /// `otpauth://` provisioning URI the client renders as a QR code.
+    pub otpauth_uri: String,
+}
+
+#[derive(Debug, Deserialize, Validate)]
+#[serde(deny_unknown_fields)]
+pub struct EnableTwoFactorRequest {
+    #[validate(length(equal = 6, message = "Enter the 6-digit code"))]
+    pub code: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TwoFactorEnabledResponse {
+    /// One-time recovery codes, shown exactly once at activation.
+    pub recovery_codes: Vec<String>,
+}
+
+#[derive(Debug, Deserialize, Validate)]
+#[serde(deny_unknown_fields)]
+pub struct DisableTwoFactorRequest {
+    #[validate(length(min = 1, max = 128, message = "Password must be 1-128 characters"))]
+    pub password: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -101,6 +133,7 @@ pub struct UserResponse {
     pub bio: Option<String>,
     pub is_public: bool,
     pub email_verified: bool,
+    pub two_factor_enabled: bool,
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
@@ -114,6 +147,7 @@ impl From<crate::models::User> for UserResponse {
             bio: user.bio,
             is_public: user.is_public,
             email_verified: user.email_verified,
+            two_factor_enabled: user.totp_enabled,
             created_at: user.created_at,
         }
     }
@@ -464,6 +498,7 @@ mod tests {
         assert!(LoginRequest {
             email: email.clone(),
             password: "SecurePass1".to_string(),
+            totp_code: None,
         }
         .validate()
         .is_err());

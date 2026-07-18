@@ -47,6 +47,9 @@ fn scope() -> actix_web::Scope {
         .route("/password/reset", web::post().to(reset_password))
         .route("/email/verify", web::post().to(verify_email))
         .route("/email/resend", web::post().to(resend_email_verification))
+        .route("/2fa/setup", web::post().to(setup_two_factor))
+        .route("/2fa/enable", web::post().to(enable_two_factor))
+        .route("/2fa/disable", web::post().to(disable_two_factor))
         .route("/sessions", web::get().to(list_sessions))
         .route("/sessions/logout-all", web::post().to(logout_all_sessions))
         .route("/sessions/{id}", web::delete().to(revoke_session))
@@ -314,6 +317,38 @@ async fn resend_email_verification(
     Ok(HttpResponse::Ok().json(serde_json::json!({
         "message": "If your email needs confirming, a new link has been sent"
     })))
+}
+
+async fn setup_two_factor(
+    pool: web::Data<PgPool>,
+    req: HttpRequest,
+) -> Result<HttpResponse, AppError> {
+    let user_id = require_auth(&req).await?;
+    let setup = services::auth::setup_two_factor(pool.get_ref(), user_id).await?;
+    Ok(no_store(HttpResponse::Ok()).json(setup))
+}
+
+async fn enable_two_factor(
+    pool: web::Data<PgPool>,
+    req: HttpRequest,
+    body: web::Json<EnableTwoFactorRequest>,
+) -> Result<HttpResponse, AppError> {
+    let user_id = require_auth(&req).await?;
+    body.validate()?;
+    let recovery_codes =
+        services::auth::enable_two_factor(pool.get_ref(), user_id, body.code.trim()).await?;
+    Ok(no_store(HttpResponse::Ok()).json(TwoFactorEnabledResponse { recovery_codes }))
+}
+
+async fn disable_two_factor(
+    pool: web::Data<PgPool>,
+    req: HttpRequest,
+    body: web::Json<DisableTwoFactorRequest>,
+) -> Result<HttpResponse, AppError> {
+    let user_id = require_auth(&req).await?;
+    body.validate()?;
+    services::auth::disable_two_factor(pool.get_ref(), user_id, &body.password).await?;
+    Ok(HttpResponse::Ok().json(serde_json::json!({"message": "Two-factor disabled"})))
 }
 
 async fn list_sessions(

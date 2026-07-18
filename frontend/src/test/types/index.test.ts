@@ -21,6 +21,7 @@ describe('Type contracts', () => {
       bio: null,
       is_public: true,
       email_verified: true,
+      two_factor_enabled: false,
       created_at: '2024-01-01',
     };
     expect(user.id).toBeDefined();
@@ -50,6 +51,7 @@ describe('Type contracts', () => {
         bio: null,
         is_public: true,
         email_verified: true,
+        two_factor_enabled: false,
         created_at: '2024-01-01',
       },
     };

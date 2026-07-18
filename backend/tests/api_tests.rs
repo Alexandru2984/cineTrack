@@ -177,6 +177,10 @@ async fn clean_db(pool: &PgPool) {
         .execute(pool)
         .await
         .ok();
+    sqlx::query("DELETE FROM two_factor_recovery_codes")
+        .execute(pool)
+        .await
+        .ok();
     sqlx::query("DELETE FROM refresh_tokens")
         .execute(pool)
         .await
@@ -949,6 +953,171 @@ async fn test_email_verification_rejects_bad_token() {
         .to_request();
     let resp = actix_test::call_service(&app, req).await;
     assert_eq!(resp.status(), 400);
+}
+
+// ── Two-Factor (TOTP) Tests ───────────────────────────────────
+
+async fn totp_secret_bytes(pool: &PgPool, email: &str) -> Vec<u8> {
+    let secret_hex: String =
+        sqlx::query_scalar("SELECT totp_secret FROM users WHERE email = $1")
+            .bind(email)
+            .fetch_one(pool)
+            .await
+            .expect("totp secret present after setup");
+    hex::decode(secret_hex).expect("stored secret is valid hex")
+}
+
+fn current_totp_code(secret: &[u8]) -> String {
+    let now = chrono::Utc::now().timestamp().max(0) as u64;
+    cinetrack::utils::totp::code_at(secret, now)
+}
+
+/// A 6-digit code guaranteed outside the ±2-step acceptance window, so the
+/// "wrong code" assertions cannot flake near a time-step boundary.
+fn wrong_totp_code(secret: &[u8]) -> String {
+    let now = chrono::Utc::now().timestamp().max(0) as u64;
+    let window: Vec<String> = (-2..=2)
+        .map(|delta| {
+            let t = (now as i64 + delta * 30).max(0) as u64;
+            cinetrack::utils::totp::code_at(secret, t)
+        })
+        .collect();
+    ["000000", "111111", "222222", "333333", "444444", "555555"]
+        .into_iter()
+        .find(|candidate| !window.iter().any(|c| c == candidate))
+        .expect("a code outside the window exists")
+        .to_string()
+}
+
+async fn login_json(
+    app: &impl actix_web::dev::Service<
+        actix_http::Request,
+        Response = actix_web::dev::ServiceResponse<impl actix_web::body::MessageBody>,
+        Error = actix_web::Error,
+    >,
+    payload: Value,
+) -> (u16, Value) {
+    let req = actix_test::TestRequest::post()
+        .uri("/api/auth/login")
+        .set_json(payload)
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(app, req).await;
+    let status = resp.status().as_u16();
+    let body: Value = actix_test::read_body_json(resp).await;
+    (status, body)
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn test_two_factor_enable_login_and_recovery() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+
+    let (access, _, _) = register_user(&app, "mfauser", "mfa@example.com", "Pass1234").await;
+
+    // Setup issues a pending secret + otpauth URI without activating 2FA.
+    let req = actix_test::TestRequest::post()
+        .uri("/api/auth/2fa/setup")
+        .insert_header(("Authorization", format!("Bearer {access}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let body: Value = actix_test::read_body_json(resp).await;
+    assert!(body["otpauth_uri"].as_str().unwrap().starts_with("otpauth://totp/"));
+    assert!(body["secret"].as_str().unwrap().len() >= 16);
+
+    let secret = totp_secret_bytes(&pool, "mfa@example.com").await;
+
+    // A wrong code cannot activate it.
+    let req = actix_test::TestRequest::post()
+        .uri("/api/auth/2fa/enable")
+        .insert_header(("Authorization", format!("Bearer {access}")))
+        .set_json(json!({ "code": wrong_totp_code(&secret) }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 400);
+
+    // The correct code activates it and returns one-time recovery codes.
+    let req = actix_test::TestRequest::post()
+        .uri("/api/auth/2fa/enable")
+        .insert_header(("Authorization", format!("Bearer {access}")))
+        .set_json(json!({ "code": current_totp_code(&secret) }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let body: Value = actix_test::read_body_json(resp).await;
+    let recovery = body["recovery_codes"].as_array().unwrap().clone();
+    assert_eq!(recovery.len(), 10);
+    let first_recovery = recovery[0].as_str().unwrap().to_string();
+
+    // A second setup is refused now that it is enabled.
+    let req = actix_test::TestRequest::post()
+        .uri("/api/auth/2fa/setup")
+        .insert_header(("Authorization", format!("Bearer {access}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 409);
+
+    // Password alone no longer logs in: the challenge flag appears.
+    let (status, body) =
+        login_json(&app, json!({ "email": "mfa@example.com", "password": "Pass1234" })).await;
+    assert_eq!(status, 401);
+    assert_eq!(body["two_factor_required"], true);
+
+    // A valid TOTP code completes the login.
+    let (status, _) = login_json(
+        &app,
+        json!({
+            "email": "mfa@example.com",
+            "password": "Pass1234",
+            "totp_code": current_totp_code(&secret)
+        }),
+    )
+    .await;
+    assert_eq!(status, 200);
+
+    // A recovery code also completes it, and cannot be reused.
+    let (status, _) = login_json(
+        &app,
+        json!({
+            "email": "mfa@example.com",
+            "password": "Pass1234",
+            "totp_code": first_recovery
+        }),
+    )
+    .await;
+    assert_eq!(status, 200);
+    let (status, body) = login_json(
+        &app,
+        json!({
+            "email": "mfa@example.com",
+            "password": "Pass1234",
+            "totp_code": first_recovery
+        }),
+    )
+    .await;
+    assert_eq!(status, 401);
+    assert_eq!(body["two_factor_required"], Value::Null);
+
+    // Disabling requires the password and restores single-factor login.
+    let req = actix_test::TestRequest::post()
+        .uri("/api/auth/2fa/disable")
+        .insert_header(("Authorization", format!("Bearer {access}")))
+        .set_json(json!({ "password": "Pass1234" }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+
+    let (status, _) =
+        login_json(&app, json!({ "email": "mfa@example.com", "password": "Pass1234" })).await;
+    assert_eq!(status, 200);
 }
 
 // ── Forgot / Reset Password Tests ─────────────────────────────

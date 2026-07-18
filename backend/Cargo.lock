@@ -914,6 +914,7 @@ dependencies = [
  "env_logger",
  "futures-util",
  "hex",
+ "hmac",
  "jsonwebtoken",
  "lettre",
  "log",

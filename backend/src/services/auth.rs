@@ -1,4 +1,5 @@
 use chrono::{Duration, Utc};
+use rand::RngCore;
 use sqlx::PgPool;
 use std::time::Duration as StdDuration;
 use tokio::time::Instant;
@@ -9,7 +10,7 @@ use crate::dto::auth::*;
 use crate::errors::AppError;
 use crate::models::{EmailVerificationToken, PasswordResetToken, RefreshToken, User};
 use crate::services::email::EmailService;
-use crate::utils::{jwt, password};
+use crate::utils::{jwt, password, totp};
 
 const PASSWORD_RESET_RESPONSE_FLOOR: StdDuration = StdDuration::from_millis(250);
 const PASSWORD_RESET_COOLDOWN_SECONDS: i64 = 10 * 60;
@@ -106,6 +107,21 @@ pub async fn login(
     }
     let user =
         user.ok_or_else(|| AppError::Unauthorized("Invalid email or password".to_string()))?;
+
+    // Second factor: only revealed after the password is confirmed, so it never
+    // discloses whether an address has 2FA before credentials are correct.
+    if user.totp_enabled {
+        match req.totp_code.as_deref().map(str::trim).filter(|c| !c.is_empty()) {
+            None => return Err(AppError::TwoFactorRequired),
+            Some(code) => {
+                if !verify_second_factor(pool, &user, code).await? {
+                    return Err(AppError::Unauthorized(
+                        "Invalid two-factor code".to_string(),
+                    ));
+                }
+            }
+        }
+    }
 
     sqlx::query(
         r#"DELETE FROM refresh_tokens
@@ -529,6 +545,179 @@ pub async fn resend_email_verification(
 
     issue_email_verification(pool, config, email_service, user.id, &user.email).await?;
     Ok(())
+}
+
+const TOTP_ISSUER: &str = "Văzute";
+const RECOVERY_CODE_COUNT: usize = 10;
+
+/// Verify a submitted second factor: a 6-digit TOTP code, or otherwise a
+/// single-use recovery code (consumed atomically on success).
+async fn verify_second_factor(pool: &PgPool, user: &User, code: &str) -> Result<bool, AppError> {
+    let secret_hex = user.totp_secret.as_deref().ok_or_else(|| {
+        AppError::InternalError(anyhow::anyhow!("2FA enabled without a stored secret"))
+    })?;
+
+    let is_totp_shape = code.len() == 6 && code.bytes().all(|byte| byte.is_ascii_digit());
+    if is_totp_shape {
+        let secret = hex::decode(secret_hex).map_err(|_| {
+            AppError::InternalError(anyhow::anyhow!("stored TOTP secret is not valid hex"))
+        })?;
+        let now = Utc::now().timestamp().max(0) as u64;
+        return Ok(totp::verify(&secret, code, now));
+    }
+
+    // Recovery code: mark the matching unconsumed row consumed in one statement.
+    let code_hash = jwt::hash_refresh_token(code.trim());
+    let consumed = sqlx::query(
+        "UPDATE two_factor_recovery_codes SET consumed_at = NOW()
+         WHERE user_id = $1 AND code_hash = $2 AND consumed_at IS NULL",
+    )
+    .bind(user.id)
+    .bind(&code_hash)
+    .execute(pool)
+    .await?
+    .rows_affected();
+    Ok(consumed == 1)
+}
+
+/// Begin TOTP enrollment: store a fresh pending secret and return the base32
+/// secret plus the otpauth URI for the authenticator app. Re-running before
+/// activation simply rotates the pending secret.
+pub async fn setup_two_factor(
+    pool: &PgPool,
+    user_id: Uuid,
+) -> Result<TwoFactorSetupResponse, AppError> {
+    let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = $1")
+        .bind(user_id)
+        .fetch_optional(pool)
+        .await?
+        .ok_or_else(|| AppError::NotFound("User not found".to_string()))?;
+
+    if user.totp_enabled {
+        return Err(AppError::Conflict(
+            "Two-factor authentication is already enabled".to_string(),
+        ));
+    }
+
+    let secret = totp::generate_secret();
+    sqlx::query("UPDATE users SET totp_secret = $2, updated_at = NOW() WHERE id = $1")
+        .bind(user_id)
+        .bind(hex::encode(secret))
+        .execute(pool)
+        .await?;
+
+    Ok(TwoFactorSetupResponse {
+        secret: totp::base32_encode(&secret),
+        otpauth_uri: totp::otpauth_uri(TOTP_ISSUER, &user.email, &secret),
+    })
+}
+
+/// Activate TOTP once the user proves possession with a valid code. Generates a
+/// fresh set of one-time recovery codes (returned in plaintext exactly here).
+pub async fn enable_two_factor(
+    pool: &PgPool,
+    user_id: Uuid,
+    code: &str,
+) -> Result<Vec<String>, AppError> {
+    let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = $1")
+        .bind(user_id)
+        .fetch_optional(pool)
+        .await?
+        .ok_or_else(|| AppError::NotFound("User not found".to_string()))?;
+
+    if user.totp_enabled {
+        return Err(AppError::Conflict(
+            "Two-factor authentication is already enabled".to_string(),
+        ));
+    }
+    let secret_hex = user.totp_secret.as_deref().ok_or_else(|| {
+        AppError::BadRequest("Start two-factor setup before confirming a code".to_string())
+    })?;
+    let secret = hex::decode(secret_hex).map_err(|_| {
+        AppError::InternalError(anyhow::anyhow!("stored TOTP secret is not valid hex"))
+    })?;
+    let now = Utc::now().timestamp().max(0) as u64;
+    if !totp::verify(&secret, code, now) {
+        return Err(AppError::BadRequest(
+            "That code is incorrect. Check your authenticator and try again.".to_string(),
+        ));
+    }
+
+    let codes: Vec<String> = (0..RECOVERY_CODE_COUNT)
+        .map(|_| generate_recovery_code())
+        .collect();
+
+    let mut tx = pool.begin().await?;
+    sqlx::query("UPDATE users SET totp_enabled = TRUE, updated_at = NOW() WHERE id = $1")
+        .bind(user_id)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("DELETE FROM two_factor_recovery_codes WHERE user_id = $1")
+        .bind(user_id)
+        .execute(&mut *tx)
+        .await?;
+    for code in &codes {
+        sqlx::query(
+            "INSERT INTO two_factor_recovery_codes (user_id, code_hash) VALUES ($1, $2)",
+        )
+        .bind(user_id)
+        .bind(jwt::hash_refresh_token(code))
+        .execute(&mut *tx)
+        .await?;
+    }
+    tx.commit().await?;
+
+    log::info!("audit: two-factor enabled user_id={user_id}");
+
+    Ok(codes)
+}
+
+/// Turn off TOTP after re-confirming the account password, clearing the secret
+/// and all recovery codes.
+pub async fn disable_two_factor(
+    pool: &PgPool,
+    user_id: Uuid,
+    password_input: &str,
+) -> Result<(), AppError> {
+    let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = $1")
+        .bind(user_id)
+        .fetch_optional(pool)
+        .await?
+        .ok_or_else(|| AppError::NotFound("User not found".to_string()))?;
+
+    let password_hash = user
+        .password_hash
+        .as_ref()
+        .ok_or_else(|| AppError::BadRequest("Password login is not enabled".to_string()))?;
+    if !password::verify_password(password_input, password_hash).await? {
+        return Err(AppError::Unauthorized("Password is incorrect".to_string()));
+    }
+
+    let mut tx = pool.begin().await?;
+    sqlx::query(
+        "UPDATE users SET totp_enabled = FALSE, totp_secret = NULL, updated_at = NOW()
+         WHERE id = $1",
+    )
+    .bind(user_id)
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query("DELETE FROM two_factor_recovery_codes WHERE user_id = $1")
+        .bind(user_id)
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await?;
+
+    log::info!("audit: two-factor disabled user_id={user_id}");
+
+    Ok(())
+}
+
+/// A grouped, human-legible recovery code (10 hex chars as `xxxxx-xxxxx`).
+fn generate_recovery_code() -> String {
+    let mut bytes = [0u8; 5];
+    rand::rngs::OsRng.fill_bytes(&mut bytes);
+    let hex = hex::encode(bytes);
+    format!("{}-{}", &hex[..5], &hex[5..])
 }
 
 pub async fn get_current_user(pool: &PgPool, user_id: Uuid) -> Result<UserResponse, AppError> {

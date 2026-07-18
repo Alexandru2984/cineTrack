@@ -36,6 +36,7 @@ describe('Account deletion page', () => {
         bio: null,
         is_public: false,
         email_verified: true,
+        two_factor_enabled: false,
         created_at: '2026-07-17T00:00:00Z',
       },
     });

@@ -11,7 +11,11 @@ import {
   useUploadAvatar,
   useDeleteAvatar,
   useUpdatePrivacy,
+  useSetupTwoFactor,
+  useEnableTwoFactor,
+  useDisableTwoFactor,
 } from '@/hooks/useAuth';
+import { QRCodeSVG } from 'qrcode.react';
 import { useImportJobs, useStartImport, useImportJob } from '@/hooks/useImport';
 import {
   useAcceptFollowRequest,
@@ -496,6 +500,177 @@ function ChangePasswordCard() {
   );
 }
 
+function TwoFactorCard() {
+  const user = useAuthStore((state) => state.user);
+  const enabled = user?.two_factor_enabled ?? false;
+  const setup = useSetupTwoFactor();
+  const enable = useEnableTwoFactor();
+  const disable = useDisableTwoFactor();
+  const [code, setCode] = useState('');
+  const [password, setPassword] = useState('');
+  const [recoveryCodes, setRecoveryCodes] = useState<string[] | null>(null);
+
+  const startSetup = () => {
+    setRecoveryCodes(null);
+    setCode('');
+    setup.mutate();
+  };
+
+  const cancelSetup = () => {
+    setup.reset();
+    enable.reset();
+    setCode('');
+  };
+
+  const confirmEnable = (e: React.FormEvent) => {
+    e.preventDefault();
+    enable.mutate(code.trim(), {
+      onSuccess: (data) => {
+        setRecoveryCodes(data.recovery_codes);
+        setup.reset();
+        setCode('');
+      },
+    });
+  };
+
+  const confirmDisable = (e: React.FormEvent) => {
+    e.preventDefault();
+    disable.mutate(password, { onSuccess: () => setPassword('') });
+  };
+
+  return (
+    <section className="rounded-lg border border-[hsl(var(--border))] p-6">
+      <h2 className="flex items-center gap-2 text-lg font-semibold">
+        <ShieldCheck className="h-5 w-5 text-[hsl(var(--primary))]" /> Two-factor authentication
+      </h2>
+      <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">
+        Require a time-based code from an authenticator app when you sign in.
+      </p>
+
+      {/* One-time recovery codes shown right after activation. */}
+      {recoveryCodes ? (
+        <div className="mt-4 max-w-md space-y-3">
+          <div className="flex items-start gap-2 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--accent))] p-3 text-sm">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-[hsl(var(--primary))]" aria-hidden="true" />
+            Save these recovery codes somewhere safe. Each works once if you lose your
+            authenticator. They won't be shown again.
+          </div>
+          <ul className="grid grid-cols-2 gap-2 rounded-md border border-[hsl(var(--border))] p-3 font-mono text-sm">
+            {recoveryCodes.map((rc) => (
+              <li key={rc}>{rc}</li>
+            ))}
+          </ul>
+          <button
+            type="button"
+            onClick={() => setRecoveryCodes(null)}
+            className="rounded-md bg-[hsl(var(--primary))] px-4 py-2 text-sm font-medium text-white hover:opacity-90"
+          >
+            I've saved my codes
+          </button>
+        </div>
+      ) : enabled ? (
+        <form onSubmit={confirmDisable} className="mt-4 max-w-sm space-y-3">
+          <p className="flex items-center gap-2 text-sm font-medium text-[hsl(var(--primary))]">
+            <ShieldCheck className="h-4 w-4" aria-hidden="true" /> Two-factor is on.
+          </p>
+          <label htmlFor="twofa-disable-password" className="block text-sm font-medium">
+            Confirm your password to turn it off
+          </label>
+          <input
+            id="twofa-disable-password"
+            type="password"
+            autoComplete="current-password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required
+            className="w-full rounded-md border border-[hsl(var(--input))] bg-transparent px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[hsl(var(--ring))]"
+          />
+          {disable.error && (
+            <p className="text-sm text-[hsl(var(--destructive))]">
+              {getApiErrorMessage(disable.error, 'Could not disable two-factor')}
+            </p>
+          )}
+          <button
+            type="submit"
+            disabled={disable.isPending}
+            className="flex items-center justify-center gap-2 rounded-md border border-[hsl(var(--destructive))] px-4 py-2 text-sm font-medium text-[hsl(var(--destructive))] hover:bg-[hsl(var(--destructive))] hover:text-white disabled:opacity-50"
+          >
+            {disable.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
+            Disable two-factor
+          </button>
+        </form>
+      ) : setup.data ? (
+        <form onSubmit={confirmEnable} className="mt-4 space-y-4">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
+            <div className="rounded-md border border-[hsl(var(--border))] bg-white p-3">
+              <QRCodeSVG value={setup.data.otpauth_uri} size={168} marginSize={0} />
+            </div>
+            <div className="min-w-0 flex-1 space-y-2 text-sm">
+              <p>Scan this with your authenticator app, or enter the key manually:</p>
+              <code className="block break-all rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--muted))] px-2 py-1.5 font-mono text-xs">
+                {setup.data.secret}
+              </code>
+              <label htmlFor="twofa-enable-code" className="block pt-1 font-medium">
+                Enter the 6-digit code to confirm
+              </label>
+              <input
+                id="twofa-enable-code"
+                type="text"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                value={code}
+                onChange={(e) => setCode(e.target.value)}
+                required
+                className="w-full max-w-[12rem] rounded-md border border-[hsl(var(--input))] bg-transparent px-3 py-2 text-sm tracking-widest focus:outline-none focus:ring-2 focus:ring-[hsl(var(--ring))]"
+                placeholder="123456"
+              />
+            </div>
+          </div>
+          {enable.error && (
+            <p className="text-sm text-[hsl(var(--destructive))]">
+              {getApiErrorMessage(enable.error, 'Could not enable two-factor')}
+            </p>
+          )}
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="submit"
+              disabled={enable.isPending}
+              className="flex items-center justify-center gap-2 rounded-md bg-[hsl(var(--primary))] px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
+            >
+              {enable.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
+              Confirm &amp; enable
+            </button>
+            <button
+              type="button"
+              onClick={cancelSetup}
+              className="rounded-md border border-[hsl(var(--border))] px-4 py-2 text-sm hover:bg-[hsl(var(--accent))]"
+            >
+              Cancel
+            </button>
+          </div>
+        </form>
+      ) : (
+        <div className="mt-4 space-y-2">
+          {setup.error && (
+            <p className="text-sm text-[hsl(var(--destructive))]">
+              {getApiErrorMessage(setup.error, 'Could not start two-factor setup')}
+            </p>
+          )}
+          <button
+            type="button"
+            onClick={startSetup}
+            disabled={setup.isPending}
+            className="flex items-center justify-center gap-2 rounded-md bg-[hsl(var(--primary))] px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
+          >
+            {setup.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
+            Enable two-factor
+          </button>
+        </div>
+      )}
+    </section>
+  );
+}
+
 function SessionsCard() {
   const navigate = useNavigate();
   const { data: sessions, isLoading, isError } = useSessions();
@@ -688,6 +863,7 @@ export default function SettingsPage() {
       <FollowRequestsCard />
       <ImportCard />
       <ChangePasswordCard />
+      <TwoFactorCard />
       <SessionsCard />
       <SignOutCard />
       <Link
