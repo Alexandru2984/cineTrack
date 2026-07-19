@@ -1148,20 +1148,21 @@ async fn test_two_factor_enable_login_and_recovery() {
 async fn insert_reset_token(pool: &PgPool, email: &str, valid: bool) -> String {
     let raw = cinetrack::utils::jwt::generate_refresh_token();
     let token_hash = cinetrack::utils::jwt::hash_refresh_token(&raw);
-    let expires = if valid {
-        "NOW() + INTERVAL '1 hour'"
-    } else {
-        "NOW() - INTERVAL '1 hour'"
-    };
-    sqlx::query(&format!(
+    // Two fixed statements rather than one interpolated: sqlx only accepts
+    // 'static SQL, and the expiry here is a boolean toggle, not real input.
+    let sql = if valid {
         "INSERT INTO password_reset_tokens (user_id, token_hash, expires_at) \
-         VALUES ((SELECT id FROM users WHERE email = $1), $2, {expires})"
-    ))
-    .bind(email)
-    .bind(&token_hash)
-    .execute(pool)
-    .await
-    .expect("insert reset token");
+         VALUES ((SELECT id FROM users WHERE email = $1), $2, NOW() + INTERVAL '1 hour')"
+    } else {
+        "INSERT INTO password_reset_tokens (user_id, token_hash, expires_at) \
+         VALUES ((SELECT id FROM users WHERE email = $1), $2, NOW() - INTERVAL '1 hour')"
+    };
+    sqlx::query(sql)
+        .bind(email)
+        .bind(&token_hash)
+        .execute(pool)
+        .await
+        .expect("insert reset token");
     raw
 }
 
