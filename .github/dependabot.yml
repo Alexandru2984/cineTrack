@@ -57,6 +57,18 @@ updates:
       - dependency-name: react-native-svg
       - dependency-name: "@react-native-async-storage/*"
       - dependency-name: "@react-native-community/*"
+      # eslint-config-expo still bundles eslint-plugin-react, whose newest
+      # release peers on eslint ^9.7 and calls the context.getFilename() API
+      # that eslint 10 removed. Lift once Expo ships an eslint 10 config.
+      - dependency-name: eslint
+        update-types:
+          - version-update:semver-major
+      # TypeScript 7 (the native port) breaks @typescript-eslint's
+      # typescript-estree, which reads internals the rewrite dropped, so lint
+      # dies before it parses a file. Lift once typescript-eslint supports it.
+      - dependency-name: typescript
+        update-types:
+          - version-update:semver-major
 
   # GitHub Actions used by the workflows
   - package-ecosystem: github-actions
