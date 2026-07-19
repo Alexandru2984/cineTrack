@@ -16,7 +16,7 @@ A personal movie and TV show tracker with social features, inspired by TV Time. 
 - **Release Calendar** — Work through the full unwatched episode backlog, browse regional upcoming releases, save episodes for later, and mark them watched in place
 - **Up Next** — Continue with the earliest unwatched aired episode from each tracked show without skipping progress
 - **Installable PWA** — Mobile-first navigation, adaptive app icons, safe-area support, explicit updates, iOS installation guidance, and an offline launch shell
-- **Native Mobile Client** — Expo SDK 57 app for iOS and Android with rotating native sessions, Home, Calendar, Search, Library, Profile, season-wide watched actions, and watched-through confirmation
+- **Native Mobile Client** — Expo SDK 57 app for iOS and Android with rotating native sessions, two-factor sign-in, Home, Calendar, Search, Library, Profile, season-wide watched actions, and watched-through confirmation
 - **Activity Heatmap** — GitHub-style contribution calendar for your viewing history
 - **Detailed Stats** — Total watch time, streak tracking, genre distribution, monthly activity charts
 - **Yearly Wrapped** — A per-year recap: titles, hours, top genres, most-watched titles, monthly activity, and longest streak
@@ -219,7 +219,7 @@ Native simulator/device builds require Android Studio or Xcode. See
 
 ### Testing
 
-The project has **415 passing unit & integration tests** (212 backend unit + 93 PostgreSQL integration + 110 frontend) plus **24 Playwright E2E tests** across three browser suites, and **53 mobile tests**. The native client additionally has lint, strict TypeScript, Expo Doctor, dependency-audit, prebuild, and Android-export gates. One credential-gated R2 test is ignored by default:
+The project has **415 passing unit & integration tests** (212 backend unit + 93 PostgreSQL integration + 110 frontend) plus **24 Playwright E2E tests** across three browser suites, and **63 mobile tests**. The native client additionally has lint, strict TypeScript, Expo Doctor, dependency-audit, prebuild, and Android-export gates. One credential-gated R2 test is ignored by default:
 
 ```bash
 # Backend unit tests (201 passing) — no external dependencies

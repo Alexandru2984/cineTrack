@@ -16,7 +16,7 @@ import { AppButton } from '@/components/app-button';
 import { AppText } from '@/components/app-text';
 import { radius, spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
-import { getErrorMessage } from '@/lib/http';
+import { getErrorMessage, isTwoFactorRequired } from '@/lib/http';
 import { loginSession, registerSession } from '@/lib/session';
 
 export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
@@ -27,6 +27,8 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
   const [showPassword, setShowPassword] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [mfaRequired, setMfaRequired] = useState(false);
+  const [totpCode, setTotpCode] = useState('');
   const isRegister = mode === 'register';
 
   const submit = async () => {
@@ -49,16 +51,28 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
       return;
     }
 
+    if (!isRegister && mfaRequired && !totpCode.trim()) {
+      setError('Enter the code from your authenticator app');
+      return;
+    }
+
     setPending(true);
     try {
       if (isRegister) {
         await registerSession(username, normalizedEmail, password);
       } else {
-        await loginSession(normalizedEmail, password);
+        await loginSession(normalizedEmail, password, mfaRequired ? totpCode : undefined);
       }
       router.replace('/(tabs)');
     } catch (submitError) {
-      setError(getErrorMessage(submitError, 'Authentication failed'));
+      if (isTwoFactorRequired(submitError)) {
+        // First challenge: reveal the code field rather than showing this as a
+        // credential failure — the password was already accepted.
+        setMfaRequired(true);
+        setError(null);
+      } else {
+        setError(getErrorMessage(submitError, 'Authentication failed'));
+      }
     } finally {
       setPending(false);
     }
@@ -183,6 +197,36 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
               </View>
             </View>
 
+            {!isRegister && mfaRequired ? (
+              <View style={styles.field}>
+                <AppText variant="label">Authentication code</AppText>
+                <TextInput
+                  value={totpCode}
+                  onChangeText={setTotpCode}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  keyboardType="number-pad"
+                  textContentType="oneTimeCode"
+                  autoComplete="one-time-code"
+                  autoFocus
+                  placeholder="123456"
+                  placeholderTextColor={theme.mutedText}
+                  onSubmitEditing={() => void submit()}
+                  style={[
+                    styles.input,
+                    {
+                      color: theme.text,
+                      borderColor: theme.border,
+                      backgroundColor: theme.elevated,
+                    },
+                  ]}
+                />
+                <AppText variant="caption" muted>
+                  Enter the 6-digit code from your authenticator app, or a recovery code.
+                </AppText>
+              </View>
+            ) : null}
+
             {error ? (
               <View style={[styles.error, { backgroundColor: theme.dangerSoft }]}>
                 <AppText variant="caption" style={{ color: theme.danger }}>
@@ -192,7 +236,7 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
             ) : null}
 
             <AppButton
-              label={isRegister ? 'Create account' : 'Sign in'}
+              label={isRegister ? 'Create account' : mfaRequired ? 'Verify' : 'Sign in'}
               loading={pending}
               onPress={() => void submit()}
             />

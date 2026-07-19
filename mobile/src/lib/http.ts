@@ -10,10 +10,26 @@ export class ApiError extends Error {
   constructor(
     message: string,
     public readonly status: number,
+    /** Parsed error body, so callers can read flags such as two_factor_required. */
+    public readonly payload?: unknown,
   ) {
     super(message);
     this.name = 'ApiError';
   }
+}
+
+/**
+ * The backend answers a login that still needs its second factor with a 401
+ * carrying `two_factor_required`, so the client can switch to the code step
+ * instead of showing a credential error.
+ */
+export function isTwoFactorRequired(error: unknown): boolean {
+  return (
+    error instanceof ApiError &&
+    typeof error.payload === 'object' &&
+    error.payload !== null &&
+    (error.payload as { two_factor_required?: boolean }).two_factor_required === true
+  );
 }
 
 export interface RawRequestOptions {
@@ -72,7 +88,11 @@ export async function rawRequest<T>(
         typeof payload === 'object' && payload !== null && 'message' in payload
           ? (payload as ErrorPayload).message
           : undefined;
-      throw new ApiError(message || `Request failed with status ${response.status}`, response.status);
+      throw new ApiError(
+        message || `Request failed with status ${response.status}`,
+        response.status,
+        payload,
+      );
     }
 
     return payload as T;

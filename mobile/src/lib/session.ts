@@ -146,10 +146,14 @@ export function refreshSession(): Promise<string> {
   return refreshPromise;
 }
 
-export async function loginSession(email: string, password: string) {
+export async function loginSession(email: string, password: string, totpCode?: string) {
+  // A 2FA-enabled account needs the second factor: a 6-digit authenticator code
+  // or a recovery code. Omitted on the first attempt; the caller retries with it
+  // after the backend answers with two_factor_required.
+  const code = totpCode?.trim();
   const payload = await rawRequest('/auth/mobile/login', {
     method: 'POST',
-    body: { email: email.trim(), password },
+    body: { email: email.trim(), password, ...(code ? { totp_code: code } : {}) },
   });
   await acceptSession(payload);
 }
