@@ -21,6 +21,16 @@ regexes = [
 ]
 
 [[allowlists]]
+description = "Fake recovery-code fixtures in the mobile two-factor login test. These are dummy grouped-hex strings used to prove a non-6-digit code takes the recovery path; the current fixture is low entropy, and this covers the earlier commit in the full-history scan."
+condition = "AND"
+paths = [
+  '''mobile/src/lib/__tests__/two-factor-login-test\.ts''',
+]
+regexes = [
+  '''[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}''',
+]
+
+[[allowlists]]
 description = "RFC 6238 TOTP reference test vector (published in the standard, not a real secret). Current code computes it; this covers older commits in the full-history scan."
 condition = "AND"
 paths = [

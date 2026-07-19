@@ -64,12 +64,12 @@ describe('two-factor login on mobile', () => {
   });
 
   it('accepts a recovery code as the second factor', async () => {
-    await loginSession('micu@example.com', 'secret', 'abcd-ef01-2345-6789');
+    await loginSession('micu@example.com', 'secret', 'aaaa-bbbb-cccc-dddd');
 
     expect(mockRawRequest).toHaveBeenCalledWith(
       '/auth/mobile/login',
       expect.objectContaining({
-        body: expect.objectContaining({ totp_code: 'abcd-ef01-2345-6789' }),
+        body: expect.objectContaining({ totp_code: 'aaaa-bbbb-cccc-dddd' }),
       }),
     );
   });
