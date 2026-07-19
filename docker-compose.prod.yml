@@ -34,6 +34,9 @@ services:
 
   backend:
     image: cinetrack-backend
+    # FQDN so outbound mail (lettre Message-ID + SMTP EHLO) doesn't carry a
+    # random container id — Gmail scores that as a spam signal.
+    hostname: vazute.micutu.com
     build:
       context: ./backend
       dockerfile: Dockerfile.prod
