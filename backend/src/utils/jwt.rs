@@ -183,6 +183,17 @@ mod tests {
     }
 
     #[test]
+    fn test_hash_refresh_token_matches_known_sha256() {
+        // Known-answer test against the canonical SHA-256 of "test". These hashes
+        // are what refresh_tokens.token_hash stores, so a digest change would log
+        // every live session out; pin the value rather than only its shape.
+        assert_eq!(
+            hash_refresh_token("test"),
+            "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
+        );
+    }
+
+    #[test]
     fn test_token_claims_contain_correct_timestamps() {
         let user_id = Uuid::new_v4();
         let secret = "test_secret";

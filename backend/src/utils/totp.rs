@@ -3,7 +3,7 @@
 //! bytes here; callers persist them hex-encoded and only ever expose the
 //! base32/otpauth forms during enrollment.
 
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use rand::TryRng;
 use sha1::Sha1;
 
