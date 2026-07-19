@@ -1,3 +1,4 @@
+use lettre::message::Mailbox;
 use lettre::transport::smtp::authentication::Credentials;
 use lettre::{AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor};
 use std::time::{Duration, Instant};
@@ -101,6 +102,24 @@ impl EmailService {
             .await;
     }
 
+    /// Build the message with an explicit `Message-ID` (`<uuid@sender-domain>`).
+    /// lettre does not add one, and a missing Message-ID is a spam signal several
+    /// providers (Gmail included) score against.
+    fn build_message(
+        from: Mailbox,
+        to: Mailbox,
+        subject: &str,
+        body: String,
+    ) -> Result<Message, lettre::error::Error> {
+        let message_id = format!("{}@{}", uuid::Uuid::new_v4(), from.email.domain());
+        Message::builder()
+            .from(from)
+            .to(to)
+            .subject(subject)
+            .message_id(Some(message_id))
+            .body(body)
+    }
+
     /// Shared transactional delivery: builds and sends the message, records the
     /// outcome metric, and never propagates errors. Outside production, when SMTP
     /// is unconfigured, the actionable link is logged so dev flows still work.
@@ -134,12 +153,7 @@ impl EmailService {
             }
         };
 
-        let message = match Message::builder()
-            .from(from)
-            .to(to)
-            .subject(subject)
-            .body(body)
-        {
+        let message = match Self::build_message(from, to, subject, body) {
             Ok(m) => m,
             Err(e) => {
                 metrics::record_email_send(kind, "invalid_message");
@@ -197,6 +211,17 @@ mod tests {
             breached_password_check: false,
             r2: None,
         }
+    }
+
+    #[test]
+    fn built_message_has_a_message_id_using_the_sender_domain() {
+        let from: Mailbox = "Vazute <noreply@micutu.com>".parse().unwrap();
+        let to: Mailbox = "user@example.com".parse().unwrap();
+        let message = EmailService::build_message(from, to, "Subject", "Body".to_string()).unwrap();
+        let raw = String::from_utf8(message.formatted()).unwrap();
+        // A non-empty Message-ID scoped to the sender domain (not "<>").
+        assert!(raw.contains("@micutu.com>"));
+        assert!(!raw.contains("Message-ID: <>"));
     }
 
     #[test]
