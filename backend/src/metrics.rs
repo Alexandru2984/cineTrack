@@ -214,7 +214,7 @@ mod tests {
             .registry
             .gather()
             .into_iter()
-            .map(|family| family.get_name().to_string())
+            .map(|family| family.name().to_string())
             .collect::<Vec<_>>();
 
         assert!(names
@@ -244,7 +244,7 @@ mod tests {
             .registry
             .gather()
             .into_iter()
-            .map(|family| family.get_name().to_string())
+            .map(|family| family.name().to_string())
             .collect::<Vec<_>>();
 
         assert!(encoded
