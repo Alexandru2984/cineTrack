@@ -41,6 +41,22 @@ updates:
         update-types:
           - minor
           - patch
+    # The Expo SDK dictates the version of every native module it manages, and
+    # `npx expo install --check` rejects anything else. Bumping these one at a
+    # time still passes CI, which never runs a native build, so the breakage
+    # only shows up on a device. They move as a set on an SDK upgrade, via
+    # `npx expo install --fix`.
+    ignore:
+      - dependency-name: expo
+      - dependency-name: expo-*
+      - dependency-name: react
+      - dependency-name: react-native
+      - dependency-name: react-native-gesture-handler
+      - dependency-name: react-native-safe-area-context
+      - dependency-name: react-native-screens
+      - dependency-name: react-native-svg
+      - dependency-name: "@react-native-async-storage/*"
+      - dependency-name: "@react-native-community/*"
 
   # GitHub Actions used by the workflows
   - package-ecosystem: github-actions
@@ -69,3 +85,11 @@ updates:
       interval: weekly
     cooldown:
       default-days: 7
+    # A Postgres major cannot be rolled out by swapping the image tag: the
+    # server refuses to start on a data directory written by an older major,
+    # and production holds a live volume. That upgrade is a deliberate
+    # dump/restore, never an automated bump.
+    ignore:
+      - dependency-name: postgres
+        update-types:
+          - version-update:semver-major
