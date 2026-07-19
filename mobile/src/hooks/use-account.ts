@@ -4,6 +4,7 @@ import {
   changeAccountPassword,
   listAccountSessions,
   logoutAllAccountSessions,
+  resendEmailVerification,
   revokeAccountSession,
   updateAccountProfile,
   type ProfileDraft,
@@ -53,4 +54,8 @@ export function useRevokeAccountSession() {
 
 export function useLogoutAllAccountSessions() {
   return useMutation({ mutationFn: logoutAllAccountSessions });
+}
+
+export function useResendEmailVerification() {
+  return useMutation({ mutationFn: resendEmailVerification });
 }

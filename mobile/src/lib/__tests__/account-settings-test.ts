@@ -2,6 +2,7 @@ import {
   changeAccountPassword,
   listAccountSessions,
   logoutAllAccountSessions,
+  resendEmailVerification,
   MAX_PROFILE_BIO_LENGTH,
   updateAccountProfile,
   validatePasswordChange,
@@ -110,5 +111,16 @@ describe('mobile account settings', () => {
     expect(mockApiRequest).toHaveBeenNthCalledWith(2, '/auth/sessions/logout-all', {
       method: 'POST',
     });
+  });
+
+  it('requests a fresh email-confirmation link without leaking the account state', async () => {
+    mockApiRequest.mockResolvedValueOnce({ message: 'ok' });
+
+    await resendEmailVerification();
+
+    // Authenticated POST with no body: the backend answers uniformly whether or
+    // not a mail was actually dispatched.
+    expect(mockApiRequest).toHaveBeenCalledWith('/auth/email/resend', { method: 'POST' });
+    expect(mockClearLocalSession).not.toHaveBeenCalled();
   });
 });

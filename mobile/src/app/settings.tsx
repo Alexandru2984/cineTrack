@@ -9,6 +9,7 @@ import {
   KeyRound,
   Laptop2,
   LogOut,
+  MailWarning,
   RefreshCw,
   Save,
   ShieldCheck,
@@ -40,6 +41,7 @@ import {
   useAccountSessions,
   useChangeAccountPassword,
   useLogoutAllAccountSessions,
+  useResendEmailVerification,
   useRevokeAccountSession,
   useUpdateAccountProfile,
 } from '@/hooks/use-account';
@@ -88,6 +90,7 @@ export default function SettingsScreen() {
   const revokeSession = useRevokeAccountSession();
   const logoutAllSessions = useLogoutAllAccountSessions();
   const changePassword = useChangeAccountPassword();
+  const resendVerification = useResendEmailVerification();
   const releaseAlerts = useReleaseNotifications(
     user?.id ?? '',
     status === 'authenticated',
@@ -436,6 +439,35 @@ export default function SettingsScreen() {
               />
             ) : null}
           </View>
+
+          {user.email_verified === false ? (
+            <View style={[styles.section, { borderBottomColor: theme.border }]}>
+              <View style={styles.sectionHeading}>
+                <MailWarning color={theme.warning} size={20} />
+                <View style={styles.headingCopy}>
+                  <AppText variant="section">Confirm your email</AppText>
+                  <AppText variant="caption" muted numberOfLines={2}>
+                    Secures your account and password recovery for {user.email}.
+                  </AppText>
+                </View>
+              </View>
+              {resendVerification.isSuccess ? (
+                <FormMessage message="Confirmation link sent. Check your inbox." success />
+              ) : null}
+              {resendVerification.isError ? (
+                <FormMessage
+                  message={getErrorMessage(resendVerification.error, 'Could not send the link')}
+                />
+              ) : null}
+              <AppButton
+                label={resendVerification.isSuccess ? 'Link sent' : 'Resend confirmation email'}
+                icon={<MailWarning color="#FFFFFF" size={18} />}
+                loading={resendVerification.isPending}
+                disabled={resendVerification.isSuccess}
+                onPress={() => resendVerification.mutate()}
+              />
+            </View>
+          ) : null}
 
           <View style={[styles.section, { borderBottomColor: theme.border }]}>
             <View style={styles.sectionHeading}>

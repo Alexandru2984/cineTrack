@@ -20,6 +20,9 @@ const userSchema = z.object({
   avatar_url: z.string().nullable(),
   bio: z.string().nullable(),
   is_public: z.boolean(),
+  // Optional so sessions cached before this field shipped still parse instead
+  // of failing validation and signing the user out on upgrade.
+  email_verified: z.boolean().optional(),
   created_at: z.string(),
 });
 

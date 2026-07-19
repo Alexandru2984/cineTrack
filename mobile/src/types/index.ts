@@ -13,6 +13,8 @@ export interface User {
   avatar_url: string | null;
   bio: string | null;
   is_public: boolean;
+  /** Absent on sessions cached before this field existed; treat only `false` as unverified. */
+  email_verified?: boolean;
   created_at: string;
 }
 

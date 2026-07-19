@@ -100,6 +100,15 @@ export async function logoutAllAccountSessions() {
   await clearLocalSession();
 }
 
+/**
+ * Ask the backend to re-send the address-confirmation link. The response is
+ * uniform whether or not a mail was actually dispatched (the backend applies a
+ * cooldown and no-ops for already-verified accounts).
+ */
+export async function resendEmailVerification() {
+  await apiRequest<{ message: string }>('/auth/email/resend', { method: 'POST' });
+}
+
 export async function deleteAccountSession(password: string) {
   await apiRequest<{ message: string }>('/users/me', {
     method: 'DELETE',
