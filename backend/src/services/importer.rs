@@ -508,3 +508,73 @@ async fn write_watch_history(
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn dt(s: &str) -> Option<DateTime<Utc>> {
+        parse_dt(&Some(s.to_string()))
+    }
+
+    #[test]
+    fn parse_dt_reads_rfc3339_timestamps() {
+        // shows.json / movies.json format, including the fractional seconds.
+        let parsed = dt("2018-12-25T00:18:11.000Z").expect("rfc3339 parses");
+        assert_eq!(parsed.to_rfc3339(), "2018-12-25T00:18:11+00:00");
+    }
+
+    #[test]
+    fn parse_dt_normalizes_a_non_utc_offset() {
+        // An export written in a local offset must land on the same instant in
+        // UTC, or the watch drifts into the wrong day on the heatmap.
+        let parsed = dt("2018-12-25T02:18:11+02:00").expect("offset parses");
+        assert_eq!(parsed, dt("2018-12-25T00:18:11Z").unwrap());
+    }
+
+    #[test]
+    fn parse_dt_reads_the_gdpr_csv_format_as_utc() {
+        let parsed = dt("2020-03-04 21:05:00").expect("csv format parses");
+        assert_eq!(parsed.to_rfc3339(), "2020-03-04T21:05:00+00:00");
+    }
+
+    #[test]
+    fn parse_dt_returns_none_for_anything_unrecognised() {
+        // These arrive from a user-supplied export, so every one of them has to
+        // come back None rather than panic or land on a bogus instant.
+        for value in [
+            "",
+            "   ",
+            "not a date",
+            "2018-12-25",           // date only, no time
+            "25-12-2018 00:18:11",  // day-first
+            "2018-13-45T00:18:11Z", // out of range
+            "2018-12-25T00:18:11",  // no zone, not the CSV shape either
+            "2018-12-25 00:18",     // missing seconds
+        ] {
+            assert!(dt(value).is_none(), "expected {value:?} to be rejected");
+        }
+        assert!(parse_dt(&None).is_none());
+    }
+
+    #[test]
+    fn normalize_title_trims_and_lowercases() {
+        assert_eq!(normalize_title("  The Expanse  "), "the expanse");
+        assert_eq!(normalize_title("BREAKING BAD"), "breaking bad");
+        assert_eq!(normalize_title("already normal"), "already normal");
+    }
+
+    #[test]
+    fn normalize_title_handles_non_ascii_titles() {
+        // Titles come straight from the export, so diacritics must fold the same
+        // way on both sides of a comparison.
+        assert_eq!(normalize_title(" Văzute "), "văzute");
+        assert_eq!(normalize_title("ÉTÉ"), "été");
+    }
+
+    #[test]
+    fn normalize_title_collapses_only_the_edges() {
+        // Interior spacing is significant; only surrounding whitespace goes.
+        assert_eq!(normalize_title("\tThe  Wire\n"), "the  wire");
+    }
+}

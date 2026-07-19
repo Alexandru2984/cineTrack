@@ -541,6 +541,64 @@ mod tests {
     }
 
     #[test]
+    fn poster_specs_reject_encoded_and_alternate_traversals() {
+        // The plain "../" case is covered above; these are the usual ways to
+        // smuggle it past a naive substring check. All of them must fail on the
+        // allowed-character rule, not by accident.
+        for spec in [
+            r"w500\..\..\private.jpg",   // backslash separators
+            "w500/%2e%2e%2fprivate.jpg", // percent-encoded ../
+            "w500/%2E%2E/private.jpg",   // mixed-case encoding
+            "w500/..%2fprivate.jpg",     // half-encoded
+            "w500/\0/private.jpg",       // null byte
+            "w500/pri vate.jpg",         // space
+            "w500/private.jpg?x=1",      // query suffix
+            "w500/private.jpg#frag",     // fragment
+            "w500/private.svg",          // disallowed extension
+            "w500/private.jpg.svg",      // double extension
+            "/w500/private.jpg",         // leading slash -> empty size
+        ] {
+            assert!(!valid_poster_spec(spec), "expected {spec:?} to be rejected");
+        }
+    }
+
+    #[test]
+    fn poster_spec_allows_a_bare_extension_name() {
+        // "w500/.jpg" passes the filter: it is a legal (if odd) object name, not
+        // a traversal. Nothing generates such a key, so the lookup just misses
+        // and 404s. Recorded so the permissiveness is a known boundary.
+        assert!(valid_poster_spec("w500/.jpg"));
+    }
+
+    #[test]
+    fn poster_specs_accept_every_allowed_tmdb_size() {
+        // A size dropping out of the allowlist would silently 404 real posters.
+        for size in POSTER_SIZES {
+            assert!(
+                valid_poster_spec(&format!("{size}/poster.jpg")),
+                "expected size {size} to be accepted"
+            );
+        }
+    }
+
+    #[test]
+    fn avatar_keys_reject_traversal_in_the_uuid_position() {
+        for key in [
+            "avatars/../posters/w500/x.jpg",
+            "avatars/../../backups/dump.gz",
+            "avatars/550e8400-e29b-41d4-a716-446655440000", // no extension
+            "avatars/550e8400-e29b-41d4-a716-446655440000.", // empty extension
+            "avatars/",
+            "avatars/.png",
+        ] {
+            assert!(
+                !valid_public_asset_key(key),
+                "expected {key:?} to be rejected"
+            );
+        }
+    }
+
+    #[test]
     fn public_asset_keys_match_only_generated_objects() {
         assert!(valid_public_asset_key(
             "avatars/550e8400-e29b-41d4-a716-446655440000.webp"
