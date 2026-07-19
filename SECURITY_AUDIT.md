@@ -147,6 +147,12 @@ Audited everything added since the previous round: the Wrapped endpoint, social-
 - Secrets: a full-tree sweep across 472 files found the Resend key only in `.env.prod` (mode 600, git-ignored) and the Mailcow API key in no file at all; nothing secret is tracked in git.
 - Live headers unchanged after the frontend rebuilds: HSTS, DENY framing, nosniff, referrer/permissions policies, COOP/CORP, and the strict `script-src 'self'` CSP.
 
+### Database and performance review
+
+- Fixed a performance regression in the new Wrapped endpoint: `EXTRACT(YEAR FROM watched_at)` is not sargable, so each of its five queries scanned the account's entire history and discarded most of it (17,124 rows read, 16,854 removed by filter, to return 270). A half-open date range now uses `idx_watch_history_user_recent` directly — verified by plan (`Index Cond` covers both bounds, 270 rows, no filter) and by the integration test, which still asserts exact aggregates and cross-year isolation. This matched the pattern the heatmap endpoint already used.
+- The rest of the schema is healthy: index usage dominates (for example `catalog_external_ids` shows 13M index scans against 74 sequential), the users table already carries functional indexes for both case-insensitive username lookup (`lower(username)`) and prefix search (`text_pattern_ops`), autovacuum is keeping dead tuples low, and the buffer cache hit ratio is 97%. Sequential scans on `user_media` and `media` are the planner's correct choice on small tables.
+- Noted for scale rather than now: `watch_history.episode_id` has no leading index for its foreign key, which is moot because nothing deletes episodes; and the pool is capped at 10 connections with a 5-second acquire timeout, which is the first knob to raise if concurrent load grows.
+
 ### Residual risks introduced by the new mail path
 
 - Mailcow stores the relayhost password (the Resend API key) in plaintext in its database, because Postfix must present it to the relay. Anyone with host or database access can read it; that is already full-compromise territory, and the key is send-only, but it argues for periodic rotation.
