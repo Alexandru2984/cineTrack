@@ -37,6 +37,13 @@ async fn my_wrapped(
 ) -> Result<HttpResponse, AppError> {
     let user_id = require_auth(&req).await?;
     let year = parse_year(&query)?;
+    // Bind the year as a half-open timestamp range instead of EXTRACT(YEAR ...),
+    // so the (user_id, watched_at) index can satisfy the predicate directly
+    // rather than scanning the account's whole history and filtering.
+    let start_date = NaiveDate::from_ymd_opt(year, 1, 1)
+        .ok_or_else(|| AppError::BadRequest("Invalid year".to_string()))?;
+    let end_date = NaiveDate::from_ymd_opt(year, 12, 31)
+        .ok_or_else(|| AppError::BadRequest("Invalid year".to_string()))?;
 
     // Headline totals over the year's watch events.
     let (
@@ -75,10 +82,12 @@ async fn my_wrapped(
             JOIN media m ON wh.media_id = m.id
             LEFT JOIN episodes e ON wh.episode_id = e.id
             WHERE wh.user_id = $1
-              AND EXTRACT(YEAR FROM wh.watched_at AT TIME ZONE 'UTC')::int = $2"#,
+              AND wh.watched_at >= ($2::date::timestamp AT TIME ZONE 'UTC')
+              AND wh.watched_at < (($3::date + 1)::timestamp AT TIME ZONE 'UTC')"#,
     )
     .bind(user_id)
-    .bind(year)
+    .bind(start_date)
+    .bind(end_date)
     .fetch_one(pool.get_ref())
     .await?;
 
@@ -89,7 +98,8 @@ async fn my_wrapped(
             SELECT DISTINCT wh.media_id
             FROM watch_history wh
             WHERE wh.user_id = $1
-              AND EXTRACT(YEAR FROM wh.watched_at AT TIME ZONE 'UTC')::int = $2
+              AND wh.watched_at >= ($2::date::timestamp AT TIME ZONE 'UTC')
+              AND wh.watched_at < (($3::date + 1)::timestamp AT TIME ZONE 'UTC')
         ) watched
         JOIN media m ON m.id = watched.media_id,
         jsonb_array_elements(
@@ -101,7 +111,8 @@ async fn my_wrapped(
         LIMIT 5"#,
     )
     .bind(user_id)
-    .bind(year)
+    .bind(start_date)
+    .bind(end_date)
     .fetch_all(pool.get_ref())
     .await?
     .into_iter()
@@ -114,13 +125,15 @@ async fn my_wrapped(
         FROM watch_history wh
         JOIN media m ON wh.media_id = m.id
         WHERE wh.user_id = $1
-          AND EXTRACT(YEAR FROM wh.watched_at AT TIME ZONE 'UTC')::int = $2
+          AND wh.watched_at >= ($2::date::timestamp AT TIME ZONE 'UTC')
+          AND wh.watched_at < (($3::date + 1)::timestamp AT TIME ZONE 'UTC')
         GROUP BY m.tmdb_id, m.media_type, m.title, m.poster_path
         ORDER BY COUNT(*) DESC, m.title
         LIMIT 5"#,
     )
     .bind(user_id)
-    .bind(year)
+    .bind(start_date)
+    .bind(end_date)
     .fetch_all(pool.get_ref())
     .await?
     .into_iter()
@@ -140,11 +153,13 @@ async fn my_wrapped(
         r#"SELECT EXTRACT(MONTH FROM wh.watched_at AT TIME ZONE 'UTC')::int AS month, COUNT(*)::bigint
         FROM watch_history wh
         WHERE wh.user_id = $1
-          AND EXTRACT(YEAR FROM wh.watched_at AT TIME ZONE 'UTC')::int = $2
+          AND wh.watched_at >= ($2::date::timestamp AT TIME ZONE 'UTC')
+          AND wh.watched_at < (($3::date + 1)::timestamp AT TIME ZONE 'UTC')
         GROUP BY month"#,
     )
     .bind(user_id)
-    .bind(year)
+    .bind(start_date)
+    .bind(end_date)
     .fetch_all(pool.get_ref())
     .await?;
     let monthly: Vec<WrappedMonth> = (1..=12)
@@ -162,10 +177,12 @@ async fn my_wrapped(
         r#"SELECT DISTINCT (watched_at AT TIME ZONE 'UTC')::date AS watch_date
         FROM watch_history
         WHERE user_id = $1
-          AND EXTRACT(YEAR FROM watched_at AT TIME ZONE 'UTC')::int = $2"#,
+          AND watched_at >= ($2::date::timestamp AT TIME ZONE 'UTC')
+          AND watched_at < (($3::date + 1)::timestamp AT TIME ZONE 'UTC')"#,
     )
     .bind(user_id)
-    .bind(year)
+    .bind(start_date)
+    .bind(end_date)
     .fetch_all(pool.get_ref())
     .await?;
     let (_, longest_streak) = calculate_streaks(&year_dates);
