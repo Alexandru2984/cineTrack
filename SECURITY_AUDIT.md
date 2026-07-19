@@ -134,6 +134,25 @@ In the third round we reviewed the repo directly on the VPS/prod host and closed
 - The 112,128,240-byte APK has SHA-256 `379d23fe19678e7778f93205ca984d89bf52c13476ab2a17fee2a100aac00b04`. ZIP validation found no corruption; `apksigner` verified APK Signature Scheme v2 with one RSA-2048 signer whose certificate SHA-256 is `2524d5b15425451e001c6b8e65a4f51958e5b0a34ca5350a4158bd7a1063600f`. The artifact contains the production HTTPS API origin, SecureStore backup exclusions, no credential-like filenames, and no secret-scanner findings.
 - Final-manifest inspection found unused `USE_BIOMETRIC` and deprecated `USE_FINGERPRINT` permissions inherited through AndroidX. The app never enables SecureStore `requireAuthentication`, so both permissions are now blocked in commit `76ca89d`; CNG verification generated the expected `tools:node="remove"` entries. The first signed artifact predates this fix and must be superseded before release.
 
+## Changes applied (2026-07-19 — extreme audit of the new surface)
+
+Audited everything added since the previous round: the Wrapped endpoint, social-preview meta, the outgoing Message-ID, the mobile two-factor and email-verification work, and the new mail infrastructure (Resend SMTP for the app, a Resend relayhost in Mailcow).
+
+- Fixed a secret-scan break: the fake recovery code in `mobile/src/lib/__tests__/two-factor-login-test.ts` tripped gitleaks' `generic-api-key` rule (entropy 3.99) and would have failed the Secret Scan job on push. The fixture is now low entropy and a narrowly scoped allowlist covers the earlier commit, mirroring the RFC 6238 vector precedent. Gitleaks is clean across 249 commits.
+- Verified the Wrapped endpoint is user-scoped by construction: all five queries bind the authenticated `user_id`, the request accepts only `year` (bounded 1900-2100) with no user selector, so cross-account access is not expressible. Unauthenticated and bogus-token requests return 401.
+- Verified the mobile `ApiError` payload change does not leak: the crash reporter serializes only `name`/`message`/`stack` and never the payload, and still redacts bearer credentials, emails, opaque tokens, and URL parameters. The only consumer of `payload` is the `two_factor_required` check.
+- Confirmed validation errors never echo submitted values: a rejected password and a malformed email both return only the field name and a static message.
+- Whole-backend sweep found no dynamic SQL, no `unsafe`, and no `.unwrap()` outside `#[cfg(test)]` modules; `health.rs` remains the only route file without `require_auth`, by design.
+- Supply chain: `cargo audit` reports only the two known yanked `spin` transitives, frontend production `npm audit` is clean, and mobile has zero high/critical (11 moderate in the Expo build-tooling chain, unchanged).
+- Secrets: a full-tree sweep across 472 files found the Resend key only in `.env.prod` (mode 600, git-ignored) and the Mailcow API key in no file at all; nothing secret is tracked in git.
+- Live headers unchanged after the frontend rebuilds: HSTS, DENY framing, nosniff, referrer/permissions policies, COOP/CORP, and the strict `script-src 'self'` CSP.
+
+### Residual risks introduced by the new mail path
+
+- Mailcow stores the relayhost password (the Resend API key) in plaintext in its database, because Postfix must present it to the relay. Anyone with host or database access can read it; that is already full-compromise territory, and the key is send-only, but it argues for periodic rotation.
+- The Resend and Mailcow API keys were both disclosed in a chat transcript during setup and should be rotated.
+- `.env.prod.bak.*` retains the previous Mailcow mailbox password as a rollback path. It is mode 600 and git-ignored; delete it once the Resend path is considered settled.
+
 ## Changes applied (2026-07-18, round 4 — social previews)
 
 - Added Open Graph / Twitter Card meta and a branded 1200x630 og-image to `index.html`, plus a `usePageTitle` hook that sets per-page document titles (list, profile, media, Wrapped). Public lists and profiles were already shareable (public read API + Share button); this fills the missing social preview. The og-image is excluded from the PWA precache since only server-side crawlers fetch it. Static crawlers get the site-level card; per-list dynamic previews would require server-side/dynamic rendering (noted as a follow-up).
