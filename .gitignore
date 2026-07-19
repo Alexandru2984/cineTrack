@@ -27,3 +27,4 @@ nginx/ssl/
 
 # Personal TV Time export/import data (contains PII: tokens, IPs, password hashes) — never commit
 tvtime_data/
+.env.prod.bak.*
