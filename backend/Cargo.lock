@@ -919,7 +919,7 @@ dependencies = [
  "lettre",
  "log",
  "prometheus",
- "rand 0.8.6",
+ "rand 0.10.1",
  "reqwest",
  "serde",
  "serde_json",

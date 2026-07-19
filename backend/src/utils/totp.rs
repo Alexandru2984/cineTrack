@@ -4,7 +4,7 @@
 //! base32/otpauth forms during enrollment.
 
 use hmac::{Hmac, Mac};
-use rand::RngCore;
+use rand::TryRng;
 use sha1::Sha1;
 
 type HmacSha1 = Hmac<Sha1>;
@@ -20,7 +20,9 @@ const SKEW_STEPS: i64 = 1;
 /// Generate a fresh 160-bit shared secret.
 pub fn generate_secret() -> [u8; 20] {
     let mut bytes = [0u8; 20];
-    rand::rngs::OsRng.fill_bytes(&mut bytes);
+    rand::rngs::SysRng
+        .try_fill_bytes(&mut bytes)
+        .expect("OS RNG unavailable while generating a TOTP secret");
     bytes
 }
 
@@ -150,6 +152,17 @@ mod tests {
             let counter = time / PERIOD_SECONDS;
             assert_eq!(format!("{:08}", hotp(RFC_SECRET, counter, 8)), expected);
         }
+    }
+
+    #[test]
+    fn generate_secret_is_full_width_and_not_degenerate() {
+        // Guards the RNG wiring itself: a secret that came back all-zero, or the
+        // same on every call, would still satisfy every other test in this file.
+        let first = generate_secret();
+        let second = generate_secret();
+        assert_ne!(first, second);
+        assert_ne!(first, [0u8; 20]);
+        assert!(first.iter().any(|&byte| byte != first[0]));
     }
 
     #[test]

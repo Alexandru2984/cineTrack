@@ -1,6 +1,6 @@
 use chrono::{Duration, Utc};
 use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
-use rand::RngCore;
+use rand::TryRng;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
@@ -50,7 +50,9 @@ pub fn validate_token(token: &str, secret: &str) -> Result<Claims, AppError> {
 
 pub fn generate_refresh_token() -> String {
     let mut bytes = [0u8; 64];
-    rand::rngs::OsRng.fill_bytes(&mut bytes);
+    rand::rngs::SysRng
+        .try_fill_bytes(&mut bytes)
+        .expect("OS RNG unavailable while generating a refresh token");
     hex::encode(bytes)
 }
 

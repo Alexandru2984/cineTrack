@@ -1,5 +1,5 @@
 use chrono::{Duration, Utc};
-use rand::RngCore;
+use rand::TryRng;
 use sqlx::PgPool;
 use std::time::Duration as StdDuration;
 use tokio::time::Instant;
@@ -731,7 +731,9 @@ pub async fn disable_two_factor(
 /// negligible collision probability across accounts.
 fn generate_recovery_code() -> String {
     let mut bytes = [0u8; 8];
-    rand::rngs::OsRng.fill_bytes(&mut bytes);
+    rand::rngs::SysRng
+        .try_fill_bytes(&mut bytes)
+        .expect("OS RNG unavailable while generating a recovery code");
     let hex = hex::encode(bytes);
     format!(
         "{}-{}-{}-{}",
