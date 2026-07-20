@@ -9,8 +9,9 @@
 //!
 //! Run with: cargo bench --bench hot_paths
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use cinetrack::utils::{jwt, password, totp};
+use criterion::{criterion_group, criterion_main, Criterion};
+use std::hint::black_box;
 use uuid::Uuid;
 
 const SECRET: &str = "bench_secret_key_long_enough_for_hs256_signing_0123456789abcdef";
@@ -23,8 +24,11 @@ fn bench_password(c: &mut Criterion) {
     group.sample_size(10);
 
     group.bench_function("hash (argon2id)", |b| {
-        b.to_async(&runtime)
-            .iter(|| async { password::hash_password(black_box("Passw0rd123!")).await.unwrap() });
+        b.to_async(&runtime).iter(|| async {
+            password::hash_password(black_box("Passw0rd123!"))
+                .await
+                .unwrap()
+        });
     });
 
     let hash = runtime
@@ -48,6 +52,44 @@ fn bench_password(c: &mut Criterion) {
                 .unwrap()
         });
     });
+
+    group.finish();
+}
+
+/// What stronger Argon2 settings would cost.
+///
+/// The stored hashes are m=19 MiB, t=2, p=1 — OWASP's documented minimum for
+/// Argon2id. Raising them is the only meaningful hardening left (the algorithm
+/// itself is the current recommendation), but each step is paid on every single
+/// sign-in, and password.rs caps concurrent hashes at 4, so latency here
+/// translates directly into a login throughput ceiling. Measure before tuning.
+fn bench_password_params(c: &mut Criterion) {
+    use argon2::password_hash::{rand_core::OsRng, PasswordHasher, SaltString};
+    use argon2::{Algorithm, Argon2, Params, Version};
+
+    let mut group = c.benchmark_group("password_params");
+    group.sample_size(10);
+
+    // (label, memory KiB, iterations, parallelism)
+    let settings = [
+        ("current: m=19MiB t=2 p=1", 19_456u32, 2u32, 1u32),
+        ("owasp alt: m=46MiB t=1 p=1", 47_104, 1, 1),
+        ("rfc9106 2nd: m=64MiB t=3 p=4", 65_536, 3, 4),
+    ];
+
+    for (label, memory, iterations, parallelism) in settings {
+        let params = Params::new(memory, iterations, parallelism, None).expect("valid params");
+        let hasher = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
+        group.bench_function(label, |b| {
+            b.iter(|| {
+                let salt = SaltString::generate(&mut OsRng);
+                hasher
+                    .hash_password(black_box(b"Passw0rd123!"), &salt)
+                    .unwrap()
+                    .to_string()
+            });
+        });
+    }
 
     group.finish();
 }
@@ -106,5 +148,11 @@ fn bench_totp(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_password, bench_jwt, bench_totp);
+criterion_group!(
+    benches,
+    bench_password,
+    bench_password_params,
+    bench_jwt,
+    bench_totp
+);
 criterion_main!(benches);
