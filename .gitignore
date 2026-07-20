@@ -30,3 +30,4 @@ tvtime_data/
 .env.prod.bak.*
 bench/results/
 bench-summary.json
+ops/alertmanager/alertmanager.generated.yml

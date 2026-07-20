@@ -1,5 +1,10 @@
 # Alert delivery for Văzute.
 #
+# This file is a template: Alertmanager does not expand environment variables in
+# its config, so ${...} left here reaches the SMTP client literally and every
+# notification fails with "unknown port". The compose entrypoint renders it with
+# envsubst before Alertmanager starts.
+#
 # Rules that fire into a dashboard nobody watches are the same problem as rules
 # that are not loaded at all, which is what the CISO review found. Delivery goes
 # over the Resend SMTP relay already proven in production for transactional
