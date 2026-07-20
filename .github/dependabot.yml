@@ -27,6 +27,14 @@ updates:
         update-types:
           - minor
           - patch
+    ignore:
+      # Same blocker as /mobile: TypeScript 7 is the native rewrite, and
+      # @typescript-eslint's typescript-estree reads internals it dropped, so
+      # eslint dies before parsing a file. tsc itself is fine — it is the lint
+      # toolchain that cannot follow yet. Lift when typescript-eslint supports it.
+      - dependency-name: typescript
+        update-types:
+          - version-update:semver-major
 
   # Native mobile npm packages
   - package-ecosystem: npm
