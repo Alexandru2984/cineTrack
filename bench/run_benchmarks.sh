@@ -7,6 +7,7 @@
 # numbers describe a loaded user rather than an empty one.
 #
 # Usage: bench/run_benchmarks.sh [--skip-micro] [--skip-api] [--skip-db]
+#        bench/run_benchmarks.sh --capacity   (load ramp instead of the above)
 
 set -euo pipefail
 
@@ -18,12 +19,15 @@ RESULTS_DIR="$ROOT_DIR/bench/results"
 STAMP="$(date +%Y%m%d-%H%M%S)"
 RUN_DIR="$RESULTS_DIR/$STAMP"
 
-RUN_MICRO=1 RUN_API=1 RUN_DB=1
+RUN_MICRO=1 RUN_API=1 RUN_DB=1 RUN_CAPACITY=0
 for arg in "$@"; do
   case "$arg" in
     --skip-micro) RUN_MICRO=0 ;;
     --skip-api) RUN_API=0 ;;
     --skip-db) RUN_DB=0 ;;
+    # Capacity is a load test, not a latency measurement, so it replaces the
+    # other layers rather than running alongside and perturbing them.
+    --capacity) RUN_CAPACITY=1; RUN_MICRO=0; RUN_API=0; RUN_DB=0 ;;
     *) echo "unknown option: $arg" >&2; exit 2 ;;
   esac
 done
@@ -50,7 +54,7 @@ if [[ "$RUN_MICRO" == 1 ]]; then
     2>&1 | tee "$RUN_DIR/micro.txt"
 fi
 
-if [[ "$RUN_API" == 0 && "$RUN_DB" == 0 ]]; then
+if [[ "$RUN_API" == 0 && "$RUN_DB" == 0 && "$RUN_CAPACITY" == 0 ]]; then
   echo "results in $RUN_DIR"
   exit 0
 fi
@@ -117,6 +121,19 @@ if [[ "$RUN_API" == 1 ]]; then
   ( cd "$RUN_DIR" && BASE_URL="$BASE_URL" TOKEN="$TOKEN" SHOW_ID="$SHOW_ID" \
       k6 run --summary-trend-stats='avg,min,med,p(95),p(99),max' \
       "$ROOT_DIR/bench/api/mobile_session.js" 2>&1 | tee api.txt )
+fi
+
+# ── Capacity ────────────────────────────────────────────────────
+if [[ "$RUN_CAPACITY" == 1 ]]; then
+  require k6
+  require python3
+  log "Capacity ramp (finding the point where the budget breaks)"
+  ( cd "$RUN_DIR" && BASE_URL="$BASE_URL" TOKEN="$TOKEN" SHOW_ID="$SHOW_ID" \
+      PEAK_RPS="${PEAK_RPS:-600}" \
+      k6 run --out "csv=capacity.csv" "$ROOT_DIR/bench/api/capacity.js" 2>&1 | tee capacity.txt )
+  log "Per-window breakdown"
+  python3 "$ROOT_DIR/bench/analyze_capacity.py" "$RUN_DIR/capacity.csv" \
+    | tee "$RUN_DIR/capacity-windows.txt"
 fi
 
 # ── Query plans ─────────────────────────────────────────────────

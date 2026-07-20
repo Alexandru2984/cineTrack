@@ -78,3 +78,26 @@ regressed" line after a routine run is usually the neighbours, not the code.
 Re-run on an idle machine before believing it. For the API and query layers, keep the `bench/results`
 directory from a known-good run and diff against it; the numbers are only
 meaningful relative to the same machine, since a loaded VPS moves every figure.
+
+## Capacity
+
+`bench/run_benchmarks.sh --capacity` answers a different question: not what one
+screen costs, but how much load the service takes before it stops being usable.
+It ramps arrival rate and reports the highest window that stayed inside the
+budget (p95 < 500 ms, errors < 1%). `PEAK_RPS=N` raises the target.
+
+Two details decide whether the number means anything:
+
+**Each VU sends its own `X-Forwarded-For`.** The rate limiter keys on client IP
+and trusts that header from a loopback peer, so without it every VU shares one
+bucket and the run measures the limiter. With it, each VU is a separate client
+through the real code path.
+
+**Watch `dropped by k6` in the summary.** Once every VU is blocked on a slow
+response, k6 cannot issue the requested rate and drops the rest. A large number
+there means the offered load never reached the configured peak — so the
+achieved rate is the server's ceiling, not evidence that it survived the peak.
+
+What the ramp does *not* cover: sign-ins (Argon2 is ~38 ms of CPU each, a
+different and much lower ceiling), writes, and anything that falls through to
+TMDB, where the external API would bound throughput long before the server did.
