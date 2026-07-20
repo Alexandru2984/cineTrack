@@ -64,7 +64,18 @@ fn bench_password(c: &mut Criterion) {
 /// sign-in, and password.rs caps concurrent hashes at 4, so latency here
 /// translates directly into a login throughput ceiling. Measure before tuning.
 fn bench_password_params(c: &mut Criterion) {
-    use argon2::password_hash::{rand_core::OsRng, PasswordHasher, SaltString};
+    use argon2::password_hash::{PasswordHasher, Salt, SaltString};
+    use rand::TryRng;
+
+    // Same salt source as the production path, which no longer depends on
+    // password_hash re-exporting an OsRng.
+    fn salt() -> SaltString {
+        let mut bytes = [0u8; Salt::RECOMMENDED_LENGTH];
+        rand::rngs::SysRng
+            .try_fill_bytes(&mut bytes)
+            .expect("OS RNG for a benchmark salt");
+        SaltString::encode_b64(&bytes).expect("valid salt")
+    }
     use argon2::{Algorithm, Argon2, Params, Version};
 
     let mut group = c.benchmark_group("password_params");
@@ -82,7 +93,7 @@ fn bench_password_params(c: &mut Criterion) {
         let hasher = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
         group.bench_function(label, |b| {
             b.iter(|| {
-                let salt = SaltString::generate(&mut OsRng);
+                let salt = salt();
                 hasher
                     .hash_password(black_box(b"Passw0rd123!"), &salt)
                     .unwrap()

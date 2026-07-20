@@ -1,9 +1,10 @@
 use std::time::Duration;
 
 use argon2::{
-    password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
+    password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, Salt, SaltString},
     Argon2,
 };
+use rand::TryRng;
 use tokio::sync::{OnceCell, Semaphore};
 
 use crate::errors::AppError;
@@ -15,8 +16,26 @@ const DUMMY_PASSWORD: &str = "cinetrack-dummy-password-never-used-for-login";
 static PASSWORD_JOB_SLOTS: Semaphore = Semaphore::const_new(MAX_CONCURRENT_PASSWORD_JOBS);
 static DUMMY_PASSWORD_HASH: OnceCell<String> = OnceCell::const_new();
 
+/// Build the salt from our own RNG rather than password_hash's re-exported
+/// `OsRng`. That re-export only exists when some crate in the graph happens to
+/// turn on `rand_core/getrandom`, which made password hashing fail to compile
+/// the moment an unrelated dependency stopped enabling it. This uses the same
+/// system RNG the rest of the security code already uses and is already tested.
+fn generate_salt() -> Result<SaltString, AppError> {
+    let mut bytes = [0u8; Salt::RECOMMENDED_LENGTH];
+    rand::rngs::SysRng
+        .try_fill_bytes(&mut bytes)
+        .map_err(|error| {
+            AppError::InternalError(anyhow::anyhow!(
+                "OS RNG unavailable for a password salt: {error}"
+            ))
+        })?;
+    SaltString::encode_b64(&bytes)
+        .map_err(|error| AppError::InternalError(anyhow::anyhow!("salt encoding failed: {error}")))
+}
+
 fn hash_password_sync(password: &str) -> Result<String, AppError> {
-    let salt = SaltString::generate(&mut OsRng);
+    let salt = generate_salt()?;
     let argon2 = Argon2::default();
     let hash = argon2
         .hash_password(password.as_bytes(), &salt)
@@ -93,6 +112,51 @@ pub async fn verify_password_or_dummy(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn generated_salts_are_unique_and_recommended_width() {
+        // Guards the RNG wiring: a constant or short salt would still hash and
+        // verify happily, so nothing else in this file would notice.
+        let first = generate_salt().expect("salt");
+        let second = generate_salt().expect("salt");
+        assert_ne!(first.as_str(), second.as_str());
+        // 16 bytes of B64 without padding.
+        assert_eq!(first.len(), 22);
+    }
+
+    #[tokio::test]
+    async fn verifies_a_hash_whose_salt_this_code_did_not_generate() {
+        // Every stored hash in production was salted by the previous code path.
+        // Verification reads the salt out of the encoded string, so changing how
+        // salts are produced must not invalidate them — this builds a hash from
+        // a fixed salt, bypassing generate_salt entirely, and requires it to
+        // still authenticate.
+        use argon2::password_hash::{PasswordHasher, SaltString};
+        let salt = SaltString::from_b64("YWJjZGVmZ2hpamtsbW5vcA").expect("fixed salt");
+        let legacy = Argon2::default()
+            .hash_password(b"Passw0rd123!", &salt)
+            .expect("hash with a fixed salt")
+            .to_string();
+
+        assert!(verify_password("Passw0rd123!", &legacy)
+            .await
+            .expect("verify"));
+        assert!(!verify_password("Wr0ngPassword!", &legacy)
+            .await
+            .expect("verify"));
+    }
+
+    #[tokio::test]
+    async fn hashes_from_the_generated_salt_verify_and_differ() {
+        let one = hash_password("Passw0rd123!").await.expect("hash");
+        let two = hash_password("Passw0rd123!").await.expect("hash");
+        // Same password, different salt, therefore different stored value.
+        assert_ne!(one, two);
+        assert!(verify_password("Passw0rd123!", &one).await.expect("verify"));
+        assert!(!verify_password("Wr0ngPassword!", &one)
+            .await
+            .expect("verify"));
+    }
 
     #[tokio::test]
     async fn test_hash_password_produces_argon2_hash() {
