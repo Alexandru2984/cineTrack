@@ -144,6 +144,9 @@ jobs:
   mobile:
     name: Mobile
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
     defaults:
       run:
         working-directory: mobile
@@ -152,6 +155,31 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
+
+      - name: Decide whether the native build is needed
+        id: native
+        working-directory: .
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Compiling the Android release takes ~30 minutes: it downloads the
+          # SDK and NDK and builds the whole React Native native stack. A change
+          # that touches neither the mobile project nor this workflow cannot
+          # affect it, and dependency bots open a steady stream of exactly those
+          # pull requests. Pushes to a branch always build, so main is never
+          # merged without the native gate having run.
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "needed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          changed=$(gh pr diff "${{ github.event.pull_request.number }}" --name-only)
+          if printf '%s\n' "$changed" | grep -qE '^(mobile/|\.github/workflows/ci\.yml$)'; then
+            echo "needed=true" >> "$GITHUB_OUTPUT"
+            echo "mobile files changed; running the native build"
+          else
+            echo "needed=false" >> "$GITHUB_OUTPUT"
+            echo "no mobile changes; skipping the native build"
+          fi
 
       - name: Install Node
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
@@ -191,6 +219,7 @@ jobs:
           node -e 'const c=require("/tmp/vazute-preview-config.json"); if(c.updates?.enabled !== true) process.exit(1)'
 
       - name: Prebuild production native projects
+        if: steps.native.outputs.needed == 'true'
         env:
           EAS_BUILD_PROFILE: production
           EXPO_UPDATES_ENABLED: "false"
@@ -198,6 +227,7 @@ jobs:
         run: npx expo prebuild --platform all --no-install --clean
 
       - name: Install Java
+        if: steps.native.outputs.needed == 'true'
         uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165 # v5.0.0
         with:
           distribution: temurin
@@ -205,6 +235,7 @@ jobs:
           cache: gradle
 
       - name: Install Android SDK
+        if: steps.native.outputs.needed == 'true'
         uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3.2.2
         with:
           packages: >-
@@ -214,9 +245,11 @@ jobs:
             ndk;27.1.12297006
 
       - name: Validate generated native security config
+        if: steps.native.outputs.needed == 'true'
         run: python3 scripts/validate_native_config.py
 
       - name: Compile Android release
+        if: steps.native.outputs.needed == 'true'
         working-directory: mobile/android
         run: ./gradlew :app:assembleRelease --no-daemon --stacktrace
 
