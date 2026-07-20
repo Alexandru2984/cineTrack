@@ -71,10 +71,15 @@ log "Building the backend in release mode"
 ( cd "$ROOT_DIR/backend" && cargo build --release --quiet )
 
 log "Starting the benchmark backend on port $BENCH_PORT"
+# Generated per run rather than written in the file: a literal here is a
+# high-entropy string in version control, which secret scanning flags and
+# which nobody should be tempted to copy. The tokens it signs live and die
+# with this process.
+BENCH_JWT_SECRET="$(head -c 48 /dev/urandom | base64 | tr -d '\n=+/')"
 env \
   APP_ENV=development APP_HOST=127.0.0.1 APP_PORT="$BENCH_PORT" \
   DATABASE_URL="$DB_URL" \
-  JWT_SECRET='bench-jwt-secret-at-least-32-bytes-long-padding-padding-padding' \
+  JWT_SECRET="$BENCH_JWT_SECRET" \
   JWT_EXPIRY_MINUTES=60 JWT_REFRESH_EXPIRY_DAYS=30 \
   TMDB_API_KEY='dummy-not-used' TMDB_READ_ACCESS_TOKEN='' \
   FRONTEND_URL="$BASE_URL" CORS_ALLOWED_ORIGINS="$BASE_URL" \

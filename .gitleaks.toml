@@ -31,6 +31,16 @@ regexes = [
 ]
 
 [[allowlists]]
+description = "Throwaway JWT secret that the benchmark runner used to hard-code. It only ever signed tokens for a local benchmark process against the disposable test database, and the runner now generates a random one per run instead. This entry exists solely because the literal is still in the commit history the scan walks."
+condition = "AND"
+paths = [
+  '''bench/run_benchmarks\.sh''',
+]
+regexes = [
+  '''bench-jwt-secret-at-least-32-bytes-long-padding-padding-padding''',
+]
+
+[[allowlists]]
 description = "RFC 6238 TOTP reference test vector (published in the standard, not a real secret). Current code computes it; this covers older commits in the full-history scan."
 condition = "AND"
 paths = [
