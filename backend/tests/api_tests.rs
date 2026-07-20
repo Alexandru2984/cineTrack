@@ -7379,3 +7379,117 @@ async fn test_exploit_sql_metacharacters_are_treated_as_data() {
 
     pool.close().await;
 }
+
+/// Brute-force a password and confirm the account locks. The important half is
+/// the last assertion: once locked, even the *correct* password is refused, so
+/// an attacker who guesses on the next attempt still gains nothing.
+#[actix_web::test]
+#[ignore = "requires test DB: docker compose -f docker-compose.test.yml up -d"]
+async fn test_exploit_password_brute_force_locks_the_account() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+
+    register_user(&app, "bruteme", "bruteme@example.com", "Pass1234").await;
+
+    for attempt in 1..=5 {
+        let req = actix_test::TestRequest::post()
+            .uri("/api/auth/login")
+            .peer_addr(peer_addr())
+            .set_json(json!({ "email": "bruteme@example.com", "password": "WrongPass9" }))
+            .to_request();
+        let resp = actix_test::call_service(&app, req).await;
+        assert_eq!(
+            resp.status(),
+            401,
+            "attempt {attempt} should be unauthorized"
+        );
+    }
+
+    let locked_until = sqlx::query_scalar::<_, Option<chrono::DateTime<chrono::Utc>>>(
+        "SELECT login_locked_until FROM users WHERE email = $1",
+    )
+    .bind("bruteme@example.com")
+    .fetch_one(&pool)
+    .await
+    .expect("user row");
+    assert!(
+        locked_until.is_some(),
+        "five failures must lock the account"
+    );
+
+    // The real password must not open a locked account.
+    let req = actix_test::TestRequest::post()
+        .uri("/api/auth/login")
+        .peer_addr(peer_addr())
+        .set_json(json!({ "email": "bruteme@example.com", "password": "Pass1234" }))
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_ne!(
+        resp.status(),
+        200,
+        "a locked account must refuse even the correct password"
+    );
+
+    pool.close().await;
+}
+
+/// A TOTP code is single-use. Replaying one inside its validity window would
+/// let anyone who observed a code once sign in again with it.
+#[actix_web::test]
+#[ignore = "requires test DB: docker compose -f docker-compose.test.yml up -d"]
+async fn test_exploit_totp_code_cannot_be_replayed_at_login() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+
+    let (access, _, _) = register_user(&app, "replayer", "replayer@example.com", "Pass1234").await;
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/auth/2fa/setup")
+        .insert_header(("Authorization", format!("Bearer {access}")))
+        .peer_addr(peer_addr())
+        .set_json(json!({ "password": "Pass1234" }))
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 200);
+
+    let secret = totp_secret_bytes(&pool, "replayer@example.com").await;
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/auth/2fa/enable")
+        .insert_header(("Authorization", format!("Bearer {access}")))
+        .peer_addr(peer_addr())
+        .set_json(json!({ "code": current_totp_code(&secret) }))
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 200);
+
+    // Enabling consumed the current step, so log in with the next one.
+    let code = next_totp_code(&secret);
+    let login = |code: String| {
+        actix_test::TestRequest::post()
+            .uri("/api/auth/login")
+            .peer_addr(peer_addr())
+            .set_json(json!({
+                "email": "replayer@example.com",
+                "password": "Pass1234",
+                "totp_code": code
+            }))
+            .to_request()
+    };
+
+    let resp = actix_test::call_service(&app, login(code.clone())).await;
+    assert_eq!(
+        resp.status(),
+        200,
+        "the fresh code should authenticate once"
+    );
+
+    let resp = actix_test::call_service(&app, login(code)).await;
+    assert_ne!(
+        resp.status(),
+        200,
+        "the same TOTP code must not authenticate a second time"
+    );
+
+    pool.close().await;
+}
