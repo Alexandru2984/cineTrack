@@ -20,7 +20,7 @@ argon2 = "0.5"
 # rand_core/getrandom is on. argon2's own features do not enable it: it was
 # being switched on incidentally by another crate's dependency, so declaring it
 # here keeps password hashing working no matter what the rest of the graph does.
-password-hash = { version = "0.5", features = ["getrandom"] }
+password-hash = { version = "0.6", features = ["getrandom"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
 dotenvy = "0.15"
 thiserror = "2"
