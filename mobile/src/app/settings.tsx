@@ -392,13 +392,17 @@ export default function SettingsScreen() {
               <View style={styles.switchCopy}>
                 <AppText variant="label">Public profile</AppText>
                 <AppText variant="caption" muted>
-                  Allow other people to discover your profile and activity.
+                  {user.email_verified === false && !isPublic
+                    ? 'Confirm your email before making your profile public.'
+                    : 'Allow other people to discover your profile and activity.'}
                 </AppText>
               </View>
               <Switch
                 accessibilityLabel="Public profile"
                 value={isPublic}
-                disabled={updateProfile.isPending}
+                disabled={
+                  updateProfile.isPending || (user.email_verified === false && !isPublic)
+                }
                 onValueChange={(value) => {
                   setIsPublic(value);
                   setProfileError(null);

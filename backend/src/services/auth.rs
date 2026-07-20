@@ -44,8 +44,8 @@ pub async fn register(
     let password_hash = password::hash_password(&req.password).await?;
 
     let user = sqlx::query_as::<_, User>(
-        r#"INSERT INTO users (username, email, password_hash)
-        VALUES ($1, $2, $3)
+        r#"INSERT INTO users (username, email, password_hash, is_public)
+        VALUES ($1, $2, $3, FALSE)
         ON CONFLICT DO NOTHING
         RETURNING *"#,
     )
@@ -319,6 +319,13 @@ pub async fn change_password(
     .bind(user_id)
     .execute(&mut *tx)
     .await?;
+    sqlx::query(
+        "UPDATE password_reset_tokens SET consumed_at = NOW()
+         WHERE user_id = $1 AND consumed_at IS NULL",
+    )
+    .bind(user_id)
+    .execute(&mut *tx)
+    .await?;
     tx.commit().await?;
 
     log::info!("audit: password changed user_id={user_id}");
@@ -572,6 +579,23 @@ pub async fn resend_email_verification(
     Ok(())
 }
 
+/// Gate actions that expose an account or its data to other users. Unverified
+/// accounts can still use private tracking and finish account recovery.
+pub async fn require_verified_email(pool: &PgPool, user_id: Uuid) -> Result<(), AppError> {
+    let verified = sqlx::query_scalar::<_, bool>("SELECT email_verified FROM users WHERE id = $1")
+        .bind(user_id)
+        .fetch_optional(pool)
+        .await?
+        .ok_or_else(|| AppError::NotFound("User not found".to_string()))?;
+
+    if !verified {
+        return Err(AppError::Forbidden(
+            "Confirm your email before using this feature".to_string(),
+        ));
+    }
+    Ok(())
+}
+
 const TOTP_ISSUER: &str = "Văzute";
 const RECOVERY_CODE_COUNT: usize = 10;
 
@@ -619,6 +643,12 @@ pub async fn setup_two_factor(
         .await?
         .ok_or_else(|| AppError::NotFound("User not found".to_string()))?;
 
+    if !user.email_verified {
+        return Err(AppError::Forbidden(
+            "Confirm your email before enabling two-factor authentication".to_string(),
+        ));
+    }
+
     // Re-confirm the password so a stolen access token alone cannot enroll a
     // second factor and lock the real owner out.
     let password_hash = user
@@ -660,6 +690,12 @@ pub async fn enable_two_factor(
         .fetch_optional(pool)
         .await?
         .ok_or_else(|| AppError::NotFound("User not found".to_string()))?;
+
+    if !user.email_verified {
+        return Err(AppError::Forbidden(
+            "Confirm your email before enabling two-factor authentication".to_string(),
+        ));
+    }
 
     if user.totp_enabled {
         return Err(AppError::Conflict(

@@ -273,6 +273,10 @@ async fn update_profile(
     body.validate()?;
     let data = body.into_inner();
 
+    if data.is_public == Some(true) {
+        crate::services::auth::require_verified_email(pool.get_ref(), user_id).await?;
+    }
+
     let mut tx = pool.begin().await?;
     let user = sqlx::query_as::<_, User>(
         r#"UPDATE users SET
@@ -389,6 +393,8 @@ async fn follow_user(
 ) -> Result<HttpResponse, AppError> {
     let user_id = require_auth(&req).await?;
     let username = path.into_inner();
+
+    crate::services::auth::require_verified_email(pool.get_ref(), user_id).await?;
 
     let mut tx = pool.begin().await?;
     let target = sqlx::query_as::<_, User>(
@@ -561,6 +567,7 @@ async fn accept_follow_request(
 ) -> Result<HttpResponse, AppError> {
     let user_id = require_auth(&req).await?;
     let follower_id = path.into_inner();
+    crate::services::auth::require_verified_email(pool.get_ref(), user_id).await?;
     let mut tx = pool.begin().await?;
     quota::lock_social_relationship_writes(&mut tx, follower_id, user_id).await?;
     let updated = sqlx::query(

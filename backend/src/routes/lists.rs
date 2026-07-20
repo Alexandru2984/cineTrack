@@ -83,6 +83,10 @@ async fn create_list(
     body.validate()?;
     let data = body.into_inner();
 
+    if data.is_public == Some(true) {
+        crate::services::auth::require_verified_email(pool.get_ref(), user_id).await?;
+    }
+
     let mut tx = pool.begin().await?;
     sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended('lists:' || $1::text, 0))")
         .bind(user_id)
@@ -162,6 +166,10 @@ async fn update_list(
     let list_id = path.into_inner();
     body.validate()?;
     let data = body.into_inner();
+
+    if data.is_public == Some(true) {
+        crate::services::auth::require_verified_email(pool.get_ref(), user_id).await?;
+    }
 
     let list = sqlx::query_as::<_, crate::models::List>(
         r#"UPDATE lists SET

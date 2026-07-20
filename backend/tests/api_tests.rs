@@ -192,8 +192,8 @@ async fn clean_db(pool: &PgPool) {
     sqlx::query("DELETE FROM users").execute(pool).await.ok();
 }
 
-/// Register a user and return (access_token, refresh_token, user_id)
-async fn register_user(
+/// Register an unverified user and return (access_token, refresh_token, user_id).
+async fn register_unverified_user(
     app: &impl actix_web::dev::Service<
         actix_http::Request,
         Response = actix_web::dev::ServiceResponse<impl actix_web::body::MessageBody>,
@@ -225,6 +225,31 @@ async fn register_user(
         refresh_token,
         body["user"]["id"].as_str().unwrap().to_string(),
     )
+}
+
+/// Most integration tests exercise post-onboarding features. Mark their users
+/// verified explicitly while keeping registration itself production-identical.
+async fn register_user(
+    app: &impl actix_web::dev::Service<
+        actix_http::Request,
+        Response = actix_web::dev::ServiceResponse<impl actix_web::body::MessageBody>,
+        Error = actix_web::Error,
+    >,
+    username: &str,
+    email: &str,
+    password: &str,
+) -> (String, String, String) {
+    let session = register_unverified_user(app, username, email, password).await;
+    let pool = PgPool::connect(&test_db_url())
+        .await
+        .expect("connect to mark test user verified");
+    sqlx::query("UPDATE users SET email_verified = TRUE, is_public = TRUE WHERE id = $1")
+        .bind(Uuid::parse_str(&session.2).expect("registered user id"))
+        .execute(&pool)
+        .await
+        .expect("mark test user verified");
+    pool.close().await;
+    session
 }
 
 async fn login_user(
@@ -268,11 +293,17 @@ async fn test_register_success() {
     let app = actix_test::init_service(create_app(pool.clone())).await;
 
     let (token, refresh, user_id) =
-        register_user(&app, "testuser", "test@example.com", "Pass1234").await;
+        register_unverified_user(&app, "testuser", "test@example.com", "Pass1234").await;
 
     assert!(!token.is_empty());
     assert!(!refresh.is_empty());
     assert!(!user_id.is_empty());
+    let is_public: bool = sqlx::query_scalar("SELECT is_public FROM users WHERE id = $1")
+        .bind(Uuid::parse_str(&user_id).unwrap())
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert!(!is_public, "new accounts must start private");
 }
 
 #[actix_web::test]
@@ -883,6 +914,34 @@ async fn test_change_password_revokes_refresh_tokens() {
     assert_eq!(resp.status(), 401);
 }
 
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn test_change_password_invalidates_existing_reset_token() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+
+    let (token, _, _) = register_user(&app, "pwreset", "pwreset@example.com", "Pass1234").await;
+    let reset_token = insert_reset_token(&pool, "pwreset@example.com", true).await;
+
+    let req = actix_test::TestRequest::patch()
+        .uri("/api/auth/password")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .set_json(json!({ "current_password": "Pass1234", "new_password": "NewPass5678" }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/auth/password/reset")
+        .set_json(json!({ "token": reset_token, "new_password": "AttackerPass9" }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 400);
+}
+
 // ── Email Verification Tests ──────────────────────────────────
 
 /// Overwrite the account's issued verification token with one whose raw value
@@ -931,7 +990,8 @@ async fn test_email_verification_flow() {
     clean_db(&pool).await;
     let app = actix_test::init_service(create_app(pool.clone())).await;
 
-    let (access, _, _) = register_user(&app, "verifyme", "verify@example.com", "Pass1234").await;
+    let (access, _, _) =
+        register_unverified_user(&app, "verifyme", "verify@example.com", "Pass1234").await;
 
     // A new account starts unverified and has a pending token row.
     assert!(!fetch_email_verified(&app, &access).await);
@@ -970,6 +1030,102 @@ async fn test_email_verification_flow() {
     let req = actix_test::TestRequest::post()
         .uri("/api/auth/email/resend")
         .insert_header(("Authorization", format!("Bearer {access}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn test_unverified_accounts_cannot_publish_or_use_social_and_two_factor() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+
+    let (unverified_access, _, _) =
+        register_unverified_user(&app, "unverified", "unverified@example.com", "Pass1234").await;
+    let (verified_access, _, verified_id) =
+        register_user(&app, "verifiedpeer", "verifiedpeer@example.com", "Pass1234").await;
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/users/unverified/follow")
+        .insert_header(("Authorization", format!("Bearer {verified_access}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 202);
+
+    let forbidden_requests = [
+        actix_test::TestRequest::post()
+            .uri(&format!(
+                "/api/users/me/follow-requests/{verified_id}/accept"
+            ))
+            .insert_header(("Authorization", format!("Bearer {unverified_access}")))
+            .peer_addr(peer_addr())
+            .to_request(),
+        actix_test::TestRequest::post()
+            .uri("/api/users/verifiedpeer/follow")
+            .insert_header(("Authorization", format!("Bearer {unverified_access}")))
+            .peer_addr(peer_addr())
+            .to_request(),
+        actix_test::TestRequest::patch()
+            .uri("/api/users/me")
+            .insert_header(("Authorization", format!("Bearer {unverified_access}")))
+            .set_json(json!({ "is_public": true }))
+            .peer_addr(peer_addr())
+            .to_request(),
+        actix_test::TestRequest::post()
+            .uri("/api/lists")
+            .insert_header(("Authorization", format!("Bearer {unverified_access}")))
+            .set_json(json!({ "name": "Public before verification", "is_public": true }))
+            .peer_addr(peer_addr())
+            .to_request(),
+        actix_test::TestRequest::post()
+            .uri("/api/auth/2fa/setup")
+            .insert_header(("Authorization", format!("Bearer {unverified_access}")))
+            .set_json(json!({ "password": "Pass1234" }))
+            .peer_addr(peer_addr())
+            .to_request(),
+    ];
+    for req in forbidden_requests {
+        let resp = actix_test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 403);
+    }
+
+    // Private organization remains usable before confirmation.
+    let req = actix_test::TestRequest::post()
+        .uri("/api/lists")
+        .insert_header(("Authorization", format!("Bearer {unverified_access}")))
+        .set_json(json!({ "name": "Private before verification", "is_public": false }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 201);
+
+    let verification_token = set_known_verification_token(&pool, "unverified@example.com").await;
+    let req = actix_test::TestRequest::post()
+        .uri("/api/auth/email/verify")
+        .set_json(json!({ "token": verification_token }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+
+    let req = actix_test::TestRequest::post()
+        .uri(&format!(
+            "/api/users/me/follow-requests/{verified_id}/accept"
+        ))
+        .insert_header(("Authorization", format!("Bearer {unverified_access}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/auth/2fa/setup")
+        .insert_header(("Authorization", format!("Bearer {unverified_access}")))
+        .set_json(json!({ "password": "Pass1234" }))
         .peer_addr(peer_addr())
         .to_request();
     let resp = actix_test::call_service(&app, req).await;
@@ -6020,8 +6176,8 @@ async fn test_social_relationship_quotas_are_atomic_and_bound_pending_requests()
     let seeded_user_count = relationship_max.max(pending_max) + 2;
 
     sqlx::query(
-        r#"INSERT INTO users (username, email)
-        SELECT 'socialtarget' || value, 'socialtarget' || value || '@example.com'
+        r#"INSERT INTO users (username, email, email_verified, is_public)
+        SELECT 'socialtarget' || value, 'socialtarget' || value || '@example.com', TRUE, TRUE
         FROM generate_series(1, $1::bigint) AS value"#,
     )
     .bind(seeded_user_count)

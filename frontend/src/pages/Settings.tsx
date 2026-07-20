@@ -71,6 +71,7 @@ function PrivacyCard() {
   const { data: me } = useMe();
   const updatePrivacy = useUpdatePrivacy();
   const isPrivate = me ? !me.is_public : false;
+  const needsVerification = Boolean(me && !me.email_verified && isPrivate);
 
   return (
     <section className="rounded-lg border border-[hsl(var(--border))] p-6">
@@ -81,7 +82,9 @@ function PrivacyCard() {
           </h2>
           <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">
             {isPrivate
-              ? 'Only approved followers can see your profile details and activity.'
+              ? needsVerification
+                ? 'Confirm your email before making your profile public.'
+                : 'Only approved followers can see your profile details and activity.'
               : 'Your profile details and activity are visible to everyone.'}
           </p>
         </div>
@@ -90,7 +93,7 @@ function PrivacyCard() {
           role="switch"
           aria-checked={isPrivate}
           aria-label="Private profile"
-          disabled={!me || updatePrivacy.isPending}
+          disabled={!me || updatePrivacy.isPending || needsVerification}
           onClick={() => updatePrivacy.mutate(isPrivate)}
           className={`relative h-6 w-11 shrink-0 rounded-full transition-colors disabled:opacity-50 ${
             isPrivate ? 'bg-[hsl(var(--primary))]' : 'bg-[hsl(var(--muted))]'
@@ -503,6 +506,7 @@ function ChangePasswordCard() {
 function TwoFactorCard() {
   const user = useAuthStore((state) => state.user);
   const enabled = user?.two_factor_enabled ?? false;
+  const emailVerified = user?.email_verified ?? false;
   const setup = useSetupTwoFactor();
   const enable = useEnableTwoFactor();
   const disable = useDisableTwoFactor();
@@ -670,9 +674,14 @@ function TwoFactorCard() {
               {getApiErrorMessage(setup.error, 'Could not start two-factor setup')}
             </p>
           )}
+          {!emailVerified && (
+            <p className="text-sm text-[hsl(var(--destructive))]">
+              Confirm your email before enabling two-factor authentication.
+            </p>
+          )}
           <button
             type="submit"
-            disabled={setup.isPending}
+            disabled={setup.isPending || !emailVerified}
             className="flex items-center justify-center gap-2 rounded-md bg-[hsl(var(--primary))] px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
           >
             {setup.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
