@@ -38,7 +38,7 @@ aws-smithy-types = "=1.6.1"
 
 [dev-dependencies]
 actix-http = "3"
-criterion = { version = "0.7", features = ["async_tokio"] }
+criterion = { version = "0.8", features = ["async_tokio"] }
 
 [[bench]]
 name = "hot_paths"
