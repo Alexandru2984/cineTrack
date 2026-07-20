@@ -1,4 +1,5 @@
 import { Redirect, router } from 'expo-router';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   AlertTriangle,
   Bell,
@@ -62,6 +63,7 @@ import {
 } from '@/lib/account';
 import { formatDateTime } from '@/lib/format';
 import { getErrorMessage } from '@/lib/http';
+import { clearOfflineQueryCache } from '@/lib/query-persistence';
 import { validateSecondFactorInput } from '@/lib/two-factor';
 import { useAuthStore } from '@/store/auth';
 import type { AccountSession } from '@/types';
@@ -85,6 +87,7 @@ const COUNTRY_OPTIONS: readonly { value: string; label: string; name: string }[]
 
 export default function SettingsScreen() {
   const theme = useTheme();
+  const queryClient = useQueryClient();
   const status = useAuthStore((state) => state.status);
   const user = useAuthStore((state) => state.user);
   const updateProfile = useUpdateAccountProfile();
@@ -128,6 +131,8 @@ export default function SettingsScreen() {
   const [showDeletionPassword, setShowDeletionPassword] = useState(false);
   const [deletionPending, setDeletionPending] = useState(false);
   const [deletionError, setDeletionError] = useState<string | null>(null);
+  const [cacheClearing, setCacheClearing] = useState(false);
+  const [cacheCleared, setCacheCleared] = useState(false);
 
   if (status !== 'authenticated' || !user) return <Redirect href="/" />;
 
@@ -246,6 +251,26 @@ export default function SettingsScreen() {
     setDeletionPassword('');
     setShowDeletionPassword(false);
     setDeletionError(null);
+  };
+
+  const confirmCacheClear = () => {
+    Alert.alert('Clear offline data?', 'Cached library and release data will be downloaded again.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Clear data',
+        style: 'destructive',
+        onPress: () => {
+          setCacheClearing(true);
+          setCacheCleared(false);
+          void clearOfflineQueryCache(queryClient)
+            .then(() => setCacheCleared(true))
+            .catch(() =>
+              Alert.alert('Could not clear data', 'Try again after restarting the app.'),
+            )
+            .finally(() => setCacheClearing(false));
+        },
+      },
+    ]);
   };
 
   const startTwoFactorSetup = async () => {
@@ -851,6 +876,14 @@ export default function SettingsScreen() {
               <AppText variant="label">Privacy policy</AppText>
               <ExternalLink color={theme.mutedText} size={18} />
             </Pressable>
+            {cacheCleared ? <FormMessage message="Offline data cleared" success /> : null}
+            <AppButton
+              label="Clear offline data"
+              icon={<Trash2 color={theme.text} size={18} />}
+              variant="secondary"
+              loading={cacheClearing}
+              onPress={confirmCacheClear}
+            />
           </View>
 
           <View style={[styles.dangerZone, { borderColor: theme.danger }]}>

@@ -11,7 +11,8 @@
       "channel": "development",
       "env": {
         "EXPO_PUBLIC_API_URL": "https://vazute.micutu.com",
-        "EXPO_PUBLIC_USE_R2_IMAGES": "true"
+        "EXPO_PUBLIC_USE_R2_IMAGES": "true",
+        "EXPO_UPDATES_ENABLED": "false"
       }
     },
     "preview": {
@@ -23,7 +24,8 @@
       },
       "env": {
         "EXPO_PUBLIC_API_URL": "https://vazute.micutu.com",
-        "EXPO_PUBLIC_USE_R2_IMAGES": "true"
+        "EXPO_PUBLIC_USE_R2_IMAGES": "true",
+        "EXPO_UPDATES_ENABLED": "true"
       }
     },
     "production": {
@@ -31,7 +33,8 @@
       "channel": "production",
       "env": {
         "EXPO_PUBLIC_API_URL": "https://vazute.micutu.com",
-        "EXPO_PUBLIC_USE_R2_IMAGES": "true"
+        "EXPO_PUBLIC_USE_R2_IMAGES": "true",
+        "EXPO_UPDATES_ENABLED": "false"
       }
     }
   }

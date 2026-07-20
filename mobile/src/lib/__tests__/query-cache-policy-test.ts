@@ -4,11 +4,14 @@ describe('offline query cache policy', () => {
   it('keeps core viewing data available offline', () => {
     expect(shouldPersistQueryKey(['tracking', undefined, 'infinite'])).toBe(true);
     expect(shouldPersistQueryKey(['calendar', 'up-next', '2026-07-17', 10])).toBe(true);
-    expect(shouldPersistQueryKey(['history', 'list'])).toBe(true);
-    expect(shouldPersistQueryKey(['lists', 'mine'])).toBe(true);
+    expect(shouldPersistQueryKey(['episode', 42])).toBe(true);
+    expect(shouldPersistQueryKey(['watched-episodes', 100, 2])).toBe(true);
   });
 
-  it('does not persist account, notification, or social queries', () => {
+  it('excludes sensitive or nonessential personal data', () => {
+    expect(shouldPersistQueryKey(['history', 'list'])).toBe(false);
+    expect(shouldPersistQueryKey(['lists', 'mine'])).toBe(false);
+    expect(shouldPersistQueryKey(['stats', 'heatmap', 2026])).toBe(false);
     expect(shouldPersistQueryKey(['account-sessions'])).toBe(false);
     expect(shouldPersistQueryKey(['notifications', 'list'])).toBe(false);
     expect(shouldPersistQueryKey(['social', 'feed'])).toBe(false);

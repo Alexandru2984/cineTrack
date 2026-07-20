@@ -13,6 +13,7 @@ import {
 } from '@/lib/client-errors';
 import { PERSISTED_QUERY_ROOTS } from '@/lib/query-cache-policy';
 import {
+  clearOfflineQueryCache,
   QUERY_CACHE_BUSTER,
   QUERY_CACHE_MAX_AGE,
   queryDehydrateOptions,
@@ -114,7 +115,7 @@ export function AppProviders({ children }: PropsWithChildren) {
     const clearCache = () => {
       queryClient.clear();
       void Promise.all([
-        queryPersister.removeClient(),
+        clearOfflineQueryCache(),
         clearClientErrorReports(),
       ]);
     };

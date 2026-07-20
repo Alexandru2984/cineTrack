@@ -3,12 +3,9 @@ export const PERSISTED_QUERY_ROOTS = [
   'discovery',
   'episode',
   'episodes',
-  'history',
-  'lists',
   'media',
   'seasons',
   'show-progress',
-  'stats',
   'tracking',
   'watched-episodes',
 ] as const;

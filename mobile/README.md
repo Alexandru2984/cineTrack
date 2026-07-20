@@ -61,11 +61,13 @@ next EAS build resolves to app/runtime version `1.1.0` before distributing it.
 
 ## Offline cache
 
-Successful library, calendar, history, list, statistics, and media queries are
-kept for up to seven days. Cache restoration is scoped to the SecureStore user
-identity, and logout or an account change clears both memory and AsyncStorage.
-Tokens remain in SecureStore. Notifications, social data, account sessions,
-and user search results are excluded from persistence.
+Successful library, calendar, episode, and public media queries are kept for up
+to seven days. The AsyncStorage payload is encrypted with AES-256-GCM and a
+device-only key held in SecureStore. Cache restoration is scoped to the
+SecureStore user identity, and logout, an account change, or the Settings clear
+action removes it. Tokens remain in SecureStore. Exact history timestamps,
+custom lists, statistics, notifications, social data, account sessions, and
+user search results are excluded from persistence.
 
 ## Crash diagnostics
 
@@ -106,19 +108,19 @@ change.
 
 ## OTA updates
 
-EAS Update is configured with a runtime tied to the native app version and
-isolated `development`, `preview`, and `production` channels. Publish only JS
-and asset changes that are compatible with the native modules already present
-in that runtime:
+EAS Update is configured with a runtime tied to the native app version. It is
+enabled only for internal `preview` builds. Store `production` builds disable
+OTA because end-to-end EAS Update code signing requires a paid EAS plan; a
+production JavaScript change therefore requires a reviewed store build.
+Publish only JS and asset changes compatible with the preview runtime:
 
 ```bash
 npx eas-cli update --channel preview --environment preview --platform android --message "Describe the tested change"
-npx eas-cli update --channel production --environment production --platform all --message "Describe the tested change"
 ```
 
 Adding or updating a native module, changing permissions, or changing native
-configuration still requires a new EAS Build. Test on `preview` before
-publishing the same commit to `production`.
+configuration still requires a new EAS Build. Re-enable production OTA only
+after update signing is configured and a newly signed runtime is distributed.
 
 ## Password-reset links
 
