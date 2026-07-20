@@ -1,5 +1,7 @@
 import { Redirect, router } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
+
+import { useSensitiveScreen } from '@/hooks/use-sensitive-screen';
 import {
   AlertTriangle,
   Bell,
@@ -124,6 +126,9 @@ export default function SettingsScreen() {
   const [twoFactorCode, setTwoFactorCode] = useState('');
   const [twoFactorError, setTwoFactorError] = useState<string | null>(null);
   const [recoveryCodes, setRecoveryCodes] = useState<string[] | null>(null);
+  // Recovery codes bypass both the password and 2FA, so the screen is guarded
+  // against capture while they are on it.
+  const codesConcealed = useSensitiveScreen(recoveryCodes !== null);
 
   const [sessionsError, setSessionsError] = useState<string | null>(null);
   const [confirmingDeletion, setConfirmingDeletion] = useState(false);
@@ -606,11 +611,17 @@ export default function SettingsScreen() {
                     { borderColor: theme.border, backgroundColor: theme.elevated },
                   ]}
                 >
-                  {recoveryCodes.map((code) => (
-                    <AppText key={code} selectable style={styles.monospace}>
-                      {code}
+                  {codesConcealed ? (
+                    <AppText muted style={styles.monospace}>
+                      Hidden while the app is in the background.
                     </AppText>
-                  ))}
+                  ) : (
+                    recoveryCodes.map((code) => (
+                      <AppText key={code} selectable style={styles.monospace}>
+                        {code}
+                      </AppText>
+                    ))
+                  )}
                 </View>
                 <AppButton
                   label="I've saved my codes"
