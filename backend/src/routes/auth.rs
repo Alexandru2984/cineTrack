@@ -596,6 +596,52 @@ mod tests {
         assert!(enforce_cookie_origin(&req, &config).is_ok());
     }
 
+    /// The limiter and the key extractor are each tested on their own; this
+    /// composes them, because the property that matters is emergent. Behind the
+    /// proxy every request arrives from the same peer, so if the forwarded
+    /// address were ignored the whole user base would share one bucket, and one
+    /// noisy client would lock everyone out.
+    #[actix_web::test]
+    async fn auth_rate_limiter_buckets_per_forwarded_client() {
+        async fn ok() -> HttpResponse {
+            HttpResponse::Ok().finish()
+        }
+
+        let limiter = build_rate_limiter();
+        let app = actix_test::init_service(
+            App::new()
+                .wrap(Governor::new(&limiter))
+                .route("/", web::get().to(ok)),
+        )
+        .await;
+        // A trusted proxy: loopback, exactly what nginx looks like to us.
+        let peer: std::net::SocketAddr = "127.0.0.1:4321".parse().unwrap();
+
+        let call = |client: &'static str| {
+            actix_test::TestRequest::get()
+                .uri("/")
+                .peer_addr(peer)
+                .insert_header(("x-forwarded-for", client))
+                .to_request()
+        };
+
+        // Exhaust one client's burst.
+        for _ in 0..10 {
+            let response = actix_test::call_service(&app, call("203.0.113.10")).await;
+            assert_eq!(response.status(), StatusCode::OK);
+        }
+        let response = actix_test::call_service(&app, call("203.0.113.10")).await;
+        assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+
+        // A different forwarded client must be unaffected by that exhaustion.
+        let response = actix_test::call_service(&app, call("203.0.113.11")).await;
+        assert_eq!(
+            response.status(),
+            StatusCode::OK,
+            "one client's burst must not throttle another"
+        );
+    }
+
     #[actix_web::test]
     async fn auth_rate_limiter_is_shared_between_app_workers() {
         async fn ok() -> HttpResponse {
