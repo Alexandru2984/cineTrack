@@ -1,21 +1,43 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { useVerifyEmail } from '@/hooks/useAuth';
+import { useMutationState } from '@tanstack/react-query';
+import { useVerifyEmail, VERIFY_EMAIL_MUTATION_KEY } from '@/hooks/useAuth';
 import { useAuthStore } from '@/store/auth';
 import { getApiErrorMessage } from '@/lib/api';
 import { CheckCircle2, Film, Loader2, XCircle } from 'lucide-react';
 
-export default function VerifyEmailPage() {
-  const [token] = useState(() => {
+/**
+ * The confirmation token is a one-time credential that only exists in the URL,
+ * and the first effect strips it so it cannot leak through history or a shared
+ * screenshot. React mounts this route more than once — StrictMode in
+ * development, and the session bootstrap swapping the tree once `authStatus`
+ * leaves `loading` — so both the token and the "already sent" flag live at
+ * module scope. Held in component state, the instance that performed the
+ * request was discarded before it could render the result: the token was gone
+ * from the URL by then, so the page spun forever on "Confirming".
+ */
+let capturedToken: string | null = null;
+let submitted = false;
+
+function readTokenOnce(): string {
+  if (capturedToken === null) {
     const fragmentToken = new URLSearchParams(window.location.hash.slice(1)).get('token');
     const legacyQueryToken = new URLSearchParams(window.location.search).get('token');
-    return fragmentToken ?? legacyQueryToken ?? '';
-  });
+    capturedToken = fragmentToken ?? legacyQueryToken ?? '';
+  }
+  return capturedToken;
+}
+
+export default function VerifyEmailPage() {
+  const token = readTokenOnce();
   const isAuthenticated = useAuthStore((s) => s.status === 'authenticated');
   const verify = useVerifyEmail();
-  // Guard against React 18 StrictMode double-invoking the effect in dev, which
-  // would consume the one-time token twice and surface a spurious failure.
-  const attempted = useRef(false);
+  // Read the attempt from the mutation cache, which outlives this component,
+  // rather than from this instance's own observer.
+  const attempt = useMutationState({
+    filters: { mutationKey: VERIFY_EMAIL_MUTATION_KEY },
+    select: (mutation) => mutation.state,
+  }).at(-1);
 
   useEffect(() => {
     if (window.location.hash || window.location.search.includes('token=')) {
@@ -24,11 +46,14 @@ export default function VerifyEmailPage() {
   }, []);
 
   useEffect(() => {
-    if (token && !attempted.current) {
-      attempted.current = true;
+    if (token && !submitted) {
+      submitted = true;
       verify.mutate({ token });
     }
   }, [token, verify]);
+
+  const pending = !attempt || attempt.status === 'pending';
+  const succeeded = attempt?.status === 'success';
 
   return (
     <div className="flex min-h-[calc(100dvh-3.5rem)] items-center justify-center px-4 md:min-h-[calc(100dvh-4rem)]">
@@ -43,11 +68,11 @@ export default function VerifyEmailPage() {
             This confirmation link is missing its token. Open the most recent link from your
             inbox, or request a new one from your account settings.
           </div>
-        ) : verify.isPending ? (
+        ) : pending ? (
           <div className="flex items-center justify-center gap-2 text-sm text-[hsl(var(--muted-foreground))]">
             <Loader2 className="h-5 w-5 animate-spin" /> Confirming your email…
           </div>
-        ) : verify.isSuccess ? (
+        ) : succeeded ? (
           <div className="space-y-4">
             <div className="flex items-center justify-center gap-2 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--accent))] p-4 text-sm">
               <CheckCircle2 className="h-5 w-5 text-[hsl(var(--primary))]" />
@@ -64,7 +89,7 @@ export default function VerifyEmailPage() {
           <div className="space-y-4">
             <div className="flex items-center justify-center gap-2 rounded-md border border-[hsl(var(--border))] p-4 text-sm text-[hsl(var(--destructive))]">
               <XCircle className="h-5 w-5" />
-              {getApiErrorMessage(verify.error, 'This confirmation link is invalid or has expired.')}
+              {getApiErrorMessage(attempt?.error, 'This confirmation link is invalid or has expired.')}
             </div>
             <p className="text-sm text-[hsl(var(--muted-foreground))]">
               You can request a fresh link from your account settings after signing in.

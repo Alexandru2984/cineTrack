@@ -1,7 +1,7 @@
 import { test, expect, type Page } from '@playwright/test';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
-import { BACKEND_LOG } from '../playwright.realstack.config';
+import { BACKEND_LOG, FRONTEND_ORIGIN } from '../playwright.realstack.config';
 
 /**
  * Real-stack auth E2E — runs against the live backend + Postgres. Each test
@@ -9,8 +9,12 @@ import { BACKEND_LOG } from '../playwright.realstack.config';
  * independent and order-free.
  */
 
-const BASE = 'http://localhost:5173/';
+const BASE = `${FRONTEND_ORIGIN}/`;
 const PASSWORD = 'Passw0rd123';
+
+function escapeRegex(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
 
 function uniqueAccount() {
   const id = `${Date.now()}${Math.floor(Math.random() * 1000)}`;
@@ -36,10 +40,13 @@ async function loginViaUi(page: Page, email: string, password: string) {
   await page.getByRole('button', { name: 'Sign in' }).click();
 }
 
-/** Read the one-time reset token the backend logs when SMTP is unconfigured. */
-async function waitForResetToken(email: string): Promise<string> {
+/** Read a one-time email token the backend logs when SMTP is unconfigured. */
+async function waitForEmailToken(email: string, subject: string): Promise<string> {
   const logPath = resolve(process.cwd(), BACKEND_LOG);
-  const pattern = new RegExp(`to=${email}\\b[^\\n]*token=([0-9a-f]{128})`, 'g');
+  const pattern = new RegExp(
+    `to=${escapeRegex(email)}\\b[^\\n]*subject="${escapeRegex(subject)}"[^\\n]*token=([0-9a-f]{128})`,
+    'g',
+  );
   const deadline = Date.now() + 10_000;
   while (Date.now() < deadline) {
     try {
@@ -51,7 +58,13 @@ async function waitForResetToken(email: string): Promise<string> {
     }
     await new Promise((r) => setTimeout(r, 250));
   }
-  throw new Error(`reset token for ${email} not found in ${BACKEND_LOG}`);
+  throw new Error(`${subject} token for ${email} not found in ${BACKEND_LOG}`);
+}
+
+async function verifyEmailViaUi(page: Page, email: string) {
+  const token = await waitForEmailToken(email, 'Confirm your Văzute email');
+  await page.goto(`/verify-email#token=${token}`);
+  await expect(page.getByText('Your email is confirmed. Thanks!')).toBeVisible();
 }
 
 test('register issues an HttpOnly refresh cookie and reaches the dashboard', async ({
@@ -102,15 +115,23 @@ test('private profiles require an approved follow request', async ({ browser }) 
   try {
     const owner = uniqueAccount();
     await registerViaUi(ownerPage, owner);
-    await ownerPage.getByRole('link', { name: 'Settings' }).click();
+    await verifyEmailViaUi(ownerPage, owner.email);
+    await ownerPage.goto('/settings');
 
+    // Accounts start private and only a confirmed address may go public, so the
+    // switch is already on. Toggling both ways proves the confirmed owner can
+    // still change visibility, and leaves the profile private for the follow
+    // request below.
     const privacy = ownerPage.getByRole('switch', { name: 'Private profile' });
+    await expect(privacy).toHaveAttribute('aria-checked', 'true');
+    await privacy.click();
     await expect(privacy).toHaveAttribute('aria-checked', 'false');
     await privacy.click();
     await expect(privacy).toHaveAttribute('aria-checked', 'true');
 
     const follower = uniqueAccount();
     await registerViaUi(followerPage, follower);
+    await verifyEmailViaUi(followerPage, follower.email);
     await followerPage.goto(`/profile/${owner.username}`);
     await expect(followerPage.getByText('Private', { exact: true })).toBeVisible();
     await expect(followerPage.getByText(/accepted follow request is required/i)).toBeVisible();
@@ -186,7 +207,7 @@ test('resets the password with the emailed token and signs in with it', async ({
   await page.getByRole('button', { name: 'Send reset link' }).click();
   await expect(page.getByText(/reset link is on its way/i)).toBeVisible();
 
-  const token = await waitForResetToken(acct.email);
+  const token = await waitForEmailToken(acct.email, 'Reset your Văzute password');
   const newPassword = 'NewPassw0rd456';
   await page.goto(`/reset-password#token=${token}`);
   await expect(page).toHaveURL(/\/reset-password$/);

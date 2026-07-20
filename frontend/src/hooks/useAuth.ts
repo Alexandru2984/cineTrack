@@ -83,25 +83,35 @@ export function useResetPassword() {
   });
 }
 
+export const VERIFY_EMAIL_MUTATION_KEY = ['verify-email'] as const;
+
 export function useVerifyEmail() {
   const setUser = useAuthStore((s) => s.setUser);
   const qc = useQueryClient();
   return useMutation({
+    // Keyed so the attempt lives in the mutation cache rather than in the
+    // component. Confirmation runs once per one-time token, and React may
+    // remount this route (StrictMode, or the session bootstrap swapping the
+    // tree) while the request is still in flight.
+    mutationKey: VERIFY_EMAIL_MUTATION_KEY,
     mutationFn: async (data: { token: string }) => {
       const res = await api.post('/auth/email/verify', data);
       return res.data as { message: string };
     },
-    onSuccess: async () => {
+    onSuccess: () => {
       // If a session is active, refresh the cached identity so the "confirm
-      // your email" banner clears without a reload.
+      // your email" banner clears without a reload. This refresh is secondary:
+      // it must not keep the one-time verification mutation in a pending state.
       if (useAuthStore.getState().token) {
-        try {
-          const res = await api.get<User>('/auth/me');
-          setUser(res.data);
-          qc.setQueryData(['me'], res.data);
-        } catch {
-          // Non-fatal: the banner will clear on the next natural refresh.
-        }
+        void api
+          .get<User>('/auth/me')
+          .then((res) => {
+            setUser(res.data);
+            qc.setQueryData(['me'], res.data);
+          })
+          .catch(() => {
+            // Non-fatal: the banner will clear on the next natural refresh.
+          });
       }
     },
   });

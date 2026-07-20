@@ -10,9 +10,18 @@ import { defineConfig, devices } from '@playwright/test';
  * `postgres` service; locally use docker-compose.test.yml). Playwright then
  * boots the backend and the Vite dev server itself.
  */
-const BACKEND_PORT = Number(process.env.E2E_BACKEND_PORT ?? 8099);
-const FRONTEND_PORT = 5173;
+function configuredPort(name: string, fallback: number) {
+  const value = Number(process.env[name] ?? fallback);
+  if (!Number.isInteger(value) || value < 1024 || value > 65535) {
+    throw new Error(`${name} must be an integer between 1024 and 65535`);
+  }
+  return value;
+}
+
+const BACKEND_PORT = configuredPort('E2E_BACKEND_PORT', 8099);
+const FRONTEND_PORT = configuredPort('E2E_FRONTEND_PORT', 5173);
 const API_URL = `http://localhost:${BACKEND_PORT}`;
+export const FRONTEND_ORIGIN = `http://localhost:${FRONTEND_PORT}`;
 const DATABASE_URL =
   process.env.E2E_DATABASE_URL ??
   'postgres://test_user:test_pass@127.0.0.1:55444/cinetrack_test';
@@ -38,7 +47,9 @@ export default defineConfig({
       command: `sh -c 'cargo run --manifest-path ../backend/Cargo.toml 2>&1 | tee ${BACKEND_LOG}'`,
       url: `http://localhost:${BACKEND_PORT}/api/health`,
       timeout: 300_000,
-      reuseExistingServer: !process.env.CI,
+      // Reusing an arbitrary local process can silently point the browser at
+      // another API, including a developer's production-configured backend.
+      reuseExistingServer: false,
       env: {
         APP_ENV: 'development',
         APP_HOST: '127.0.0.1',
@@ -49,8 +60,8 @@ export default defineConfig({
         JWT_REFRESH_EXPIRY_DAYS: '30',
         TMDB_API_KEY: 'dummy-tmdb-key-not-used-by-auth-flows',
         TMDB_READ_ACCESS_TOKEN: '',
-        FRONTEND_URL: `http://localhost:${FRONTEND_PORT}`,
-        CORS_ALLOWED_ORIGINS: `http://localhost:${FRONTEND_PORT}`,
+        FRONTEND_URL: FRONTEND_ORIGIN,
+        CORS_ALLOWED_ORIGINS: FRONTEND_ORIGIN,
         SMTP_HOST: '',
         SMTP_USERNAME: '',
         SMTP_PASSWORD: '',
@@ -68,10 +79,10 @@ export default defineConfig({
       },
     },
     {
-      command: 'npm run dev',
+      command: `npm run dev -- --host 127.0.0.1 --port ${FRONTEND_PORT} --strictPort`,
       url: `http://localhost:${FRONTEND_PORT}`,
       timeout: 120_000,
-      reuseExistingServer: !process.env.CI,
+      reuseExistingServer: false,
       // Point the SPA at the test backend (Vite exposes VITE_-prefixed process
       // env to import.meta.env), since the default assumes port 8080.
       env: { VITE_API_URL: API_URL },
