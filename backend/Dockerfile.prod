@@ -1,7 +1,14 @@
 FROM rust:1.96-slim-bookworm@sha256:e18a79fc84dfcfc3ab5ba72290398a644c135c97eaa881447fddc354ee4701a3 AS builder
 WORKDIR /app
 COPY Cargo.toml Cargo.lock ./
-RUN mkdir src && echo "fn main() {}" > src/main.rs && cargo build --release --locked && rm -rf src
+# Cargo.toml declares the benches target explicitly, so its source has to exist
+# for the manifest to parse — even in this dependency-caching layer, which
+# otherwise only needs a stub main.
+RUN mkdir -p src benches \
+  && echo "fn main() {}" > src/main.rs \
+  && echo "fn main() {}" > benches/hot_paths.rs \
+  && cargo build --release --locked \
+  && rm -rf src benches
 COPY . .
 RUN touch src/main.rs && cargo build --release --locked
 
