@@ -6,7 +6,7 @@ edition = "2021"
 [dependencies]
 actix-web = "4"
 actix-cors = "0.7"
-actix-multipart = "0.7"
+actix-multipart = "0.8"
 futures-util = "0.3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -16,6 +16,11 @@ uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 jsonwebtoken = { version = "10.4", default-features = false, features = ["aws_lc_rs"] }
 argon2 = "0.5"
+# Salt generation uses password_hash's re-exported OsRng, which only exists when
+# rand_core/getrandom is on. argon2's own features do not enable it: it was
+# being switched on incidentally by another crate's dependency, so declaring it
+# here keeps password hashing working no matter what the rest of the graph does.
+password-hash = { version = "0.5", features = ["getrandom"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
 dotenvy = "0.15"
 thiserror = "2"
@@ -38,7 +43,7 @@ aws-smithy-types = "=1.6.1"
 
 [dev-dependencies]
 actix-http = "3"
-criterion = { version = "0.7", features = ["async_tokio"] }
+criterion = { version = "0.8", features = ["async_tokio"] }
 
 [[bench]]
 name = "hot_paths"
