@@ -36,7 +36,9 @@ mkdir -p "$RUN_DIR"
 BACKEND_PID=""
 
 cleanup() {
-  [[ -n "$BACKEND_PID" ]] && kill "$BACKEND_PID" 2>/dev/null || true
+  if [[ -n "$BACKEND_PID" ]]; then
+    kill "$BACKEND_PID" 2>/dev/null || true
+  fi
 }
 trap cleanup EXIT
 

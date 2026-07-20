@@ -239,7 +239,7 @@ jobs:
         run: |
           docker run --rm --volume "$PWD:$PWD:ro" --workdir "$PWD" \
             koalaman/shellcheck:v0.10.0@sha256:0fa384f2a6171aef8aab2999a531c8c8158727d54a8f20157a5c3c51a734d6b2 \
-            --external-sources scripts/*.sh scripts/tests/*.sh
+            --external-sources scripts/*.sh scripts/tests/*.sh bench/*.sh bench/db/*.sh
 
       - name: Validate embedded Python
         run: |
