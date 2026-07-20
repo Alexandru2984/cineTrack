@@ -18,6 +18,7 @@ function activity(id: string): ActivityItem {
     media_title: 'Film',
     media_type: 'movie',
     poster_path: null,
+    episode_id: null,
     episode_name: null,
     season_number: null,
     episode_number: null,

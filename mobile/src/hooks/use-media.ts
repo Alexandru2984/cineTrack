@@ -1,8 +1,9 @@
-import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { apiRequest } from '@/lib/api';
 import { withQuery } from '@/lib/http';
 import type {
+  EpisodeReaction,
   DiscoveryResponse,
   Episode,
   EpisodeDetail,
@@ -83,5 +84,25 @@ export function useEpisodeDetail(id: string) {
     queryKey: ['episode', id],
     queryFn: () => apiRequest<EpisodeDetail>(`/media/episodes/${id}`),
     enabled: Boolean(id),
+  });
+}
+
+/**
+ * Set, change or clear the viewer's reaction. Passing null removes it, which is
+ * what tapping the active reaction again does.
+ */
+export function useSetEpisodeReaction(episodeId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (reaction: EpisodeReaction | null) =>
+      reaction === null
+        ? apiRequest(`/media/episodes/${episodeId}/reaction`, { method: 'DELETE' })
+        : apiRequest(`/media/episodes/${episodeId}/reaction`, {
+            method: 'PUT',
+            body: { reaction },
+          }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['episode', episodeId] });
+    },
   });
 }

@@ -21,8 +21,9 @@ import {
   useMarkCalendarEpisodeWatched,
   useSetEpisodePlanned,
 } from '@/hooks/use-calendar';
-import { useEpisodeDetail } from '@/hooks/use-media';
+import { useEpisodeDetail, useSetEpisodeReaction } from '@/hooks/use-media';
 import { useTheme } from '@/hooks/use-theme';
+import { EpisodeReactions } from '@/components/episode-reactions';
 import { episodePath, publicUrl } from '@/lib/deep-links';
 import { episodeCode, formatDate, formatDateTime, formatRuntime } from '@/lib/format';
 import { getErrorMessage } from '@/lib/http';
@@ -39,6 +40,7 @@ export default function EpisodeDetailScreen() {
   const status = useAuthStore((state) => state.status);
   const sessionAvailable = hasLocalSession(status);
   const episode = useEpisodeDetail(sessionAvailable ? id : '');
+  const setReaction = useSetEpisodeReaction(id);
   const plan = useSetEpisodePlanned();
   const watched = useMarkCalendarEpisodeWatched();
   const item = episode.data;
@@ -218,6 +220,14 @@ export default function EpisodeDetailScreen() {
             </AppText>
           ) : null}
         </View>
+
+        <EpisodeReactions
+          reactions={item.reactions}
+          myReaction={item.my_reaction}
+          canReact={item.is_watched}
+          pending={setReaction.isPending}
+          onSelect={(reaction) => setReaction.mutate(reaction)}
+        />
       </ScrollView>
     </>
   );

@@ -55,7 +55,30 @@ export function SocialActivityRow({ item, showUser = true }: { item: ActivityIte
         >
           <AppText variant="label" numberOfLines={1}>{item.media_title}</AppText>
         </Pressable>
-        {episode ? <AppText variant="caption" muted numberOfLines={1}>{episode}</AppText> : null}
+        {episode ? (
+          // Rows written before the feed exposed the id, and title-level
+          // watches, have no episode to open — those stay plain text.
+          item.episode_id ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`Open ${episode}`}
+              onPress={() =>
+                router.push({
+                  pathname: '/episodes/[id]',
+                  params: { id: String(item.episode_id) },
+                })
+              }
+            >
+              <AppText variant="caption" muted numberOfLines={1}>
+                {episode}
+              </AppText>
+            </Pressable>
+          ) : (
+            <AppText variant="caption" muted numberOfLines={1}>
+              {episode}
+            </AppText>
+          )
+        ) : null}
         <AppText variant="caption" muted>{formatDateTime(item.timestamp)}</AppText>
       </View>
     </View>
