@@ -18,6 +18,7 @@ const Dashboard = lazy(() => import('@/pages/Dashboard'));
 const SearchPage = lazy(() => import('@/pages/Search'));
 const CalendarPage = lazy(() => import('@/pages/Calendar'));
 const MediaDetail = lazy(() => import('@/pages/MediaDetail'));
+const EpisodeDetailPage = lazy(() => import('@/pages/EpisodeDetail'));
 const TrackingPage = lazy(() => import('@/pages/Tracking'));
 const StatsPage = lazy(() => import('@/pages/Stats'));
 const WrappedPage = lazy(() => import('@/pages/Wrapped'));
@@ -106,6 +107,7 @@ export default function App() {
               <Route path="/search" element={<ProtectedRoute><SearchPage /></ProtectedRoute>} />
               <Route path="/calendar" element={<ProtectedRoute><CalendarPage /></ProtectedRoute>} />
               <Route path="/media/:id" element={<ProtectedRoute><MediaDetail /></ProtectedRoute>} />
+              <Route path="/episodes/:id" element={<ProtectedRoute><EpisodeDetailPage /></ProtectedRoute>} />
               <Route path="/tracking" element={<ProtectedRoute><TrackingPage /></ProtectedRoute>} />
               <Route path="/stats" element={<ProtectedRoute><StatsPage /></ProtectedRoute>} />
               <Route path="/wrapped" element={<ProtectedRoute><WrappedPage /></ProtectedRoute>} />

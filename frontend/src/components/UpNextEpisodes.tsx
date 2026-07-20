@@ -144,8 +144,8 @@ function UpNextRow({
   return (
     <article className="grid min-h-20 grid-cols-[5rem_minmax(0,1fr)] items-center gap-x-3 gap-y-2 py-3 sm:grid-cols-[6rem_minmax(0,1fr)_auto]">
       <Link
-        to={`/media/${item.tmdb_id}?type=tv`}
-        aria-label={`Open ${item.title}`}
+        to={`/episodes/${item.episode_id}`}
+        aria-label={`Open ${episodeName}`}
         className="row-span-2 flex h-14 w-20 items-center justify-center overflow-hidden rounded bg-[hsl(var(--muted))] sm:row-span-1 sm:h-16 sm:w-24"
       >
         <img
@@ -165,12 +165,15 @@ function UpNextRow({
         >
           {item.title}
         </Link>
-        <p className="mt-0.5 truncate text-xs">
+        <Link
+          to={`/episodes/${item.episode_id}`}
+          className="mt-0.5 block truncate text-xs hover:text-emerald-600 dark:hover:text-emerald-400"
+        >
           <span className="mr-1.5 font-mono text-[hsl(var(--muted-foreground))]">
             {episodeCode(item)}
           </span>
           {episodeName}
-        </p>
+        </Link>
         <p className="mt-1 flex gap-2 text-[11px] text-[hsl(var(--muted-foreground))]">
           <span>{airDateLabel(item.air_date)}</span>
           {item.runtime_minutes != null && <span>{formatRuntime(item.runtime_minutes)}</span>}

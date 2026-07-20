@@ -156,7 +156,10 @@ export function useSetEpisodePlanned() {
       }
       return { episodeId, planned };
     },
-    onSettled: () => queryClient.invalidateQueries({ queryKey: calendarKeys.all }),
+    onSettled: (_data, _error, variables) => {
+      void queryClient.invalidateQueries({ queryKey: calendarKeys.all });
+      void queryClient.invalidateQueries({ queryKey: ['episode', variables.episodeId] });
+    },
   });
 }
 
@@ -169,8 +172,9 @@ export function useMarkCalendarEpisodeWatched() {
       );
       return response.data;
     },
-    onSuccess: () => {
+    onSuccess: (_data, episodeId) => {
       void queryClient.invalidateQueries({ queryKey: calendarKeys.all });
+      void queryClient.invalidateQueries({ queryKey: ['episode', episodeId] });
       void queryClient.invalidateQueries({ queryKey: ['history'] });
       void queryClient.invalidateQueries({ queryKey: ['tracking'] });
       void queryClient.invalidateQueries({ queryKey: ['stats'] });

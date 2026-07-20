@@ -3,6 +3,7 @@ import api from '@/lib/api';
 import type {
   DiscoveryResponse,
   Episode,
+  EpisodeDetail,
   Media,
   Season,
   TmdbSearchResponse,
@@ -85,5 +86,16 @@ export function useEpisodes(id: string, seasonNumber: number | null) {
       return res.data;
     },
     enabled: !!id && seasonNumber !== null && seasonNumber >= 0,
+  });
+}
+
+export function useEpisodeDetail(id: string | undefined) {
+  return useQuery<EpisodeDetail>({
+    queryKey: ['episode', id],
+    queryFn: async () => {
+      const response = await api.get<EpisodeDetail>(`/media/episodes/${id}`);
+      return response.data;
+    },
+    enabled: Boolean(id),
   });
 }

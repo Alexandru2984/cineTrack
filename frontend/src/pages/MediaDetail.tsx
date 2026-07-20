@@ -1,5 +1,4 @@
-import { useSearchParams } from 'react-router-dom';
-import { useParams } from 'react-router-dom';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { useEpisodes, useMediaDetail, useSeasons } from '@/hooks/useMedia';
 import {
   useCreateTracking,
@@ -361,7 +360,12 @@ export default function MediaDetail() {
                             {episode.episode_number}
                           </div>
                           <div className="min-w-0 flex-1">
-                            <h3 className="font-medium">{episode.name || `Episode ${episode.episode_number}`}</h3>
+                            <Link
+                              to={`/episodes/${episode.id}`}
+                              className="font-medium hover:text-[hsl(var(--primary))]"
+                            >
+                              {episode.name || `Episode ${episode.episode_number}`}
+                            </Link>
                             <div className="mt-1 flex flex-wrap gap-x-3 text-xs text-[hsl(var(--muted-foreground))]">
                               {episode.air_date && <span>{formatDate(episode.air_date)}</span>}
                               {episode.runtime_minutes != null && <span>{formatRuntime(episode.runtime_minutes)}</span>}

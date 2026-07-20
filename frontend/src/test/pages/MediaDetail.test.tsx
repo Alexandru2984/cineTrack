@@ -1,5 +1,6 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import MediaDetail from '@/pages/MediaDetail';
 
@@ -13,10 +14,14 @@ const mocks = vi.hoisted(() => ({
   markEpisodesWatchedThrough: vi.fn(),
 }));
 
-vi.mock('react-router-dom', () => ({
-  useParams: () => ({ id: '1399' }),
-  useSearchParams: () => [new URLSearchParams('type=tv')],
-}));
+vi.mock('react-router-dom', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('react-router-dom')>();
+  return {
+    ...actual,
+    useParams: () => ({ id: '1399' }),
+    useSearchParams: () => [new URLSearchParams('type=tv')],
+  };
+});
 
 vi.mock('@/hooks/useMedia', () => ({
   useMediaDetail: () => ({
@@ -74,6 +79,8 @@ vi.mock('@/hooks/useTracking', () => ({
 }));
 
 describe('MediaDetail episode tracking', () => {
+  const renderPage = () => render(<MemoryRouter><MediaDetail /></MemoryRouter>);
+
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.useEpisodes.mockReturnValue({
@@ -120,7 +127,7 @@ describe('MediaDetail episode tracking', () => {
 
   it('selects seasons and marks only unwatched episodes', async () => {
     const user = userEvent.setup();
-    render(<MediaDetail />);
+    renderPage();
 
     const seasonOne = screen.getByRole('tab', { name: /Season 1/ });
     expect(seasonOne).toHaveAttribute('aria-selected', 'true');
@@ -150,7 +157,7 @@ describe('MediaDetail episode tracking', () => {
         },
       ],
     });
-    render(<MediaDetail />);
+    renderPage();
 
     await user.click(screen.getAllByTitle('Mark watched')[1]);
     expect(screen.getByRole('dialog', { name: 'Mark S01E02 watched?' })).toBeVisible();
@@ -169,7 +176,7 @@ describe('MediaDetail episode tracking', () => {
 
   it('confirms marking every available episode in a season', async () => {
     const user = userEvent.setup();
-    render(<MediaDetail />);
+    renderPage();
 
     await user.click(screen.getByRole('button', { name: 'Mark season watched' }));
     expect(screen.getByRole('dialog', { name: 'Mark Season 1 watched?' })).toBeVisible();

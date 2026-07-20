@@ -466,12 +466,15 @@ function EpisodeRow({
         >
           {item.title}
         </Link>
-        <p className="mt-0.5 truncate text-sm">
+        <Link
+          to={`/episodes/${item.episode_id}`}
+          className="mt-0.5 block truncate text-sm hover:text-cyan-600 dark:hover:text-cyan-400"
+        >
           <span className="mr-2 font-mono text-xs text-[hsl(var(--muted-foreground))]">
             {episodeCode(item.season_number, item.episode_number)}
           </span>
           {item.episode_name || `Episode ${item.episode_number}`}
-        </p>
+        </Link>
         <div className="mt-1 flex flex-wrap gap-x-3 text-xs text-[hsl(var(--muted-foreground))]">
           <span>{formatCalendarDate(item.air_date, false)}</span>
           {item.runtime_minutes != null && <span>{formatRuntime(item.runtime_minutes)}</span>}
@@ -509,12 +512,15 @@ function UpcomingEpisodeRow({
         >
           {item.title}
         </Link>
-        <p className="mt-0.5 truncate text-sm">
+        <Link
+          to={`/episodes/${item.item_id}`}
+          className="mt-0.5 block truncate text-sm hover:text-cyan-600 dark:hover:text-cyan-400"
+        >
           <span className="mr-2 font-mono text-xs text-[hsl(var(--muted-foreground))]">
             {episodeCode(item.season_number ?? 0, item.episode_number ?? 0)}
           </span>
           {episodeName}
-        </p>
+        </Link>
       </div>
       <button
         type="button"
