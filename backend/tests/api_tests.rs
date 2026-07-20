@@ -59,6 +59,7 @@ fn test_config() -> cinetrack::config::Config {
         frontend_url: "http://localhost:5173".into(),
         database_url: test_db_url(),
         jwt_secret: "test_secret_must_be_64_chars_long_so_we_pad_it_here_abcdefghijklmnopq".into(),
+        totp_encryption_key: [0x42; 32],
         jwt_expiry_minutes: 15,
         jwt_refresh_expiry_days: 30,
         tmdb_api_key: "fake_tmdb_key".into(),
@@ -1161,17 +1162,24 @@ async fn test_email_verification_rejects_bad_token() {
 // ── Two-Factor (TOTP) Tests ───────────────────────────────────
 
 async fn totp_secret_bytes(pool: &PgPool, email: &str) -> Vec<u8> {
-    let secret_hex: String = sqlx::query_scalar("SELECT totp_secret FROM users WHERE email = $1")
-        .bind(email)
-        .fetch_one(pool)
-        .await
-        .expect("totp secret present after setup");
-    hex::decode(secret_hex).expect("stored secret is valid hex")
+    let (user_id, stored): (Uuid, String) =
+        sqlx::query_as("SELECT id, totp_secret FROM users WHERE email = $1")
+            .bind(email)
+            .fetch_one(pool)
+            .await
+            .expect("totp secret present after setup");
+    cinetrack::utils::totp_secret::decrypt(&test_config().totp_encryption_key, user_id, &stored)
+        .expect("stored secret is authenticated ciphertext")
 }
 
 fn current_totp_code(secret: &[u8]) -> String {
     let now = chrono::Utc::now().timestamp().max(0) as u64;
     cinetrack::utils::totp::code_at(secret, now)
+}
+
+fn next_totp_code(secret: &[u8]) -> String {
+    let next_step = chrono::Utc::now().timestamp().max(0) as u64 + 30;
+    cinetrack::utils::totp::code_at(secret, next_step)
 }
 
 /// A 6-digit code guaranteed outside the ±2-step acceptance window, so the
@@ -1247,6 +1255,14 @@ async fn test_two_factor_enable_login_and_recovery() {
 
     let secret = totp_secret_bytes(&pool, "mfa@example.com").await;
 
+    // Simulate a pre-encryption pending enrollment. Activation must migrate it.
+    sqlx::query("UPDATE users SET totp_secret = $2 WHERE email = $1")
+        .bind("mfa@example.com")
+        .bind(hex::encode(&secret))
+        .execute(&pool)
+        .await
+        .unwrap();
+
     // A wrong code cannot activate it.
     let req = actix_test::TestRequest::post()
         .uri("/api/auth/2fa/enable")
@@ -1270,6 +1286,13 @@ async fn test_two_factor_enable_login_and_recovery() {
     let recovery = body["recovery_codes"].as_array().unwrap().clone();
     assert_eq!(recovery.len(), 10);
     let first_recovery = recovery[0].as_str().unwrap().to_string();
+    let stored_after_enable: String =
+        sqlx::query_scalar("SELECT totp_secret FROM users WHERE email = $1")
+            .bind("mfa@example.com")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(stored_after_enable.starts_with("v1:"));
 
     // A second setup is refused now that it is enabled.
     let req = actix_test::TestRequest::post()
@@ -1290,17 +1313,33 @@ async fn test_two_factor_enable_login_and_recovery() {
     assert_eq!(status, 401);
     assert_eq!(body["two_factor_required"], true);
 
-    // A valid TOTP code completes the login.
-    let (status, _) = login_json(
-        &app,
-        json!({
-            "email": "mfa@example.com",
-            "password": "Pass1234",
-            "totp_code": current_totp_code(&secret)
-        }),
-    )
-    .await;
-    assert_eq!(status, 200);
+    // Simulate an enabled legacy account, then race the same TOTP twice. The
+    // database counter must let exactly one login consume the time step.
+    sqlx::query("UPDATE users SET totp_secret = $2, totp_last_used_step = NULL WHERE email = $1")
+        .bind("mfa@example.com")
+        .bind(hex::encode(&secret))
+        .execute(&pool)
+        .await
+        .unwrap();
+    let login_payload = json!({
+        "email": "mfa@example.com",
+        "password": "Pass1234",
+        "totp_code": next_totp_code(&secret)
+    });
+    let (first_login, second_login) = tokio::join!(
+        login_json(&app, login_payload.clone()),
+        login_json(&app, login_payload.clone())
+    );
+    let statuses = [first_login.0, second_login.0];
+    assert_eq!(statuses.iter().filter(|status| **status == 200).count(), 1);
+    assert_eq!(statuses.iter().filter(|status| **status == 401).count(), 1);
+    let stored_after_login: String =
+        sqlx::query_scalar("SELECT totp_secret FROM users WHERE email = $1")
+            .bind("mfa@example.com")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(stored_after_login.starts_with("v1:"));
 
     // A recovery code also completes it, and cannot be reused.
     let (status, _) = login_json(
@@ -1341,6 +1380,64 @@ async fn test_two_factor_enable_login_and_recovery() {
     )
     .await;
     assert_eq!(status, 200);
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn test_account_login_throttle_survives_ips_and_resets_after_success() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    register_user(&app, "throttled", "throttled@example.com", "Pass1234").await;
+
+    for _ in 0..5 {
+        let (status, _) = login_json(
+            &app,
+            json!({ "email": "throttled@example.com", "password": "WrongPass9" }),
+        )
+        .await;
+        assert_eq!(status, 401);
+    }
+
+    let (failed_attempts, locked): (i32, bool) = sqlx::query_as(
+        "SELECT login_failed_attempts, login_locked_until > NOW()
+         FROM users WHERE email = $1",
+    )
+    .bind("throttled@example.com")
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(failed_attempts, 5);
+    assert!(locked);
+
+    let (status, _) = login_json(
+        &app,
+        json!({ "email": "throttled@example.com", "password": "Pass1234" }),
+    )
+    .await;
+    assert_eq!(status, 429);
+
+    sqlx::query(
+        "UPDATE users SET login_locked_until = NOW() - INTERVAL '1 second' WHERE email = $1",
+    )
+    .bind("throttled@example.com")
+    .execute(&pool)
+    .await
+    .unwrap();
+    let (status, _) = login_json(
+        &app,
+        json!({ "email": "throttled@example.com", "password": "Pass1234" }),
+    )
+    .await;
+    assert_eq!(status, 200);
+
+    let failed_attempts: i32 =
+        sqlx::query_scalar("SELECT login_failed_attempts FROM users WHERE email = $1")
+            .bind("throttled@example.com")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(failed_attempts, 0);
 }
 
 // ── Forgot / Reset Password Tests ─────────────────────────────

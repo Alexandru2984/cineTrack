@@ -1,6 +1,6 @@
 //! RFC 6238 TOTP (time-based one-time passwords) over HMAC-SHA1, plus the
 //! helpers needed to enroll an authenticator app. Secrets are handled as raw
-//! bytes here; callers persist them hex-encoded and only ever expose the
+//! bytes here; callers own encrypted persistence and only ever expose the
 //! base32/otpauth forms during enrollment.
 
 use hmac::{Hmac, KeyInit, Mac};
@@ -79,20 +79,23 @@ pub fn code_at(secret: &[u8], unix_time: u64) -> String {
 /// The input must be exactly `DIGITS` ASCII digits; comparison is constant-time
 /// over the fixed-width strings to avoid leaking match progress via timing.
 pub fn verify(secret: &[u8], code: &str, unix_time: u64) -> bool {
+    matching_step(secret, code, unix_time).is_some()
+}
+
+/// Return the exact accepted counter so callers can atomically reject a replay.
+pub fn matching_step(secret: &[u8], code: &str, unix_time: u64) -> Option<u64> {
     if code.len() != DIGITS as usize || !code.bytes().all(|b| b.is_ascii_digit()) {
-        return false;
+        return None;
     }
     let base = (unix_time / PERIOD_SECONDS) as i64;
-    (-SKEW_STEPS..=SKEW_STEPS).any(|delta| {
-        let Some(counter) = base.checked_add(delta).filter(|value| *value >= 0) else {
-            return false;
-        };
+    (-SKEW_STEPS..=SKEW_STEPS).find_map(|delta| {
+        let counter = base.checked_add(delta).filter(|value| *value >= 0)?;
         let candidate = format!(
             "{:0width$}",
             hotp(secret, counter as u64, DIGITS),
             width = DIGITS as usize
         );
-        constant_time_eq(candidate.as_bytes(), code.as_bytes())
+        constant_time_eq(candidate.as_bytes(), code.as_bytes()).then_some(counter as u64)
     })
 }
 

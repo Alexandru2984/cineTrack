@@ -17,6 +17,14 @@ pub struct User {
     #[serde(skip_serializing)]
     pub totp_secret: Option<String>,
     pub totp_enabled: bool,
+    #[serde(skip_serializing)]
+    pub totp_last_used_step: Option<i64>,
+    #[serde(skip_serializing)]
+    pub login_failed_attempts: i32,
+    #[serde(skip_serializing)]
+    pub login_last_failed_at: Option<DateTime<Utc>>,
+    #[serde(skip_serializing)]
+    pub login_locked_until: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }

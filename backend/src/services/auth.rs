@@ -10,12 +10,15 @@ use crate::dto::auth::*;
 use crate::errors::AppError;
 use crate::models::{EmailVerificationToken, PasswordResetToken, RefreshToken, User};
 use crate::services::email::EmailService;
-use crate::utils::{jwt, password, totp};
+use crate::utils::{jwt, password, totp, totp_secret};
 
 const PASSWORD_RESET_RESPONSE_FLOOR: StdDuration = StdDuration::from_millis(250);
 const PASSWORD_RESET_COOLDOWN_SECONDS: i64 = 10 * 60;
 const EMAIL_VERIFICATION_TTL_HOURS: i64 = 24;
 const EMAIL_VERIFICATION_COOLDOWN_SECONDS: i64 = 2 * 60;
+const LOGIN_FAILURE_LIMIT: i32 = 5;
+const LOGIN_FAILURE_WINDOW_SECONDS: i64 = 15 * 60;
+const LOGIN_LOCK_SECONDS: i64 = 15 * 60;
 
 /// Normalize an email for storage and lookup: trimmed and lowercased, so
 /// `Test@X.com ` and `test@x.com` resolve to the same account.
@@ -101,12 +104,24 @@ pub async fn login(
         .and_then(|candidate| candidate.password_hash.as_deref());
 
     if !password::verify_password_or_dummy(&req.password, password_hash).await? {
+        if let Some(user) = &user {
+            record_login_failure(pool, user.id).await?;
+        }
         return Err(AppError::Unauthorized(
             "Invalid email or password".to_string(),
         ));
     }
     let user =
         user.ok_or_else(|| AppError::Unauthorized("Invalid email or password".to_string()))?;
+
+    if user
+        .login_locked_until
+        .is_some_and(|locked_until| locked_until > Utc::now())
+    {
+        return Err(AppError::TooManyRequests(
+            "Too many failed sign-in attempts. Try again later.".to_string(),
+        ));
+    }
 
     // Second factor: only revealed after the password is confirmed, so it never
     // discloses whether an address has 2FA before credentials are correct.
@@ -119,7 +134,8 @@ pub async fn login(
         {
             None => return Err(AppError::TwoFactorRequired),
             Some(code) => {
-                if !verify_second_factor(pool, &user, code).await? {
+                if !verify_second_factor(pool, config, &user, code).await? {
+                    record_login_failure(pool, user.id).await?;
                     return Err(AppError::Unauthorized(
                         "Invalid two-factor code".to_string(),
                     ));
@@ -127,6 +143,8 @@ pub async fn login(
             }
         }
     }
+
+    clear_login_failures(pool, user.id).await?;
 
     sqlx::query(
         r#"DELETE FROM refresh_tokens
@@ -599,33 +617,143 @@ pub async fn require_verified_email(pool: &PgPool, user_id: Uuid) -> Result<(), 
 const TOTP_ISSUER: &str = "Văzute";
 const RECOVERY_CODE_COUNT: usize = 10;
 
-/// Verify a submitted second factor: a 6-digit TOTP code, or otherwise a
-/// single-use recovery code (consumed atomically on success).
-async fn verify_second_factor(pool: &PgPool, user: &User, code: &str) -> Result<bool, AppError> {
-    let secret_hex = user.totp_secret.as_deref().ok_or_else(|| {
+async fn record_login_failure(pool: &PgPool, user_id: Uuid) -> Result<(), AppError> {
+    sqlx::query(
+        "WITH next_attempt AS (
+            SELECT id,
+                CASE
+                    WHEN login_last_failed_at IS NULL
+                      OR login_last_failed_at < NOW() - ($2 * INTERVAL '1 second')
+                    THEN 1
+                    ELSE LEAST(login_failed_attempts + 1, $3)
+                END AS attempts
+            FROM users
+            WHERE id = $1
+              AND (login_locked_until IS NULL OR login_locked_until <= NOW())
+            FOR UPDATE
+        )
+        UPDATE users AS target
+        SET login_failed_attempts = next_attempt.attempts,
+            login_last_failed_at = NOW(),
+            login_locked_until = CASE
+                WHEN next_attempt.attempts >= $3
+                THEN NOW() + ($4 * INTERVAL '1 second')
+                ELSE NULL
+            END
+        FROM next_attempt
+        WHERE target.id = next_attempt.id",
+    )
+    .bind(user_id)
+    .bind(LOGIN_FAILURE_WINDOW_SECONDS)
+    .bind(LOGIN_FAILURE_LIMIT)
+    .bind(LOGIN_LOCK_SECONDS)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+async fn clear_login_failures(pool: &PgPool, user_id: Uuid) -> Result<(), AppError> {
+    sqlx::query(
+        "UPDATE users
+         SET login_failed_attempts = 0,
+             login_last_failed_at = NULL,
+             login_locked_until = NULL
+         WHERE id = $1
+           AND (login_failed_attempts <> 0
+             OR login_last_failed_at IS NOT NULL
+             OR login_locked_until IS NOT NULL)",
+    )
+    .bind(user_id)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+fn decode_stored_totp_secret(
+    config: &Config,
+    user: &User,
+) -> Result<(Vec<u8>, Option<String>), AppError> {
+    let stored = user.totp_secret.as_deref().ok_or_else(|| {
         AppError::InternalError(anyhow::anyhow!("2FA enabled without a stored secret"))
     })?;
+    let (secret, migrated) = if totp_secret::is_encrypted(stored) {
+        (
+            totp_secret::decrypt(&config.totp_encryption_key, user.id, stored)?,
+            None,
+        )
+    } else {
+        let secret = hex::decode(stored).map_err(|_| {
+            AppError::InternalError(anyhow::anyhow!("legacy TOTP secret is not valid hex"))
+        })?;
+        let encrypted = totp_secret::encrypt(&config.totp_encryption_key, user.id, &secret)?;
+        (secret, Some(encrypted))
+    };
+    if secret.len() != 20 {
+        return Err(AppError::InternalError(anyhow::anyhow!(
+            "stored TOTP secret has the wrong length"
+        )));
+    }
+    Ok((secret, migrated))
+}
+
+/// Verify a submitted second factor: a 6-digit TOTP code, or otherwise a
+/// single-use recovery code (consumed atomically on success).
+async fn verify_second_factor(
+    pool: &PgPool,
+    config: &Config,
+    user: &User,
+    code: &str,
+) -> Result<bool, AppError> {
+    let (secret, migrated_secret) = decode_stored_totp_secret(config, user)?;
 
     let is_totp_shape = code.len() == 6 && code.bytes().all(|byte| byte.is_ascii_digit());
     if is_totp_shape {
-        let secret = hex::decode(secret_hex).map_err(|_| {
-            AppError::InternalError(anyhow::anyhow!("stored TOTP secret is not valid hex"))
-        })?;
         let now = Utc::now().timestamp().max(0) as u64;
-        return Ok(totp::verify(&secret, code, now));
+        let Some(step) = totp::matching_step(&secret, code, now) else {
+            return Ok(false);
+        };
+        let step = i64::try_from(step).map_err(|_| {
+            AppError::InternalError(anyhow::anyhow!("TOTP counter does not fit the database"))
+        })?;
+        let accepted = sqlx::query(
+            "UPDATE users
+             SET totp_last_used_step = $2,
+                 totp_secret = COALESCE($3, totp_secret),
+                 updated_at = NOW()
+             WHERE id = $1
+               AND (totp_last_used_step IS NULL OR totp_last_used_step < $2)",
+        )
+        .bind(user.id)
+        .bind(step)
+        .bind(migrated_secret)
+        .execute(pool)
+        .await?
+        .rows_affected();
+        return Ok(accepted == 1);
     }
 
     // Recovery code: mark the matching unconsumed row consumed in one statement.
     let code_hash = jwt::hash_refresh_token(code.trim());
+    let mut tx = pool.begin().await?;
     let consumed = sqlx::query(
         "UPDATE two_factor_recovery_codes SET consumed_at = NOW()
          WHERE user_id = $1 AND code_hash = $2 AND consumed_at IS NULL",
     )
     .bind(user.id)
     .bind(&code_hash)
-    .execute(pool)
+    .execute(&mut *tx)
     .await?
     .rows_affected();
+    if consumed == 1 {
+        if let Some(encrypted) = migrated_secret {
+            sqlx::query("UPDATE users SET totp_secret = $2, updated_at = NOW() WHERE id = $1")
+                .bind(user.id)
+                .bind(encrypted)
+                .execute(&mut *tx)
+                .await?;
+        }
+        tx.commit().await?;
+    }
     Ok(consumed == 1)
 }
 
@@ -634,6 +762,7 @@ async fn verify_second_factor(pool: &PgPool, user: &User, code: &str) -> Result<
 /// activation simply rotates the pending secret.
 pub async fn setup_two_factor(
     pool: &PgPool,
+    config: &Config,
     user_id: Uuid,
     password_input: &str,
 ) -> Result<TwoFactorSetupResponse, AppError> {
@@ -666,11 +795,25 @@ pub async fn setup_two_factor(
     }
 
     let secret = totp::generate_secret();
-    sqlx::query("UPDATE users SET totp_secret = $2, updated_at = NOW() WHERE id = $1")
-        .bind(user_id)
-        .bind(hex::encode(secret))
-        .execute(pool)
-        .await?;
+    let encrypted = totp_secret::encrypt(&config.totp_encryption_key, user_id, &secret)?;
+    let updated = sqlx::query(
+        "UPDATE users
+         SET totp_secret = $2, totp_last_used_step = NULL, updated_at = NOW()
+         WHERE id = $1
+           AND totp_enabled = FALSE
+           AND totp_secret IS NOT DISTINCT FROM $3",
+    )
+    .bind(user_id)
+    .bind(encrypted)
+    .bind(&user.totp_secret)
+    .execute(pool)
+    .await?
+    .rows_affected();
+    if updated != 1 {
+        return Err(AppError::Conflict(
+            "Two-factor setup changed. Start setup again.".to_string(),
+        ));
+    }
 
     Ok(TwoFactorSetupResponse {
         secret: totp::base32_encode(&secret),
@@ -682,6 +825,7 @@ pub async fn setup_two_factor(
 /// fresh set of one-time recovery codes (returned in plaintext exactly here).
 pub async fn enable_two_factor(
     pool: &PgPool,
+    config: &Config,
     user_id: Uuid,
     code: &str,
 ) -> Result<Vec<String>, AppError> {
@@ -702,28 +846,49 @@ pub async fn enable_two_factor(
             "Two-factor authentication is already enabled".to_string(),
         ));
     }
-    let secret_hex = user.totp_secret.as_deref().ok_or_else(|| {
+    let stored_secret = user.totp_secret.clone().ok_or_else(|| {
         AppError::BadRequest("Start two-factor setup before confirming a code".to_string())
     })?;
-    let secret = hex::decode(secret_hex).map_err(|_| {
-        AppError::InternalError(anyhow::anyhow!("stored TOTP secret is not valid hex"))
-    })?;
+    let (secret, _) = decode_stored_totp_secret(config, &user)?;
     let now = Utc::now().timestamp().max(0) as u64;
-    if !totp::verify(&secret, code, now) {
+    let Some(step) = totp::matching_step(&secret, code, now) else {
         return Err(AppError::BadRequest(
             "That code is incorrect. Check your authenticator and try again.".to_string(),
         ));
-    }
+    };
+    let step = i64::try_from(step).map_err(|_| {
+        AppError::InternalError(anyhow::anyhow!("TOTP counter does not fit the database"))
+    })?;
+    let encrypted = totp_secret::encrypt(&config.totp_encryption_key, user_id, &secret)?;
 
     let codes: Vec<String> = (0..RECOVERY_CODE_COUNT)
         .map(|_| generate_recovery_code())
         .collect();
 
     let mut tx = pool.begin().await?;
-    sqlx::query("UPDATE users SET totp_enabled = TRUE, updated_at = NOW() WHERE id = $1")
-        .bind(user_id)
-        .execute(&mut *tx)
-        .await?;
+    let enabled = sqlx::query(
+        "UPDATE users
+         SET totp_enabled = TRUE,
+             totp_secret = $2,
+             totp_last_used_step = $3,
+             updated_at = NOW()
+         WHERE id = $1
+           AND totp_enabled = FALSE
+           AND totp_secret = $4
+           AND (totp_last_used_step IS NULL OR totp_last_used_step < $3)",
+    )
+    .bind(user_id)
+    .bind(encrypted)
+    .bind(step)
+    .bind(stored_secret)
+    .execute(&mut *tx)
+    .await?
+    .rows_affected();
+    if enabled != 1 {
+        return Err(AppError::Conflict(
+            "Two-factor setup changed. Start setup again.".to_string(),
+        ));
+    }
     sqlx::query("DELETE FROM two_factor_recovery_codes WHERE user_id = $1")
         .bind(user_id)
         .execute(&mut *tx)
@@ -765,7 +930,11 @@ pub async fn disable_two_factor(
 
     let mut tx = pool.begin().await?;
     sqlx::query(
-        "UPDATE users SET totp_enabled = FALSE, totp_secret = NULL, updated_at = NOW()
+        "UPDATE users
+         SET totp_enabled = FALSE,
+             totp_secret = NULL,
+             totp_last_used_step = NULL,
+             updated_at = NOW()
          WHERE id = $1",
     )
     .bind(user_id)

@@ -70,10 +70,10 @@ A personal movie and TV show tracker with social features, inspired by TV Time. 
 The application has been through multiple security audits. Key measures include:
 
 - **Authentication** — Short-lived JWT access tokens (15 min) with SHA-256 hashed refresh tokens, automatic rotation, and per-user token cap (max 5 sessions)
-- **Two-Factor Auth (TOTP)** — Optional RFC 6238 authenticator codes, gated at login after the password check; single-use recovery codes stored only as SHA-256 hashes; disabling requires the account password
+- **Two-Factor Auth (TOTP)** — Optional RFC 6238 authenticator codes with AES-256-GCM encrypted secrets, one-use time-step replay protection, and SHA-256 hashed recovery codes; disabling requires the account password
 - **Breached-Password Rejection** — Register/change/reset check the password against Have I Been Pwned via k-anonymity (only a 5-char SHA-1 prefix leaves the server; fail-open)
 - **Email Verification** — One-time confirmation link on registration (hashed token, 24h TTL, resend cooldown); existing accounts grandfathered
-- **Rate Limiting** — Global rate limiter (10 req/s, burst 50) + stricter auth-specific limiter (3 req/s, burst 10) to prevent brute-force
+- **Rate Limiting** — Global and auth-specific IP limiters plus a PostgreSQL-backed per-account lock after repeated credential or 2FA failures
 - **Password Policy** — Minimum 8 characters, must contain at least one letter and one digit, rejects all-same-character passwords
 - **Input Validation** — All user inputs validated with length limits (bio 500, review 5000, list names 200, etc.) and content validation
 - **Upload Safety** — Avatar bytes, structure, dimensions, declared type, and size are checked; imports have byte and record limits plus a two-job global concurrency cap; poster downloads are streamed through an uncredentialed, non-redirecting client with strict size limits
@@ -122,6 +122,7 @@ The application has been through multiple security audits. Key measures include:
    DATABASE_URL=postgresql://cinetrack_user:<password>@db:5432/cinetrack
 
    JWT_SECRET=<openssl rand -base64 64>
+   TOTP_ENCRYPTION_KEY=<openssl rand -hex 32>
    JWT_EXPIRY_MINUTES=15
    JWT_REFRESH_EXPIRY_DAYS=30
 

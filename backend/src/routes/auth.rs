@@ -321,24 +321,33 @@ async fn resend_email_verification(
 
 async fn setup_two_factor(
     pool: web::Data<PgPool>,
+    config: web::Data<Config>,
     req: HttpRequest,
     body: web::Json<SetupTwoFactorRequest>,
 ) -> Result<HttpResponse, AppError> {
     let user_id = require_auth(&req).await?;
     body.validate()?;
-    let setup = services::auth::setup_two_factor(pool.get_ref(), user_id, &body.password).await?;
+    let setup =
+        services::auth::setup_two_factor(pool.get_ref(), config.get_ref(), user_id, &body.password)
+            .await?;
     Ok(no_store(HttpResponse::Ok()).json(setup))
 }
 
 async fn enable_two_factor(
     pool: web::Data<PgPool>,
+    config: web::Data<Config>,
     req: HttpRequest,
     body: web::Json<EnableTwoFactorRequest>,
 ) -> Result<HttpResponse, AppError> {
     let user_id = require_auth(&req).await?;
     body.validate()?;
-    let recovery_codes =
-        services::auth::enable_two_factor(pool.get_ref(), user_id, body.code.trim()).await?;
+    let recovery_codes = services::auth::enable_two_factor(
+        pool.get_ref(),
+        config.get_ref(),
+        user_id,
+        body.code.trim(),
+    )
+    .await?;
     Ok(no_store(HttpResponse::Ok()).json(TwoFactorEnabledResponse { recovery_codes }))
 }
 
@@ -490,6 +499,7 @@ mod tests {
             database_url: "postgres://example".to_string(),
             jwt_secret: "test_secret_must_be_64_chars_long_so_we_pad_it_here_abcdefghijklmnopq"
                 .to_string(),
+            totp_encryption_key: [0x42; 32],
             jwt_expiry_minutes: 15,
             jwt_refresh_expiry_days: 30,
             tmdb_api_key: "fake".to_string(),

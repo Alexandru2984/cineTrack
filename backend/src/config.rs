@@ -21,6 +21,7 @@ pub struct Config {
     pub frontend_url: String,
     pub database_url: String,
     pub jwt_secret: String,
+    pub totp_encryption_key: [u8; 32],
     pub jwt_expiry_minutes: i64,
     pub jwt_refresh_expiry_days: i64,
     pub tmdb_api_key: String,
@@ -63,6 +64,13 @@ impl Config {
                 "JWT_SECRET must be generated randomly in production"
             );
         }
+        let totp_encryption_key = match env::var("TOTP_ENCRYPTION_KEY") {
+            Ok(value) => parse_totp_encryption_key(&value),
+            Err(_) if is_production => {
+                panic!("TOTP_ENCRYPTION_KEY must be set to 64 hexadecimal characters in production")
+            }
+            Err(_) => [0xA5; 32],
+        };
 
         let frontend_url = validate_url(
             "FRONTEND_URL",
@@ -136,6 +144,7 @@ impl Config {
             frontend_url,
             database_url: env::var("DATABASE_URL").expect("DATABASE_URL must be set"),
             jwt_secret,
+            totp_encryption_key,
             jwt_expiry_minutes: jwt_expiry_minutes(),
             jwt_refresh_expiry_days: bounded_env("JWT_REFRESH_EXPIRY_DAYS", 30_i64, 1, 90),
             tmdb_api_key,
@@ -177,6 +186,18 @@ impl Config {
     pub fn is_production(&self) -> bool {
         self.app_env == "production"
     }
+}
+
+fn parse_totp_encryption_key(value: &str) -> [u8; 32] {
+    let value = value.trim();
+    assert!(
+        value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit()),
+        "TOTP_ENCRYPTION_KEY must contain exactly 64 hexadecimal characters"
+    );
+    let decoded = hex::decode(value).expect("validated TOTP encryption key hex");
+    decoded
+        .try_into()
+        .expect("validated TOTP encryption key length")
 }
 
 fn validate_app_env(value: String) -> String {
@@ -515,5 +536,18 @@ mod tests {
             )
         })
         .is_err());
+    }
+
+    #[test]
+    fn parses_a_256_bit_totp_encryption_key() {
+        let key = parse_totp_encryption_key(&"ab".repeat(32));
+        assert_eq!(key, [0xAB; 32]);
+    }
+
+    #[test]
+    fn rejects_malformed_totp_encryption_keys() {
+        for value in ["ab", &"zz".repeat(32), &"ab".repeat(33)] {
+            assert!(std::panic::catch_unwind(|| parse_totp_encryption_key(value)).is_err());
+        }
     }
 }
