@@ -127,16 +127,22 @@ Adding or updating a native module, changing permissions, or changing native
 configuration still requires a new EAS Build. Re-enable production OTA only
 after update signing is configured and a newly signed runtime is distributed.
 
-## Password-reset links
+## App and universal links
 
-Android App Links are enabled for
-`https://vazute.micutu.com/reset-password`. The domain association contains the
-SHA-256 fingerprint of the EAS Android keystore, and the reset token stays in
-the URL fragment so it is not sent in HTTP requests. After Google Play App
-Signing is enabled, add the Play signing certificate fingerprint to
+Android App Links are enabled for password resets, media details, episode
+details, profiles, and public lists under `https://vazute.micutu.com`. Protected
+links preserve a strictly validated internal destination through login; an
+external or malformed redirect value is discarded. The domain association
+contains the SHA-256 fingerprint of the EAS Android keystore. After Google Play
+App Signing is enabled, add the Play signing certificate fingerprint to
 `frontend/public/.well-known/assetlinks.json` alongside the EAS fingerprint.
 
-The custom `vazute` scheme remains available for local testing. iOS universal
-links require the Apple Developer Team ID and an Apple App Site Association
-file; until those credentials exist, the HTTPS reset link intentionally opens
-the web reset flow on iOS.
+The password-reset token stays in the URL fragment so it is not sent in HTTP
+requests. Shared media and episode URLs use the same canonical paths on web and
+native, so they keep working when the app is not installed.
+
+The custom `vazute` scheme remains available for local testing. The iOS
+Associated Domains entitlement is prepared, but universal links still require
+the real Apple Developer Team ID and an Apple App Site Association file. Until
+those credentials exist, HTTPS links intentionally fall back to the web on iOS.
+See `STORE_RELEASE_CHECKLIST.md` for the remaining external steps.

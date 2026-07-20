@@ -116,6 +116,7 @@ export default function RootLayout() {
               <Stack.Screen name="lists/[id]" options={{ title: 'List' }} />
               <Stack.Screen name="social" options={{ title: 'Social' }} />
               <Stack.Screen name="people/[username]" options={{ title: 'Profile' }} />
+              <Stack.Screen name="profile/[username]" options={{ title: 'Profile' }} />
               <Stack.Screen name="settings" options={{ title: 'Account settings' }} />
             </Stack>
           </View>

@@ -1,5 +1,5 @@
 import { Image } from 'expo-image';
-import { router, Stack, useLocalSearchParams } from 'expo-router';
+import { Redirect, router, Stack, useLocalSearchParams } from 'expo-router';
 import {
   Bookmark,
   BookmarkCheck,
@@ -7,9 +7,10 @@ import {
   CheckCircle2,
   Clock3,
   Film,
+  Share2,
   Tv,
 } from 'lucide-react-native';
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Pressable, ScrollView, Share, StyleSheet, View } from 'react-native';
 
 import { AppButton } from '@/components/app-button';
 import { AppText } from '@/components/app-text';
@@ -22,8 +23,11 @@ import {
 } from '@/hooks/use-calendar';
 import { useEpisodeDetail } from '@/hooks/use-media';
 import { useTheme } from '@/hooks/use-theme';
+import { episodePath, publicUrl } from '@/lib/deep-links';
 import { episodeCode, formatDate, formatDateTime, formatRuntime } from '@/lib/format';
 import { getErrorMessage } from '@/lib/http';
+import { hydrateSession } from '@/lib/session';
+import { hasLocalSession, useAuthStore } from '@/store/auth';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -32,13 +36,42 @@ export default function EpisodeDetailScreen() {
   const params = useLocalSearchParams<{ id: string }>();
   const rawId = Array.isArray(params.id) ? params.id[0] : params.id;
   const id = rawId && UUID_PATTERN.test(rawId) ? rawId : '';
-  const episode = useEpisodeDetail(id);
+  const status = useAuthStore((state) => state.status);
+  const sessionAvailable = hasLocalSession(status);
+  const episode = useEpisodeDetail(sessionAvailable ? id : '');
   const plan = useSetEpisodePlanned();
   const watched = useMarkCalendarEpisodeWatched();
   const item = episode.data;
 
+  if (!id) {
+    return (
+      <ErrorState
+        message="This episode link is invalid"
+        onRetry={() => router.replace('/')}
+      />
+    );
+  }
+  if (status === 'loading') return <LoadingState label="Restoring session" />;
+  if (status === 'restore_error') {
+    return (
+      <ErrorState
+        message="Your session is still saved. Check your connection and try again."
+        onRetry={() => void hydrateSession()}
+      />
+    );
+  }
+  if (!sessionAvailable) {
+    return (
+      <Redirect
+        href={{
+          pathname: '/(auth)/login',
+          params: { redirect: episodePath(id) },
+        }}
+      />
+    );
+  }
   if (episode.isLoading) return <LoadingState label="Loading episode" />;
-  if (!id || episode.isError || !item) {
+  if (episode.isError || !item) {
     return (
       <ErrorState
         message={getErrorMessage(episode.error, 'This episode could not be loaded')}
@@ -53,6 +86,7 @@ export default function EpisodeDetailScreen() {
   const artwork = imageUrl(item.still_path ?? item.poster_path, item.still_path ? 'w780' : 'w342');
   const canManage = item.tracking_status !== null && item.tracking_status !== 'dropped';
   const actionError = plan.error || watched.error;
+  const shareUrl = publicUrl(episodePath(item.episode_id));
 
   return (
     <>
@@ -142,6 +176,18 @@ export default function EpisodeDetailScreen() {
               onPress={() => watched.mutate(item.episode_id)}
             />
           ) : null}
+          <AppButton
+            label="Share"
+            icon={<Share2 color={theme.text} size={18} />}
+            variant="secondary"
+            onPress={() =>
+              void Share.share({
+                title: `${item.title} ${code}`,
+                message: `${item.title} ${code}: ${name}\n${shareUrl}`,
+                url: shareUrl,
+              })
+            }
+          />
         </View>
 
         {!canManage ? (

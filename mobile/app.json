@@ -22,6 +22,9 @@
     "ios": {
       "bundleIdentifier": "com.micutu.vazute",
       "supportsTablet": true,
+      "associatedDomains": [
+        "applinks:vazute.micutu.com"
+      ],
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       }
@@ -38,6 +41,26 @@
               "scheme": "https",
               "host": "vazute.micutu.com",
               "pathPrefix": "/reset-password"
+            },
+            {
+              "scheme": "https",
+              "host": "vazute.micutu.com",
+              "pathPrefix": "/media"
+            },
+            {
+              "scheme": "https",
+              "host": "vazute.micutu.com",
+              "pathPrefix": "/episodes"
+            },
+            {
+              "scheme": "https",
+              "host": "vazute.micutu.com",
+              "pathPrefix": "/profile"
+            },
+            {
+              "scheme": "https",
+              "host": "vazute.micutu.com",
+              "pathPrefix": "/lists"
             }
           ],
           "category": [

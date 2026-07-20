@@ -5,14 +5,18 @@ from __future__ import annotations
 
 import json
 import plistlib
+import re
 import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+REPOSITORY_ROOT = ROOT.parent
 ANDROID_NS = "{http://schemas.android.com/apk/res/android}"
 TOOLS_NS = "{http://schemas.android.com/tools}"
+ASSOCIATED_PATHS = {"/reset-password", "/media", "/episodes", "/profile", "/lists"}
+FINGERPRINT_PATTERN = re.compile(r"^(?:[0-9A-F]{2}:){31}[0-9A-F]{2}$")
 
 
 def require(condition: bool, message: str) -> None:
@@ -89,10 +93,11 @@ def validate_android(config: dict[str, object]) -> None:
                     )
                 )
     require(config["scheme"] in custom_schemes, "custom URL scheme is missing")
-    require(
-        ("https", "vazute.micutu.com", "/reset-password") in verified_links,
-        "verified Android password-reset link is missing",
-    )
+    for path in ASSOCIATED_PATHS:
+        require(
+            ("https", "vazute.micutu.com", path) in verified_links,
+            f"verified Android app link is missing: {path}",
+        )
 
     package = config["android"]["package"]  # type: ignore[index]
     package_path = Path(*str(package).split("."))
@@ -110,6 +115,7 @@ def read_plist(path: Path) -> dict[str, object]:
 def validate_ios(config: dict[str, object]) -> None:
     info = read_plist(only_path("ios/*/Info.plist"))
     expo = read_plist(only_path("ios/*/Supporting/Expo.plist"))
+    entitlements = read_plist(only_path("ios/*/*.entitlements"))
     require(expo.get("EXUpdatesEnabled") is False, "production iOS OTA is enabled")
     require(
         expo.get("EXUpdatesRuntimeVersion") == config["version"],
@@ -127,6 +133,41 @@ def validate_ios(config: dict[str, object]) -> None:
         for scheme in group.get("CFBundleURLSchemes", [])
     }
     require(config["scheme"] in schemes, "iOS custom URL scheme is missing")
+    associated_domains = entitlements.get("com.apple.developer.associated-domains", [])
+    require(
+        "applinks:vazute.micutu.com" in associated_domains,
+        "iOS associated domain is missing",
+    )
+
+
+def validate_android_asset_links(config: dict[str, object]) -> None:
+    path = REPOSITORY_ROOT / "frontend/public/.well-known/assetlinks.json"
+    with path.open(encoding="utf-8") as source:
+        entries = json.load(source)
+    require(isinstance(entries, list) and len(entries) > 0, "assetlinks.json has no entries")
+
+    package = config["android"]["package"]  # type: ignore[index]
+    matching = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        target = entry.get("target")
+        relation = entry.get("relation")
+        if (
+            isinstance(target, dict)
+            and isinstance(relation, list)
+            and target.get("namespace") == "android_app"
+            and target.get("package_name") == package
+            and "delegate_permission/common.handle_all_urls" in relation
+        ):
+            matching.append(entry)
+    require(len(matching) == 1, "assetlinks.json must contain one matching Android app")
+    fingerprints = matching[0]["target"].get("sha256_cert_fingerprints", [])
+    require(isinstance(fingerprints, list) and len(fingerprints) > 0, "signing fingerprint is missing")
+    require(
+        all(isinstance(value, str) and FINGERPRINT_PATTERN.fullmatch(value) for value in fingerprints),
+        "assetlinks.json contains a malformed SHA-256 fingerprint",
+    )
 
 
 def main() -> None:
@@ -134,6 +175,7 @@ def main() -> None:
         config = json.load(source)["expo"]
     validate_android(config)
     validate_ios(config)
+    validate_android_asset_links(config)
     print("native production config passed")
 
 

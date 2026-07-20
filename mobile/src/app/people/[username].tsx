@@ -1,4 +1,4 @@
-import { Redirect, useLocalSearchParams } from 'expo-router';
+import { Redirect, router, useLocalSearchParams } from 'expo-router';
 import { CalendarDays, Clock3, LockKeyhole, UserMinus, UserPlus } from 'lucide-react-native';
 import { ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -16,10 +16,12 @@ import {
   useUnfollowUser,
 } from '@/hooks/use-social';
 import { useTheme } from '@/hooks/use-theme';
+import { profilePath, safePostAuthRedirect } from '@/lib/deep-links';
 import { formatDate } from '@/lib/format';
 import { getErrorMessage } from '@/lib/http';
+import { hydrateSession } from '@/lib/session';
 import { relationshipLabel, uniqueActivities } from '@/lib/social';
-import { useAuthStore } from '@/store/auth';
+import { hasLocalSession, useAuthStore } from '@/store/auth';
 
 export default function PublicProfileScreen() {
   const theme = useTheme();
@@ -27,7 +29,9 @@ export default function PublicProfileScreen() {
   const currentUser = useAuthStore((state) => state.user);
   const params = useLocalSearchParams<{ username: string }>();
   const username = Array.isArray(params.username) ? params.username[0] : params.username;
-  const profile = usePublicUserProfile(username ?? '');
+  const sessionAvailable = hasLocalSession(status);
+  const returnTo = safePostAuthRedirect(profilePath(username ?? ''));
+  const profile = usePublicUserProfile(username ?? '', sessionAvailable && returnTo !== null);
   const activity = usePublicUserActivity(
     username ?? '',
     profile.data?.can_view_activity ?? false,
@@ -36,7 +40,30 @@ export default function PublicProfileScreen() {
   const unfollow = useUnfollowUser();
   const activityItems = uniqueActivities(activity.data?.pages ?? []);
 
-  if (status !== 'authenticated') return <Redirect href="/" />;
+  if (!returnTo) {
+    return (
+      <ErrorState
+        message="This profile link is invalid"
+        onRetry={() => router.replace('/')}
+      />
+    );
+  }
+  if (status === 'loading') return <LoadingState label="Restoring session" />;
+  if (status === 'restore_error') {
+    return (
+      <ErrorState
+        message="Your session is still saved. Check your connection and try again."
+        onRetry={() => void hydrateSession()}
+      />
+    );
+  }
+  if (!sessionAvailable) {
+    return (
+      <Redirect
+        href={{ pathname: '/(auth)/login', params: { redirect: String(returnTo) } }}
+      />
+    );
+  }
   if (profile.isLoading) return <LoadingState label="Loading profile" />;
   if (profile.isError || !profile.data) {
     return (

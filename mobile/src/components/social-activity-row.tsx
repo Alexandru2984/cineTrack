@@ -33,7 +33,7 @@ export function SocialActivityRow({ item, showUser = true }: { item: ActivityIte
           <Pressable
             accessibilityRole="button"
             onPress={() =>
-              router.push({ pathname: '/people/[username]', params: { username: item.username } })
+              router.push({ pathname: '/profile/[username]', params: { username: item.username } })
             }
             style={styles.user}
           >

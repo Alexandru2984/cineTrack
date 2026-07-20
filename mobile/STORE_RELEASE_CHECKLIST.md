@@ -1,0 +1,52 @@
+# Mobile store release checklist
+
+Nothing in this checklist authorizes a Git push, deployment, EAS build, store
+submission, or credential change. Run those steps only from a reviewed commit.
+
+## Repository gates
+
+- The Git worktree contains only the intended release commit.
+- GitHub CI is green, including the Android release compile and native config validation.
+- `npm ci && npm run verify && npm audit --audit-level=high` passes in `mobile/`.
+- The production Expo config reports `updates.enabled=false`.
+- The app/runtime version is newer than every distributed native runtime using changed native modules.
+- The backend migration job succeeds before application replicas start.
+
+## Production secrets and operations
+
+- `TOTP_ENCRYPTION_KEY` is a persistent random 32-byte key stored off-host; losing it disables existing 2FA setups.
+- Database backups use a dedicated R2 bucket/token and `BACKUP_AGE_RECIPIENT`.
+- A restore drill into a disposable database has passed and the Prometheus backup alerts are loaded.
+- SMTP/Resend delivery is verified for verification, reset, and security-event emails.
+- No `.env`, credentials, signing keys, tokens, database dumps, or generated native projects are tracked by Git.
+
+## Google Play
+
+- Create the Play application and enable Play App Signing.
+- Add the Play **app signing** SHA-256 fingerprint, not only the upload/EAS fingerprint, to `frontend/public/.well-known/assetlinks.json`.
+- Verify `https://vazute.micutu.com/.well-known/assetlinks.json` returns HTTP 200, no redirect, and `application/json`.
+- Reinstall the signed release and test `/reset-password`, `/media`, `/episodes`, `/profile`, and `/lists` links with `adb`.
+- Complete Data safety from the actual behavior documented at `https://vazute.micutu.com/privacy`.
+- Set the account-deletion URL to `https://vazute.micutu.com/account-deletion` and verify deletion inside the app.
+- Review the production AAB permissions and confirm that blocked permissions did not return.
+- Add FCM v1 credentials only when release alerts are intentionally enabled for the store build.
+
+## Apple App Store
+
+- Enroll in the Apple Developer Program and obtain the real Team ID.
+- Create `frontend/public/.well-known/apple-app-site-association` with app ID `<TEAM_ID>.com.micutu.vazute` and only the supported paths.
+- Serve the AASA file over HTTPS without a redirect and verify the Associated Domains capability on the signed build.
+- Complete App Privacy using the production data flows and the public privacy policy.
+- Verify in-app account deletion, password reset, session revocation, and Sign in with Apple applicability before submission.
+
+The Apple Team ID and Play App Signing fingerprint are external values and must
+never be guessed or copied from an unrelated signing identity.
+
+## Release verification
+
+- Install the exact signed artifact on a normal device, not only Expo Orbit or an emulator.
+- Test fresh install, login with and without 2FA, offline launch, token refresh, logout, reset link, and account deletion.
+- Test media/episode sharing, incoming app links while signed out, login return, and incoming links while offline.
+- Confirm `completed`, season bulk watch, and watched-through never add unreleased episodes.
+- Confirm privacy/cache clearing, crash-report redaction, notification opt-in/out, and device-token revocation.
+- Record the commit, version, version code/build number, signing identity, CI run, and artifact checksum in the release notes.

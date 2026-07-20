@@ -1,4 +1,4 @@
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { Eye, EyeOff, Film } from 'lucide-react-native';
 import { useState } from 'react';
 import {
@@ -17,6 +17,7 @@ import { AppText } from '@/components/app-text';
 import { SegmentedControl } from '@/components/segmented-control';
 import { radius, spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import { safePostAuthRedirect } from '@/lib/deep-links';
 import { getErrorMessage, isTwoFactorRequired } from '@/lib/http';
 import { loginSession, registerSession } from '@/lib/session';
 import {
@@ -32,6 +33,8 @@ const SECOND_FACTOR_OPTIONS = [
 
 export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
   const theme = useTheme();
+  const params = useLocalSearchParams<{ redirect?: string | string[] }>();
+  const redirect = safePostAuthRedirect(params.redirect);
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -82,7 +85,7 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
           mfaRequired ? normalizeSecondFactorInput(secondFactorCode) : undefined,
         );
       }
-      router.replace('/(tabs)');
+      router.replace(redirect ?? '/(tabs)');
     } catch (submitError) {
       if (isTwoFactorRequired(submitError)) {
         // First challenge: reveal the code field rather than showing this as a
@@ -285,9 +288,14 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
 
           <Pressable
             accessibilityRole="link"
-            onPress={() =>
-              router.replace(isRegister ? '/(auth)/login' : '/(auth)/register')
-            }
+            onPress={() => {
+              const pathname = isRegister ? '/(auth)/login' : '/(auth)/register';
+              router.replace(
+                redirect
+                  ? { pathname, params: { redirect: String(redirect) } }
+                  : pathname,
+              );
+            }}
             style={styles.switchMode}
           >
             <AppText muted>

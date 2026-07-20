@@ -60,12 +60,12 @@ export function usePeopleSearch(query: string, enabled = true) {
   });
 }
 
-export function usePublicUserProfile(username: string) {
+export function usePublicUserProfile(username: string, enabled = true) {
   return useQuery({
     queryKey: socialKeys.profile(username),
     queryFn: () =>
       apiRequest<PublicUserProfile>(`/users/${encodeURIComponent(username)}`),
-    enabled: username.length > 0,
+    enabled: enabled && username.length > 0,
   });
 }
 

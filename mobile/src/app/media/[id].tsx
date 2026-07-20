@@ -1,11 +1,12 @@
 import { Image } from 'expo-image';
-import { router, Stack, useLocalSearchParams } from 'expo-router';
+import { Redirect, router, Stack, useLocalSearchParams } from 'expo-router';
 import {
   Calendar,
   Check,
   CheckCheck,
   Clock3,
   ListPlus,
+  Share2,
   Star,
 } from 'lucide-react-native';
 import { useMemo, useState } from 'react';
@@ -13,6 +14,7 @@ import {
   Alert,
   Pressable,
   ScrollView,
+  Share,
   StyleSheet,
   View,
 } from 'react-native';
@@ -44,6 +46,9 @@ import {
   trackingStatusLabels,
 } from '@/lib/format';
 import { getErrorMessage } from '@/lib/http';
+import { mediaPath, publicUrl } from '@/lib/deep-links';
+import { hydrateSession } from '@/lib/session';
+import { hasLocalSession, useAuthStore } from '@/store/auth';
 import type {
   Episode,
   MediaType,
@@ -82,10 +87,13 @@ export default function MediaDetailScreen() {
   const id = normalizeTmdbId(rawId);
   const rawType = Array.isArray(params.type) ? params.type[0] : params.type;
   const type: MediaType = rawType === 'tv' ? 'tv' : 'movie';
-  const media = useMediaDetail(id, type);
-  const seasons = useSeasons(id, type === 'tv');
+  const status = useAuthStore((state) => state.status);
+  const sessionAvailable = hasLocalSession(status);
+  const requestId = sessionAvailable ? id : '';
+  const media = useMediaDetail(requestId, type);
+  const seasons = useSeasons(requestId, type === 'tv');
   const tracking = useTrackingLookup(
-    id ? [{ tmdb_id: Number(id), media_type: type }] : [],
+    requestId ? [{ tmdb_id: Number(requestId), media_type: type }] : [],
   );
   const createTracking = useCreateTracking();
   const updateTracking = useUpdateTracking();
@@ -125,7 +133,7 @@ export default function MediaDetailScreen() {
         availableSeasons[0]?.season_number ??
         null;
 
-  const episodes = useEpisodes(type === 'tv' ? id : '', selectedSeason);
+  const episodes = useEpisodes(type === 'tv' ? requestId : '', selectedSeason);
   const watchedEpisodes = useWatchedEpisodes(media.data?.tmdb_id, selectedSeason);
   const progress = useShowProgress(media.data?.tmdb_id);
   const markEpisode = useMarkEpisodeWatched();
@@ -157,6 +165,33 @@ export default function MediaDetailScreen() {
     markSeason.error ||
     markThrough.error;
 
+  if (!id) {
+    return (
+      <ErrorState
+        message="This title link is invalid"
+        onRetry={() => router.replace('/')}
+      />
+    );
+  }
+  if (status === 'loading') return <LoadingState label="Restoring session" />;
+  if (status === 'restore_error') {
+    return (
+      <ErrorState
+        message="Your session is still saved. Check your connection and try again."
+        onRetry={() => void hydrateSession()}
+      />
+    );
+  }
+  if (!sessionAvailable) {
+    return (
+      <Redirect
+        href={{
+          pathname: '/(auth)/login',
+          params: { redirect: mediaPath(id, type) },
+        }}
+      />
+    );
+  }
   if (media.isLoading) return <LoadingState label="Loading details" />;
   if (media.isError || !media.data) {
     return (
@@ -169,6 +204,7 @@ export default function MediaDetailScreen() {
 
   const item = media.data;
   const runtime = formatRuntime(item.runtime_minutes);
+  const shareUrl = publicUrl(mediaPath(item.tmdb_id, type));
 
   const changeStatus = (status: TrackingStatus) => {
     setStatusSelection({ mediaKey, status });
@@ -313,6 +349,22 @@ export default function MediaDetailScreen() {
             ))}
           </ScrollView>
         ) : null}
+
+        <View style={styles.shareAction}>
+          <AppButton
+            label="Share"
+            variant="secondary"
+            compact
+            icon={<Share2 color={theme.mutedText} size={18} />}
+            onPress={() =>
+              void Share.share({
+                title: item.title,
+                message: `${item.title}\n${shareUrl}`,
+                url: shareUrl,
+              })
+            }
+          />
+        </View>
 
         <View style={styles.section}>
           <AppText variant="section">Tracking</AppText>
@@ -671,6 +723,10 @@ const styles = StyleSheet.create({
   },
   section: {
     gap: spacing.md,
+    paddingHorizontal: spacing.lg,
+  },
+  shareAction: {
+    alignItems: 'flex-start',
     paddingHorizontal: spacing.lg,
   },
   listAction: {

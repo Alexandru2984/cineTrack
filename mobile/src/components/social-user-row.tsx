@@ -27,7 +27,7 @@ export function SocialUserRow({
         accessibilityRole="button"
         accessibilityLabel={`Open ${username}'s profile`}
         onPress={() =>
-          router.push({ pathname: '/people/[username]', params: { username } })
+          router.push({ pathname: '/profile/[username]', params: { username } })
         }
         style={({ pressed }) => [{ opacity: pressed ? 0.72 : 1 }]}
       >
@@ -36,7 +36,7 @@ export function SocialUserRow({
       <Pressable
         accessibilityRole="button"
         onPress={() =>
-          router.push({ pathname: '/people/[username]', params: { username } })
+          router.push({ pathname: '/profile/[username]', params: { username } })
         }
         style={({ pressed }) => [styles.copy, { opacity: pressed ? 0.72 : 1 }]}
       >

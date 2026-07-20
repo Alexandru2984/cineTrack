@@ -146,7 +146,7 @@ export default function NotificationsScreen() {
               onPress={() => {
                 if (unread) markRead.mutate(item.id);
                 router.push({
-                  pathname: '/people/[username]',
+                  pathname: '/profile/[username]',
                   params: { username: item.actor_username },
                 });
               }}
