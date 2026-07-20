@@ -198,7 +198,7 @@ jobs:
         run: npx expo prebuild --platform all --no-install --clean
 
       - name: Install Java
-        uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165 # v5.0.0
+        uses: actions/setup-java@0f481fcb613427c0f801b606911222b5b6f3083a # v5.5.0
         with:
           distribution: temurin
           java-version: "17"
