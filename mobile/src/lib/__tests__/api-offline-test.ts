@@ -1,5 +1,6 @@
 import { apiRequest } from '@/lib/api';
-import { rawRequest } from '@/lib/http';
+import { ApiError, rawRequest } from '@/lib/http';
+import { currentSessionGeneration, refreshSession } from '@/lib/session';
 import { useAuthStore } from '@/store/auth';
 import type { User } from '@/types';
 
@@ -10,6 +11,7 @@ jest.mock('@/lib/http', () => ({
 
 jest.mock('@/lib/session', () => ({
   refreshSession: jest.fn(),
+  currentSessionGeneration: jest.fn(() => 0),
 }));
 
 const user: User = {
@@ -23,10 +25,13 @@ const user: User = {
 };
 
 const mockRawRequest = jest.mocked(rawRequest);
+const mockCurrentSessionGeneration = jest.mocked(currentSessionGeneration);
+const mockRefreshSession = jest.mocked(refreshSession);
 
 describe('offline API guard', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockCurrentSessionGeneration.mockReturnValue(0);
     useAuthStore.getState().clearSession();
   });
 
@@ -40,5 +45,20 @@ describe('offline API guard', () => {
       message: 'Connect to the internet to make changes',
     });
     expect(mockRawRequest).not.toHaveBeenCalled();
+  });
+
+  it('does not retry a request after the active account changes', async () => {
+    useAuthStore.getState().setSession('old-access-token', user);
+    mockRawRequest.mockRejectedValueOnce(new ApiError('Expired', 401));
+    mockRefreshSession.mockImplementationOnce(async () => {
+      mockCurrentSessionGeneration.mockReturnValue(1);
+      return 'new-access-token';
+    });
+
+    await expect(apiRequest('/tracking')).rejects.toMatchObject({
+      status: 401,
+      message: 'Session changed while the request was in progress',
+    });
+    expect(mockRawRequest).toHaveBeenCalledTimes(1);
   });
 });

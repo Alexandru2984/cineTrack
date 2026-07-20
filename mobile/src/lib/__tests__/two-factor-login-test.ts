@@ -6,12 +6,15 @@ jest.mock('@/lib/http', () => {
   return { ...actual, rawRequest: jest.fn() };
 });
 jest.mock('@/lib/secure-session', () => ({
-  writeRefreshToken: jest.fn(),
-  writeCachedSession: jest.fn(),
-  removeCachedSession: jest.fn(),
-  removeRefreshToken: jest.fn(),
-  readCachedSession: jest.fn(),
-  readRefreshToken: jest.fn(),
+  writeRefreshToken: jest.fn().mockResolvedValue(undefined),
+  writeCachedSession: jest.fn().mockResolvedValue(undefined),
+  removeCachedSession: jest.fn().mockResolvedValue(undefined),
+  removeRefreshToken: jest.fn().mockResolvedValue(undefined),
+  readCachedSession: jest.fn().mockResolvedValue(null),
+  readRefreshToken: jest.fn().mockResolvedValue(null),
+  queueLogoutRevocation: jest.fn().mockResolvedValue(undefined),
+  readPendingLogoutRevocations: jest.fn().mockResolvedValue([]),
+  removePendingLogoutRevocation: jest.fn().mockResolvedValue(undefined),
 }));
 jest.mock('@/lib/secure-release-notifications', () => ({
   detachStoredReleaseNotifications: jest.fn(),
@@ -21,7 +24,7 @@ const mockRawRequest = jest.mocked(rawRequest);
 
 const SESSION = {
   access_token: 'access-token',
-  refresh_token: 'r'.repeat(64),
+  refresh_token: 'a'.repeat(128),
   token_type: 'Bearer',
   expires_in: 900,
   user: {

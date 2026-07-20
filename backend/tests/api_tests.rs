@@ -364,6 +364,52 @@ async fn test_mobile_auth_returns_rotating_tokens_without_cookies() {
 
 #[actix_web::test]
 #[ignore = "requires test DB"]
+async fn test_mobile_logout_revokes_a_token_rotated_during_logout() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/auth/mobile/register")
+        .set_json(json!({
+            "username": "logoutrotation",
+            "email": "logoutrotation@example.com",
+            "password": "Pass1234"
+        }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let registered: Value = actix_test::call_and_read_body_json(&app, req).await;
+    let original_refresh = registered["refresh_token"].as_str().unwrap().to_string();
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/auth/mobile/refresh")
+        .set_json(json!({ "refresh_token": &original_refresh }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let refreshed: Value = actix_test::read_body_json(resp).await;
+    let rotated_refresh = refreshed["refresh_token"].as_str().unwrap().to_string();
+
+    // A client that started logout before the refresh response arrived only
+    // knows the consumed token. Revoking its family must also revoke the child.
+    let req = actix_test::TestRequest::post()
+        .uri("/api/auth/mobile/logout")
+        .set_json(json!({ "refresh_token": original_refresh }))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 200);
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/auth/mobile/refresh")
+        .set_json(json!({ "refresh_token": rotated_refresh }))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 401);
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
 async fn test_mobile_session_list_identifies_current_refresh_token() {
     let pool = setup_pool().await;
     clean_db(&pool).await;

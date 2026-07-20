@@ -22,10 +22,11 @@ import {
   flushPendingPushRevocations,
   syncReleaseNotifications,
 } from '@/lib/release-notifications';
-import { resumeOfflineSession } from '@/lib/session';
+import { flushPendingLogoutRevocations, resumeOfflineSession } from '@/lib/session';
 import { useAuthStore } from '@/store/auth';
 
 function refreshReleaseNotifications() {
+  void flushPendingLogoutRevocations().catch(() => undefined);
   void flushPendingPushRevocations().catch(() => undefined);
   const auth = useAuthStore.getState();
   if (auth.status === 'authenticated' && auth.user) {

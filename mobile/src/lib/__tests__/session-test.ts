@@ -1,14 +1,22 @@
 import { ApiError, rawRequest } from '@/lib/http';
 import {
   readCachedSession,
+  readPendingLogoutRevocations,
   readRefreshToken,
+  queueLogoutRevocation,
   removeCachedSession,
+  removePendingLogoutRevocation,
   removeRefreshToken,
   writeCachedSession,
   writeRefreshToken,
 } from '@/lib/secure-session';
 import { detachStoredReleaseNotifications } from '@/lib/secure-release-notifications';
-import { hydrateSession, refreshSession } from '@/lib/session';
+import {
+  hydrateSession,
+  loginSession,
+  logoutSession,
+  refreshSession,
+} from '@/lib/session';
 import { useAuthStore } from '@/store/auth';
 import type { MobileAuthResponse, User } from '@/types';
 
@@ -19,8 +27,11 @@ jest.mock('@/lib/http', () => ({
 
 jest.mock('@/lib/secure-session', () => ({
   readCachedSession: jest.fn(),
+  readPendingLogoutRevocations: jest.fn(),
   readRefreshToken: jest.fn(),
+  queueLogoutRevocation: jest.fn(),
   removeCachedSession: jest.fn(),
+  removePendingLogoutRevocation: jest.fn(),
   removeRefreshToken: jest.fn(),
   writeCachedSession: jest.fn(),
   writeRefreshToken: jest.fn(),
@@ -40,10 +51,10 @@ const user: User = {
   created_at: '2026-07-17T00:00:00Z',
 };
 
-const refreshToken = 'r'.repeat(64);
+const refreshToken = 'a'.repeat(128);
 const response: MobileAuthResponse = {
   access_token: 'new-access-token',
-  refresh_token: 'n'.repeat(64),
+  refresh_token: 'b'.repeat(128),
   token_type: 'Bearer',
   expires_in: 900,
   user,
@@ -51,20 +62,36 @@ const response: MobileAuthResponse = {
 
 const mockRawRequest = jest.mocked(rawRequest);
 const mockReadCachedSession = jest.mocked(readCachedSession);
+const mockReadPendingLogoutRevocations = jest.mocked(readPendingLogoutRevocations);
 const mockReadRefreshToken = jest.mocked(readRefreshToken);
+const mockQueueLogoutRevocation = jest.mocked(queueLogoutRevocation);
 const mockRemoveCachedSession = jest.mocked(removeCachedSession);
+const mockRemovePendingLogoutRevocation = jest.mocked(removePendingLogoutRevocation);
 const mockRemoveRefreshToken = jest.mocked(removeRefreshToken);
 const mockWriteCachedSession = jest.mocked(writeCachedSession);
 const mockWriteRefreshToken = jest.mocked(writeRefreshToken);
 const mockDetachReleaseNotifications = jest.mocked(detachStoredReleaseNotifications);
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
 
 describe('mobile session recovery', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     useAuthStore.getState().clearSession();
     mockReadCachedSession.mockResolvedValue(null);
+    mockReadPendingLogoutRevocations.mockResolvedValue([]);
     mockReadRefreshToken.mockResolvedValue(refreshToken);
     mockRemoveCachedSession.mockResolvedValue();
+    mockRemovePendingLogoutRevocation.mockResolvedValue();
+    mockQueueLogoutRevocation.mockResolvedValue();
     mockRemoveRefreshToken.mockResolvedValue();
     mockWriteCachedSession.mockResolvedValue();
     mockWriteRefreshToken.mockResolvedValue();
@@ -155,5 +182,84 @@ describe('mobile session recovery', () => {
       accessToken: response.access_token,
       user,
     });
+  });
+
+  it('cannot resurrect a session when refresh completes after logout', async () => {
+    useAuthStore.getState().setSession('old-access-token', user);
+    const pendingRefresh = deferred<MobileAuthResponse>();
+    mockRawRequest.mockImplementation((path) => {
+      if (path === '/auth/mobile/refresh') return pendingRefresh.promise;
+      return Promise.resolve({});
+    });
+
+    const refreshing = refreshSession();
+    await Promise.resolve();
+    await logoutSession();
+    pendingRefresh.resolve(response);
+
+    await expect(refreshing).rejects.toThrow('Session changed');
+    expect(mockWriteRefreshToken).not.toHaveBeenCalled();
+    expect(useAuthStore.getState().status).toBe('anonymous');
+    expect(mockRawRequest).toHaveBeenCalledWith(
+      '/auth/mobile/logout',
+      expect.objectContaining({ body: { refresh_token: response.refresh_token } }),
+    );
+  });
+
+  it('cannot overwrite a newer account with a late refresh response', async () => {
+    useAuthStore.getState().setSession('old-access-token', user);
+    const pendingRefresh = deferred<MobileAuthResponse>();
+    const otherUser: User = {
+      ...user,
+      id: 'f46e408e-6df2-4b80-ae34-4903d46a8e27',
+      username: 'other_user',
+      email: 'other@example.com',
+    };
+    const otherResponse: MobileAuthResponse = {
+      ...response,
+      access_token: 'other-access-token',
+      refresh_token: 'c'.repeat(128),
+      user: otherUser,
+    };
+    mockRawRequest.mockImplementation((path) => {
+      if (path === '/auth/mobile/refresh') return pendingRefresh.promise;
+      if (path === '/auth/mobile/login') return Promise.resolve(otherResponse);
+      return Promise.resolve({});
+    });
+
+    const refreshing = refreshSession();
+    await Promise.resolve();
+    await loginSession(otherUser.email, 'Pass1234');
+    pendingRefresh.resolve(response);
+
+    await expect(refreshing).rejects.toThrow('Session changed');
+    expect(useAuthStore.getState()).toMatchObject({
+      status: 'authenticated',
+      accessToken: otherResponse.access_token,
+      user: otherUser,
+    });
+    expect(mockWriteRefreshToken).toHaveBeenCalledTimes(1);
+    expect(mockWriteRefreshToken).toHaveBeenCalledWith(otherResponse.refresh_token);
+  });
+
+  it('queues logout revocation when the device is offline', async () => {
+    useAuthStore.getState().setOfflineSession(user);
+    mockRawRequest.mockRejectedValueOnce(new ApiError('Offline', 0));
+
+    await logoutSession();
+
+    expect(mockQueueLogoutRevocation).toHaveBeenCalledWith(refreshToken);
+    expect(useAuthStore.getState().status).toBe('anonymous');
+  });
+
+  it('fully clears cached identity when refresh storage is empty', async () => {
+    useAuthStore.getState().setSession('old-access-token', user);
+    mockReadRefreshToken.mockResolvedValueOnce(null);
+
+    await expect(refreshSession()).rejects.toThrow('No refresh token');
+
+    expect(mockRemoveCachedSession).toHaveBeenCalled();
+    expect(mockDetachReleaseNotifications).toHaveBeenCalled();
+    expect(useAuthStore.getState().status).toBe('anonymous');
   });
 });

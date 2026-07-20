@@ -130,11 +130,18 @@ pub async fn login(
 
     sqlx::query(
         r#"DELETE FROM refresh_tokens
-        WHERE user_id = $1
+        WHERE refresh_tokens.user_id = $1
         AND (
             expires_at < NOW()
             OR (consumed_at IS NOT NULL AND consumed_at < NOW() - INTERVAL '7 days')
             OR (revoked_at IS NOT NULL AND revoked_at < NOW() - INTERVAL '7 days')
+        )
+        AND NOT EXISTS (
+            SELECT 1 FROM refresh_tokens active
+            WHERE active.family_id = refresh_tokens.family_id
+              AND active.consumed_at IS NULL
+              AND active.revoked_at IS NULL
+              AND active.expires_at >= NOW()
         )"#,
     )
     .bind(user.id)
@@ -222,14 +229,16 @@ pub async fn refresh_token(
     let expires_at = Utc::now() + Duration::days(config.jwt_refresh_expiry_days);
 
     sqlx::query(
-        "INSERT INTO refresh_tokens (user_id, token_hash, expires_at, user_agent, ip_address, last_used_at)
-         VALUES ($1, $2, $3, $4, $5, NOW())",
+        "INSERT INTO refresh_tokens
+            (user_id, token_hash, expires_at, user_agent, ip_address, last_used_at, family_id)
+         VALUES ($1, $2, $3, $4, $5, NOW(), $6)",
     )
     .bind(user.id)
     .bind(&new_token_hash)
     .bind(expires_at)
     .bind(&client.user_agent)
     .bind(&client.ip_address)
+    .bind(stored.family_id)
     .execute(&mut *tx)
     .await?;
 
@@ -251,12 +260,23 @@ pub async fn logout(pool: &PgPool, refresh_token: &str) -> Result<(), AppError> 
         return Ok(());
     }
     let token_hash = jwt::hash_refresh_token(refresh_token);
-    sqlx::query(
-        "UPDATE refresh_tokens SET revoked_at = NOW() WHERE token_hash = $1 AND revoked_at IS NULL",
+    let mut tx = pool.begin().await?;
+    let family_id = sqlx::query_scalar::<_, Uuid>(
+        "SELECT family_id FROM refresh_tokens WHERE token_hash = $1 FOR UPDATE",
     )
     .bind(&token_hash)
-    .execute(pool)
+    .fetch_optional(&mut *tx)
     .await?;
+    if let Some(family_id) = family_id {
+        sqlx::query(
+            "UPDATE refresh_tokens SET revoked_at = NOW()
+             WHERE family_id = $1 AND revoked_at IS NULL",
+        )
+        .bind(family_id)
+        .execute(&mut *tx)
+        .await?;
+    }
+    tx.commit().await?;
     Ok(())
 }
 

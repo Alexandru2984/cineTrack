@@ -2,9 +2,12 @@ import { z } from 'zod';
 
 import { ApiError, rawRequest } from '@/lib/http';
 import {
+  queueLogoutRevocation,
   readCachedSession,
+  readPendingLogoutRevocations,
   readRefreshToken,
   removeCachedSession,
+  removePendingLogoutRevocation,
   removeRefreshToken,
   writeCachedSession,
   writeRefreshToken,
@@ -39,59 +42,191 @@ const cachedSessionSchema = z.object({
   user: userSchema,
 });
 
-let refreshPromise: Promise<string> | null = null;
+class SessionSupersededError extends Error {
+  constructor() {
+    super('Session changed while authentication was in progress');
+    this.name = 'SessionSupersededError';
+  }
+}
+
+interface RefreshInFlight {
+  generation: number;
+  promise: Promise<string>;
+}
+
+let sessionGeneration = 0;
+let refreshInFlight: RefreshInFlight | null = null;
+let credentialTail: Promise<void> = Promise.resolve();
+let revocationTail: Promise<void> = Promise.resolve();
+
+function withCredentialLock<T>(operation: () => Promise<T>): Promise<T> {
+  const result = credentialTail.then(operation, operation);
+  credentialTail = result.then(
+    () => undefined,
+    () => undefined,
+  );
+  return result;
+}
+
+function withRevocationLock<T>(operation: () => Promise<T>): Promise<T> {
+  const result = revocationTail.then(operation, operation);
+  revocationTail = result.then(
+    () => undefined,
+    () => undefined,
+  );
+  return result;
+}
+
+function beginSessionTransition() {
+  sessionGeneration += 1;
+  refreshInFlight = null;
+  return sessionGeneration;
+}
+
+export function currentSessionGeneration() {
+  return sessionGeneration;
+}
 
 function isRejectedRefresh(error: unknown) {
   return error instanceof ApiError && error.status === 401;
 }
 
-export async function clearLocalSession() {
-  await Promise.all([
-    removeRefreshToken().catch(() => undefined),
-    removeCachedSession().catch(() => undefined),
-    detachStoredReleaseNotifications().catch(() => undefined),
-  ]);
-  useAuthStore.getState().clearSession();
+function shouldRetainRevocation(error: unknown) {
+  return (
+    !(error instanceof ApiError) ||
+    error.status === 0 ||
+    error.status === 429 ||
+    error.status >= 500
+  );
 }
 
 async function revokeToken(refreshToken: string) {
   await rawRequest('/auth/mobile/logout', {
     method: 'POST',
     body: { refresh_token: refreshToken },
-  }).catch(() => undefined);
+  });
 }
 
-async function acceptSession(payload: unknown) {
+async function revokeOrQueue(refreshToken: string) {
+  return withRevocationLock(async () => {
+    try {
+      await revokeToken(refreshToken);
+      await removePendingLogoutRevocation(refreshToken);
+    } catch (error) {
+      if (shouldRetainRevocation(error)) {
+        await queueLogoutRevocation(refreshToken);
+      } else {
+        await removePendingLogoutRevocation(refreshToken);
+      }
+    }
+  });
+}
+
+export function flushPendingLogoutRevocations() {
+  return withRevocationLock(async () => {
+    const pending = await readPendingLogoutRevocations();
+    for (const refreshToken of pending) {
+      try {
+        await revokeToken(refreshToken);
+        await removePendingLogoutRevocation(refreshToken);
+      } catch (error) {
+        if (shouldRetainRevocation(error)) break;
+        await removePendingLogoutRevocation(refreshToken);
+      }
+    }
+  });
+}
+
+async function clearStoredSession(generation: number, detachNotifications: boolean) {
+  return withCredentialLock(async () => {
+    if (generation !== sessionGeneration) return;
+    await Promise.all([
+      removeRefreshToken().catch(() => undefined),
+      removeCachedSession().catch(() => undefined),
+      ...(detachNotifications
+        ? [detachStoredReleaseNotifications().catch(() => undefined)]
+        : []),
+    ]);
+    if (generation === sessionGeneration) {
+      useAuthStore.getState().clearSession();
+    }
+  });
+}
+
+async function invalidateAndClear(expectedGeneration: number) {
+  if (expectedGeneration !== sessionGeneration) return;
+  const generation = beginSessionTransition();
+  useAuthStore.getState().clearSession();
+  await clearStoredSession(generation, true);
+}
+
+export async function clearLocalSession() {
+  const generation = beginSessionTransition();
+  useAuthStore.getState().clearSession();
+  await clearStoredSession(generation, true);
+}
+
+async function rejectSupersededSession(refreshToken: string): Promise<never> {
+  await Promise.all([
+    removeRefreshToken().catch(() => undefined),
+    removeCachedSession().catch(() => undefined),
+    revokeOrQueue(refreshToken),
+  ]);
+  throw new SessionSupersededError();
+}
+
+async function acceptSession(payload: unknown, generation: number) {
   const session = mobileAuthSchema.parse(payload) as MobileAuthResponse;
-  try {
-    await writeRefreshToken(session.refresh_token);
-  } catch (error) {
-    await revokeToken(session.refresh_token);
-    useAuthStore.getState().clearSession();
-    throw error;
-  }
-  try {
-    await writeCachedSession(session.refresh_token, session.user);
-  } catch {
-    await removeCachedSession().catch(() => undefined);
-  }
-  useAuthStore.getState().setSession(session.access_token, session.user);
-  return session.access_token;
+  return withCredentialLock(async () => {
+    if (generation !== sessionGeneration) {
+      await revokeOrQueue(session.refresh_token);
+      throw new SessionSupersededError();
+    }
+    try {
+      await writeRefreshToken(session.refresh_token);
+    } catch (error) {
+      await revokeOrQueue(session.refresh_token);
+      if (generation === sessionGeneration) {
+        await Promise.all([
+          removeRefreshToken().catch(() => undefined),
+          removeCachedSession().catch(() => undefined),
+          detachStoredReleaseNotifications().catch(() => undefined),
+        ]);
+        useAuthStore.getState().clearSession();
+      }
+      throw error;
+    }
+    if (generation !== sessionGeneration) {
+      return rejectSupersededSession(session.refresh_token);
+    }
+    try {
+      await writeCachedSession(session.refresh_token, session.user);
+    } catch {
+      await removeCachedSession().catch(() => undefined);
+    }
+    if (generation !== sessionGeneration) {
+      return rejectSupersededSession(session.refresh_token);
+    }
+    useAuthStore.getState().setSession(session.access_token, session.user);
+    return session.access_token;
+  });
 }
 
 export async function hydrateSession() {
+  const generation = beginSessionTransition();
   useAuthStore.getState().beginSessionRestore();
 
   let refreshToken: string | null;
   try {
     refreshToken = await readRefreshToken();
   } catch {
-    useAuthStore.getState().failSessionRestore();
+    if (generation === sessionGeneration) useAuthStore.getState().failSessionRestore();
     return;
   }
 
+  if (generation !== sessionGeneration) return;
   if (!refreshToken) {
-    await clearLocalSession();
+    await clearStoredSession(generation, true);
     return;
   }
 
@@ -104,10 +239,12 @@ export async function hydrateSession() {
       method: 'POST',
       body: { refresh_token: refreshToken },
     });
-    await acceptSession(payload);
+    await acceptSession(payload, generation);
+    void flushPendingLogoutRevocations();
   } catch (error) {
+    if (error instanceof SessionSupersededError || generation !== sessionGeneration) return;
     if (isRejectedRefresh(error)) {
-      await clearLocalSession();
+      await invalidateAndClear(generation);
     } else if (
       cachedSession.success &&
       cachedSession.data.refresh_token === refreshToken
@@ -125,57 +262,67 @@ export async function resumeOfflineSession() {
 }
 
 export function refreshSession(): Promise<string> {
-  if (!refreshPromise) {
-    refreshPromise = (async () => {
-      const refreshToken = await readRefreshToken();
-      if (!refreshToken) {
-        useAuthStore.getState().clearSession();
-        throw new Error('No refresh token');
-      }
-      const payload = await rawRequest('/auth/mobile/refresh', {
-        method: 'POST',
-        body: { refresh_token: refreshToken },
-      });
-      return acceptSession(payload);
-    })()
-      .catch(async (error) => {
-        if (isRejectedRefresh(error)) await clearLocalSession();
-        throw error;
-      })
-      .finally(() => {
-        refreshPromise = null;
-      });
-  }
-  return refreshPromise;
+  const generation = sessionGeneration;
+  if (refreshInFlight?.generation === generation) return refreshInFlight.promise;
+
+  let entry: RefreshInFlight;
+  const promise = (async () => {
+    const refreshToken = await readRefreshToken();
+    if (generation !== sessionGeneration) throw new SessionSupersededError();
+    if (!refreshToken) {
+      await invalidateAndClear(generation);
+      throw new Error('No refresh token');
+    }
+    const payload = await rawRequest('/auth/mobile/refresh', {
+      method: 'POST',
+      body: { refresh_token: refreshToken },
+    });
+    return acceptSession(payload, generation);
+  })()
+    .catch(async (error) => {
+      if (isRejectedRefresh(error)) await invalidateAndClear(generation);
+      throw error;
+    })
+    .finally(() => {
+      if (refreshInFlight === entry) refreshInFlight = null;
+    });
+  entry = { generation, promise };
+  refreshInFlight = entry;
+  return promise;
+}
+
+async function beginAuthentication() {
+  const generation = beginSessionTransition();
+  useAuthStore.getState().clearSession();
+  await clearStoredSession(generation, false);
+  return generation;
 }
 
 export async function loginSession(email: string, password: string, totpCode?: string) {
-  // A 2FA-enabled account needs the second factor: a 6-digit authenticator code
-  // or a recovery code. Omitted on the first attempt; the caller retries with it
-  // after the backend answers with two_factor_required.
+  const generation = await beginAuthentication();
   const code = totpCode?.trim();
   const payload = await rawRequest('/auth/mobile/login', {
     method: 'POST',
     body: { email: email.trim(), password, ...(code ? { totp_code: code } : {}) },
   });
-  await acceptSession(payload);
+  await acceptSession(payload, generation);
 }
 
 export async function registerSession(username: string, email: string, password: string) {
+  const generation = await beginAuthentication();
   const payload = await rawRequest('/auth/mobile/register', {
     method: 'POST',
     body: { username: username.trim(), email: email.trim(), password },
   });
-  await acceptSession(payload);
+  await acceptSession(payload, generation);
 }
 
 export async function logoutSession() {
   const refreshToken = await readRefreshToken().catch(() => null);
-  try {
-    if (refreshToken && useAuthStore.getState().status !== 'offline') {
-      await revokeToken(refreshToken);
-    }
-  } finally {
-    await clearLocalSession();
-  }
+  const generation = beginSessionTransition();
+  useAuthStore.getState().clearSession();
+  await Promise.all([
+    clearStoredSession(generation, true),
+    ...(refreshToken ? [revokeOrQueue(refreshToken)] : []),
+  ]);
 }

@@ -1,5 +1,5 @@
 import { ApiError, rawRequest, type RawRequestOptions } from '@/lib/http';
-import { refreshSession } from '@/lib/session';
+import { currentSessionGeneration, refreshSession } from '@/lib/session';
 import { useAuthStore } from '@/store/auth';
 
 interface ApiRequestOptions extends RawRequestOptions {
@@ -12,6 +12,7 @@ export async function apiRequest<T>(
   options: ApiRequestOptions = {},
 ): Promise<T> {
   const authenticated = options.authenticated ?? true;
+  const generation = currentSessionGeneration();
   const auth = useAuthStore.getState();
   if (authenticated && auth.status === 'offline') {
     throw new ApiError('Connect to the internet to make changes', 0);
@@ -22,10 +23,15 @@ export async function apiRequest<T>(
     : options.headers;
 
   try {
-    return await rawRequest<T>(path, { ...options, headers });
+    const response = await rawRequest<T>(path, { ...options, headers });
+    if (authenticated && generation !== currentSessionGeneration()) {
+      throw new ApiError('Session changed while the request was in progress', 401);
+    }
+    return response;
   } catch (error) {
     const mayRefresh =
       authenticated &&
+      generation === currentSessionGeneration() &&
       options.retryAfterRefresh !== false &&
       error instanceof ApiError &&
       error.status === 401 &&
@@ -33,9 +39,16 @@ export async function apiRequest<T>(
     if (!mayRefresh) throw error;
 
     const accessToken = await refreshSession();
-    return rawRequest<T>(path, {
+    if (generation !== currentSessionGeneration()) {
+      throw new ApiError('Session changed while the request was in progress', 401);
+    }
+    const response = await rawRequest<T>(path, {
       ...options,
       headers: { ...options.headers, Authorization: `Bearer ${accessToken}` },
     });
+    if (generation !== currentSessionGeneration()) {
+      throw new ApiError('Session changed while the request was in progress', 401);
+    }
+    return response;
   }
 }
