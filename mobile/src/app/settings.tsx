@@ -40,9 +40,12 @@ import { radius, spacing } from '@/constants/theme';
 import {
   useAccountSessions,
   useChangeAccountPassword,
+  useDisableTwoFactor,
+  useEnableTwoFactor,
   useLogoutAllAccountSessions,
   useResendEmailVerification,
   useRevokeAccountSession,
+  useSetupTwoFactor,
   useUpdateAccountProfile,
 } from '@/hooks/use-account';
 import {
@@ -59,6 +62,7 @@ import {
 } from '@/lib/account';
 import { formatDateTime } from '@/lib/format';
 import { getErrorMessage } from '@/lib/http';
+import { validateSecondFactorInput } from '@/lib/two-factor';
 import { useAuthStore } from '@/store/auth';
 import type { AccountSession } from '@/types';
 
@@ -91,6 +95,9 @@ export default function SettingsScreen() {
   const logoutAllSessions = useLogoutAllAccountSessions();
   const changePassword = useChangeAccountPassword();
   const resendVerification = useResendEmailVerification();
+  const setupTwoFactor = useSetupTwoFactor();
+  const enableTwoFactor = useEnableTwoFactor();
+  const disableTwoFactor = useDisableTwoFactor();
   const releaseAlerts = useReleaseNotifications(
     user?.id ?? '',
     status === 'authenticated',
@@ -107,6 +114,13 @@ export default function SettingsScreen() {
   const [passwordConfirmation, setPasswordConfirmation] = useState('');
   const [showPasswords, setShowPasswords] = useState(false);
   const [passwordError, setPasswordError] = useState<string | null>(null);
+
+  const [twoFactorSetupPassword, setTwoFactorSetupPassword] = useState('');
+  const [twoFactorDisablePassword, setTwoFactorDisablePassword] = useState('');
+  const [twoFactorPasswordVisible, setTwoFactorPasswordVisible] = useState(false);
+  const [twoFactorCode, setTwoFactorCode] = useState('');
+  const [twoFactorError, setTwoFactorError] = useState<string | null>(null);
+  const [recoveryCodes, setRecoveryCodes] = useState<string[] | null>(null);
 
   const [sessionsError, setSessionsError] = useState<string | null>(null);
   const [confirmingDeletion, setConfirmingDeletion] = useState(false);
@@ -232,6 +246,74 @@ export default function SettingsScreen() {
     setDeletionPassword('');
     setShowDeletionPassword(false);
     setDeletionError(null);
+  };
+
+  const startTwoFactorSetup = async () => {
+    setTwoFactorError(null);
+    setRecoveryCodes(null);
+    if (user.email_verified === false) {
+      setTwoFactorError('Confirm your email before enabling two-factor authentication');
+      return;
+    }
+    if (!twoFactorSetupPassword || twoFactorSetupPassword.length > 128) {
+      setTwoFactorError('Enter your current password');
+      return;
+    }
+    try {
+      await setupTwoFactor.mutateAsync(twoFactorSetupPassword);
+      setTwoFactorSetupPassword('');
+      setTwoFactorCode('');
+    } catch (error) {
+      setTwoFactorError(getErrorMessage(error, 'Could not start two-factor setup'));
+    }
+  };
+
+  const confirmTwoFactorSetup = async () => {
+    const validationError = validateSecondFactorInput('authenticator', twoFactorCode);
+    if (validationError) {
+      setTwoFactorError(validationError);
+      return;
+    }
+    setTwoFactorError(null);
+    try {
+      const result = await enableTwoFactor.mutateAsync(twoFactorCode);
+      setRecoveryCodes(result.recovery_codes);
+      setTwoFactorCode('');
+      setupTwoFactor.reset();
+    } catch (error) {
+      setTwoFactorError(getErrorMessage(error, 'Could not enable two-factor authentication'));
+    }
+  };
+
+  const cancelTwoFactorSetup = () => {
+    setupTwoFactor.reset();
+    enableTwoFactor.reset();
+    setTwoFactorCode('');
+    setTwoFactorError(null);
+  };
+
+  const openAuthenticator = async () => {
+    if (!setupTwoFactor.data) return;
+    try {
+      await Linking.openURL(setupTwoFactor.data.otpauth_uri);
+    } catch {
+      setTwoFactorError('No authenticator app could open the setup link. Enter the key manually.');
+    }
+  };
+
+  const confirmDisableTwoFactor = async () => {
+    setTwoFactorError(null);
+    if (!twoFactorDisablePassword || twoFactorDisablePassword.length > 128) {
+      setTwoFactorError('Enter your current password');
+      return;
+    }
+    try {
+      await disableTwoFactor.mutateAsync(twoFactorDisablePassword);
+      setTwoFactorDisablePassword('');
+      setRecoveryCodes(null);
+    } catch (error) {
+      setTwoFactorError(getErrorMessage(error, 'Could not disable two-factor authentication'));
+    }
   };
 
   return (
@@ -468,6 +550,168 @@ export default function SettingsScreen() {
               />
             </View>
           ) : null}
+
+          <View style={[styles.section, { borderBottomColor: theme.border }]}>
+            <View style={styles.sectionHeading}>
+              <ShieldCheck color={theme.primary} size={20} />
+              <View style={styles.headingCopy}>
+                <AppText variant="section">Two-factor authentication</AppText>
+                <AppText variant="caption" muted>
+                  Require a code from an authenticator app when you sign in.
+                </AppText>
+              </View>
+            </View>
+
+            {recoveryCodes ? (
+              <View style={styles.confirmation}>
+                <View style={[styles.notice, { borderColor: theme.warning }]}>
+                  <AlertTriangle color={theme.warning} size={18} />
+                  <AppText variant="caption" style={styles.noticeCopy}>
+                    Save these one-time recovery codes now. They will not be shown again.
+                  </AppText>
+                </View>
+                <View
+                  accessibilityLabel="Two-factor recovery codes"
+                  style={[
+                    styles.recoveryCodeList,
+                    { borderColor: theme.border, backgroundColor: theme.elevated },
+                  ]}
+                >
+                  {recoveryCodes.map((code) => (
+                    <AppText key={code} selectable style={styles.monospace}>
+                      {code}
+                    </AppText>
+                  ))}
+                </View>
+                <AppButton
+                  label="I've saved my codes"
+                  icon={<ShieldCheck color="#FFFFFF" size={18} />}
+                  onPress={() => setRecoveryCodes(null)}
+                />
+              </View>
+            ) : user.two_factor_enabled ? (
+              <View style={styles.confirmation}>
+                <FormMessage message="Two-factor authentication is on." success />
+                <PasswordField
+                  label="Password to turn it off"
+                  value={twoFactorDisablePassword}
+                  visible={twoFactorPasswordVisible}
+                  autoComplete="current-password"
+                  onChange={(value) => {
+                    setTwoFactorDisablePassword(value);
+                    setTwoFactorError(null);
+                  }}
+                  onToggleVisibility={() =>
+                    setTwoFactorPasswordVisible((visible) => !visible)
+                  }
+                  onSubmit={() => void confirmDisableTwoFactor()}
+                />
+                {twoFactorError ? <FormMessage message={twoFactorError} /> : null}
+                <AppButton
+                  label="Disable two-factor"
+                  variant="danger"
+                  loading={disableTwoFactor.isPending}
+                  onPress={() => void confirmDisableTwoFactor()}
+                />
+              </View>
+            ) : setupTwoFactor.data ? (
+              <View style={styles.confirmation}>
+                <AppButton
+                  label="Open authenticator app"
+                  icon={<ExternalLink color={theme.text} size={18} />}
+                  variant="secondary"
+                  onPress={() => void openAuthenticator()}
+                />
+                <View style={styles.field}>
+                  <AppText variant="label">Manual setup key</AppText>
+                  <View
+                    style={[
+                      styles.secretBox,
+                      { borderColor: theme.border, backgroundColor: theme.elevated },
+                    ]}
+                  >
+                    <AppText selectable style={styles.monospace}>
+                      {setupTwoFactor.data.secret}
+                    </AppText>
+                  </View>
+                </View>
+                <View style={styles.field}>
+                  <AppText variant="label">6-digit confirmation code</AppText>
+                  <TextInput
+                    value={twoFactorCode}
+                    onChangeText={(value) => {
+                      setTwoFactorCode(value);
+                      setTwoFactorError(null);
+                    }}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    autoComplete="one-time-code"
+                    textContentType="oneTimeCode"
+                    keyboardType="number-pad"
+                    maxLength={6}
+                    placeholder="123456"
+                    placeholderTextColor={theme.mutedText}
+                    onSubmitEditing={() => void confirmTwoFactorSetup()}
+                    style={[
+                      styles.textInput,
+                      {
+                        color: theme.text,
+                        borderColor: theme.border,
+                        backgroundColor: theme.elevated,
+                      },
+                    ]}
+                  />
+                </View>
+                {twoFactorError ? <FormMessage message={twoFactorError} /> : null}
+                <View style={styles.actions}>
+                  <View style={styles.action}>
+                    <AppButton
+                      label="Confirm and enable"
+                      loading={enableTwoFactor.isPending}
+                      onPress={() => void confirmTwoFactorSetup()}
+                    />
+                  </View>
+                  <View style={styles.action}>
+                    <AppButton
+                      label="Cancel"
+                      variant="secondary"
+                      disabled={enableTwoFactor.isPending}
+                      onPress={cancelTwoFactorSetup}
+                    />
+                  </View>
+                </View>
+              </View>
+            ) : (
+              <View style={styles.confirmation}>
+                <PasswordField
+                  label="Password to start setup"
+                  value={twoFactorSetupPassword}
+                  visible={twoFactorPasswordVisible}
+                  autoComplete="current-password"
+                  onChange={(value) => {
+                    setTwoFactorSetupPassword(value);
+                    setTwoFactorError(null);
+                  }}
+                  onToggleVisibility={() =>
+                    setTwoFactorPasswordVisible((visible) => !visible)
+                  }
+                  onSubmit={() => void startTwoFactorSetup()}
+                />
+                {user.email_verified === false ? (
+                  <FormMessage message="Confirm your email before enabling two-factor authentication" />
+                ) : twoFactorError ? (
+                  <FormMessage message={twoFactorError} />
+                ) : null}
+                <AppButton
+                  label="Set up two-factor"
+                  icon={<ShieldCheck color="#FFFFFF" size={18} />}
+                  loading={setupTwoFactor.isPending}
+                  disabled={user.email_verified === false}
+                  onPress={() => void startTwoFactorSetup()}
+                />
+              </View>
+            )}
+          </View>
 
           <View style={[styles.section, { borderBottomColor: theme.border }]}>
             <View style={styles.sectionHeading}>
@@ -896,6 +1140,35 @@ const styles = StyleSheet.create({
   message: {
     borderRadius: radius.md,
     padding: spacing.md,
+  },
+  notice: {
+    minWidth: 0,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.sm,
+    borderWidth: 1,
+    borderRadius: radius.md,
+    padding: spacing.md,
+  },
+  noticeCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  secretBox: {
+    borderWidth: 1,
+    borderRadius: radius.md,
+    padding: spacing.md,
+  },
+  recoveryCodeList: {
+    gap: spacing.sm,
+    borderWidth: 1,
+    borderRadius: radius.md,
+    padding: spacing.md,
+  },
+  monospace: {
+    fontFamily: Platform.select({ ios: 'Menlo', android: 'monospace', default: 'monospace' }),
+    fontSize: 14,
+    lineHeight: 20,
   },
   sessionList: {
     borderTopWidth: StyleSheet.hairlineWidth,

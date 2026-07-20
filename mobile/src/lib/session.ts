@@ -26,6 +26,7 @@ const userSchema = z.object({
   // Optional so sessions cached before this field shipped still parse instead
   // of failing validation and signing the user out on upgrade.
   email_verified: z.boolean().optional(),
+  two_factor_enabled: z.boolean().optional(),
   created_at: z.string(),
 });
 

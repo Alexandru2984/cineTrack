@@ -2,10 +2,13 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import {
   changeAccountPassword,
+  disableTwoFactor,
+  enableTwoFactor,
   listAccountSessions,
   logoutAllAccountSessions,
   resendEmailVerification,
   revokeAccountSession,
+  setupTwoFactor,
   updateAccountProfile,
   type ProfileDraft,
 } from '@/lib/account';
@@ -58,4 +61,30 @@ export function useLogoutAllAccountSessions() {
 
 export function useResendEmailVerification() {
   return useMutation({ mutationFn: resendEmailVerification });
+}
+
+export function useSetupTwoFactor() {
+  return useMutation({ mutationFn: setupTwoFactor });
+}
+
+export function useEnableTwoFactor() {
+  const user = useAuthStore((state) => state.user);
+  const setUser = useAuthStore((state) => state.setUser);
+  return useMutation({
+    mutationFn: enableTwoFactor,
+    onSuccess: () => {
+      if (user) setUser({ ...user, two_factor_enabled: true });
+    },
+  });
+}
+
+export function useDisableTwoFactor() {
+  const user = useAuthStore((state) => state.user);
+  const setUser = useAuthStore((state) => state.setUser);
+  return useMutation({
+    mutationFn: disableTwoFactor,
+    onSuccess: () => {
+      if (user) setUser({ ...user, two_factor_enabled: false });
+    },
+  });
 }

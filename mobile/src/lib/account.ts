@@ -12,6 +12,15 @@ export interface ProfileDraft {
   isPublic: boolean;
 }
 
+export interface TwoFactorSetup {
+  secret: string;
+  otpauth_uri: string;
+}
+
+export interface TwoFactorEnabled {
+  recovery_codes: string[];
+}
+
 export function validateProfileDraft(username: string, bio: string) {
   const normalizedUsername = username.trim();
   if (normalizedUsername.length < 3 || normalizedUsername.length > 50) {
@@ -107,6 +116,27 @@ export async function logoutAllAccountSessions() {
  */
 export async function resendEmailVerification() {
   await apiRequest<{ message: string }>('/auth/email/resend', { method: 'POST' });
+}
+
+export async function setupTwoFactor(password: string) {
+  return apiRequest<TwoFactorSetup>('/auth/2fa/setup', {
+    method: 'POST',
+    body: { password },
+  });
+}
+
+export async function enableTwoFactor(code: string) {
+  return apiRequest<TwoFactorEnabled>('/auth/2fa/enable', {
+    method: 'POST',
+    body: { code: code.trim() },
+  });
+}
+
+export async function disableTwoFactor(password: string) {
+  await apiRequest<{ message?: string }>('/auth/2fa/disable', {
+    method: 'POST',
+    body: { password },
+  });
 }
 
 export async function deleteAccountSession(password: string) {

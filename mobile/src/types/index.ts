@@ -15,6 +15,8 @@ export interface User {
   is_public: boolean;
   /** Absent on sessions cached before this field existed; treat only `false` as unverified. */
   email_verified?: boolean;
+  /** Absent on older cached sessions; the backend remains the source of truth after refresh. */
+  two_factor_enabled?: boolean;
   created_at: string;
 }
 

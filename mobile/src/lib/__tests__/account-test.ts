@@ -1,5 +1,10 @@
 import { apiRequest } from '@/lib/api';
-import { deleteAccountSession } from '@/lib/account';
+import {
+  deleteAccountSession,
+  disableTwoFactor,
+  enableTwoFactor,
+  setupTwoFactor,
+} from '@/lib/account';
 import { clearLocalSession } from '@/lib/session';
 
 jest.mock('@/lib/api', () => ({
@@ -42,5 +47,47 @@ describe('account deletion', () => {
     );
 
     expect(mockClearLocalSession).not.toHaveBeenCalled();
+  });
+});
+
+describe('two-factor account management', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it('starts setup with only the current password', async () => {
+    mockApiRequest.mockResolvedValueOnce({
+      secret: 'BASE32SECRET',
+      otpauth_uri: 'otpauth://totp/Vazute:user@example.com',
+    });
+
+    await setupTwoFactor('SecurePass1');
+
+    expect(mockApiRequest).toHaveBeenCalledWith('/auth/2fa/setup', {
+      method: 'POST',
+      body: { password: 'SecurePass1' },
+    });
+  });
+
+  it('trims the six-digit code sent to enable two-factor', async () => {
+    mockApiRequest.mockResolvedValueOnce({ recovery_codes: ['aaaa-bbbb-cccc-dddd'] });
+
+    await enableTwoFactor(' 123456 ');
+
+    expect(mockApiRequest).toHaveBeenCalledWith('/auth/2fa/enable', {
+      method: 'POST',
+      body: { code: '123456' },
+    });
+  });
+
+  it('requires a password payload to disable two-factor', async () => {
+    mockApiRequest.mockResolvedValueOnce({ message: 'Two-factor disabled' });
+
+    await disableTwoFactor('SecurePass1');
+
+    expect(mockApiRequest).toHaveBeenCalledWith('/auth/2fa/disable', {
+      method: 'POST',
+      body: { password: 'SecurePass1' },
+    });
   });
 });

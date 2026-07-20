@@ -14,10 +14,21 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { AppButton } from '@/components/app-button';
 import { AppText } from '@/components/app-text';
+import { SegmentedControl } from '@/components/segmented-control';
 import { radius, spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { getErrorMessage, isTwoFactorRequired } from '@/lib/http';
 import { loginSession, registerSession } from '@/lib/session';
+import {
+  normalizeSecondFactorInput,
+  validateSecondFactorInput,
+  type SecondFactorMode,
+} from '@/lib/two-factor';
+
+const SECOND_FACTOR_OPTIONS = [
+  { value: 'authenticator', label: 'Authenticator' },
+  { value: 'recovery', label: 'Recovery code' },
+] as const;
 
 export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
   const theme = useTheme();
@@ -28,7 +39,8 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [mfaRequired, setMfaRequired] = useState(false);
-  const [totpCode, setTotpCode] = useState('');
+  const [secondFactorMode, setSecondFactorMode] = useState<SecondFactorMode>('authenticator');
+  const [secondFactorCode, setSecondFactorCode] = useState('');
   const isRegister = mode === 'register';
 
   const submit = async () => {
@@ -51,9 +63,12 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
       return;
     }
 
-    if (!isRegister && mfaRequired && !totpCode.trim()) {
-      setError('Enter the code from your authenticator app');
-      return;
+    if (!isRegister && mfaRequired) {
+      const validationError = validateSecondFactorInput(secondFactorMode, secondFactorCode);
+      if (validationError) {
+        setError(validationError);
+        return;
+      }
     }
 
     setPending(true);
@@ -61,7 +76,11 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
       if (isRegister) {
         await registerSession(username, normalizedEmail, password);
       } else {
-        await loginSession(normalizedEmail, password, mfaRequired ? totpCode : undefined);
+        await loginSession(
+          normalizedEmail,
+          password,
+          mfaRequired ? normalizeSecondFactorInput(secondFactorCode) : undefined,
+        );
       }
       router.replace('/(tabs)');
     } catch (submitError) {
@@ -199,17 +218,37 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
 
             {!isRegister && mfaRequired ? (
               <View style={styles.field}>
-                <AppText variant="label">Authentication code</AppText>
+                <SegmentedControl
+                  value={secondFactorMode}
+                  options={SECOND_FACTOR_OPTIONS}
+                  disabled={pending}
+                  onChange={(value) => {
+                    setSecondFactorMode(value);
+                    setSecondFactorCode('');
+                    setError(null);
+                  }}
+                />
+                <AppText variant="label">
+                  {secondFactorMode === 'authenticator'
+                    ? 'Authentication code'
+                    : 'Recovery code'}
+                </AppText>
                 <TextInput
-                  value={totpCode}
-                  onChangeText={setTotpCode}
+                  value={secondFactorCode}
+                  onChangeText={(value) => {
+                    setSecondFactorCode(value);
+                    setError(null);
+                  }}
                   autoCapitalize="none"
                   autoCorrect={false}
-                  keyboardType="number-pad"
-                  textContentType="oneTimeCode"
-                  autoComplete="one-time-code"
+                  keyboardType={secondFactorMode === 'authenticator' ? 'number-pad' : 'ascii-capable'}
+                  textContentType={secondFactorMode === 'authenticator' ? 'oneTimeCode' : 'none'}
+                  autoComplete={secondFactorMode === 'authenticator' ? 'one-time-code' : 'off'}
+                  maxLength={secondFactorMode === 'authenticator' ? 6 : 19}
                   autoFocus
-                  placeholder="123456"
+                  placeholder={
+                    secondFactorMode === 'authenticator' ? '123456' : 'xxxx-xxxx-xxxx-xxxx'
+                  }
                   placeholderTextColor={theme.mutedText}
                   onSubmitEditing={() => void submit()}
                   style={[
@@ -222,7 +261,9 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
                   ]}
                 />
                 <AppText variant="caption" muted>
-                  Enter the 6-digit code from your authenticator app, or a recovery code.
+                  {secondFactorMode === 'authenticator'
+                    ? 'Use the current 6-digit code from your authenticator app.'
+                    : 'Each recovery code can be used once.'}
                 </AppText>
               </View>
             ) : null}
