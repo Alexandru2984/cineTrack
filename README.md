@@ -311,7 +311,8 @@ văzute/
 │   └── eas.json            # Development, preview, production profiles
 ├── scripts/
 │   ├── run_tests.sh        # All-in-one test runner
-│   ├── backup_to_r2.sh     # pg_dump -> gzip -> Cloudflare R2 (with retention)
+│   ├── backup_to_r2.sh     # consistent pg_dump -> age -> R2 (with retention)
+│   ├── restore_from_r2.sh  # download, hash/decrypt, verify or restore a dump
 │   ├── sync_tmdb_catalog.py # Daily TMDB ID/title inventory -> PostgreSQL + R2
 │   ├── hydrate_tmdb_catalog.sh # Bounded popular-title detail hydration
 │   └── sync_release_schedules.sh # Tracked-title episodes/releases -> PostgreSQL
@@ -361,10 +362,37 @@ R2 is used for:
 - **Avatars** — `avatars/{user_id}.{ext}`, served via the asset proxy (or a public domain if `R2_PUBLIC_BASE_URL` is set).
 - **Poster cache** — an opt-in write-through cache (`VITE_USE_R2_IMAGES=true`) that mirrors TMDB images under `posters/` and serves them from `GET /api/img/{size}/{path}`.
 - **Catalog exports** — compressed daily TMDB ID exports are archived under `catalog/exports/`; PostgreSQL keeps the compact, indexed current ID/title inventory while R2 holds the raw recovery copies.
-- **Database backups** — `scripts/backup_to_r2.sh` runs `pg_dump | gzip` and uploads a timestamped snapshot to `backups/`, pruning anything older than the retention window (default 14 days). Schedule it with cron:
+- **Database backups** — `scripts/backup_to_r2.sh` creates a consistent PostgreSQL custom archive, validates it with `pg_restore`, optionally encrypts it with `age`, verifies the uploaded R2 size and SHA-256, and prunes objects older than the retention window (default 14 days). Schedule it with cron:
   ```cron
   30 3 * * * /path/to/cineTrack/scripts/backup_to_r2.sh >> /var/log/vazute-backup.log 2>&1
   ```
+
+  Generate the recovery identity on a trusted offline machine, keep that file
+  outside the VPS, and place only its public `age1...` recipient in
+  `BACKUP_AGE_RECIPIENT`. Use a separate backup bucket and least-privilege R2
+  object token through `BACKUP_R2_*`. After both transitions have been tested, set
+  `REQUIRE_ENCRYPTED_BACKUPS=true` and
+  `REQUIRE_DEDICATED_BACKUP_CREDENTIALS=true` so cron fails closed if either
+  hardening control disappears.
+
+  Verify the latest archive without changing a database:
+
+  ```bash
+  BACKUP_AGE_IDENTITY_FILE=/secure/offline-recovery-key.txt \
+    scripts/restore_from_r2.sh verify latest
+  ```
+
+  A restore drill requires an explicit, non-production target. Existing targets
+  and the configured production database have separate confirmation guards:
+
+  ```bash
+  BACKUP_AGE_IDENTITY_FILE=/secure/offline-recovery-key.txt \
+    scripts/restore_from_r2.sh restore cinetrack_restore_drill latest
+  ```
+
+  The backup script emits node-exporter textfile metrics for failures, staleness,
+  encryption, size, and credential isolation. Prometheus scrape and alerting
+  snippets live under `ops/prometheus/`; they are not installed automatically.
 
 Apply the cache lifecycle rules once, then schedule the catalog sync after TMDB's daily exports are available. A second bounded job hydrates details for popular entries without scraping the entire catalog. The focused release job refreshes only distinct titles tracked by users and can run more often:
 

@@ -1,0 +1,79 @@
+groups:
+  - name: cinetrack-backups
+    rules:
+      - alert: CineTrackBackupMetricsMissing
+        expr: absent(cinetrack_backup_last_run_timestamp_seconds)
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: CineTrack backup metrics are missing
+          description: Install the backup textfile metric in the node exporter collector directory.
+
+      - alert: CineTrackBackupFailed
+        expr: cinetrack_backup_last_run_success == 0
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: CineTrack database backup failed
+          description: The most recent CineTrack backup run did not complete successfully.
+
+      - alert: CineTrackBackupStale
+        expr: time() - cinetrack_backup_last_success_timestamp_seconds > 93600
+        for: 15m
+        labels:
+          severity: critical
+        annotations:
+          summary: CineTrack database backup is stale
+          description: No successful CineTrack database backup has completed in the last 26 hours.
+
+      - alert: CineTrackBackupUnencrypted
+        expr: cinetrack_backup_encrypted == 0
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: CineTrack backup is not encrypted client-side
+          description: Configure BACKUP_AGE_RECIPIENT and require encrypted backups.
+
+      - alert: CineTrackBackupUsesSharedCredentials
+        expr: cinetrack_backup_dedicated_credentials == 0
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: CineTrack backup uses application R2 credentials
+          description: Configure a least-privilege BACKUP_R2 credential set.
+
+  - name: cinetrack-backend
+    rules:
+      - alert: CineTrackBackendDown
+        expr: up{job="cinetrack-backend"} == 0 or absent(up{job="cinetrack-backend"})
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: CineTrack backend metrics endpoint is down
+          description: Prometheus cannot scrape the loopback-only CineTrack backend.
+
+      - alert: CineTrackHighServerErrorRate
+        expr: |
+          sum(rate(cinetrack_http_requests_total{status=~"5.."}[10m]))
+            /
+          clamp_min(sum(rate(cinetrack_http_requests_total[10m])), 0.001) > 0.05
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: CineTrack backend has a high 5xx rate
+          description: More than 5 percent of requests returned 5xx during the last 15 minutes.
+
+      - alert: CineTrackTransactionalEmailErrors
+        expr: increase(cinetrack_email_send_total{outcome=~"smtp_error|invalid_message|not_configured"}[15m]) > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: CineTrack transactional email failed
+          description: At least one transactional email failed in the last 15 minutes.
