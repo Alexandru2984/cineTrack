@@ -119,6 +119,31 @@ pub struct EpisodeResponse {
     pub still_path: Option<String>,
 }
 
+#[derive(Debug, Serialize, sqlx::FromRow)]
+pub struct EpisodeDetailResponse {
+    pub episode_id: uuid::Uuid,
+    pub media_id: uuid::Uuid,
+    pub tmdb_id: i32,
+    pub title: String,
+    pub poster_path: Option<String>,
+    pub backdrop_path: Option<String>,
+    pub season_id: uuid::Uuid,
+    pub season_number: i32,
+    pub season_name: Option<String>,
+    pub episode_number: i32,
+    pub episode_name: Option<String>,
+    pub overview: Option<String>,
+    pub runtime_minutes: Option<i32>,
+    pub air_date: Option<chrono::NaiveDate>,
+    pub still_path: Option<String>,
+    pub tracking_status: Option<String>,
+    pub is_available: bool,
+    pub is_watched: bool,
+    pub is_planned: bool,
+    pub watch_count: i64,
+    pub last_watched_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
 // TMDB API response types
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct TmdbSearchResponse {

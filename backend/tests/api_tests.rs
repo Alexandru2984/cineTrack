@@ -4857,6 +4857,127 @@ async fn test_bulk_episode_watch_is_idempotent_bounded_and_updates_progress() {
 
 #[actix_web::test]
 #[ignore = "requires test DB"]
+async fn test_episode_detail_is_authenticated_and_user_scoped() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (token, _, user_id) = register_user(
+        &app,
+        "episodedetail",
+        "episodedetail@example.com",
+        "Pass1234",
+    )
+    .await;
+    let user_id = Uuid::parse_str(&user_id).unwrap();
+    let (other_token, _, _) =
+        register_user(&app, "episodeother", "episodeother@example.com", "Pass1234").await;
+
+    let media_id = sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO media
+            (tmdb_id, media_type, title, poster_path, backdrop_path)
+        VALUES (991301, 'tv', 'Episode Detail Show', '/poster.jpg', '/backdrop.jpg')
+        RETURNING id"#,
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let season_id = sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO seasons (media_id, season_number, name, episode_count)
+        VALUES ($1, 2, 'Second Season', 1)
+        RETURNING id"#,
+    )
+    .bind(media_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let episode_id = sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO episodes
+            (season_id, episode_number, name, overview, runtime_minutes, air_date, still_path)
+        VALUES ($1, 3, 'The Detail', 'A complete synopsis', 52, CURRENT_DATE, '/still.jpg')
+        RETURNING id"#,
+    )
+    .bind(season_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO user_media (user_id, media_id, status) VALUES ($1, $2, 'watching')")
+        .bind(user_id)
+        .bind(media_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO episode_plans (user_id, episode_id) VALUES ($1, $2)")
+        .bind(user_id)
+        .bind(episode_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let uri = format!("/api/media/episodes/{episode_id}");
+    let req = actix_test::TestRequest::get()
+        .uri(&uri)
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 401);
+
+    let req = actix_test::TestRequest::get()
+        .uri(&uri)
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let body: Value = actix_test::read_body_json(resp).await;
+    assert_eq!(body["episode_id"], episode_id.to_string());
+    assert_eq!(body["tmdb_id"], 991301);
+    assert_eq!(body["season_number"], 2);
+    assert_eq!(body["episode_number"], 3);
+    assert_eq!(body["tracking_status"], "watching");
+    assert_eq!(body["is_available"], true);
+    assert_eq!(body["is_planned"], true);
+    assert_eq!(body["is_watched"], false);
+    assert_eq!(body["watch_count"], 0);
+    assert!(body["last_watched_at"].is_null());
+
+    let req = actix_test::TestRequest::get()
+        .uri(&uri)
+        .insert_header(("Authorization", format!("Bearer {other_token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let other_body: Value = actix_test::call_and_read_body_json(&app, req).await;
+    assert!(other_body["tracking_status"].is_null());
+    assert_eq!(other_body["is_planned"], false);
+    assert_eq!(other_body["is_watched"], false);
+
+    sqlx::query("INSERT INTO watch_history (user_id, media_id, episode_id) VALUES ($1, $2, $3)")
+        .bind(user_id)
+        .bind(media_id)
+        .bind(episode_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let req = actix_test::TestRequest::get()
+        .uri(&uri)
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let watched_body: Value = actix_test::call_and_read_body_json(&app, req).await;
+    assert_eq!(watched_body["is_planned"], false);
+    assert_eq!(watched_body["is_watched"], true);
+    assert_eq!(watched_body["watch_count"], 1);
+    assert!(watched_body["last_watched_at"].is_string());
+
+    let missing_uri = format!("/api/media/episodes/{}", Uuid::new_v4());
+    let req = actix_test::TestRequest::get()
+        .uri(&missing_uri)
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 404);
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
 async fn test_media_rejects_invalid_upstream_parameters() {
     let pool = setup_pool().await;
     clean_db(&pool).await;

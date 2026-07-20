@@ -16,6 +16,7 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
         web::scope("/media")
             .route("/search", web::get().to(search))
             .route("/discovery", web::get().to(discovery))
+            .route("/episodes/{episode_id}", web::get().to(get_episode_detail))
             .route("/{id}", web::get().to(get_detail))
             .route("/{id}/watch-providers", web::get().to(get_watch_providers))
             .route("/{id}/seasons", web::get().to(get_seasons))
@@ -24,6 +25,59 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
                 web::get().to(get_episodes),
             ),
     );
+}
+
+async fn get_episode_detail(
+    pool: web::Data<PgPool>,
+    req: HttpRequest,
+    path: web::Path<Uuid>,
+) -> Result<HttpResponse, AppError> {
+    let user_id = require_auth(&req).await?;
+    let episode_id = path.into_inner();
+    let detail = sqlx::query_as::<_, EpisodeDetailResponse>(
+        r#"SELECT
+            episodes.id AS episode_id,
+            media.id AS media_id,
+            media.tmdb_id,
+            media.title,
+            media.poster_path,
+            media.backdrop_path,
+            seasons.id AS season_id,
+            seasons.season_number,
+            seasons.name AS season_name,
+            episodes.episode_number,
+            episodes.name AS episode_name,
+            episodes.overview,
+            episodes.runtime_minutes,
+            episodes.air_date,
+            episodes.still_path,
+            tracked.status AS tracking_status,
+            episodes.air_date IS NULL OR episodes.air_date <= CURRENT_DATE AS is_available,
+            COALESCE(history.watch_count, 0) > 0 AS is_watched,
+            plans.episode_id IS NOT NULL AS is_planned,
+            COALESCE(history.watch_count, 0) AS watch_count,
+            history.last_watched_at
+        FROM episodes
+        JOIN seasons ON seasons.id = episodes.season_id
+        JOIN media ON media.id = seasons.media_id AND media.media_type = 'tv'
+        LEFT JOIN user_media tracked
+          ON tracked.media_id = media.id AND tracked.user_id = $2
+        LEFT JOIN episode_plans plans
+          ON plans.episode_id = episodes.id AND plans.user_id = $2
+        LEFT JOIN LATERAL (
+            SELECT COUNT(*) AS watch_count, MAX(watched_at) AS last_watched_at
+            FROM watch_history
+            WHERE user_id = $2 AND episode_id = episodes.id
+        ) history ON TRUE
+        WHERE episodes.id = $1"#,
+    )
+    .bind(episode_id)
+    .bind(user_id)
+    .fetch_optional(pool.get_ref())
+    .await?
+    .ok_or_else(|| AppError::NotFound("Episode not found".to_string()))?;
+
+    Ok(HttpResponse::Ok().json(detail))
 }
 
 async fn discovery(
