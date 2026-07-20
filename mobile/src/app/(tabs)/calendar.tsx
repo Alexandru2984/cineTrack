@@ -239,10 +239,12 @@ function UpcomingRow({
       <Pressable
         style={({ pressed }) => [styles.upcomingDetails, { opacity: pressed ? 0.72 : 1 }]}
         onPress={() =>
-          router.push({
-            pathname: '/media/[id]',
-            params: { id: String(item.tmdb_id), type: isEpisode ? 'tv' : 'movie' },
-          })
+          isEpisode
+            ? router.push({ pathname: '/episodes/[id]', params: { id: item.item_id } })
+            : router.push({
+                pathname: '/media/[id]',
+                params: { id: String(item.tmdb_id), type: 'movie' },
+              })
         }
       >
         <Poster path={item.poster_path} width={50} height={75} />

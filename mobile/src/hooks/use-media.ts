@@ -5,6 +5,7 @@ import { withQuery } from '@/lib/http';
 import type {
   DiscoveryResponse,
   Episode,
+  EpisodeDetail,
   Media,
   MediaType,
   Season,
@@ -74,5 +75,13 @@ export function useEpisodes(id: string, seasonNumber: number | null) {
     queryFn: () =>
       apiRequest<Episode[]>(`/media/${id}/seasons/${seasonNumber}/episodes`),
     enabled: Boolean(id) && seasonNumber !== null && seasonNumber >= 0,
+  });
+}
+
+export function useEpisodeDetail(id: string) {
+  return useQuery({
+    queryKey: ['episode', id],
+    queryFn: () => apiRequest<EpisodeDetail>(`/media/episodes/${id}`),
+    enabled: Boolean(id),
   });
 }

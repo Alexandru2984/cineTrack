@@ -108,6 +108,7 @@ export default function RootLayout() {
               <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
               <Stack.Screen name="reset-password" options={{ headerShown: false }} />
               <Stack.Screen name="media/[id]" options={{ title: 'Details' }} />
+              <Stack.Screen name="episodes/[id]" options={{ title: 'Episode' }} />
               <Stack.Screen name="notifications" options={{ title: 'Notifications' }} />
               <Stack.Screen name="statistics" options={{ title: 'Statistics' }} />
               <Stack.Screen name="history" options={{ title: 'Watch history' }} />

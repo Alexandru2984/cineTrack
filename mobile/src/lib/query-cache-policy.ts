@@ -1,6 +1,7 @@
 export const PERSISTED_QUERY_ROOTS = [
   'calendar',
   'discovery',
+  'episode',
   'episodes',
   'history',
   'lists',

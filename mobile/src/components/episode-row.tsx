@@ -36,12 +36,12 @@ export function EpisodeRow({
         style={({ pressed }) => [styles.details, { opacity: pressed ? 0.72 : 1 }]}
         onPress={() =>
           router.push({
-            pathname: '/media/[id]',
-            params: { id: String(item.tmdb_id), type: 'tv' },
+            pathname: '/episodes/[id]',
+            params: { id: item.episode_id },
           })
         }
       >
-        <Poster path={item.poster_path} width={50} height={75} />
+        <Poster path={item.still_path ?? item.poster_path} width={50} height={75} />
         <View style={styles.copy}>
           <AppText variant="label" numberOfLines={1}>
             {item.title}

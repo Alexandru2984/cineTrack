@@ -69,6 +69,30 @@ export interface Episode {
   still_path: string | null;
 }
 
+export interface EpisodeDetail {
+  episode_id: string;
+  media_id: string;
+  tmdb_id: number;
+  title: string;
+  poster_path: string | null;
+  backdrop_path: string | null;
+  season_id: string;
+  season_number: number;
+  season_name: string | null;
+  episode_number: number;
+  episode_name: string | null;
+  overview: string | null;
+  runtime_minutes: number | null;
+  air_date: string | null;
+  still_path: string | null;
+  tracking_status: TrackingStatus | null;
+  is_available: boolean;
+  is_watched: boolean;
+  is_planned: boolean;
+  watch_count: number;
+  last_watched_at: string | null;
+}
+
 export interface SeasonWatchProgress {
   season_number: number;
   episode_count: number | null;

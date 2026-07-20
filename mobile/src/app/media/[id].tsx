@@ -1,5 +1,5 @@
 import { Image } from 'expo-image';
-import { Stack, useLocalSearchParams } from 'expo-router';
+import { router, Stack, useLocalSearchParams } from 'expo-router';
 import {
   Calendar,
   Check,
@@ -496,9 +496,19 @@ export default function MediaDetailScreen() {
                             <AppText variant="label">{episode.episode_number}</AppText>
                           </View>
                           <View style={styles.episodeCopy}>
-                            <AppText variant="label" numberOfLines={2}>
-                              {episode.name || `Episode ${episode.episode_number}`}
-                            </AppText>
+                            <Pressable
+                              accessibilityRole="link"
+                              onPress={() =>
+                                router.push({
+                                  pathname: '/episodes/[id]',
+                                  params: { id: episode.id },
+                                })
+                              }
+                            >
+                              <AppText variant="label" numberOfLines={2}>
+                                {episode.name || `Episode ${episode.episode_number}`}
+                              </AppText>
+                            </Pressable>
                             <AppText variant="caption" muted>
                               {episode.air_date ? formatDate(episode.air_date) : 'Air date TBA'}
                               {episode.runtime_minutes

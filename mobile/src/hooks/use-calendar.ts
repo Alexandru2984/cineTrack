@@ -140,7 +140,11 @@ export function useSetEpisodePlanned() {
       apiRequest(`/calendar/episodes/${episodeId}/plan`, {
         method: planned ? 'PUT' : 'DELETE',
       }),
-    onSettled: () => queryClient.invalidateQueries({ queryKey: calendarKeys.all }),
+    onSettled: (_data, _error, variables) =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: calendarKeys.all }),
+        queryClient.invalidateQueries({ queryKey: ['episode', variables.episodeId] }),
+      ]),
   });
 }
 
@@ -151,9 +155,10 @@ export function useMarkCalendarEpisodeWatched() {
       apiRequest<CalendarWatchResponse>(`/calendar/episodes/${episodeId}/watched`, {
         method: 'POST',
       }),
-    onSuccess: async () => {
+    onSuccess: async (_data, episodeId) => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: calendarKeys.all }),
+        queryClient.invalidateQueries({ queryKey: ['episode', episodeId] }),
         queryClient.invalidateQueries({ queryKey: ['tracking'] }),
         queryClient.invalidateQueries({ queryKey: ['stats'] }),
         queryClient.invalidateQueries({ queryKey: ['discovery'] }),
