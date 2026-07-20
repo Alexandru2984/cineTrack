@@ -7149,3 +7149,233 @@ async fn test_expired_token_rejected() {
     let resp = actix_test::call_service(&app, req).await;
     assert_eq!(resp.status(), 401);
 }
+
+// ── Exploitation Tests ────────────────────────────────────────
+//
+// These do not check that features work; they attempt concrete attacks and
+// assert the server refuses. A regression here is a vulnerability, not a bug,
+// so each one names the attack it stands for.
+
+/// Craft a JWT with `alg: none` and no signature. A library that honours the
+/// header's algorithm would accept it as authentication for any user.
+#[actix_web::test]
+#[ignore = "requires test DB: docker compose -f docker-compose.test.yml up -d"]
+async fn test_exploit_jwt_alg_none_is_rejected() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+
+    let (_, _, user_id) =
+        register_user(&app, "algnone", "algnone@example.com", "Passw0rd123").await;
+
+    // base64url without padding, written out rather than pulling in a crate
+    // just to forge one token.
+    fn b64(value: &str) -> String {
+        const ALPHABET: &[u8; 64] =
+            b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+        let bytes = value.as_bytes();
+        let mut out = String::new();
+        for chunk in bytes.chunks(3) {
+            let b = [
+                chunk[0],
+                *chunk.get(1).unwrap_or(&0),
+                *chunk.get(2).unwrap_or(&0),
+            ];
+            let n = ((b[0] as u32) << 16) | ((b[1] as u32) << 8) | b[2] as u32;
+            let indices = [n >> 18 & 63, n >> 12 & 63, n >> 6 & 63, n & 63];
+            for (i, index) in indices.iter().enumerate() {
+                if i <= chunk.len() {
+                    out.push(ALPHABET[*index as usize] as char);
+                }
+            }
+        }
+        out
+    }
+
+    let header = b64(r#"{"alg":"none","typ":"JWT"}"#);
+    let claims = b64(&format!(
+        r#"{{"sub":"{user_id}","exp":9999999999,"iat":1000000000}}"#
+    ));
+    let forged = format!("{header}.{claims}.");
+
+    let req = actix_test::TestRequest::get()
+        .uri("/api/auth/me")
+        .peer_addr(peer_addr())
+        .insert_header((header::AUTHORIZATION, format!("Bearer {forged}")))
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 401, "alg=none token must not authenticate");
+
+    pool.close().await;
+}
+
+/// Register while trying to set columns the API never exposes. The DTOs use
+/// `deny_unknown_fields`, so the request is refused outright rather than having
+/// the extra keys quietly dropped — no account is created at all.
+#[actix_web::test]
+#[ignore = "requires test DB: docker compose -f docker-compose.test.yml up -d"]
+async fn test_exploit_mass_assignment_on_register_is_refused() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/auth/register")
+        .peer_addr(peer_addr())
+        .set_json(json!({
+            "username": "massassign",
+            "email": "massassign@example.com",
+            "password": "Passw0rd123",
+            // None of these may be honoured.
+            "email_verified": true,
+            "is_public": true,
+            "totp_enabled": false,
+            "id": "00000000-0000-4000-8000-000000000009"
+        }))
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(
+        resp.status(),
+        400,
+        "a register body carrying privileged columns must be refused"
+    );
+
+    let created = sqlx::query_scalar::<_, i64>("SELECT count(*) FROM users WHERE email = $1")
+        .bind("massassign@example.com")
+        .fetch_one(&pool)
+        .await
+        .expect("count query");
+    assert_eq!(
+        created, 0,
+        "the rejected request must not create an account"
+    );
+
+    // And the ordinary path still leaves the privileged columns at their safe
+    // defaults, which is the property the rejection is protecting.
+    let (_, _, user_id) =
+        register_unverified_user(&app, "plainreg", "plainreg@example.com", "Pass1234").await;
+    let row = sqlx::query_as::<_, (bool, bool)>(
+        "SELECT email_verified, is_public FROM users WHERE id = $1",
+    )
+    .bind(Uuid::parse_str(&user_id).expect("uuid"))
+    .fetch_one(&pool)
+    .await
+    .expect("registered user");
+    assert!(!row.0, "a new account must not start email-verified");
+    assert!(!row.1, "a new account must not start public");
+
+    pool.close().await;
+}
+
+/// A user must not be able to modify another account's tracking entry, either
+/// by patching it or deleting it.
+#[actix_web::test]
+#[ignore = "requires test DB: docker compose -f docker-compose.test.yml up -d"]
+async fn test_exploit_cannot_touch_another_users_tracking() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+
+    let (victim_token, _, _) =
+        register_user(&app, "victimtr", "victimtr@example.com", "Passw0rd123").await;
+    let (attacker_token, _, _) =
+        register_user(&app, "attacktr", "attacktr@example.com", "Passw0rd123").await;
+
+    // Tracking resolves against the local catalogue; seed it so the request
+    // does not depend on an upstream lookup.
+    sqlx::query(
+        r#"INSERT INTO media (tmdb_id, media_type, title, runtime_minutes)
+        VALUES (991501, 'movie', 'Exploit Test Movie', 100)"#,
+    )
+    .execute(&pool)
+    .await
+    .expect("seed media");
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/tracking")
+        .peer_addr(peer_addr())
+        .insert_header((header::AUTHORIZATION, format!("Bearer {victim_token}")))
+        .set_json(json!({ "tmdb_id": 991501, "media_type": "movie", "status": "watching" }))
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 201, "victim should be able to track a title");
+    let created: Value = actix_test::read_body_json(resp).await;
+    let entry_id = created["id"].as_str().expect("tracking id").to_string();
+
+    // Patch someone else's entry.
+    let req = actix_test::TestRequest::patch()
+        .uri(&format!("/api/tracking/{entry_id}"))
+        .peer_addr(peer_addr())
+        .insert_header((header::AUTHORIZATION, format!("Bearer {attacker_token}")))
+        .set_json(json!({ "status": "dropped" }))
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert!(
+        resp.status() == 404 || resp.status() == 403,
+        "patching another user's tracking entry returned {}",
+        resp.status()
+    );
+
+    // Delete someone else's entry.
+    let req = actix_test::TestRequest::delete()
+        .uri(&format!("/api/tracking/{entry_id}"))
+        .peer_addr(peer_addr())
+        .insert_header((header::AUTHORIZATION, format!("Bearer {attacker_token}")))
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert!(
+        resp.status() == 404 || resp.status() == 403,
+        "deleting another user's tracking entry returned {}",
+        resp.status()
+    );
+
+    // The row must still be there, untouched.
+    let still_watching =
+        sqlx::query_scalar::<_, String>("SELECT status FROM user_media WHERE id = $1")
+            .bind(Uuid::parse_str(&entry_id).expect("uuid"))
+            .fetch_one(&pool)
+            .await
+            .expect("victim entry survives");
+    assert_eq!(still_watching, "watching");
+
+    pool.close().await;
+}
+
+/// SQL metacharacters must be stored and compared as data. Every query is
+/// parameterised, so this is a regression guard against someone later building
+/// a statement by formatting.
+#[actix_web::test]
+#[ignore = "requires test DB: docker compose -f docker-compose.test.yml up -d"]
+async fn test_exploit_sql_metacharacters_are_treated_as_data() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+
+    let (token, _, _) = register_user(&app, "sqluser", "sqluser@example.com", "Passw0rd123").await;
+
+    let payload = "'; DROP TABLE users; --";
+    let req = actix_test::TestRequest::post()
+        .uri("/api/lists")
+        .peer_addr(peer_addr())
+        .insert_header((header::AUTHORIZATION, format!("Bearer {token}")))
+        .set_json(json!({ "name": payload, "description": payload, "is_public": false }))
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 201);
+
+    // The table still exists and the payload round-tripped as a literal string.
+    let stored = sqlx::query_scalar::<_, String>("SELECT name FROM lists WHERE name = $1")
+        .bind(payload)
+        .fetch_one(&pool)
+        .await
+        .expect("users table intact and the name stored verbatim");
+    assert_eq!(stored, payload);
+
+    let users_exist = sqlx::query_scalar::<_, i64>("SELECT count(*) FROM users")
+        .fetch_one(&pool)
+        .await
+        .expect("users table still exists");
+    assert!(users_exist >= 1);
+
+    pool.close().await;
+}
