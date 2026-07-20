@@ -69,6 +69,16 @@ updates:
       - dependency-name: typescript
         update-types:
           - version-update:semver-major
+      # jest-expo pins the jest 29 line through its own dependencies, so a
+      # jest 30 runner meets jest-mock 29 and every suite dies on
+      # `clearMocksOnScope is not a function`. @types/jest follows the runtime.
+      # Lift when jest-expo moves to jest 30.
+      - dependency-name: jest
+        update-types:
+          - version-update:semver-major
+      - dependency-name: "@types/jest"
+        update-types:
+          - version-update:semver-major
 
   # GitHub Actions used by the workflows
   - package-ecosystem: github-actions
