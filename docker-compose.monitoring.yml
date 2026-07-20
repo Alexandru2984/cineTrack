@@ -1,0 +1,76 @@
+# Monitoring for Văzute, kept in its own compose project.
+#
+# The alert rules in ops/prometheus/cinetrack-alerts.yml existed for a while but
+# were loaded nowhere: the only Prometheus on this host belongs to another
+# application and scrapes only that one. Mean time to detect was therefore
+# unbounded — a failed backup or a dead backend would have been noticed by a
+# user, not by us.
+#
+# Joins the app's existing network so the backend is scraped directly rather
+# than through the public origin. Nothing is published to the host: these
+# services are reachable only from inside the network, so the metrics endpoint
+# and the alert history are not exposed to the internet.
+#
+#   docker compose -f docker-compose.monitoring.yml --env-file .env.prod up -d
+
+name: cinetrack-monitoring
+
+services:
+  prometheus:
+    image: prom/prometheus:v3.7.3
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=30d
+    networks: [app, monitoring]
+    volumes:
+      - ./ops/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./ops/prometheus/cinetrack-alerts.yml:/etc/prometheus/rules/cinetrack-alerts.yml:ro
+      - prometheus_data:/prometheus
+    depends_on: [alertmanager]
+
+  alertmanager:
+    image: prom/alertmanager:v0.28.1
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+    networks: [monitoring]
+    environment:
+      ALERT_SMTP_HOST: "${SMTP_HOST:?SMTP_HOST must be set}"
+      ALERT_SMTP_PORT: "${SMTP_PORT:-465}"
+      ALERT_SMTP_FROM: "${ALERT_SMTP_FROM:-alerts@micutu.com}"
+      ALERT_SMTP_USERNAME: "${SMTP_USERNAME:?SMTP_USERNAME must be set}"
+      ALERT_SMTP_PASSWORD: "${SMTP_PASSWORD:?SMTP_PASSWORD must be set}"
+      ALERT_EMAIL_TO: "${ALERT_EMAIL_TO:?ALERT_EMAIL_TO must be set}"
+    volumes:
+      - ./ops/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager_data:/alertmanager
+
+  # Publishes the backup script's textfile metrics. Without this the backup
+  # alerts have no series to evaluate and stay silently green.
+  node-exporter:
+    image: prom/node-exporter:v1.10.1
+    restart: unless-stopped
+    # Runs as the backup script's owner. The state directory is mode 700 by
+    # design — it holds the lock alongside the metrics — so the default `nobody`
+    # cannot traverse it, and loosening the directory to suit the collector
+    # would be the wrong trade.
+    user: "${METRICS_UID:-1001}:${METRICS_GID:-1001}"
+    command:
+      - --collector.textfile.directory=/var/lib/node_exporter/textfile
+    networks: [monitoring]
+    volumes:
+      - ${BACKUP_STATE_DIR:-/home/micu/.local/state/cinetrack}:/var/lib/node_exporter/textfile:ro
+
+networks:
+  # The app stack's network, created by docker-compose.prod.yml.
+  app:
+    name: cinetrack_default
+    external: true
+  monitoring:
+
+volumes:
+  prometheus_data:
+  alertmanager_data:

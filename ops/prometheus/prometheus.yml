@@ -1,0 +1,39 @@
+# Scrape config for Văzute's own monitoring stack.
+#
+# Deliberately separate from the Prometheus that serves the other applications
+# on this host: that one carries `deployment: pdfeditor` external labels and is
+# owned by a different compose project, so folding this in would mislabel every
+# series and couple two production apps' monitoring together.
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    deployment: vazute
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]
+
+rule_files:
+  - /etc/prometheus/rules/cinetrack-alerts.yml
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  # The job name matters: CineTrackBackendDown alerts on
+  # up{job="cinetrack-backend"}, so renaming this silently disables it.
+  - job_name: cinetrack-backend
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["backend:8080"]
+
+  # Carries the backup metrics. The backup script writes backup.prom into its
+  # state directory, which node-exporter's textfile collector reads and
+  # republishes — that is the only path by which the backup alerts see anything.
+  - job_name: cinetrack-node
+    static_configs:
+      - targets: ["node-exporter:9100"]

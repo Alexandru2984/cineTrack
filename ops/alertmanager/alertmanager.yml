@@ -1,0 +1,44 @@
+# Alert delivery for Văzute.
+#
+# Rules that fire into a dashboard nobody watches are the same problem as rules
+# that are not loaded at all, which is what the CISO review found. Delivery goes
+# over the Resend SMTP relay already proven in production for transactional
+# mail, rather than introducing another vendor for this.
+
+global:
+  smtp_smarthost: "${ALERT_SMTP_HOST}:${ALERT_SMTP_PORT}"
+  smtp_from: "${ALERT_SMTP_FROM}"
+  smtp_auth_username: "${ALERT_SMTP_USERNAME}"
+  smtp_auth_password: "${ALERT_SMTP_PASSWORD}"
+  smtp_require_tls: false # port 465 is implicit TLS, not STARTTLS
+
+route:
+  receiver: email
+  # Group so a full outage sends one message rather than one per rule.
+  group_by: ["alertname"]
+  group_wait: 30s
+  group_interval: 5m
+  # Re-send while a problem is still open, so a missed mail is not the end of it.
+  repeat_interval: 6h
+  routes:
+    # Backups failing is not urgent to the minute, but must not be lost in a
+    # group with a louder alert.
+    - matchers:
+        - alertname =~ "CineTrackBackup.*"
+      receiver: email
+      group_wait: 1m
+      repeat_interval: 12h
+
+receivers:
+  - name: email
+    email_configs:
+      - to: "${ALERT_EMAIL_TO}"
+        send_resolved: true
+        headers:
+          Subject: '[Văzute] {{ .Status | toUpper }}: {{ .CommonLabels.alertname }}'
+
+inhibit_rules:
+  # If the backend is down, its error-rate alert is noise.
+  - source_matchers: [alertname = "CineTrackBackendDown"]
+    target_matchers: [alertname = "CineTrackHighServerErrorRate"]
+    equal: ["deployment"]
