@@ -25,11 +25,27 @@ echo "=== Mobile Checks ==="
 cd ../mobile
 CI=1 npm run verify
 CI=1 npm run export:android
+EAS_BUILD_PROFILE=production EXPO_UPDATES_ENABLED=false EXPO_USE_DEV_CLIENT=0 \
+  npx expo prebuild --platform all --no-install --clean
+python3 scripts/validate_native_config.py
+echo ""
+
+echo "=== Operations Checks ==="
+cd ..
+bash -n scripts/*.sh scripts/tests/*.sh
+python3 scripts/tests/check_embedded_python.py \
+  scripts/backup_to_r2.sh scripts/restore_from_r2.sh
+scripts/tests/backup_restore_test.sh
+if command -v promtool >/dev/null; then
+  promtool check rules ops/prometheus/cinetrack-alerts.yml
+else
+  echo "promtool not installed; skipped Prometheus rule validation"
+fi
 echo ""
 
 echo "=== Backend Integration Tests ==="
 echo "Starting test database..."
-cd ..
+cd "$ROOT_DIR"
 docker compose -p "$TEST_PROJECT" -f docker-compose.test.yml up -d --wait 2>/dev/null
 
 echo "Running integration tests..."

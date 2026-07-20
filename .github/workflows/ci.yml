@@ -181,6 +181,80 @@ jobs:
       - name: Export Android bundle
         run: npm run export:android
 
+      - name: Validate OTA profile configuration
+        run: |
+          EAS_BUILD_PROFILE=production EXPO_UPDATES_ENABLED=true \
+            npx expo config --type public --json > /tmp/vazute-production-config.json
+          node -e 'const c=require("/tmp/vazute-production-config.json"); if(c.updates?.enabled !== false) process.exit(1)'
+          EAS_BUILD_PROFILE=preview EXPO_UPDATES_ENABLED=true \
+            npx expo config --type public --json > /tmp/vazute-preview-config.json
+          node -e 'const c=require("/tmp/vazute-preview-config.json"); if(c.updates?.enabled !== true) process.exit(1)'
+
+      - name: Prebuild production native projects
+        env:
+          EAS_BUILD_PROFILE: production
+          EXPO_UPDATES_ENABLED: "false"
+          EXPO_USE_DEV_CLIENT: "0"
+        run: npx expo prebuild --platform all --no-install --clean
+
+      - name: Install Java
+        uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165 # v5.0.0
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - name: Install Android SDK
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3.2.2
+        with:
+          packages: >-
+            platform-tools
+            platforms;android-36
+            build-tools;36.0.0
+            ndk;27.1.12297006
+
+      - name: Validate generated native security config
+        run: python3 scripts/validate_native_config.py
+
+      - name: Compile Android release
+        working-directory: mobile/android
+        run: ./gradlew :app:assembleRelease --no-daemon --stacktrace
+
+  operations:
+    name: Operations
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Validate GitHub Actions workflows
+        run: |
+          docker run --rm --volume "$PWD:$PWD:ro" --workdir "$PWD" \
+            rhysd/actionlint:1.7.7@sha256:1d74bfc9fd1963af8f89a7c22afaaafd42f49aad711a09951d02cb996398f61d \
+            -color
+
+      - name: ShellCheck operational scripts
+        run: |
+          docker run --rm --volume "$PWD:$PWD:ro" --workdir "$PWD" \
+            koalaman/shellcheck:v0.10.0@sha256:0fa384f2a6171aef8aab2999a531c8c8158727d54a8f20157a5c3c51a734d6b2 \
+            --external-sources scripts/*.sh scripts/tests/*.sh
+
+      - name: Validate embedded Python
+        run: |
+          python3 scripts/tests/check_embedded_python.py \
+            scripts/backup_to_r2.sh scripts/restore_from_r2.sh
+
+      - name: Backup and restore safety tests
+        run: scripts/tests/backup_restore_test.sh
+
+      - name: Validate Prometheus alert rules
+        run: |
+          docker run --rm --volume "$PWD:/repo:ro" --entrypoint promtool \
+            prom/prometheus:v3.6.0@sha256:d9a702d3f7f398540e7190c4d80dbb8a0dc95c1e481e8ebd8a08e5bcf83cf735 \
+            check rules /repo/ops/prometheus/cinetrack-alerts.yml
+
   e2e:
     name: Frontend E2E
     runs-on: ubuntu-latest

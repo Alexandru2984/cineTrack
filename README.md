@@ -249,6 +249,12 @@ docker compose -f docker-compose.test.yml -p cinetrack_e2e down -v
 # Native client validation and Android bundle export
 cd mobile && npm run verify && npm audit --audit-level=high && npm run export:android
 
+# Operational scripts, embedded Python, backup/restore guards, and alert rules
+bash -n scripts/*.sh scripts/tests/*.sh
+python3 scripts/tests/check_embedded_python.py scripts/backup_to_r2.sh scripts/restore_from_r2.sh
+scripts/tests/backup_restore_test.sh
+promtool check rules ops/prometheus/cinetrack-alerts.yml
+
 # Or run everything at once:
 ./scripts/run_tests.sh
 ```
@@ -257,7 +263,8 @@ cd mobile && npm run verify && npm audit --audit-level=high && npm run export:an
 - **Unit tests** — JWT generation/validation, Argon2id hashing, password policy, all DTO validators (boundary cases, XSS rejection), error mapping & sanitization
 - **Integration tests** — Full auth flows, access control, IDOR protection, user enumeration prevention, profile privacy, atomic tracking/history transitions, sequential Up Next selection, bulk episode history, Calendar ownership and pagination, release schedules, statistics, lists, and imports
 - **Frontend tests** — Zustand stores, query hooks, utility functions, full-backlog Calendar pagination, Up Next actions, PWA lifecycle/install states, episode/season bulk controls, route contracts, About attribution, and error-boundary fallback
-- **Mobile checks** — ESLint with React Compiler rules, strict TypeScript, all 20 Expo Doctor checks, reproducible `npm ci`, Android Hermes export, permission-aware Android/iOS prebuilds, and HIGH/CRITICAL dependency gates
+- **Mobile checks** — ESLint with React Compiler rules, strict TypeScript, all 20 Expo Doctor checks, reproducible `npm ci`, Android Hermes export, structured Android/iOS manifest validation, a native Android release compile, and HIGH/CRITICAL dependency gates
+- **Operations checks** — ShellCheck, embedded-Python syntax, isolated backup/restore safety paths, and Prometheus rule validation using digest-pinned tool images
 - **E2E tests (Playwright)** — route guards, auth flows, mobile navigation, sequential episode actions, discovery/social UI, and watched-through confirmation against a mocked API; install/offline PWA behavior against a production build; plus a real-stack suite covering cookies, token rotation, sessions, account deletion, private follows, and password reset
 
 ## Project Structure

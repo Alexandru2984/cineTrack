@@ -29,6 +29,11 @@ storage configured.
 npm run verify
 npm run export:android
 npm audit --audit-level=high
+EAS_BUILD_PROFILE=production EXPO_UPDATES_ENABLED=false EXPO_USE_DEV_CLIENT=0 \
+  npx expo prebuild --platform all --no-install --clean
+python3 scripts/validate_native_config.py
+# With ANDROID_HOME configured:
+cd android && ./gradlew :app:assembleRelease --no-daemon
 ```
 
 ## Builds
