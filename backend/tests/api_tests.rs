@@ -7659,3 +7659,122 @@ async fn test_returning_show_stays_watching_when_caught_up() {
 
     pool.close().await;
 }
+
+// ── Episode reactions ─────────────────────────────────────────
+
+#[actix_web::test]
+#[ignore = "requires test DB: docker compose -f docker-compose.test.yml up -d"]
+async fn test_episode_reactions_require_having_watched_and_aggregate() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+
+    let (viewer, _, viewer_id) =
+        register_user(&app, "reactor", "reactor@example.com", "Pass1234").await;
+    let (other, _, _) = register_user(&app, "reactor2", "reactor2@example.com", "Pass1234").await;
+    let viewer_id = Uuid::parse_str(&viewer_id).unwrap();
+
+    let media_id = seed_finished_show(&pool, 993001, "Ended", 1).await;
+    let episode_id = sqlx::query_scalar::<_, Uuid>(
+        "SELECT e.id FROM episodes e JOIN seasons s ON s.id = e.season_id WHERE s.media_id = $1",
+    )
+    .bind(media_id)
+    .fetch_one(&pool)
+    .await
+    .expect("episode id");
+
+    let react = |token: &str, reaction: &str| {
+        actix_test::TestRequest::put()
+            .uri(&format!("/api/media/episodes/{episode_id}/reaction"))
+            .insert_header((header::AUTHORIZATION, format!("Bearer {token}")))
+            .peer_addr(peer_addr())
+            .set_json(json!({ "reaction": reaction }))
+            .to_request()
+    };
+
+    // Reacting to something you have not watched is refused.
+    let resp = actix_test::call_service(&app, react(&viewer, "loved")).await;
+    assert_eq!(
+        resp.status(),
+        400,
+        "reacting without watching the episode must be refused"
+    );
+
+    sqlx::query("INSERT INTO watch_history (user_id, media_id, episode_id) VALUES ($1, $2, $3)")
+        .bind(viewer_id)
+        .bind(media_id)
+        .bind(episode_id)
+        .execute(&pool)
+        .await
+        .expect("record the watch");
+
+    assert_eq!(
+        actix_test::call_service(&app, react(&viewer, "loved"))
+            .await
+            .status(),
+        200
+    );
+
+    // Changing your mind replaces rather than accumulates.
+    assert_eq!(
+        actix_test::call_service(&app, react(&viewer, "shocked"))
+            .await
+            .status(),
+        200
+    );
+    let rows = sqlx::query_scalar::<_, i64>(
+        "SELECT count(*) FROM episode_reactions WHERE user_id = $1 AND episode_id = $2",
+    )
+    .bind(viewer_id)
+    .bind(episode_id)
+    .fetch_one(&pool)
+    .await
+    .expect("count");
+    assert_eq!(rows, 1, "a second reaction must replace the first");
+
+    // An unknown reaction never reaches the table.
+    let resp = actix_test::call_service(&app, react(&viewer, "definitely-not-a-reaction")).await;
+    assert_eq!(resp.status(), 400);
+
+    // The detail endpoint reports aggregate counts and the viewer's own pick,
+    // and says nothing about who reacted.
+    let req = actix_test::TestRequest::get()
+        .uri(&format!("/api/media/episodes/{episode_id}"))
+        .insert_header((header::AUTHORIZATION, format!("Bearer {viewer}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let body: Value = actix_test::read_body_json(actix_test::call_service(&app, req).await).await;
+    assert_eq!(body["my_reaction"], "shocked");
+    assert_eq!(body["reactions"][0]["reaction"], "shocked");
+    assert_eq!(body["reactions"][0]["count"], 1);
+    assert!(
+        body.to_string().find("user_id").is_none(),
+        "reaction aggregates must not expose who reacted"
+    );
+
+    // Another account sees the same counts but no reaction of its own.
+    let req = actix_test::TestRequest::get()
+        .uri(&format!("/api/media/episodes/{episode_id}"))
+        .insert_header((header::AUTHORIZATION, format!("Bearer {other}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let body: Value = actix_test::read_body_json(actix_test::call_service(&app, req).await).await;
+    assert!(body["my_reaction"].is_null());
+    assert_eq!(body["reactions"][0]["count"], 1);
+
+    // Removing it clears the aggregate.
+    let req = actix_test::TestRequest::delete()
+        .uri(&format!("/api/media/episodes/{episode_id}/reaction"))
+        .insert_header((header::AUTHORIZATION, format!("Bearer {viewer}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 200);
+
+    let remaining = sqlx::query_scalar::<_, i64>("SELECT count(*) FROM episode_reactions")
+        .fetch_one(&pool)
+        .await
+        .expect("count");
+    assert_eq!(remaining, 0);
+
+    pool.close().await;
+}

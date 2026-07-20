@@ -1,9 +1,10 @@
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import api from '@/lib/api';
 import type {
   DiscoveryResponse,
   Episode,
   EpisodeDetail,
+  EpisodeReaction,
   Media,
   Season,
   TmdbSearchResponse,
@@ -97,5 +98,25 @@ export function useEpisodeDetail(id: string | undefined) {
       return response.data;
     },
     enabled: Boolean(id),
+  });
+}
+
+/**
+ * Set, change or clear the viewer's reaction to an episode. Passing null
+ * removes it, which is what tapping the active reaction again does.
+ */
+export function useSetEpisodeReaction(episodeId: string | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (reaction: EpisodeReaction | null) => {
+      if (reaction === null) {
+        await api.delete(`/media/episodes/${episodeId}/reaction`);
+        return;
+      }
+      await api.put(`/media/episodes/${episodeId}/reaction`, { reaction });
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['episode', episodeId] });
+    },
   });
 }

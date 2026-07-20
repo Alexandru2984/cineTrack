@@ -17,6 +17,14 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
             .route("/search", web::get().to(search))
             .route("/discovery", web::get().to(discovery))
             .route("/episodes/{episode_id}", web::get().to(get_episode_detail))
+            .route(
+                "/episodes/{episode_id}/reaction",
+                web::put().to(set_episode_reaction),
+            )
+            .route(
+                "/episodes/{episode_id}/reaction",
+                web::delete().to(remove_episode_reaction),
+            )
             .route("/{id}", web::get().to(get_detail))
             .route("/{id}/watch-providers", web::get().to(get_watch_providers))
             .route("/{id}/seasons", web::get().to(get_seasons))
@@ -76,6 +84,22 @@ async fn get_episode_detail(
     .fetch_optional(pool.get_ref())
     .await?
     .ok_or_else(|| AppError::NotFound("Episode not found".to_string()))?;
+
+    let mut detail = detail;
+    detail.reactions = sqlx::query_as::<_, ReactionCount>(
+        "SELECT reaction, count(*) AS count FROM episode_reactions
+         WHERE episode_id = $1 GROUP BY reaction ORDER BY count DESC, reaction",
+    )
+    .bind(episode_id)
+    .fetch_all(pool.get_ref())
+    .await?;
+    detail.my_reaction = sqlx::query_scalar::<_, String>(
+        "SELECT reaction FROM episode_reactions WHERE episode_id = $1 AND user_id = $2",
+    )
+    .bind(episode_id)
+    .bind(user_id)
+    .fetch_optional(pool.get_ref())
+    .await?;
 
     Ok(HttpResponse::Ok().json(detail))
 }
@@ -428,4 +452,64 @@ async fn get_episodes(
     let episodes =
         cached_episodes_for_media(pool.get_ref(), tmdb.get_ref(), media, season_number).await?;
     Ok(HttpResponse::Ok().json(episodes))
+}
+
+/// Set or replace the viewer's reaction to an episode.
+///
+/// Reacting requires having watched it. That keeps the counts meaningful, and
+/// it makes reacting to something unaired impossible without a second rule —
+/// you cannot have watched what has not aired.
+async fn set_episode_reaction(
+    pool: web::Data<PgPool>,
+    req: HttpRequest,
+    path: web::Path<Uuid>,
+    body: web::Json<SetEpisodeReactionRequest>,
+) -> Result<HttpResponse, AppError> {
+    let user_id = require_auth(&req).await?;
+    let episode_id = path.into_inner();
+    body.validate()?;
+
+    let watched = sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS(SELECT 1 FROM watch_history WHERE user_id = $1 AND episode_id = $2)",
+    )
+    .bind(user_id)
+    .bind(episode_id)
+    .fetch_one(pool.get_ref())
+    .await?;
+    if !watched {
+        return Err(AppError::BadRequest(
+            "Mark the episode as watched before reacting to it".to_string(),
+        ));
+    }
+
+    sqlx::query(
+        r#"INSERT INTO episode_reactions (user_id, episode_id, reaction)
+        VALUES ($1, $2, $3)
+        ON CONFLICT (user_id, episode_id)
+        DO UPDATE SET reaction = EXCLUDED.reaction, updated_at = NOW()"#,
+    )
+    .bind(user_id)
+    .bind(episode_id)
+    .bind(&body.reaction)
+    .execute(pool.get_ref())
+    .await?;
+
+    Ok(HttpResponse::Ok().json(serde_json::json!({ "reaction": body.reaction })))
+}
+
+async fn remove_episode_reaction(
+    pool: web::Data<PgPool>,
+    req: HttpRequest,
+    path: web::Path<Uuid>,
+) -> Result<HttpResponse, AppError> {
+    let user_id = require_auth(&req).await?;
+    let episode_id = path.into_inner();
+
+    sqlx::query("DELETE FROM episode_reactions WHERE user_id = $1 AND episode_id = $2")
+        .bind(user_id)
+        .bind(episode_id)
+        .execute(pool.get_ref())
+        .await?;
+
+    Ok(HttpResponse::Ok().json(serde_json::json!({ "message": "Reaction removed" })))
 }

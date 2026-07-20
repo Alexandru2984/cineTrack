@@ -20,6 +20,7 @@ vi.mock('@/hooks/useMedia', () => ({
     error: null,
     refetch: vi.fn(),
   }),
+  useSetEpisodeReaction: () => ({ mutate: vi.fn(), isPending: false }),
 }));
 
 vi.mock('@/hooks/useCalendar', () => ({
@@ -57,6 +58,8 @@ const availableEpisode: EpisodeDetail = {
   is_planned: false,
   watch_count: 0,
   last_watched_at: null,
+  reactions: [],
+  my_reaction: null,
 };
 
 function renderPage() {

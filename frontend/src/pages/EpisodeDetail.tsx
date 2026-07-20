@@ -10,12 +10,13 @@ import {
 } from 'lucide-react';
 import { Link, useParams } from 'react-router-dom';
 
+import { EpisodeReactions } from '@/components/EpisodeReactions';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
 import {
   useMarkCalendarEpisodeWatched,
   useSetEpisodePlanned,
 } from '@/hooks/useCalendar';
-import { useEpisodeDetail } from '@/hooks/useMedia';
+import { useEpisodeDetail, useSetEpisodeReaction } from '@/hooks/useMedia';
 import { usePageTitle } from '@/hooks/usePageTitle';
 import { getApiErrorMessage } from '@/lib/api';
 import { formatDate, formatDateTime, formatRuntime, getPosterUrl } from '@/lib/utils';
@@ -27,6 +28,7 @@ function episodeCode(season: number, episode: number) {
 export default function EpisodeDetailPage() {
   const { id } = useParams<{ id: string }>();
   const episode = useEpisodeDetail(id);
+  const setReaction = useSetEpisodeReaction(id);
   const setPlanned = useSetEpisodePlanned();
   const markWatched = useMarkCalendarEpisodeWatched();
   const item = episode.data;
@@ -160,6 +162,14 @@ export default function EpisodeDetailPage() {
           </p>
         )}
       </section>
+
+      <EpisodeReactions
+        reactions={item.reactions}
+        myReaction={item.my_reaction}
+        canReact={item.is_watched}
+        pending={setReaction.isPending}
+        onSelect={(reaction) => setReaction.mutate(reaction)}
+      />
     </article>
   );
 }

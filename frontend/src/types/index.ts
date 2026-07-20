@@ -94,6 +94,25 @@ export interface EpisodeDetail {
   is_planned: boolean;
   watch_count: number;
   last_watched_at: string | null;
+  reactions: ReactionCount[];
+  my_reaction: EpisodeReaction | null;
+}
+
+/** Fixed vocabulary, mirrored by a CHECK constraint on the table. */
+export const EPISODE_REACTIONS = [
+  'loved',
+  'funny',
+  'shocked',
+  'sad',
+  'tense',
+  'bored',
+] as const;
+
+export type EpisodeReaction = (typeof EPISODE_REACTIONS)[number];
+
+export interface ReactionCount {
+  reaction: EpisodeReaction;
+  count: number;
 }
 
 export interface SeasonWatchProgress {

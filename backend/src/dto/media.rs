@@ -142,6 +142,40 @@ pub struct EpisodeDetailResponse {
     pub is_planned: bool,
     pub watch_count: i64,
     pub last_watched_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// How many people picked each reaction, highest first. Aggregate only:
+    /// who reacted is never exposed, which keeps private profiles private
+    /// without needing any visibility rules here. Loaded separately from the
+    /// row, hence the default.
+    #[sqlx(skip)]
+    pub reactions: Vec<ReactionCount>,
+    /// The viewer's own reaction, if any.
+    #[sqlx(skip)]
+    pub my_reaction: Option<String>,
+}
+
+#[derive(Debug, serde::Serialize, sqlx::FromRow)]
+pub struct ReactionCount {
+    pub reaction: String,
+    pub count: i64,
+}
+
+/// The closed vocabulary, mirrored by a CHECK constraint on the table so a bug
+/// here cannot widen it into free text.
+pub const EPISODE_REACTIONS: [&str; 6] = ["loved", "funny", "shocked", "sad", "tense", "bored"];
+
+#[derive(Debug, serde::Deserialize, validator::Validate)]
+#[serde(deny_unknown_fields)]
+pub struct SetEpisodeReactionRequest {
+    #[validate(custom(function = "validate_reaction"))]
+    pub reaction: String,
+}
+
+fn validate_reaction(value: &str) -> Result<(), validator::ValidationError> {
+    if EPISODE_REACTIONS.contains(&value) {
+        Ok(())
+    } else {
+        Err(validator::ValidationError::new("unknown_reaction"))
+    }
 }
 
 // TMDB API response types
