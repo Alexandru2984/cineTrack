@@ -7493,3 +7493,169 @@ async fn test_exploit_totp_code_cannot_be_replayed_at_login() {
 
     pool.close().await;
 }
+
+// ── Show completion ───────────────────────────────────────────
+
+/// Seed a show with one season of `episode_count` episodes, all aired.
+async fn seed_finished_show(
+    pool: &PgPool,
+    tmdb_id: i32,
+    show_status: &str,
+    episode_count: i32,
+) -> Uuid {
+    let media_id = sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO media (tmdb_id, media_type, title, status)
+        VALUES ($1, 'tv', 'Completion Test Show', $2) RETURNING id"#,
+    )
+    .bind(tmdb_id)
+    .bind(show_status)
+    .fetch_one(pool)
+    .await
+    .expect("seed media");
+
+    let season_id = sqlx::query_scalar::<_, Uuid>(
+        "INSERT INTO seasons (media_id, season_number, episode_count) VALUES ($1, 1, $2) RETURNING id",
+    )
+    .bind(media_id)
+    .bind(episode_count)
+    .fetch_one(pool)
+    .await
+    .expect("seed season");
+
+    for number in 1..=episode_count {
+        sqlx::query(
+            "INSERT INTO episodes (season_id, episode_number, air_date) VALUES ($1, $2, CURRENT_DATE - 30)",
+        )
+        .bind(season_id)
+        .bind(number)
+        .execute(pool)
+        .await
+        .expect("seed episode");
+    }
+    media_id
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB: docker compose -f docker-compose.test.yml up -d"]
+async fn test_finished_show_completes_when_the_last_episode_is_watched() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+
+    let (token, _, user_id) =
+        register_user(&app, "completer", "completer@example.com", "Pass1234").await;
+    let user_id = Uuid::parse_str(&user_id).unwrap();
+    let media_id = seed_finished_show(&pool, 992001, "Ended", 3).await;
+
+    sqlx::query("INSERT INTO user_media (user_id, media_id, status) VALUES ($1, $2, 'watching')")
+        .bind(user_id)
+        .bind(media_id)
+        .execute(&pool)
+        .await
+        .expect("track the show");
+
+    let episodes = sqlx::query_scalar::<_, Uuid>(
+        "SELECT e.id FROM episodes e JOIN seasons s ON s.id = e.season_id
+         WHERE s.media_id = $1 ORDER BY e.episode_number",
+    )
+    .bind(media_id)
+    .fetch_all(&pool)
+    .await
+    .expect("episode ids");
+
+    let status_now = |pool: PgPool| async move {
+        sqlx::query_scalar::<_, String>("SELECT status FROM user_media WHERE user_id = $1")
+            .bind(user_id)
+            .fetch_one(&pool)
+            .await
+            .expect("status")
+    };
+
+    for (index, episode_id) in episodes.iter().enumerate() {
+        let req = actix_test::TestRequest::post()
+            .uri(&format!("/api/calendar/episodes/{episode_id}/watched"))
+            .insert_header((header::AUTHORIZATION, format!("Bearer {token}")))
+            .peer_addr(peer_addr())
+            .to_request();
+        let resp = actix_test::call_service(&app, req).await;
+        assert!(
+            resp.status().is_success(),
+            "watching episode {index} failed"
+        );
+
+        if index + 1 < episodes.len() {
+            assert_eq!(
+                status_now(pool.clone()).await,
+                "watching",
+                "the show must not complete before the last episode"
+            );
+        }
+    }
+
+    assert_eq!(status_now(pool.clone()).await, "completed");
+    let completed_at = sqlx::query_scalar::<_, Option<chrono::NaiveDate>>(
+        "SELECT completed_at FROM user_media WHERE user_id = $1",
+    )
+    .bind(user_id)
+    .fetch_one(&pool)
+    .await
+    .expect("completed_at");
+    assert!(completed_at.is_some(), "completion must record a date");
+
+    pool.close().await;
+}
+
+/// A show still in production stays on `watching` even with every aired episode
+/// seen: the viewer is caught up, not finished, and next week proves it.
+#[actix_web::test]
+#[ignore = "requires test DB: docker compose -f docker-compose.test.yml up -d"]
+async fn test_returning_show_stays_watching_when_caught_up() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+
+    let (token, _, user_id) =
+        register_user(&app, "caughtup", "caughtup@example.com", "Pass1234").await;
+    let user_id = Uuid::parse_str(&user_id).unwrap();
+    let media_id = seed_finished_show(&pool, 992002, "Returning Series", 2).await;
+
+    sqlx::query("INSERT INTO user_media (user_id, media_id, status) VALUES ($1, $2, 'watching')")
+        .bind(user_id)
+        .bind(media_id)
+        .execute(&pool)
+        .await
+        .expect("track the show");
+
+    let episodes = sqlx::query_scalar::<_, Uuid>(
+        "SELECT e.id FROM episodes e JOIN seasons s ON s.id = e.season_id WHERE s.media_id = $1",
+    )
+    .bind(media_id)
+    .fetch_all(&pool)
+    .await
+    .expect("episode ids");
+
+    for episode_id in episodes {
+        let req = actix_test::TestRequest::post()
+            .uri(&format!("/api/calendar/episodes/{episode_id}/watched"))
+            .insert_header((header::AUTHORIZATION, format!("Bearer {token}")))
+            .peer_addr(peer_addr())
+            .to_request();
+        assert!(actix_test::call_service(&app, req)
+            .await
+            .status()
+            .is_success());
+    }
+
+    let status =
+        sqlx::query_scalar::<_, String>("SELECT status FROM user_media WHERE user_id = $1")
+            .bind(user_id)
+            .fetch_one(&pool)
+            .await
+            .expect("status");
+    assert_eq!(
+        status, "watching",
+        "a returning series must not be marked completed just for being caught up"
+    );
+
+    pool.close().await;
+}

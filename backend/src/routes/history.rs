@@ -194,6 +194,15 @@ async fn create_history(
     .await?;
     tx.commit().await?;
 
+    // Awarding the completed badge is a consequence of the watch, never a
+    // precondition for it, so a failure here must not fail the request.
+    crate::services::completion::complete_show_if_fully_watched_best_effort(
+        pool.get_ref(),
+        user_id,
+        data.media_id,
+    )
+    .await;
+
     Ok(HttpResponse::Created().json(history))
 }
 
@@ -459,6 +468,13 @@ async fn write_bulk_episode_history(
     .map_err(|_| AppError::InternalError(anyhow::anyhow!("bulk watch count overflow")))?;
     tx.commit().await?;
 
+    // Awarding the completed badge is a consequence of the watch, never a
+    // precondition for it, so a failure here must not fail the request.
+    crate::services::completion::complete_show_if_fully_watched_best_effort(
+        pool, user_id, media_id,
+    )
+    .await;
+
     Ok(BulkWatchResponse {
         media_id,
         candidate_count,
@@ -621,6 +637,15 @@ async fn mark_episode_watched(
     .fetch_one(&mut *tx)
     .await?;
     tx.commit().await?;
+
+    // Awarding the completed badge is a consequence of the watch, never a
+    // precondition for it, so a failure here must not fail the request.
+    crate::services::completion::complete_show_if_fully_watched_best_effort(
+        pool.get_ref(),
+        user_id,
+        media.id,
+    )
+    .await;
 
     Ok(HttpResponse::Created().json(serde_json::json!({
         "history_id": history_id,

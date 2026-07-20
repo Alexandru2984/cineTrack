@@ -589,6 +589,15 @@ async fn mark_episode_watched(
     .await?;
     tx.commit().await?;
 
+    // Awarding the completed badge is a consequence of the watch, never a
+    // precondition for it, so a failure here must not fail the request.
+    crate::services::completion::complete_show_if_fully_watched_best_effort(
+        pool.get_ref(),
+        user_id,
+        media_id,
+    )
+    .await;
+
     let status = if already_watched {
         actix_web::http::StatusCode::OK
     } else {
