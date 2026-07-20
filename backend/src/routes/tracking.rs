@@ -410,15 +410,20 @@ async fn record_completion_history(
         return Ok(());
     }
 
-    let missing_episodes = sqlx::query_scalar::<_, i64>(
-        r#"SELECT COUNT(*)
+    let (missing_episodes, catalog_episode_count) = sqlx::query_as::<_, (i64, i64)>(
+        r#"SELECT
+            COUNT(*) FILTER (
+                WHERE (e.air_date IS NULL OR e.air_date <= CURRENT_DATE)
+                AND NOT EXISTS (
+                    SELECT 1 FROM watch_history wh
+                    WHERE wh.user_id = $1 AND wh.media_id = $2 AND wh.episode_id = e.id
+                )
+            ),
+            COUNT(*)
         FROM episodes e
         JOIN seasons s ON e.season_id = s.id
         WHERE s.media_id = $2 AND s.season_number > 0
-        AND NOT EXISTS (
-            SELECT 1 FROM watch_history wh
-            WHERE wh.user_id = $1 AND wh.media_id = $2 AND wh.episode_id = e.id
-        )"#,
+        "#,
     )
     .bind(user_id)
     .bind(media_id)
@@ -433,7 +438,7 @@ async fn record_completion_history(
     .bind(media_id)
     .fetch_one(&mut **tx)
     .await?;
-    let fallback_rows = if missing_episodes == 0 && !has_title_history {
+    let fallback_rows = if catalog_episode_count == 0 && !has_title_history {
         1
     } else {
         0
@@ -446,6 +451,7 @@ async fn record_completion_history(
         FROM episodes e
         JOIN seasons s ON e.season_id = s.id
         WHERE s.media_id = $2 AND s.season_number > 0
+        AND (e.air_date IS NULL OR e.air_date <= CURRENT_DATE)
         AND NOT EXISTS (
             SELECT 1 FROM watch_history wh
             WHERE wh.user_id = $1 AND wh.media_id = $2 AND wh.episode_id = e.id

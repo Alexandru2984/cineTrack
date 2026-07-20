@@ -521,7 +521,26 @@ async fn mark_episode_watched(
     let mut tx = pool.begin().await?;
     lock_episode_state(&mut tx, user_id, episode_id).await?;
     quota::lock_tracking_writes(&mut tx, user_id).await?;
-    let media_id = ensure_tracked_episode(&mut tx, user_id, episode_id).await?;
+    let (media_id, is_available) = sqlx::query_as::<_, (Uuid, bool)>(
+        r#"SELECT seasons.media_id,
+            episodes.air_date IS NULL OR episodes.air_date <= CURRENT_DATE
+        FROM episodes
+        JOIN seasons ON seasons.id = episodes.season_id
+        JOIN media ON media.id = seasons.media_id AND media.media_type = 'tv'
+        JOIN user_media tracked
+          ON tracked.media_id = media.id AND tracked.user_id = $1
+        WHERE episodes.id = $2 AND tracked.status <> 'dropped'"#,
+    )
+    .bind(user_id)
+    .bind(episode_id)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(|| AppError::NotFound("Episode not found in your tracked shows".to_string()))?;
+    if !is_available {
+        return Err(AppError::BadRequest(
+            "Future episodes cannot be marked watched".to_string(),
+        ));
+    }
     let history_count = quota::lock_and_count_history(&mut tx, user_id).await?;
     let existing_history_id = sqlx::query_scalar::<_, Uuid>(
         r#"SELECT id FROM watch_history

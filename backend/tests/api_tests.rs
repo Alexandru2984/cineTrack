@@ -1842,7 +1842,7 @@ async fn test_completing_show_records_cached_episodes_idempotently() {
     .unwrap();
     let season_id = sqlx::query_scalar::<_, Uuid>(
         r#"INSERT INTO seasons (media_id, season_number, name, episode_count)
-        VALUES ($1, 1, 'Season 1', 2)
+        VALUES ($1, 1, 'Season 1', 4)
         RETURNING id"#,
     )
     .bind(media_id)
@@ -1850,8 +1850,13 @@ async fn test_completing_show_records_cached_episodes_idempotently() {
     .await
     .unwrap();
     sqlx::query(
-        r#"INSERT INTO episodes (season_id, episode_number, name, runtime_minutes)
-        VALUES ($1, 1, 'Episode 1', 42), ($1, 2, 'Episode 2', 44)"#,
+        r#"INSERT INTO episodes
+            (season_id, episode_number, name, runtime_minutes, air_date)
+        VALUES
+            ($1, 1, 'Unknown date', 42, NULL),
+            ($1, 2, 'Already aired', 44, CURRENT_DATE - 1),
+            ($1, 3, 'Airs today', 45, CURRENT_DATE),
+            ($1, 4, 'Future episode', 46, CURRENT_DATE + 1)"#,
     )
     .bind(season_id)
     .execute(&pool)
@@ -1884,7 +1889,22 @@ async fn test_completing_show_records_cached_episodes_idempotently() {
     .fetch_one(&pool)
     .await
     .unwrap();
-    assert_eq!(counts, (2, 0));
+    assert_eq!(counts, (3, 0));
+
+    let future_watches = sqlx::query_scalar::<_, i64>(
+        r#"SELECT COUNT(*)
+        FROM watch_history history
+        JOIN episodes ON episodes.id = history.episode_id
+        WHERE history.user_id = $1
+          AND history.media_id = $2
+          AND episodes.air_date > CURRENT_DATE"#,
+    )
+    .bind(user_id)
+    .bind(media_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(future_watches, 0);
 
     for status in ["watching", "completed"] {
         let req = actix_test::TestRequest::patch()
@@ -1905,7 +1925,7 @@ async fn test_completing_show_records_cached_episodes_idempotently() {
     .fetch_one(&pool)
     .await
     .unwrap();
-    assert_eq!(history_count, 2);
+    assert_eq!(history_count, 3);
 
     let uncached_media_id = sqlx::query_scalar::<_, Uuid>(
         r#"INSERT INTO media (tmdb_id, media_type, title, runtime_minutes)
@@ -4799,6 +4819,40 @@ async fn test_bulk_episode_watch_is_idempotent_bounded_and_updates_progress() {
         .unwrap(),
         vec![1, 2, 3]
     );
+
+    for uri in [
+        "/api/history/tv/991201/seasons/2/episodes/4/watched",
+        "/api/history/tv/991201/seasons/2/episodes/4/watched-through",
+    ] {
+        let req = actix_test::TestRequest::post()
+            .uri(uri)
+            .insert_header(("Authorization", format!("Bearer {token}")))
+            .peer_addr(peer_addr())
+            .to_request();
+        let resp = actix_test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 400, "{uri} must reject future episodes");
+    }
+
+    let req = actix_test::TestRequest::post()
+        .uri(&format!(
+            "/api/calendar/episodes/{}/watched",
+            season_two_episodes[3]
+        ))
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 400);
+
+    let future_watch_count = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM watch_history WHERE user_id = $1 AND episode_id = $2",
+    )
+    .bind(user_id)
+    .bind(season_two_episodes[3])
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(future_watch_count, 0);
 }
 
 #[actix_web::test]

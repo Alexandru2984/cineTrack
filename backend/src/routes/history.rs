@@ -508,23 +508,25 @@ async fn mark_episodes_watched_through(
     let media = load_tv_media_for_watch(pool.get_ref(), tmdb.get_ref(), user_id, tmdb_id).await?;
     cache_bulk_seasons(pool.get_ref(), tmdb.get_ref(), &media, season_number, true).await?;
 
-    let target_exists = sqlx::query_scalar::<_, bool>(
-        r#"SELECT EXISTS (
-            SELECT 1
-            FROM episodes
-            JOIN seasons ON seasons.id = episodes.season_id
-            WHERE seasons.media_id = $1
-              AND seasons.season_number = $2
-              AND episodes.episode_number = $3
-        )"#,
+    let target_air_date = sqlx::query_scalar::<_, Option<chrono::NaiveDate>>(
+        r#"SELECT episodes.air_date
+        FROM episodes
+        JOIN seasons ON seasons.id = episodes.season_id
+        WHERE seasons.media_id = $1
+          AND seasons.season_number = $2
+          AND episodes.episode_number = $3"#,
     )
     .bind(media.id)
     .bind(season_number)
     .bind(episode_number)
-    .fetch_one(pool.get_ref())
+    .fetch_optional(pool.get_ref())
     .await?;
-    if !target_exists {
-        return Err(AppError::NotFound("Episode not found".to_string()));
+    let target_air_date =
+        target_air_date.ok_or_else(|| AppError::NotFound("Episode not found".to_string()))?;
+    if target_air_date.is_some_and(|date| date > chrono::Utc::now().date_naive()) {
+        return Err(AppError::BadRequest(
+            "Future episodes cannot be marked watched".to_string(),
+        ));
     }
 
     let episode_ids = sqlx::query_scalar::<_, Uuid>(
@@ -543,6 +545,7 @@ async fn mark_episodes_watched_through(
                   )
               )
           )
+          AND (episodes.air_date IS NULL OR episodes.air_date <= CURRENT_DATE)
         ORDER BY seasons.season_number, episodes.episode_number"#,
     )
     .bind(media.id)
@@ -572,6 +575,14 @@ async fn mark_episode_watched(
         .into_iter()
         .find(|episode| episode.episode_number == episode_number)
         .ok_or_else(|| AppError::NotFound("Episode not found".to_string()))?;
+    if episode
+        .air_date
+        .is_some_and(|date| date > chrono::Utc::now().date_naive())
+    {
+        return Err(AppError::BadRequest(
+            "Future episodes cannot be marked watched".to_string(),
+        ));
+    }
 
     let mut tx = pool.begin().await?;
     ensure_tracking_for_watch(&mut tx, user_id, media.id).await?;
