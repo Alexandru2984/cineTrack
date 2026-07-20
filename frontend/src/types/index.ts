@@ -344,6 +344,7 @@ export interface ActivityItem {
   media_title: string;
   media_type: string;
   poster_path: string | null;
+  episode_id: string | null;
   episode_name: string | null;
   season_number: number | null;
   episode_number: number | null;

@@ -102,6 +102,7 @@ pub struct ActivityItem {
     pub media_title: String,
     pub media_type: String,
     pub poster_path: Option<String>,
+    pub episode_id: Option<uuid::Uuid>,
     pub episode_name: Option<String>,
     pub season_number: Option<i32>,
     pub episode_number: Option<i32>,

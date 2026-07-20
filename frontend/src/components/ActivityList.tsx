@@ -96,7 +96,18 @@ export function ActivityList({
               </Link>
               {episode && (
                 <p className="mt-0.5 truncate text-sm text-[hsl(var(--muted-foreground))]">
-                  {episode}
+                  {/* Older rows predate the episode link, and a title watch has
+                      no episode at all, so fall back to plain text. */}
+                  {item.episode_id ? (
+                    <Link
+                      to={`/episodes/${item.episode_id}`}
+                      className="hover:text-[hsl(var(--foreground))] hover:underline"
+                    >
+                      {episode}
+                    </Link>
+                  ) : (
+                    episode
+                  )}
                 </p>
               )}
               <p className="mt-1 flex flex-wrap items-center gap-x-2 text-xs text-[hsl(var(--muted-foreground))]">

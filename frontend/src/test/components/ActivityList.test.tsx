@@ -14,6 +14,7 @@ const episodeActivity: ActivityItem = {
   media_title: 'Followed Show',
   media_type: 'tv',
   poster_path: null,
+  episode_id: '9f73ec5d-27bc-44a0-ae8f-8c43384eff3a',
   episode_name: 'The Reveal',
   season_number: 2,
   episode_number: 3,
@@ -60,5 +61,31 @@ describe('ActivityList', () => {
       </MemoryRouter>,
     );
     expect(screen.getByRole('alert')).toHaveTextContent('Activity could not be loaded');
+  });
+
+  it('links the episode line to the episode page', () => {
+    render(
+      <MemoryRouter>
+        <ActivityList items={[episodeActivity]} />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole('link', { name: /S2 E3/ })).toHaveAttribute(
+      'href',
+      '/episodes/9f73ec5d-27bc-44a0-ae8f-8c43384eff3a',
+    );
+  });
+
+  it('renders the episode line as plain text when there is no episode id', () => {
+    // Title-level watches carry no episode, and rows written before the feed
+    // exposed the id still arrive without one.
+    render(
+      <MemoryRouter>
+        <ActivityList items={[{ ...episodeActivity, episode_id: null }]} />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText(/S2 E3/)).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /S2 E3/ })).toBeNull();
   });
 });

@@ -24,6 +24,7 @@ struct ActivityRow {
     media_title: String,
     media_type: String,
     poster_path: Option<String>,
+    episode_id: Option<Uuid>,
     episode_name: Option<String>,
     season_number: Option<i32>,
     episode_number: Option<i32>,
@@ -67,6 +68,7 @@ impl From<ActivityRow> for ActivityItem {
             media_title: row.media_title,
             media_type: row.media_type,
             poster_path: row.poster_path,
+            episode_id: row.episode_id,
             episode_name: row.episode_name,
             season_number: row.season_number,
             episode_number: row.episode_number,
@@ -720,7 +722,7 @@ async fn get_user_activity(
     let activities = sqlx::query_as::<_, ActivityRow>(
         r#"SELECT wh.id, wh.user_id, u.username, u.avatar_url, m.tmdb_id,
             m.title AS media_title, m.media_type, m.poster_path,
-            e.name AS episode_name, s.season_number, e.episode_number,
+            wh.episode_id, e.name AS episode_name, s.season_number, e.episode_number,
             wh.watched_at AS timestamp
         FROM watch_history wh
         JOIN users u ON wh.user_id = u.id
@@ -766,7 +768,7 @@ async fn my_activity_feed(
         )
         SELECT recent.id, recent.user_id, u.username, u.avatar_url, m.tmdb_id,
             m.title AS media_title, m.media_type, m.poster_path,
-            e.name AS episode_name, s.season_number, e.episode_number,
+            recent.episode_id, e.name AS episode_name, s.season_number, e.episode_number,
             recent.watched_at AS timestamp
         FROM visible_users visible
         CROSS JOIN LATERAL (
