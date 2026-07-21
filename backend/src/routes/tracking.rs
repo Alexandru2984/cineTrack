@@ -6,6 +6,7 @@ use uuid::Uuid;
 use validator::Validate;
 
 use crate::dto::tracking::*;
+use crate::available_through;
 use crate::errors::AppError;
 use crate::middleware::auth::require_auth;
 use crate::services::quota;
@@ -410,10 +411,12 @@ async fn record_completion_history(
         return Ok(());
     }
 
-    let (missing_episodes, catalog_episode_count) = sqlx::query_as::<_, (i64, i64)>(
+    let (missing_episodes, catalog_episode_count) = sqlx::query_as::<_, (i64, i64)>(concat!(
         r#"SELECT
             COUNT(*) FILTER (
-                WHERE (e.air_date IS NULL OR e.air_date <= CURRENT_DATE)
+                WHERE (e.air_date IS NULL OR e.air_date <= "#,
+        available_through!(),
+        r#")
                 AND NOT EXISTS (
                     SELECT 1 FROM watch_history wh
                     WHERE wh.user_id = $1 AND wh.media_id = $2 AND wh.episode_id = e.id
@@ -424,7 +427,7 @@ async fn record_completion_history(
         JOIN seasons s ON e.season_id = s.id
         WHERE s.media_id = $2 AND s.season_number > 0
         "#,
-    )
+    ))
     .bind(user_id)
     .bind(media_id)
     .fetch_one(&mut **tx)
@@ -445,18 +448,20 @@ async fn record_completion_history(
     };
     quota::ensure_history_capacity(history_count, missing_episodes + fallback_rows)?;
 
-    let inserted = sqlx::query(
+    let inserted = sqlx::query(concat!(
         r#"INSERT INTO watch_history (user_id, media_id, episode_id, watched_at)
         SELECT $1, $2, e.id, NOW()
         FROM episodes e
         JOIN seasons s ON e.season_id = s.id
         WHERE s.media_id = $2 AND s.season_number > 0
-        AND (e.air_date IS NULL OR e.air_date <= CURRENT_DATE)
+        AND (e.air_date IS NULL OR e.air_date <= "#,
+        available_through!(),
+        r#")
         AND NOT EXISTS (
             SELECT 1 FROM watch_history wh
             WHERE wh.user_id = $1 AND wh.media_id = $2 AND wh.episode_id = e.id
         )"#,
-    )
+    ))
     .bind(user_id)
     .bind(media_id)
     .execute(&mut **tx)

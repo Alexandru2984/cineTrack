@@ -4,6 +4,7 @@ use sqlx::{PgPool, Postgres, Transaction};
 use uuid::Uuid;
 
 use crate::dto::calendar::*;
+use crate::available_through;
 use crate::errors::AppError;
 use crate::middleware::auth::require_auth;
 use crate::services::quota;
@@ -538,16 +539,18 @@ async fn mark_episode_watched(
     let mut tx = pool.begin().await?;
     lock_episode_state(&mut tx, user_id, episode_id).await?;
     quota::lock_tracking_writes(&mut tx, user_id).await?;
-    let (media_id, is_available) = sqlx::query_as::<_, (Uuid, bool)>(
+    let (media_id, is_available) = sqlx::query_as::<_, (Uuid, bool)>(concat!(
         r#"SELECT seasons.media_id,
-            episodes.air_date IS NULL OR episodes.air_date <= CURRENT_DATE
+            episodes.air_date IS NULL OR episodes.air_date <= "#,
+        available_through!(),
+        r#"
         FROM episodes
         JOIN seasons ON seasons.id = episodes.season_id
         JOIN media ON media.id = seasons.media_id AND media.media_type = 'tv'
         JOIN user_media tracked
           ON tracked.media_id = media.id AND tracked.user_id = $1
         WHERE episodes.id = $2 AND tracked.status <> 'dropped'"#,
-    )
+    ))
     .bind(user_id)
     .bind(episode_id)
     .fetch_optional(&mut *tx)

@@ -20,6 +20,7 @@ export function SegmentedControl<T extends string>({
     <ScrollView
       horizontal
       showsHorizontalScrollIndicator={false}
+      style={styles.track}
       contentContainerStyle={styles.row}
     >
       {options.map((option) => {
@@ -55,6 +56,14 @@ export function SegmentedControl<T extends string>({
 }
 
 const styles = StyleSheet.create({
+  track: {
+    // A horizontal ScrollView ships with flexGrow: 1, so inside a column layout
+    // it swallows whatever vertical space is left over and the tabs stretch to
+    // fill it. That only shows on screens short enough to leave slack, which is
+    // why the control looks correct on a full feed and wrong the moment you
+    // switch to a tab with an empty state.
+    flexGrow: 0,
+  },
   row: {
     gap: spacing.sm,
   },
