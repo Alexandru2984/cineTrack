@@ -28,6 +28,22 @@ groups:
           summary: CineTrack database backup is stale
           description: No successful CineTrack database backup has completed in the last 26 hours.
 
+      # The run itself still succeeds when only the off-site copy fails, since
+      # R2 holds a verified archive — so nothing else here would fire. Without
+      # this rule the mirror could stop for weeks and only a log nobody reads
+      # would say so.
+      - alert: CineTrackBackupOffsiteMirrorFailing
+        expr: cinetrack_backup_offsite_wanted == 1 and cinetrack_backup_offsite_mirrored == 0
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: CineTrack off-site backup mirror is failing
+          description: >-
+            Backups reach R2 but no longer reach the off-site remote, so every
+            copy now depends on one provider. Check rclone credentials and that
+            BACKUP_GDRIVE_REMOTE is still reachable.
+
       - alert: CineTrackBackupUnencrypted
         expr: cinetrack_backup_encrypted == 0
         for: 15m

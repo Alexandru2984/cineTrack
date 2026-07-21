@@ -40,6 +40,11 @@ SUCCESS=0
 SIZE_BYTES=0
 ENCRYPTED=0
 DEDICATED_CREDENTIALS=0
+# 0 when an off-site copy was wanted but did not happen. Reported as its own
+# metric because a mirror that quietly stops is worth an alert: R2 still holds
+# the backup, so nothing else in this run would look wrong.
+OFFSITE_MIRRORED=0
+OFFSITE_WANTED=0
 TMP_DIR=""
 
 write_metrics() {
@@ -76,6 +81,12 @@ write_metrics() {
     printf '# HELP cinetrack_backup_dedicated_credentials Whether dedicated R2 credentials were used.\n'
     printf '# TYPE cinetrack_backup_dedicated_credentials gauge\n'
     printf 'cinetrack_backup_dedicated_credentials %s\n' "$DEDICATED_CREDENTIALS"
+    printf '# HELP cinetrack_backup_offsite_wanted Whether an off-site mirror is configured.\n'
+    printf '# TYPE cinetrack_backup_offsite_wanted gauge\n'
+    printf 'cinetrack_backup_offsite_wanted %s\n' "$OFFSITE_WANTED"
+    printf '# HELP cinetrack_backup_offsite_mirrored Whether the archive reached the off-site remote.\n'
+    printf '# TYPE cinetrack_backup_offsite_mirrored gauge\n'
+    printf 'cinetrack_backup_offsite_mirrored %s\n' "$OFFSITE_MIRRORED"
   } > "$tmp"
   chmod 0644 "$tmp"
   mv -f "$tmp" "$METRICS_FILE"
@@ -246,6 +257,33 @@ for page in paginator.paginate(Bucket=bucket, Prefix=os.environ["BACKUP_PREFIX"]
             deleted += 1
 print(f"  pruned {deleted} expired backup object(s)")
 PY
+
+# Off-site copy to a second provider, so losing the Cloudflare account does not
+# lose every backup with it. Deliberately the plain remote and not an rclone
+# crypt one: the archive is already age-encrypted, and wrapping it again would
+# make recovery need both the age key and the rclone passphrase — two secrets
+# living on this same host. One is enough, and one is easier to keep safe.
+#
+# A failure here does not fail the run, because R2 already holds a verified
+# copy. It does show up in the metrics, which is what the alert watches.
+if [[ -n "${BACKUP_GDRIVE_REMOTE:-}" ]]; then
+  OFFSITE_WANTED=1
+  if ! command -v rclone >/dev/null; then
+    echo "[$(date -u +%FT%TZ)] warning: BACKUP_GDRIVE_REMOTE set but rclone is missing; no off-site copy." >&2
+  elif rclone copyto "$UPLOAD_FILE" "${BACKUP_GDRIVE_REMOTE}/$(basename "$KEY")" 2>&1 \
+    && rclone lsf "${BACKUP_GDRIVE_REMOTE}/$(basename "$KEY")" >/dev/null 2>&1; then
+    OFFSITE_MIRRORED=1
+    echo "  mirrored off-site to ${BACKUP_GDRIVE_REMOTE}"
+    # Same retention as R2. Restricted to our own filenames so a shared folder
+    # never has unrelated files pruned out from under it.
+    rclone delete "$BACKUP_GDRIVE_REMOTE" --min-age "${RETENTION_DAYS}d" \
+      --include "${POSTGRES_DB}_*.dump*" 2>/dev/null \
+      && echo "  applied ${RETENTION_DAYS}-day retention off-site" \
+      || echo "[$(date -u +%FT%TZ)] warning: off-site retention pass failed." >&2
+  else
+    echo "[$(date -u +%FT%TZ)] warning: off-site copy to ${BACKUP_GDRIVE_REMOTE} failed." >&2
+  fi
+fi
 
 SUCCESS=1
 printf '%s\n' "$(date +%s)" > "$LAST_SUCCESS_FILE"
