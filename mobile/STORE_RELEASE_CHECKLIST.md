@@ -43,6 +43,12 @@ fingerprint alone will not verify Android App Links on store builds.
   Row counts matched production except 200 `media` rows added by the daily catalog
   hydration after the backup ran; no row existed in the restore that production
   lacked. Re-run after any change to the dump format or the age recipient.
+  Every stored backup is now an encrypted custom-format `.dump.age`. The legacy
+  plain-SQL `.sql.gz` snapshots were converted and the plaintext originals
+  deleted on 2026-07-21; `restore_from_r2.sh` never accepted that older format,
+  so anything still named `.sql.gz` would only restore by hand via `zcat | psql`.
+  A converted snapshot was restored as part of the same drill to prove the
+  conversion kept its data.
 - SMTP/Resend delivery is verified for verification, reset, and security-event emails.
 - No `.env`, credentials, signing keys, tokens, database dumps, or generated native projects are tracked by Git.
 
