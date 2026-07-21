@@ -44,10 +44,32 @@ is deletable in-app.
 
 ## Permissions
 
-Only `android.permission.INTERNET` is active. Six others that Expo modules
-declare by default are explicitly removed via `blockedPermissions` and appear in
-the built manifest with `tools:node="remove"` (verified: 6 removed). There is no
-storage, location, biometric, camera or overlay permission in the shipped app.
+Verified by inspecting the actual release APK (`aapt2 dump badging`), not the
+`app.json` source — the shipped app merges permissions from its libraries, so
+the source list understates it.
+
+**No sensitive permission is present:** no location, contacts, camera,
+microphone, SMS, call log, calendar, or broad storage. That is the part Play's
+Data Safety review cares about, and it is clean.
+
+What does ship, and why:
+
+| Permission(s) | Source | Runtime prompt? |
+| --- | --- | --- |
+| `INTERNET`, `ACCESS_NETWORK_STATE`, `ACCESS_WIFI_STATE` | networking / offline detection | No |
+| `POST_NOTIFICATIONS`, `RECEIVE_BOOT_COMPLETED`, `WAKE_LOCK`, `c2dm.RECEIVE` | push notifications (opt-in) | `POST_NOTIFICATIONS` only |
+| `READ_MEDIA_IMAGES` (maxSdkVersion 33) | avatar image picking on Android ≤13 | Yes, on older Android |
+| `DETECT_SCREEN_CAPTURE` | the recovery-code screen guard | No |
+| `BIND_GET_INSTALL_REFERRER_SERVICE` | Play install attribution | No |
+| Launcher badge permissions (Samsung, HTC, Sony, Oppo, Huawei, …) | notification badge count | No |
+
+The two runtime-prompt permissions are `POST_NOTIFICATIONS` (only if the user
+turns on release notifications) and `READ_MEDIA_IMAGES` (only when picking an
+avatar, and only on Android 13 and below). Both are user-initiated and optional.
+
+Six permissions that Expo modules would otherwise declare — storage read/write,
+system-alert-window, vibrate, biometric, fingerprint — are removed via
+`blockedPermissions` and confirmed absent from the APK.
 
 ## Account deletion — Play's dedicated requirement
 
