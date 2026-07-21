@@ -18,7 +18,24 @@ import {
 } from '@/hooks/useCalendar';
 import { getApiErrorMessage } from '@/lib/api';
 import { formatRuntime, getPosterUrl } from '@/lib/utils';
-import type { CalendarEpisode } from '@/types';
+import type { CalendarEpisode, UpNextEpisode } from '@/types';
+
+/** A show untouched for this long is something you dropped mid-run, not
+ *  something you are watching. Both are worth surfacing, but not in one list. */
+const RESUME_AFTER_DAYS = 30;
+
+function isDormant(item: UpNextEpisode): boolean {
+  const elapsed = Date.now() - new Date(item.last_watched_at).getTime();
+  return elapsed > RESUME_AFTER_DAYS * 24 * 60 * 60 * 1000;
+}
+
+function lastWatchedLabel(value: string): string {
+  const days = Math.floor((Date.now() - new Date(value).getTime()) / 86_400_000);
+  if (days < 60) return `${days} days ago`;
+  if (days < 365) return `${Math.round(days / 30)} months ago`;
+  const years = Math.floor(days / 365);
+  return years === 1 ? 'a year ago' : `${years} years ago`;
+}
 
 function episodeCode(item: CalendarEpisode): string {
   return `S${String(item.season_number).padStart(2, '0')}E${String(item.episode_number).padStart(2, '0')}`;
@@ -38,6 +55,13 @@ export function UpNextEpisodes() {
   const markWatched = useMarkCalendarEpisodeWatched();
   const items = upNext.data?.items ?? [];
   const actionError = setPlanned.error ?? markWatched.error;
+  // Headings only earn their space when there is something to tell apart; with
+  // a single group the list speaks for itself.
+  const groups = [
+    { key: 'continuing', title: 'Continue watching', items: items.filter((item) => !isDormant(item)) },
+    { key: 'dormant', title: 'Pick back up', items: items.filter(isDormant) },
+  ].filter((group) => group.items.length > 0);
+  const showHeadings = groups.length > 1;
 
   return (
     <section aria-labelledby="up-next-heading" aria-busy={upNext.isLoading}>
@@ -100,25 +124,37 @@ export function UpNextEpisodes() {
           </div>
         </div>
       ) : (
-        <div className="divide-y divide-[hsl(var(--border))] border-y border-[hsl(var(--border))]">
-          {items.map((item) => (
-            <UpNextRow
-              key={item.episode_id}
-              item={item}
-              planPending={
-                setPlanned.isPending && setPlanned.variables?.episodeId === item.episode_id
-              }
-              watchedPending={
-                markWatched.isPending && markWatched.variables === item.episode_id
-              }
-              onPlan={() =>
-                setPlanned.mutate({
-                  episodeId: item.episode_id,
-                  planned: !item.is_planned,
-                })
-              }
-              onWatched={() => markWatched.mutate(item.episode_id)}
-            />
+        <div className="space-y-5">
+          {groups.map((group) => (
+            <div key={group.key}>
+              {showHeadings && (
+                <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-[hsl(var(--muted-foreground))]">
+                  {group.title}
+                </h3>
+              )}
+              <div className="divide-y divide-[hsl(var(--border))] border-y border-[hsl(var(--border))]">
+                {group.items.map((item) => (
+                  <UpNextRow
+                    key={item.episode_id}
+                    item={item}
+                    showLastWatched={group.key === 'dormant'}
+                    planPending={
+                      setPlanned.isPending && setPlanned.variables?.episodeId === item.episode_id
+                    }
+                    watchedPending={
+                      markWatched.isPending && markWatched.variables === item.episode_id
+                    }
+                    onPlan={() =>
+                      setPlanned.mutate({
+                        episodeId: item.episode_id,
+                        planned: !item.is_planned,
+                      })
+                    }
+                    onWatched={() => markWatched.mutate(item.episode_id)}
+                  />
+                ))}
+              </div>
+            </div>
           ))}
         </div>
       )}
@@ -128,12 +164,14 @@ export function UpNextEpisodes() {
 
 function UpNextRow({
   item,
+  showLastWatched,
   planPending,
   watchedPending,
   onPlan,
   onWatched,
 }: {
-  item: CalendarEpisode;
+  item: UpNextEpisode;
+  showLastWatched: boolean;
   planPending: boolean;
   watchedPending: boolean;
   onPlan: () => void;
@@ -177,6 +215,7 @@ function UpNextRow({
         <p className="mt-1 flex gap-2 text-[11px] text-[hsl(var(--muted-foreground))]">
           <span>{airDateLabel(item.air_date)}</span>
           {item.runtime_minutes != null && <span>{formatRuntime(item.runtime_minutes)}</span>}
+          {showLastWatched && <span>Watched {lastWatchedLabel(item.last_watched_at)}</span>}
         </p>
       </div>
       <div className="col-start-2 row-start-2 flex items-center gap-1 sm:col-start-3 sm:row-start-1">

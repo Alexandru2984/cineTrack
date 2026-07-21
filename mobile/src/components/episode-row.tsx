@@ -16,12 +16,16 @@ import type { CalendarEpisode } from '@/types';
 
 export function EpisodeRow({
   item,
+  note,
   onPlan,
   onWatched,
   planPending = false,
   watchedPending = false,
 }: {
   item: CalendarEpisode;
+  /** Extra context appended to the caption line, such as how long ago the show
+   *  was last watched. */
+  note?: string;
   onPlan: () => void;
   onWatched: () => void;
   planPending?: boolean;
@@ -55,6 +59,7 @@ export function EpisodeRow({
           <AppText variant="caption" muted numberOfLines={1}>
             {formatDate(item.air_date)}
             {runtime ? ` · ${runtime}` : ''}
+            {note ? ` · ${note}` : ''}
           </AppText>
         </View>
       </Pressable>

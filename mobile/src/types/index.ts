@@ -318,8 +318,14 @@ export interface CalendarEpisodePage {
   next_cursor: EpisodeCursor | null;
 }
 
+export interface UpNextEpisode extends CalendarEpisode {
+  /** When the user last watched anything from this show. Up next only returns
+   *  shows they have started, so this is always present. */
+  last_watched_at: string;
+}
+
 export interface UpNextResponse {
-  items: CalendarEpisode[];
+  items: UpNextEpisode[];
 }
 
 export type UpcomingItemKind = 'episode' | 'movie';

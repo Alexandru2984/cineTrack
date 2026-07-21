@@ -105,18 +105,33 @@ async fn up_next_episodes(
 ) -> Result<HttpResponse, AppError> {
     let user_id = require_auth(&req).await?;
     let params = query.resolve()?;
-    let items = sqlx::query_as::<_, CalendarEpisode>(
-        r#"WITH next_ids AS (
+    let items = sqlx::query_as::<_, UpNextEpisode>(
+        // Up next is about the user's own progress, so it is ordered by when
+        // they last watched the show and restricted to shows they have actually
+        // started. Ordering by air_date instead — which this did — turns the
+        // screen into a broadcast schedule: a show last touched three years ago
+        // outranks one watched this morning, because all that is compared is
+        // when the episode aired.
+        r#"WITH progress AS (
+            SELECT media_id, MAX(watched_at) AS last_watched_at
+            FROM watch_history
+            WHERE user_id = $1
+            GROUP BY media_id
+        ),
+        next_ids AS (
             SELECT DISTINCT ON (tracked.media_id)
                 tracked.media_id,
                 episodes.id AS episode_id,
                 seasons.season_number,
                 episodes.episode_number,
-                episodes.air_date
+                episodes.air_date,
+                progress.last_watched_at
             FROM user_media tracked
             JOIN media
               ON media.id = tracked.media_id
              AND media.media_type = 'tv'
+            -- Inner join, so a tracked show with nothing watched never appears.
+            JOIN progress ON progress.media_id = tracked.media_id
             JOIN seasons ON seasons.media_id = media.id
             JOIN episodes ON episodes.season_id = seasons.id
             WHERE tracked.user_id = $1
@@ -141,6 +156,7 @@ async fn up_next_episodes(
                 next_ids.season_number,
                 next_ids.episode_number,
                 next_ids.air_date,
+                next_ids.last_watched_at,
                 plans.episode_id IS NOT NULL AS is_planned
             FROM next_ids
             LEFT JOIN episode_plans plans
@@ -148,7 +164,7 @@ async fn up_next_episodes(
              AND plans.episode_id = next_ids.episode_id
             ORDER BY
                 plans.episode_id IS NOT NULL DESC,
-                next_ids.air_date DESC,
+                next_ids.last_watched_at DESC,
                 next_ids.episode_id DESC
             LIMIT $4
         )
@@ -165,13 +181,14 @@ async fn up_next_episodes(
             episodes.runtime_minutes,
             selected.air_date,
             episodes.still_path,
-            selected.is_planned
+            selected.is_planned,
+            selected.last_watched_at
         FROM selected
         JOIN media ON media.id = selected.media_id
         JOIN episodes ON episodes.id = selected.episode_id
         ORDER BY
             selected.is_planned DESC,
-            selected.air_date DESC,
+            selected.last_watched_at DESC,
             selected.episode_id DESC"#,
     )
     .bind(user_id)

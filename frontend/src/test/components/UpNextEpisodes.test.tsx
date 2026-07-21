@@ -42,11 +42,23 @@ const episode = {
   air_date: '2026-07-16',
   still_path: '/still.jpg',
   is_planned: true,
+  last_watched_at: '2026-07-15T20:00:00.000Z',
+};
+
+const dormantEpisode = {
+  ...episode,
+  episode_id: 'episode-two',
+  media_id: 'media-two',
+  title: 'Abandoned Show',
+  episode_name: 'Where You Stopped',
+  is_planned: false,
+  last_watched_at: '2023-07-16T20:00:00.000Z',
 };
 
 describe('Up Next episodes', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.setSystemTime(new Date('2026-07-16T12:00:00.000Z'));
     mocks.useUpNextEpisodes.mockReturnValue({
       data: { items: [episode] },
       isLoading: false,
@@ -80,6 +92,30 @@ describe('Up Next episodes', () => {
       }),
     );
     expect(mocks.markWatched).toHaveBeenCalledWith('episode-one');
+  });
+
+  it('keeps a single list unlabelled when every show is equally current', () => {
+    render(<MemoryRouter><UpNextEpisodes /></MemoryRouter>);
+
+    expect(screen.queryByRole('heading', { name: 'Continue watching' })).toBeNull();
+    expect(screen.queryByRole('heading', { name: 'Pick back up' })).toBeNull();
+  });
+
+  it('separates a long-abandoned show and says how long it has been', () => {
+    mocks.useUpNextEpisodes.mockReturnValue({
+      data: { items: [episode, dormantEpisode] },
+      isLoading: false,
+      isError: false,
+      refetch: mocks.refetch,
+    });
+
+    render(<MemoryRouter><UpNextEpisodes /></MemoryRouter>);
+
+    expect(screen.getByRole('heading', { name: 'Continue watching' })).toBeVisible();
+    expect(screen.getByRole('heading', { name: 'Pick back up' })).toBeVisible();
+    expect(screen.getByText('Watched 3 years ago')).toBeVisible();
+    // The current show carries no such note; only the dormant group explains itself.
+    expect(screen.queryByText('Watched a day ago')).toBeNull();
   });
 
   it('offers recovery when the preview request fails', async () => {

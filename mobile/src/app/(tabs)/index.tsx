@@ -26,6 +26,7 @@ import { useNotificationSummary } from '@/hooks/use-notifications';
 import { useMyStats } from '@/hooks/use-stats';
 import { useTheme } from '@/hooks/use-theme';
 import { getErrorMessage } from '@/lib/http';
+import { groupUpNext, lastWatchedLabel } from '@/lib/up-next';
 import { useAuthStore } from '@/store/auth';
 
 export default function HomeScreen() {
@@ -45,6 +46,10 @@ export default function HomeScreen() {
   const recommendations = useMemo(
     () => discovery.data?.recommendations.slice(0, 12) ?? [],
     [discovery.data],
+  );
+  const upNextGroups = useMemo(
+    () => groupUpNext(upNext.data?.items ?? []),
+    [upNext.data],
   );
 
   const refresh = () => {
@@ -120,24 +125,38 @@ export default function HomeScreen() {
               message={getErrorMessage(upNext.error, 'Your queue could not be loaded')}
               onRetry={() => void upNext.refetch()}
             />
-          ) : upNext.data?.items.length ? (
-            <View style={[styles.list, { borderTopColor: theme.border }]}>
-              {upNext.data.items.map((item) => (
-                <EpisodeRow
-                  key={item.episode_id}
-                  item={item}
-                  onPlan={() =>
-                    plan.mutate({
-                      episodeId: item.episode_id,
-                      planned: !item.is_planned,
-                    })
-                  }
-                  onWatched={() => watched.mutate(item.episode_id)}
-                  planPending={plan.isPending && plan.variables?.episodeId === item.episode_id}
-                  watchedPending={watched.isPending && watched.variables === item.episode_id}
-                />
-              ))}
-            </View>
+          ) : upNextGroups.length ? (
+            upNextGroups.map((group) => (
+              <View key={group.key} style={styles.upNextGroup}>
+                {upNextGroups.length > 1 ? (
+                  <AppText variant="caption" muted>
+                    {group.title.toUpperCase()}
+                  </AppText>
+                ) : null}
+                <View style={[styles.list, { borderTopColor: theme.border }]}>
+                  {group.items.map((item) => (
+                    <EpisodeRow
+                      key={item.episode_id}
+                      item={item}
+                      note={
+                        group.key === 'dormant'
+                          ? `watched ${lastWatchedLabel(item.last_watched_at)}`
+                          : undefined
+                      }
+                      onPlan={() =>
+                        plan.mutate({
+                          episodeId: item.episode_id,
+                          planned: !item.is_planned,
+                        })
+                      }
+                      onWatched={() => watched.mutate(item.episode_id)}
+                      planPending={plan.isPending && plan.variables?.episodeId === item.episode_id}
+                      watchedPending={watched.isPending && watched.variables === item.episode_id}
+                    />
+                  ))}
+                </View>
+              </View>
+            ))
           ) : (
             <EmptyState
               icon={Search}
@@ -254,6 +273,9 @@ const styles = StyleSheet.create({
   },
   section: {
     gap: spacing.md,
+  },
+  upNextGroup: {
+    gap: spacing.xs,
   },
   list: {
     borderTopWidth: StyleSheet.hairlineWidth,

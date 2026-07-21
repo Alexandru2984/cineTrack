@@ -182,9 +182,33 @@ pub struct CalendarEpisodePage {
     pub next_cursor: Option<EpisodeCursor>,
 }
 
+/// A calendar episode plus the progress that put it in the queue. Separate from
+/// `CalendarEpisode` because `last_watched_at` is only meaningful here: the
+/// other calendar endpoints list episodes regardless of whether the show was
+/// ever started, so there would be nothing honest to put in the field.
+#[derive(Debug, Serialize, sqlx::FromRow)]
+pub struct UpNextEpisode {
+    pub episode_id: Uuid,
+    pub media_id: Uuid,
+    pub tmdb_id: i32,
+    pub title: String,
+    pub poster_path: Option<String>,
+    pub season_number: i32,
+    pub episode_number: i32,
+    pub episode_name: Option<String>,
+    pub overview: Option<String>,
+    pub runtime_minutes: Option<i32>,
+    pub air_date: NaiveDate,
+    pub still_path: Option<String>,
+    pub is_planned: bool,
+    /// When the user last watched anything from this show. Never null — the
+    /// query only returns shows with at least one watched episode.
+    pub last_watched_at: DateTime<Utc>,
+}
+
 #[derive(Debug, Serialize)]
 pub struct UpNextResponse {
-    pub items: Vec<CalendarEpisode>,
+    pub items: Vec<UpNextEpisode>,
 }
 
 #[derive(Debug, Serialize, sqlx::FromRow)]
