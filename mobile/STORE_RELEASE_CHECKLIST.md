@@ -3,6 +3,28 @@
 Nothing in this checklist authorizes a Git push, deployment, EAS build, store
 submission, or credential change. Run those steps only from a reviewed commit.
 
+## The artifact — read this first
+
+The local `assembleRelease` build proves the app **compiles** and produced a
+113 MB APK. That APK is **not** a store artifact, for two reasons:
+
+1. **It is debug-signed** (`CN=Android Debug`). Play rejects debug-signed
+   uploads. The release build must be signed with an upload key.
+2. **Play wants an AAB, not an APK.** New apps upload an Android App Bundle
+   (`bundleRelease` → `.aab`), and Play generates per-device APKs from it. An
+   APK cannot be uploaded as a new app.
+
+The intended path is **EAS Build** (`eas build --platform android --profile
+production`), which produces a signed `.aab` using credentials EAS manages —
+you never handle the keystore. That step needs the Expo account and, for
+submission, the Play account. Building locally is only a compile check; do not
+try to ship the local artifact.
+
+Once EAS has built and Play has ingested the first release, note the **app
+signing** SHA-256 fingerprint from Play Console (Play re-signs with its own key)
+and add it to `frontend/public/.well-known/assetlinks.json` — the upload-key
+fingerprint alone will not verify Android App Links on store builds.
+
 ## Repository gates
 
 - The Git worktree contains only the intended release commit.
