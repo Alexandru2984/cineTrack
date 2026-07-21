@@ -39,6 +39,10 @@ fingerprint alone will not verify Android App Links on store builds.
 - `TOTP_ENCRYPTION_KEY` is a persistent random 32-byte key stored off-host; losing it disables existing 2FA setups.
 - Database backups use a dedicated R2 bucket/token and `BACKUP_AGE_RECIPIENT`.
 - A restore drill into a disposable database has passed and the Prometheus backup alerts are loaded.
+  Last drill: 2026-07-21, `cinetrack_20260721_033001.dump.age` into `cinetrack_restore_drill`.
+  Row counts matched production except 200 `media` rows added by the daily catalog
+  hydration after the backup ran; no row existed in the restore that production
+  lacked. Re-run after any change to the dump format or the age recipient.
 - SMTP/Resend delivery is verified for verification, reset, and security-event emails.
 - No `.env`, credentials, signing keys, tokens, database dumps, or generated native projects are tracked by Git.
 
