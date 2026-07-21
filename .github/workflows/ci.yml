@@ -22,6 +22,7 @@ concurrency:
 jobs:
   backend:
     name: Backend
+    timeout-minutes: 20
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -68,6 +69,7 @@ jobs:
 
   integration:
     name: Backend Integration
+    timeout-minutes: 25
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -109,6 +111,7 @@ jobs:
 
   frontend:
     name: Frontend
+    timeout-minutes: 15
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -143,6 +146,7 @@ jobs:
 
   mobile:
     name: Mobile
+    timeout-minutes: 45
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -251,10 +255,19 @@ jobs:
       - name: Compile Android release
         if: steps.native.outputs.needed == 'true'
         working-directory: mobile/android
-        run: ./gradlew :app:assembleRelease --no-daemon --stacktrace
+        # 30 minutes is generous for this build; a run that exceeds it is stuck,
+        # not slow, and should say so rather than sit until GitHub's 6h default.
+        timeout-minutes: 30
+        env:
+          # A hosted runner does not have the memory for parallel Gradle workers
+          # alongside React Native's NDK compilation. Serialising keeps the peak
+          # down, which is the most likely reason this step hung.
+          GRADLE_OPTS: -Dorg.gradle.jvmargs=-Xmx4g -Dorg.gradle.workers.max=2
+        run: ./gradlew :app:assembleRelease --no-daemon --no-parallel --stacktrace
 
   operations:
     name: Operations
+    timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
