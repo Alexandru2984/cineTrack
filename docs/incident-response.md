@@ -117,5 +117,18 @@ Plain and specific. No "we take security seriously."
 - Note the timeline in `SECURITY_AUDIT.md` while it is fresh.
 - If detection was slow, add the alert that would have caught it — that is what
   `ops/prometheus/cinetrack-alerts.yml` is for.
+
+  > **A new rule needs the container recreated, not just reloaded.** That file is
+  > bind-mounted as a single file, so the mount follows the inode it had at start.
+  > Most editors write a replacement and rename it, which leaves the container
+  > reading the old content — `SIGHUP` then reloads, logs success, and changes
+  > nothing. After editing, run
+  > `docker compose -f docker-compose.monitoring.yml --env-file .env.prod up -d --force-recreate prometheus`
+  > and confirm with
+  > `docker exec cinetrack-monitoring-prometheus-1 grep -c 'alert:' /etc/prometheus/rules/cinetrack-alerts.yml`.
+  >
+  > Note also that host port 9090 belongs to a different project's Prometheus.
+  > This stack publishes no port; query it over its own network namespace, or you
+  > will read someone else's targets and believe you checked this one.
 - Re-run this page's commands afterwards to confirm they still work. Anything
   here that was wrong when you needed it should be fixed the same day.
