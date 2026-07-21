@@ -22,7 +22,7 @@ const BACKEND_PORT = configuredPort('E2E_BACKEND_PORT', 8099);
 const FRONTEND_PORT = configuredPort('E2E_FRONTEND_PORT', 5173);
 const API_URL = `http://localhost:${BACKEND_PORT}`;
 export const FRONTEND_ORIGIN = `http://localhost:${FRONTEND_PORT}`;
-const DATABASE_URL =
+export const DATABASE_URL =
   process.env.E2E_DATABASE_URL ??
   'postgres://test_user:test_pass@127.0.0.1:55444/cinetrack_test';
 
