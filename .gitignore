@@ -27,7 +27,9 @@ nginx/ssl/
 
 # Personal TV Time export/import data (contains PII: tokens, IPs, password hashes) — never commit
 tvtime_data/
-.env.prod.bak.*
+# Glob, not `.bak.*`: a backup named `.env.prod.bak-<date>` slipped past the
+# dot-only pattern and showed up as untracked, one `git add -A` from leaking.
+.env.prod.bak*
 bench/results/
 bench-summary.json
 ops/alertmanager/alertmanager.generated.yml
