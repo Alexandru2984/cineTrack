@@ -77,7 +77,15 @@ services:
       R2_SECRET_ACCESS_KEY: "${R2_SECRET_ACCESS_KEY:-}"
       R2_BUCKET: "${R2_BUCKET:-}"
       R2_PUBLIC_BASE_URL: "${R2_PUBLIC_BASE_URL:-}"
-      RUST_LOG: "${RUST_LOG:-cinetrack=info,actix_web=info}"
+      # actix_web_prom is silenced to error on purpose. Its only log statement
+      # warns that it could not interpolate a parameterised route pattern, which
+      # happens on every request the rate limiter rejects: the governor answers
+      # 429 before the path params are extracted, so the params map is empty.
+      # The crate then falls back to the raw pattern, which is the correct label
+      # anyway, so the line is noise — and without this it fires once per
+      # throttled image request. Note that env_logger matches by prefix, so
+      # `actix_web=info` alone would re-enable it.
+      RUST_LOG: "${RUST_LOG:-cinetrack=info,actix_web=info,actix_web_prom=error}"
     read_only: true
     tmpfs:
       - /tmp:size=64m,noexec,nosuid,nodev
