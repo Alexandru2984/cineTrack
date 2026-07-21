@@ -8,7 +8,9 @@ use uuid::Uuid;
 use crate::config::Config;
 use crate::dto::auth::*;
 use crate::errors::AppError;
-use crate::models::{EmailVerificationToken, PasswordResetToken, RefreshToken, User};
+use crate::models::{
+    EmailChangeToken, EmailVerificationToken, PasswordResetToken, RefreshToken, User,
+};
 use crate::services::email::EmailService;
 use crate::utils::{jwt, password, totp, totp_secret};
 
@@ -16,6 +18,10 @@ const PASSWORD_RESET_RESPONSE_FLOOR: StdDuration = StdDuration::from_millis(250)
 const PASSWORD_RESET_COOLDOWN_SECONDS: i64 = 10 * 60;
 const EMAIL_VERIFICATION_TTL_HOURS: i64 = 24;
 const EMAIL_VERIFICATION_COOLDOWN_SECONDS: i64 = 2 * 60;
+const EMAIL_CHANGE_TTL_HOURS: i64 = 24;
+// Longer than the verification cooldown: every request also mails the *old*
+// address, and that inbox should not be usable as a way to pester someone.
+const EMAIL_CHANGE_COOLDOWN_SECONDS: i64 = 5 * 60;
 const LOGIN_FAILURE_LIMIT: i32 = 5;
 const LOGIN_FAILURE_WINDOW_SECONDS: i64 = 15 * 60;
 const LOGIN_LOCK_SECONDS: i64 = 15 * 60;
@@ -571,6 +577,177 @@ pub async fn verify_email(pool: &PgPool, token: &str) -> Result<(), AppError> {
     tx.commit().await?;
 
     log::info!("audit: email verified user_id={}", stored.user_id);
+
+    Ok(())
+}
+
+/// Start a change of the account's email address.
+///
+/// Nothing about the account moves here. The new address is parked in
+/// `email_change_tokens` and only becomes the login once it proves it can
+/// receive mail, so a typo costs the user a wait rather than their account.
+///
+/// The current password is required: a live session alone must not be enough to
+/// redirect account recovery, or anyone reaching an unlocked device could point
+/// the address at themselves and then use "forgot password" to take the rest.
+pub async fn request_email_change(
+    pool: &PgPool,
+    config: &Config,
+    email_service: &EmailService,
+    user_id: Uuid,
+    current_password: &str,
+    new_email: &str,
+) -> Result<(), AppError> {
+    let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = $1")
+        .bind(user_id)
+        .fetch_optional(pool)
+        .await?
+        .ok_or_else(|| AppError::NotFound("User not found".to_string()))?;
+
+    let password_hash = user
+        .password_hash
+        .as_ref()
+        .ok_or_else(|| AppError::BadRequest("Password login is not enabled".to_string()))?;
+
+    if !password::verify_password(current_password, password_hash).await? {
+        return Err(AppError::Unauthorized(
+            "Current password is incorrect".to_string(),
+        ));
+    }
+
+    let new_email = normalize_email(new_email);
+    if new_email == user.email {
+        return Err(AppError::BadRequest(
+            "That is already your email address".to_string(),
+        ));
+    }
+
+    // Checked here for a clear message, and again by the unique constraint when
+    // the change is confirmed — between those two moments somebody else may
+    // register the same address, and the constraint is what actually decides.
+    let taken = sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS(SELECT 1 FROM users WHERE email = $1 AND id <> $2)",
+    )
+    .bind(&new_email)
+    .bind(user_id)
+    .fetch_one(pool)
+    .await?;
+    if taken {
+        return Err(AppError::Conflict(
+            "That email address is already in use".to_string(),
+        ));
+    }
+
+    let token = jwt::generate_refresh_token();
+    let token_hash = jwt::hash_refresh_token(&token);
+    let expires_at = Utc::now() + Duration::hours(EMAIL_CHANGE_TTL_HOURS);
+
+    let issued = sqlx::query_as::<_, EmailChangeToken>(
+        "INSERT INTO email_change_tokens (user_id, new_email, token_hash, expires_at)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (user_id) DO UPDATE
+         SET new_email = EXCLUDED.new_email,
+             token_hash = EXCLUDED.token_hash,
+             expires_at = EXCLUDED.expires_at,
+             consumed_at = NULL,
+             created_at = NOW()
+         WHERE email_change_tokens.created_at
+               <= NOW() - ($5 * INTERVAL '1 second')
+         RETURNING *",
+    )
+    .bind(user_id)
+    .bind(&new_email)
+    .bind(&token_hash)
+    .bind(expires_at)
+    .bind(EMAIL_CHANGE_COOLDOWN_SECONDS)
+    .fetch_optional(pool)
+    .await?;
+
+    if issued.is_none() {
+        return Err(AppError::TooManyRequests(
+            "A change is already pending; check your inbox or try again shortly".to_string(),
+        ));
+    }
+
+    let confirm_url = format!(
+        "{}/confirm-email-change#token={}",
+        config.frontend_url.trim_end_matches('/'),
+        token
+    );
+    let email_service = email_service.clone();
+    let old_address = user.email.clone();
+    let new_address = new_email.clone();
+    actix_web::rt::spawn(async move {
+        email_service
+            .send_email_change_verification(&new_address, &confirm_url)
+            .await;
+        // The old address is told regardless of whether the new one accepts
+        // mail, because its owner is the person who needs to know first.
+        email_service
+            .send_email_change_notice(&old_address, &new_address)
+            .await;
+    });
+
+    log::info!("audit: email change requested user_id={user_id}");
+
+    Ok(())
+}
+
+/// Complete a change of address from the link mailed to the new one.
+///
+/// Confirming also marks the account verified: the address just demonstrated the
+/// exact thing verification asks for.
+pub async fn confirm_email_change(pool: &PgPool, token: &str) -> Result<(), AppError> {
+    if !jwt::is_valid_refresh_token(token) {
+        return Err(AppError::BadRequest(
+            "Invalid or expired confirmation token".to_string(),
+        ));
+    }
+    let token_hash = jwt::hash_refresh_token(token);
+    let mut tx = pool.begin().await?;
+
+    let stored = sqlx::query_as::<_, EmailChangeToken>(
+        "SELECT * FROM email_change_tokens WHERE token_hash = $1 FOR UPDATE",
+    )
+    .bind(&token_hash)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(|| AppError::BadRequest("Invalid or expired confirmation token".to_string()))?;
+
+    if stored.consumed_at.is_some() || stored.expires_at < Utc::now() {
+        return Err(AppError::BadRequest(
+            "Invalid or expired confirmation token".to_string(),
+        ));
+    }
+
+    sqlx::query("UPDATE email_change_tokens SET consumed_at = NOW() WHERE id = $1")
+        .bind(stored.id)
+        .execute(&mut *tx)
+        .await?;
+
+    let updated = sqlx::query(
+        "UPDATE users SET email = $2, email_verified = TRUE, updated_at = NOW() WHERE id = $1",
+    )
+    .bind(stored.user_id)
+    .bind(&stored.new_email)
+    .execute(&mut *tx)
+    .await;
+
+    match updated {
+        Ok(_) => {}
+        // Somebody registered this address while the link sat unopened. The
+        // account keeps the address it has; nothing is lost but the request.
+        Err(sqlx::Error::Database(error)) if error.is_unique_violation() => {
+            return Err(AppError::Conflict(
+                "That email address was taken before you confirmed it".to_string(),
+            ));
+        }
+        Err(error) => return Err(error.into()),
+    }
+
+    tx.commit().await?;
+
+    log::info!("audit: email changed user_id={}", stored.user_id);
 
     Ok(())
 }

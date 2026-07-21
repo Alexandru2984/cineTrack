@@ -196,6 +196,32 @@ pub struct ChangePasswordRequest {
     pub new_password: String,
 }
 
+/// The current password is required even though the caller is already
+/// authenticated. A live session is enough to read the account; moving the
+/// address that recovers it should cost more than that.
+#[derive(Debug, Deserialize, Validate)]
+#[serde(deny_unknown_fields)]
+pub struct ChangeEmailRequest {
+    #[validate(length(
+        min = 1,
+        max = 128,
+        message = "Current password must be 1-128 characters"
+    ))]
+    pub current_password: String,
+    #[validate(
+        length(max = 254, message = "Email must be at most 254 characters"),
+        email(message = "Invalid email address")
+    )]
+    pub new_email: String,
+}
+
+#[derive(Debug, Deserialize, Validate)]
+#[serde(deny_unknown_fields)]
+pub struct ConfirmEmailChangeRequest {
+    #[validate(length(min = 1, max = 512, message = "Invalid token"))]
+    pub token: String,
+}
+
 #[derive(Debug, Deserialize, Validate)]
 #[serde(deny_unknown_fields)]
 pub struct ForgotPasswordRequest {
@@ -519,6 +545,46 @@ mod tests {
             new_password: "SecurePass1".to_string(),
         };
         assert!(req.validate().is_err());
+    }
+
+    #[test]
+    fn change_email_requires_a_real_address_and_a_password() {
+        let valid = ChangeEmailRequest {
+            current_password: "SecurePass1".to_string(),
+            new_email: "new@example.com".to_string(),
+        };
+        assert!(valid.validate().is_ok());
+
+        // No password means a stolen session alone could move the address.
+        let no_password = ChangeEmailRequest {
+            current_password: String::new(),
+            new_email: "new@example.com".to_string(),
+        };
+        assert!(no_password.validate().is_err());
+
+        let malformed = ChangeEmailRequest {
+            current_password: "SecurePass1".to_string(),
+            new_email: "not-an-address".to_string(),
+        };
+        assert!(malformed.validate().is_err());
+
+        let too_long = ChangeEmailRequest {
+            current_password: "SecurePass1".to_string(),
+            new_email: format!("{}@example.com", "a".repeat(250)),
+        };
+        assert!(too_long.validate().is_err());
+    }
+
+    #[test]
+    fn change_email_payloads_reject_unknown_fields() {
+        assert!(
+            serde_json::from_value::<ChangeEmailRequest>(serde_json::json!({
+                "current_password": "SecurePass1",
+                "new_email": "new@example.com",
+                "email_verified": true
+            }))
+            .is_err()
+        );
     }
 
     #[test]

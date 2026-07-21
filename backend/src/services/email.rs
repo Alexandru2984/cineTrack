@@ -102,6 +102,38 @@ impl EmailService {
             .await;
     }
 
+    /// Confirm a requested new address. Sent to the *new* address, which is the
+    /// whole point: an address that cannot receive this never becomes the login.
+    pub async fn send_email_change_verification(&self, to: &str, confirm_url: &str) {
+        let subject = "Confirm your new Văzute email";
+        let body = format!(
+            "You asked to use this address for your Văzute account.\n\n\
+             Confirm it to complete the change (link valid for 24 hours):\n{confirm_url}\n\n\
+             Until you confirm, your account keeps its current address. If you \
+             didn't request this, you can safely ignore this email."
+        );
+        self.deliver("email_change_verification", to, subject, body, confirm_url)
+            .await;
+    }
+
+    /// Warn the address currently on the account that a change was requested.
+    /// Sent to the *old* address so a takeover cannot happen quietly: whoever
+    /// still reads that inbox finds out while the change is pending, not after.
+    ///
+    /// It carries no link. Anything actionable here would be a second way in for
+    /// the very attacker this is meant to expose.
+    pub async fn send_email_change_notice(&self, to: &str, new_email: &str) {
+        let subject = "Your Văzute email address was asked to change";
+        let body = format!(
+            "Someone requested that your Văzute account move to {new_email}.\n\n\
+             The change only takes effect once that address is confirmed. Your \
+             current address still works until then.\n\n\
+             If this wasn't you, change your password now — whoever asked knew it."
+        );
+        self.deliver("email_change_notice", to, subject, body, "")
+            .await;
+    }
+
     /// Build the message with an explicit `Message-ID` (`<uuid@sender-domain>`).
     /// lettre does not add one, and a missing Message-ID is a spam signal several
     /// providers (Gmail included) score against.

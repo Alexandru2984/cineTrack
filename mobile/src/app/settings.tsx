@@ -12,6 +12,7 @@ import {
   KeyRound,
   Laptop2,
   LogOut,
+  Mail,
   MailWarning,
   RefreshCw,
   Save,
@@ -46,6 +47,7 @@ import {
   useDisableTwoFactor,
   useEnableTwoFactor,
   useLogoutAllAccountSessions,
+  useRequestAccountEmailChange,
   useResendEmailVerification,
   useRevokeAccountSession,
   useSetupTwoFactor,
@@ -99,6 +101,7 @@ export default function SettingsScreen() {
   const revokeSession = useRevokeAccountSession();
   const logoutAllSessions = useLogoutAllAccountSessions();
   const changePassword = useChangeAccountPassword();
+  const requestEmailChange = useRequestAccountEmailChange();
   const resendVerification = useResendEmailVerification();
   const setupTwoFactor = useSetupTwoFactor();
   const enableTwoFactor = useEnableTwoFactor();
@@ -114,6 +117,10 @@ export default function SettingsScreen() {
   const [profileError, setProfileError] = useState<string | null>(null);
   const [profileSaved, setProfileSaved] = useState(false);
 
+  const [emailPassword, setEmailPassword] = useState('');
+  const [newEmail, setNewEmail] = useState('');
+  const [emailError, setEmailError] = useState<string | null>(null);
+  const [emailSentTo, setEmailSentTo] = useState<string | null>(null);
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [passwordConfirmation, setPasswordConfirmation] = useState('');
@@ -168,6 +175,31 @@ export default function SettingsScreen() {
       setProfileSaved(true);
     } catch (error) {
       setProfileError(getErrorMessage(error, 'Could not update your profile'));
+    }
+  };
+
+  const submitEmailChange = async () => {
+    const address = newEmail.trim();
+    if (!address.includes('@') || address.length > 254) {
+      setEmailError('Enter a valid email address');
+      return;
+    }
+    if (!emailPassword) {
+      setEmailError('Enter your current password');
+      return;
+    }
+    setEmailError(null);
+    try {
+      await requestEmailChange.mutateAsync({
+        currentPassword: emailPassword,
+        newEmail: address,
+      });
+      // The session is untouched on purpose — the address has not moved yet.
+      setEmailSentTo(address);
+      setEmailPassword('');
+      setNewEmail('');
+    } catch (error) {
+      setEmailError(getErrorMessage(error, 'Could not start the email change'));
     }
   };
 
@@ -750,6 +782,66 @@ export default function SettingsScreen() {
                   onPress={() => void startTwoFactorSetup()}
                 />
               </View>
+            )}
+          </View>
+
+          <View style={[styles.section, { borderBottomColor: theme.border }]}>
+            <View style={styles.sectionHeading}>
+              <Mail color={theme.info} size={20} />
+              <View style={styles.headingCopy}>
+                <AppText variant="section">Change email</AppText>
+                <AppText variant="caption" muted>
+                  {user.email} signs you in today.
+                </AppText>
+              </View>
+            </View>
+            {emailSentTo ? (
+              <FormMessage
+                success
+                message={`Open the link sent to ${emailSentTo} to finish. Until you do, ${user.email} stays your address.`}
+              />
+            ) : (
+              <>
+                <View style={styles.field}>
+                  <AppText variant="label">New email</AppText>
+                  <TextInput
+                    value={newEmail}
+                    onChangeText={(value) => {
+                      setNewEmail(value);
+                      setEmailError(null);
+                    }}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    keyboardType="email-address"
+                    maxLength={254}
+                    placeholder="you@example.com"
+                    placeholderTextColor={theme.mutedText}
+                    style={[
+                      styles.textInput,
+                      { color: theme.text, borderColor: theme.border, backgroundColor: theme.elevated },
+                    ]}
+                  />
+                </View>
+                <PasswordField
+                  label="Current password"
+                  value={emailPassword}
+                  visible={showPasswords}
+                  autoComplete="current-password"
+                  onChange={(value) => {
+                    setEmailPassword(value);
+                    setEmailError(null);
+                  }}
+                  onToggleVisibility={() => setShowPasswords((visible) => !visible)}
+                  onSubmit={() => void submitEmailChange()}
+                />
+                {emailError ? <FormMessage message={emailError} /> : null}
+                <AppButton
+                  label="Send confirmation link"
+                  icon={<Mail color="#FFFFFF" size={18} />}
+                  loading={requestEmailChange.isPending}
+                  onPress={() => void submitEmailChange()}
+                />
+              </>
             )}
           </View>
 

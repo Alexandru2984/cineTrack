@@ -47,6 +47,8 @@ fn scope() -> actix_web::Scope {
         .route("/password/reset", web::post().to(reset_password))
         .route("/email/verify", web::post().to(verify_email))
         .route("/email/resend", web::post().to(resend_email_verification))
+        .route("/email/change", web::post().to(request_email_change))
+        .route("/email/change/confirm", web::post().to(confirm_email_change))
         .route("/2fa/setup", web::post().to(setup_two_factor))
         .route("/2fa/enable", web::post().to(enable_two_factor))
         .route("/2fa/disable", web::post().to(disable_two_factor))
@@ -297,6 +299,40 @@ async fn verify_email(
     body.validate()?;
     services::auth::verify_email(pool.get_ref(), &body.token).await?;
     Ok(HttpResponse::Ok().json(serde_json::json!({"message": "Email verified successfully"})))
+}
+
+async fn request_email_change(
+    pool: web::Data<PgPool>,
+    config: web::Data<Config>,
+    email_service: web::Data<EmailService>,
+    req: HttpRequest,
+    body: web::Json<ChangeEmailRequest>,
+) -> Result<HttpResponse, AppError> {
+    let user_id = require_auth(&req).await?;
+    body.validate()?;
+    let data = body.into_inner();
+    services::auth::request_email_change(
+        pool.get_ref(),
+        config.get_ref(),
+        email_service.get_ref(),
+        user_id,
+        &data.current_password,
+        &data.new_email,
+    )
+    .await?;
+
+    Ok(HttpResponse::Ok().json(serde_json::json!({
+        "message": "Check the new address for a confirmation link"
+    })))
+}
+
+async fn confirm_email_change(
+    pool: web::Data<PgPool>,
+    body: web::Json<ConfirmEmailChangeRequest>,
+) -> Result<HttpResponse, AppError> {
+    body.validate()?;
+    services::auth::confirm_email_change(pool.get_ref(), &body.token).await?;
+    Ok(HttpResponse::Ok().json(serde_json::json!({"message": "Email address updated"})))
 }
 
 async fn resend_email_verification(

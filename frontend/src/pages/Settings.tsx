@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   useChangePassword,
+  useChangeEmail,
   useLogout,
   useSessions,
   useRevokeSession,
@@ -34,6 +35,7 @@ import {
   Info,
   LockKeyhole,
   KeyRound,
+  Mail,
   Loader2,
   LogOut,
   Monitor,
@@ -397,6 +399,97 @@ function ImportCard() {
               <UploadCloud className="h-4 w-4" />
             )}
             Start import
+          </button>
+        </form>
+      )}
+    </section>
+  );
+}
+
+function ChangeEmailCard() {
+  const user = useAuthStore((state) => state.user);
+  const [password, setPassword] = useState('');
+  const [nextEmail, setNextEmail] = useState('');
+  const changeEmail = useChangeEmail();
+  const sent = changeEmail.isSuccess;
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    changeEmail.mutate(
+      { current_password: password, new_email: nextEmail },
+      { onSuccess: () => setPassword('') },
+    );
+  };
+
+  return (
+    <section className="rounded-lg border border-[hsl(var(--border))] p-6">
+      <h2 className="flex items-center gap-2 text-lg font-semibold">
+        <Mail className="h-5 w-5 text-[hsl(var(--primary))]" /> Change email
+      </h2>
+      <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">
+        Signing in uses <span className="font-medium">{user?.email}</span>. A new address only
+        takes effect once you open the link sent to it, and we tell the current address that
+        the change was requested.
+      </p>
+
+      {sent ? (
+        <div className="mt-4 flex items-start gap-2 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--accent))] p-4 text-sm">
+          <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-[hsl(var(--primary))]" />
+          <div>
+            <p className="font-medium">Check {nextEmail}</p>
+            <p className="text-[hsl(var(--muted-foreground))]">
+              The link is valid for 24 hours. Until you open it, {user?.email} stays the address
+              on your account.
+            </p>
+          </div>
+        </div>
+      ) : (
+        <form onSubmit={handleSubmit} className="mt-4 space-y-4 max-w-sm">
+          <div>
+            <label htmlFor="change-email-address" className="block text-sm font-medium mb-1">
+              New email
+            </label>
+            <input
+              id="change-email-address"
+              type="email"
+              autoComplete="email"
+              value={nextEmail}
+              onChange={(e) => setNextEmail(e.target.value)}
+              required
+              maxLength={254}
+              className="w-full rounded-md border border-[hsl(var(--input))] bg-transparent px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[hsl(var(--ring))]"
+            />
+          </div>
+          <div>
+            <label htmlFor="change-email-password" className="block text-sm font-medium mb-1">
+              Current password
+            </label>
+            <input
+              id="change-email-password"
+              type="password"
+              autoComplete="current-password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+              className="w-full rounded-md border border-[hsl(var(--input))] bg-transparent px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[hsl(var(--ring))]"
+            />
+            <p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">
+              Asked for because this address is what recovers your account.
+            </p>
+          </div>
+
+          {changeEmail.error && (
+            <p className="text-sm text-[hsl(var(--destructive))]">
+              {getApiErrorMessage(changeEmail.error, 'Could not start the email change')}
+            </p>
+          )}
+          <button
+            type="submit"
+            disabled={changeEmail.isPending}
+            className="rounded-md bg-[hsl(var(--primary))] px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-2"
+          >
+            {changeEmail.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
+            Send confirmation link
           </button>
         </form>
       )}
@@ -884,6 +977,7 @@ export default function SettingsPage() {
       <InstallAppCard />
       <FollowRequestsCard />
       <ImportCard />
+      <ChangeEmailCard />
       <ChangePasswordCard />
       <TwoFactorCard />
       <SessionsCard />

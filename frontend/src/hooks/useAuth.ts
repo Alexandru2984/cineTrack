@@ -188,6 +188,43 @@ export function useChangePassword() {
   });
 }
 
+export function useChangeEmail() {
+  return useMutation({
+    mutationFn: async (data: { current_password: string; new_email: string }) => {
+      const res = await api.post('/auth/email/change', data);
+      return res.data as { message: string };
+    },
+    // Nothing local changes yet: the address only moves once the link mailed to
+    // it is opened, so there is no cached identity to refresh here.
+  });
+}
+
+export const CONFIRM_EMAIL_CHANGE_MUTATION_KEY = ['confirm-email-change'] as const;
+
+export function useConfirmEmailChange() {
+  const setUser = useAuthStore((s) => s.setUser);
+  return useMutation({
+    // Keyed for the same reason as email verification: one-time token, and the
+    // route can remount while the request is still in flight.
+    mutationKey: CONFIRM_EMAIL_CHANGE_MUTATION_KEY,
+    mutationFn: async (data: { token: string }) => {
+      const res = await api.post('/auth/email/change/confirm', data);
+      return res.data as { message: string };
+    },
+    onSuccess: () => {
+      // The link is usually opened in a browser that may or may not hold the
+      // session. Refresh the identity when it does, so settings stops showing
+      // the old address; a failure here must not fail the confirmation.
+      if (useAuthStore.getState().token) {
+        void api
+          .get<User>('/auth/me')
+          .then((res) => setUser(res.data))
+          .catch(() => undefined);
+      }
+    },
+  });
+}
+
 export function useSessions() {
   const token = useAuthStore((s) => s.token);
   return useQuery<Session[]>({

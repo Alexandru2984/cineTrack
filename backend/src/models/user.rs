@@ -72,3 +72,14 @@ pub struct EmailVerificationToken {
     pub consumed_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
 }
+
+#[derive(Debug, Clone, FromRow)]
+pub struct EmailChangeToken {
+    pub id: Uuid,
+    pub user_id: Uuid,
+    pub new_email: String,
+    pub token_hash: String,
+    pub expires_at: DateTime<Utc>,
+    pub consumed_at: Option<DateTime<Utc>>,
+    pub created_at: DateTime<Utc>,
+}

@@ -14,6 +14,7 @@ const RegisterPage = lazy(() => import('@/pages/Register'));
 const ForgotPasswordPage = lazy(() => import('@/pages/ForgotPassword'));
 const ResetPasswordPage = lazy(() => import('@/pages/ResetPassword'));
 const VerifyEmailPage = lazy(() => import('@/pages/VerifyEmail'));
+const ConfirmEmailChangePage = lazy(() => import('@/pages/ConfirmEmailChange'));
 const Dashboard = lazy(() => import('@/pages/Dashboard'));
 const SearchPage = lazy(() => import('@/pages/Search'));
 const CalendarPage = lazy(() => import('@/pages/Calendar'));
@@ -100,6 +101,9 @@ export default function App() {
               <Route path="/reset-password" element={<PublicOnlyRoute><ResetPasswordPage /></PublicOnlyRoute>} />
               {/* Reachable whether or not a session is active — a user may open the link on any device. */}
               <Route path="/verify-email" element={<VerifyEmailPage />} />
+              {/* Not PublicOnly: the link is opened from an inbox, which may or
+                  may not be the browser holding the session. */}
+              <Route path="/confirm-email-change" element={<ConfirmEmailChangePage />} />
               <Route path="/about" element={<AboutPage />} />
               <Route path="/privacy" element={<PrivacyPage />} />
               <Route path="/account-deletion" element={<AccountDeletionPage />} />

@@ -65,6 +65,22 @@ export async function updateAccountProfile(draft: ProfileDraft) {
   });
 }
 
+/// Starts a change of address. Nothing local changes: the account keeps its
+/// current email until the link mailed to the new one is opened, so the session
+/// is deliberately left alone here.
+export async function requestAccountEmailChange(
+  currentPassword: string,
+  newEmail: string,
+) {
+  await apiRequest<{ message: string }>('/auth/email/change', {
+    method: 'POST',
+    body: {
+      current_password: currentPassword,
+      new_email: newEmail,
+    },
+  });
+}
+
 export async function changeAccountPassword(
   currentPassword: string,
   newPassword: string,

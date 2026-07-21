@@ -6,6 +6,7 @@ import {
   enableTwoFactor,
   listAccountSessions,
   logoutAllAccountSessions,
+  requestAccountEmailChange,
   resendEmailVerification,
   revokeAccountSession,
   setupTwoFactor,
@@ -32,6 +33,18 @@ export function useUpdateAccountProfile() {
   return useMutation({
     mutationFn: (draft: ProfileDraft) => updateAccountProfile(draft),
     onSuccess: (user) => setUser(user),
+  });
+}
+
+export function useRequestAccountEmailChange() {
+  return useMutation({
+    mutationFn: ({
+      currentPassword,
+      newEmail,
+    }: {
+      currentPassword: string;
+      newEmail: string;
+    }) => requestAccountEmailChange(currentPassword, newEmail),
   });
 }
 
