@@ -90,17 +90,28 @@ export function EpisodeRow({
           style={({ pressed }) => [
             styles.iconButton,
             {
-              borderColor: theme.success,
-              backgroundColor: theme.successSoft,
-              opacity: watchedPending ? 0.5 : pressed ? 0.72 : 1,
+              // Neutral at rest. Every episode this row can render is unwatched
+              // by construction — the calendar query excludes anything with a
+              // watch_history row — so a filled green check reads as state the
+              // episode does not have. The web shows that green on hover only;
+              // touch has no hover, so it lands on press instead.
+              borderColor: pressed ? theme.success : theme.border,
+              backgroundColor: pressed ? theme.successSoft : theme.elevated,
+              opacity: watchedPending ? 0.5 : 1,
             },
           ]}
         >
-          {watchedPending ? (
-            <LoaderCircle color={theme.success} size={18} />
-          ) : (
-            <Check color={theme.success} size={19} strokeWidth={2.5} />
-          )}
+          {({ pressed }) =>
+            watchedPending ? (
+              <LoaderCircle color={theme.success} size={18} />
+            ) : (
+              <Check
+                color={pressed ? theme.success : theme.mutedText}
+                size={19}
+                strokeWidth={2.5}
+              />
+            )
+          }
         </Pressable>
       </View>
     </View>
