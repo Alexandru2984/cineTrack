@@ -13,9 +13,21 @@ pub mod stats;
 pub mod tracking;
 pub mod users;
 
+use actix_governor::governor::middleware::NoOpMiddleware;
+use actix_governor::{Governor, GovernorConfig};
 use actix_web::web;
 
+use crate::middleware::rate_limit::TrustedProxyIpKeyExtractor;
+
+/// The limiter every non-image API route shares. Env-driven via
+/// `RATE_LIMIT_REQUESTS_PER_SECOND` / `RATE_LIMIT_BURST_SIZE`.
+pub type SharedGovernorConfig = GovernorConfig<TrustedProxyIpKeyExtractor, NoOpMiddleware>;
+
 pub fn configure(cfg: &mut web::ServiceConfig) {
+    // Same split as the rate-limited path, minus the limiters: public images
+    // are top-level scopes registered before /api.
+    assets::configure_public_images_unlimited(cfg);
+
     cfg.service(
         web::scope("/api")
             .configure(health::configure)
@@ -42,9 +54,20 @@ pub fn configure_with_rate_limits(
     auth_rate_limiter: &auth::AuthGovernorConfig,
     client_error_rate_limiter: &client_errors::ClientErrorGovernorConfig,
     push_rate_limiter: &push::PushGovernorConfig,
+    image_rate_limiter: &assets::ImageGovernorConfig,
+    shared_rate_limiter: &SharedGovernorConfig,
 ) {
+    // Public images first, on their own generous budget: a grid of cards asks
+    // for dozens at once, and under the shared API limit that burst came back as
+    // 429s — a poster that never loads. These are top-level `/api/img` and
+    // `/api/assets` scopes, matched before the `/api` scope below.
+    assets::configure_public_images(cfg, image_rate_limiter);
+
     cfg.service(
         web::scope("/api")
+            // The shared limiter now wraps only the non-image API, not every
+            // request via the App, so images are not double-counted.
+            .wrap(Governor::new(shared_rate_limiter))
             .configure(health::configure)
             .configure(|cfg| auth::configure_rate_limited(cfg, auth_rate_limiter))
             .configure(assets::configure)

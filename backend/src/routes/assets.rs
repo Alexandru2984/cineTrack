@@ -1,3 +1,5 @@
+use actix_governor::governor::middleware::NoOpMiddleware;
+use actix_governor::{Governor, GovernorConfig, GovernorConfigBuilder};
 use actix_multipart::Multipart;
 use actix_web::{web, HttpRequest, HttpResponse};
 use futures_util::StreamExt;
@@ -7,8 +9,25 @@ use uuid::Uuid;
 use crate::config::Config;
 use crate::errors::AppError;
 use crate::middleware::auth::require_auth;
+use crate::middleware::rate_limit::TrustedProxyIpKeyExtractor;
 use crate::services::storage::{StorageService, AVATAR_EXTENSIONS};
 use crate::services::tmdb::TmdbService;
+
+pub type ImageGovernorConfig = GovernorConfig<TrustedProxyIpKeyExtractor, NoOpMiddleware>;
+
+/// Public images get a far more generous budget than the rest of the API.
+/// A single page of cards requests dozens of posters at once; under the shared
+/// API limit that burst was answered with 429s, which the user sees as posters
+/// that never load. The images are public, immutable and cached for a week, so
+/// a high ceiling here costs nothing.
+pub fn build_image_rate_limiter() -> ImageGovernorConfig {
+    GovernorConfigBuilder::default()
+        .requests_per_second(50)
+        .burst_size(300)
+        .key_extractor(TrustedProxyIpKeyExtractor)
+        .finish()
+        .expect("valid image rate limiter configuration")
+}
 
 const MAX_AVATAR_BYTES: usize = 3 * 1024 * 1024; // 3 MB
 const MAX_POSTER_BYTES: usize = 15 * 1024 * 1024; // 15 MB
@@ -20,17 +39,45 @@ const MAX_POSTER_PIXELS: u64 = 40_000_000;
 const POSTER_SIZES: &[&str] = &[
     "w45", "w92", "w154", "w185", "w300", "w342", "w500", "w780", "w1280", "original",
 ];
+/// Avatar upload and delete: authenticated writes, so they stay on the normal
+/// API budget. Registered inside the shared `/api` scope.
 pub fn configure(cfg: &mut web::ServiceConfig) {
     cfg.service(
         web::resource("/users/me/avatar")
             .route(web::post().to(upload_avatar))
             .route(web::delete().to(delete_avatar)),
+    );
+}
+
+/// The public image routes without a limiter, for the dev/test entry point
+/// (`routes::configure`) which applies no rate limiting at all. Keeps both
+/// entry points serving the same paths.
+pub fn configure_public_images_unlimited(cfg: &mut web::ServiceConfig) {
+    cfg.service(web::scope("/api/img").route("/{size}/{file}", web::get().to(serve_poster)))
+        .service(
+            web::scope("/api/assets")
+                .route("/avatars/{file}", web::get().to(serve_avatar_asset))
+                .route("/posters/{size}/{file}", web::get().to(serve_cached_poster)),
+        );
+}
+
+/// The public, cacheable image routes as their own top-level scopes carrying
+/// the image limiter. Registered ahead of the `/api` scope in main so the more
+/// specific `/api/img` and `/api/assets` prefixes match here first; everything
+/// else falls through to `/api`. Kept as real prefixed scopes rather than an
+/// empty nested scope, which silently swallows the path and 404s every route.
+pub fn configure_public_images(cfg: &mut web::ServiceConfig, limiter: &ImageGovernorConfig) {
+    cfg.service(
+        web::scope("/api/img")
+            .wrap(Governor::new(limiter))
+            .route("/{size}/{file}", web::get().to(serve_poster)),
     )
-    .service(web::resource("/assets/avatars/{file}").route(web::get().to(serve_avatar_asset)))
     .service(
-        web::resource("/assets/posters/{size}/{file}").route(web::get().to(serve_cached_poster)),
-    )
-    .service(web::resource("/img/{size}/{file}").route(web::get().to(serve_poster)));
+        web::scope("/api/assets")
+            .wrap(Governor::new(limiter))
+            .route("/avatars/{file}", web::get().to(serve_avatar_asset))
+            .route("/posters/{size}/{file}", web::get().to(serve_cached_poster)),
+    );
 }
 
 /// Validate a `{size}/{file}` poster spec: an allowed TMDB size, then one safe

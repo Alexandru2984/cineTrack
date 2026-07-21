@@ -1,5 +1,5 @@
 use actix_cors::Cors;
-use actix_governor::{Governor, GovernorConfigBuilder};
+use actix_governor::GovernorConfigBuilder;
 use actix_web::{middleware as actix_middleware, web, App, HttpResponse, HttpServer};
 
 use std::io::{Read, Write};
@@ -342,6 +342,7 @@ async fn main() -> std::io::Result<()> {
     let auth_governor_conf = routes::auth::build_rate_limiter();
     let client_error_governor_conf = routes::client_errors::build_rate_limiter();
     let push_governor_conf = routes::push::build_rate_limiter();
+    let image_governor_conf = routes::assets::build_image_rate_limiter();
 
     log::info!("Starting server at {}:{}", host, port);
 
@@ -349,6 +350,8 @@ async fn main() -> std::io::Result<()> {
         let auth_governor_conf = auth_governor_conf.clone();
         let client_error_governor_conf = client_error_governor_conf.clone();
         let push_governor_conf = push_governor_conf.clone();
+        let image_governor_conf = image_governor_conf.clone();
+        let governor_conf = governor_conf.clone();
         // Cap request bodies at the application layer (defense-in-depth: nginx
         // also limits, but this protects direct access and returns a clean 400).
         let json_cfg = web::JsonConfig::default()
@@ -389,7 +392,6 @@ async fn main() -> std::io::Result<()> {
         }
 
         App::new()
-            .wrap(Governor::new(&governor_conf))
             .wrap(cors)
             .wrap(security_headers)
             .wrap(actix_middleware::from_fn(request_id))
@@ -408,6 +410,8 @@ async fn main() -> std::io::Result<()> {
                     &auth_governor_conf,
                     &client_error_governor_conf,
                     &push_governor_conf,
+                    &image_governor_conf,
+                    &governor_conf,
                 )
             })
     })
