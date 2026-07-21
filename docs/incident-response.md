@@ -57,6 +57,13 @@ Then rotate, in this order: `JWT_SECRET`, R2 keys, Resend SMTP password, TMDB
 key. **Do not rotate `TOTP_ENCRYPTION_KEY`** — it decrypts stored 2FA secrets,
 and changing it locks out every enrolled user.
 
+> **Rotating the SMTP password also breaks alerting until you re-render the
+> Alertmanager config.** It uses the same Resend credentials, rendered once into
+> a file. After changing `SMTP_PASSWORD` in `.env.prod`, run
+> `scripts/render_alertmanager_config.sh` and restart the alertmanager
+> container, or alerts will silently stop being delivered — during the exact
+> incident you most need them.
+
 ## 3. Restore from backup
 
 Backups are age-encrypted, run daily at 03:30, and keep 14 days.
