@@ -48,7 +48,10 @@ fn scope() -> actix_web::Scope {
         .route("/email/verify", web::post().to(verify_email))
         .route("/email/resend", web::post().to(resend_email_verification))
         .route("/email/change", web::post().to(request_email_change))
-        .route("/email/change/confirm", web::post().to(confirm_email_change))
+        .route(
+            "/email/change/confirm",
+            web::post().to(confirm_email_change),
+        )
         .route("/2fa/setup", web::post().to(setup_two_factor))
         .route("/2fa/enable", web::post().to(enable_two_factor))
         .route("/2fa/disable", web::post().to(disable_two_factor))

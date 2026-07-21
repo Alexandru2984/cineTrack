@@ -3,8 +3,8 @@ use chrono::{DateTime, Utc};
 use sqlx::{PgPool, Postgres, Transaction};
 use uuid::Uuid;
 
-use crate::dto::calendar::*;
 use crate::available_through;
+use crate::dto::calendar::*;
 use crate::errors::AppError;
 use crate::middleware::auth::require_auth;
 use crate::services::quota;
