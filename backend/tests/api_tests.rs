@@ -7778,3 +7778,109 @@ async fn test_episode_reactions_require_having_watched_and_aggregate() {
 
     pool.close().await;
 }
+
+// ── Rate-limited routing wiring ────────────────────────────────
+//
+// configure_with_rate_limits restructures the route tree — images into their
+// own scopes, a shared governor wrapping the rest. An earlier version of that
+// split 404'd every route, including /api/health, and nothing caught it because
+// the integration harness uses the un-limited configure. This boots the app the
+// way production does and asserts the tree still resolves.
+
+fn build_rate_limited_app(
+    pool: PgPool,
+) -> actix_web::App<
+    impl actix_web::dev::ServiceFactory<
+        actix_web::dev::ServiceRequest,
+        Config = (),
+        Response = actix_web::dev::ServiceResponse<impl actix_web::body::MessageBody>,
+        Error = actix_web::Error,
+        InitError = (),
+    >,
+> {
+    use actix_governor::{GovernorConfig, GovernorConfigBuilder};
+    use cinetrack::middleware::rate_limit::TrustedProxyIpKeyExtractor;
+
+    let shared: GovernorConfig<TrustedProxyIpKeyExtractor, _> = GovernorConfigBuilder::default()
+        .requests_per_second(20)
+        .burst_size(100)
+        .key_extractor(TrustedProxyIpKeyExtractor)
+        .finish()
+        .expect("shared limiter");
+    let auth = cinetrack::routes::auth::build_rate_limiter();
+    let client_error = cinetrack::routes::client_errors::build_rate_limiter();
+    let push = cinetrack::routes::push::build_rate_limiter();
+    let image = cinetrack::routes::assets::build_image_rate_limiter();
+
+    // Register storage as None so the image handler returns a clean 400
+    // ("storage not configured") rather than a 500 from a missing extractor,
+    // making the routing assertions deterministic.
+    let storage: Option<cinetrack::services::storage::StorageService> = None;
+
+    actix_web::App::new()
+        .app_data(web::Data::new(pool))
+        .app_data(web::Data::new(test_config()))
+        .app_data(web::Data::new(storage))
+        .configure(move |cfg| {
+            cinetrack::routes::configure_with_rate_limits(
+                cfg,
+                &auth,
+                &client_error,
+                &push,
+                &image,
+                &shared,
+            )
+        })
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB: docker compose -f docker-compose.test.yml up -d"]
+async fn test_rate_limited_wiring_resolves_every_route_class() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(build_rate_limited_app(pool.clone())).await;
+
+    // The regression was a routing 404 on everything. Health is unauthenticated,
+    // so a 200 proves the /api scope still matches under the shared governor.
+    let req = actix_test::TestRequest::get()
+        .uri("/api/health")
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(
+        actix_test::call_service(&app, req).await.status(),
+        200,
+        "the /api scope must still resolve after the rate-limit restructure"
+    );
+
+    // An authed route reaches its handler and refuses (401), rather than 404ing
+    // because the scope stopped matching.
+    let req = actix_test::TestRequest::get()
+        .uri("/api/tracking")
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 401);
+
+    // The image routes live in their own top-level scopes now; they must still
+    // reach their handler. A bad poster spec is a handler 404/400, not a routing
+    // miss — the point is the request is routed at all, so assert it is not the
+    // one thing that would mean the scope vanished: it must not be a 401 (which
+    // would mean it fell through into the authed /api scope).
+    for path in ["/api/img/w500/x.jpg", "/api/assets/posters/w500/x.jpg"] {
+        let req = actix_test::TestRequest::get()
+            .uri(path)
+            .peer_addr(peer_addr())
+            .to_request();
+        let status = actix_test::call_service(&app, req).await.status();
+        assert_ne!(
+            status, 401,
+            "{path} must route to the public image handler, not fall into the authed API scope"
+        );
+        assert_ne!(
+            status.as_u16(),
+            404,
+            "{path} must be routed, got a routing miss"
+        );
+    }
+
+    pool.close().await;
+}
