@@ -295,6 +295,9 @@ jobs:
       - name: Backup and restore safety tests
         run: scripts/tests/backup_restore_test.sh
 
+      - name: Validate Alertmanager config permissions
+        run: scripts/tests/alertmanager_config_test.sh
+
       - name: Validate Prometheus alert rules
         run: |
           docker run --rm --volume "$PWD:/repo:ro" --entrypoint promtool \

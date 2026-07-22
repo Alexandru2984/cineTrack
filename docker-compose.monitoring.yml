@@ -33,10 +33,11 @@ services:
   alertmanager:
     image: prom/alertmanager:v0.28.1
     restart: unless-stopped
-    # Runs as the config file's owner. The rendered config holds the SMTP
-    # password, so it stays mode 600 on the host rather than being widened to
-    # suit the image's default `nobody`.
-    user: "${METRICS_UID:-1001}:${METRICS_GID:-1001}"
+    # Keep the image's unprivileged user so it owns the image-initialized data
+    # volume. Its primary group is the host group that owns the rendered config,
+    # which is mode 640: readable by Alertmanager without making the SMTP
+    # credential world-readable.
+    user: "nobody:${METRICS_GID:-1001}"
     # Alertmanager does not expand environment variables in its config, so the
     # template is rendered before it starts. Without this the SMTP settings
     # arrive as literal ${...} and every alert fails to deliver — silently,

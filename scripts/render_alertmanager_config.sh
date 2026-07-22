@@ -12,8 +12,8 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_FILE="${ENV_FILE:-$ROOT_DIR/.env.prod}"
-TEMPLATE="$ROOT_DIR/ops/alertmanager/alertmanager.yml.tmpl"
-OUTPUT="$ROOT_DIR/ops/alertmanager/alertmanager.generated.yml"
+TEMPLATE="${TEMPLATE_FILE:-$ROOT_DIR/ops/alertmanager/alertmanager.yml.tmpl}"
+OUTPUT="${OUTPUT_FILE:-$ROOT_DIR/ops/alertmanager/alertmanager.generated.yml}"
 
 # Only well-formed KEY=VALUE lines, so an unquoted value elsewhere in the file
 # cannot break this.
@@ -33,6 +33,7 @@ export ALERT_SMTP_FROM="${ALERT_SMTP_FROM:-alerts@micutu.com}"
 export ALERT_SMTP_USERNAME="$SMTP_USERNAME"
 export ALERT_SMTP_PASSWORD="$SMTP_PASSWORD"
 
-umask 077
+umask 027
 envsubst < "$TEMPLATE" > "$OUTPUT"
+chmod 0640 "$OUTPUT"
 echo "rendered $OUTPUT"
