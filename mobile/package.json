@@ -54,6 +54,9 @@
     "export:android": "expo export --platform android",
     "verify": "npm run lint && npm run typecheck && npm test && npm run doctor"
   },
+  "overrides": {
+    "uuid": "11.1.1"
+  },
   "engines": {
     "node": ">=22.13.0"
   },
