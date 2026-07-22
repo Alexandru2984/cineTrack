@@ -18,7 +18,6 @@ is deletable in-app.
 | --- | --- | --- | --- | --- |
 | **Email address** | Yes | Yes | Account management | Verified on signup. |
 | **Name / username** | Yes | Yes | Account, app functionality | Public display name, chosen by the user. |
-| **Photos** (avatar) | Optional | No | App functionality | Only if the user uploads one. |
 | **App activity — watch history** | Yes | Yes | App functionality | The core feature: what the user marked watched. |
 | **App activity — other (reactions, ratings, lists)** | Optional | No | App functionality | Only what the user creates. |
 | **Device ID** (push token) | Optional | No | Send notifications | Only if the user enables release notifications. |
@@ -39,14 +38,15 @@ is deletable in-app.
   removes the account and all associated rows. The account-deletion URL for the
   store listing is `https://vazute.micutu.com/account-deletion`.
 - **Is data collection optional?** Email and username are required for an
-  account. Everything else — avatar, push token, ratings, reactions, lists — is
-  created only by user action.
+  account. Everything else — push token, ratings, reactions, and lists — is
+  created only by user action. The mobile app can display an avatar already
+  stored on the account, but it does not currently upload photos.
 
 ## Permissions
 
-Verified by inspecting the actual release APK (`aapt2 dump badging`), not the
-`app.json` source — the shipped app merges permissions from its libraries, so
-the source list understates it.
+Verified against the generated production manifest and the native library
+manifests, not only the `app.json` source. Re-check the final signed AAB in Play
+Console because the shipped app merges permissions from its libraries.
 
 **No sensitive permission is present:** no location, contacts, camera,
 microphone, SMS, call log, calendar, or broad storage. That is the part Play's
@@ -58,18 +58,18 @@ What does ship, and why:
 | --- | --- | --- |
 | `INTERNET`, `ACCESS_NETWORK_STATE`, `ACCESS_WIFI_STATE` | networking / offline detection | No |
 | `POST_NOTIFICATIONS`, `RECEIVE_BOOT_COMPLETED`, `WAKE_LOCK`, `c2dm.RECEIVE` | push notifications (opt-in) | `POST_NOTIFICATIONS` only |
-| `READ_MEDIA_IMAGES` (maxSdkVersion 33) | avatar image picking on Android ≤13 | Yes, on older Android |
 | `DETECT_SCREEN_CAPTURE` | the recovery-code screen guard | No |
 | `BIND_GET_INSTALL_REFERRER_SERVICE` | Play install attribution | No |
 | Launcher badge permissions (Samsung, HTC, Sony, Oppo, Huawei, …) | notification badge count | No |
 
-The two runtime-prompt permissions are `POST_NOTIFICATIONS` (only if the user
-turns on release notifications) and `READ_MEDIA_IMAGES` (only when picking an
-avatar, and only on Android 13 and below). Both are user-initiated and optional.
+The only runtime-prompt permission is `POST_NOTIFICATIONS`, requested only if
+the user turns on release notifications.
 
-Six permissions that Expo modules would otherwise declare — storage read/write,
-system-alert-window, vibrate, biometric, fingerprint — are removed via
-`blockedPermissions` and confirmed absent from the APK.
+Seven permissions that Expo modules would otherwise declare — media/storage
+read, storage write, system-alert-window, vibrate, biometric, and fingerprint —
+are removed via `blockedPermissions`. `READ_MEDIA_IMAGES` is contributed by
+`expo-screen-capture` for the optional screenshot-listener API; Văzute only
+blocks capture, which does not need photo access.
 
 ## Account deletion — Play's dedicated requirement
 
