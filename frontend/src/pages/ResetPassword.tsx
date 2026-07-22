@@ -2,14 +2,11 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useResetPassword } from '@/hooks/useAuth';
 import { getApiErrorMessage } from '@/lib/api';
+import { readFragmentOneTimeToken, scrubOneTimeTokenUrl } from '@/lib/oneTimeToken';
 import { Film, Loader2 } from 'lucide-react';
 
 export default function ResetPasswordPage() {
-  const [token] = useState(() => {
-    const fragmentToken = new URLSearchParams(window.location.hash.slice(1)).get('token');
-    const legacyQueryToken = new URLSearchParams(window.location.search).get('token');
-    return fragmentToken ?? legacyQueryToken ?? '';
-  });
+  const [token] = useState(() => readFragmentOneTimeToken(window.location.hash));
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [mismatch, setMismatch] = useState(false);
@@ -17,9 +14,7 @@ export default function ResetPasswordPage() {
   const navigate = useNavigate();
 
   useEffect(() => {
-    if (window.location.hash || window.location.search.includes('token=')) {
-      window.history.replaceState(null, '', window.location.pathname);
-    }
+    scrubOneTimeTokenUrl();
   }, []);
 
   const handleSubmit = (e: React.FormEvent) => {

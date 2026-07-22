@@ -4,6 +4,7 @@ import { useMutationState } from '@tanstack/react-query';
 import { useVerifyEmail, VERIFY_EMAIL_MUTATION_KEY } from '@/hooks/useAuth';
 import { useAuthStore } from '@/store/auth';
 import { getApiErrorMessage } from '@/lib/api';
+import { readFragmentOneTimeToken, scrubOneTimeTokenUrl } from '@/lib/oneTimeToken';
 import { CheckCircle2, Film, Loader2, XCircle } from 'lucide-react';
 
 /**
@@ -21,9 +22,7 @@ let submitted = false;
 
 function readTokenOnce(): string {
   if (capturedToken === null) {
-    const fragmentToken = new URLSearchParams(window.location.hash.slice(1)).get('token');
-    const legacyQueryToken = new URLSearchParams(window.location.search).get('token');
-    capturedToken = fragmentToken ?? legacyQueryToken ?? '';
+    capturedToken = readFragmentOneTimeToken(window.location.hash);
   }
   return capturedToken;
 }
@@ -40,9 +39,7 @@ export default function VerifyEmailPage() {
   }).at(-1);
 
   useEffect(() => {
-    if (window.location.hash || window.location.search.includes('token=')) {
-      window.history.replaceState(null, '', window.location.pathname);
-    }
+    scrubOneTimeTokenUrl();
   }, []);
 
   useEffect(() => {
