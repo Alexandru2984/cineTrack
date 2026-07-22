@@ -133,9 +133,11 @@ export default function SettingsScreen() {
   const [twoFactorCode, setTwoFactorCode] = useState('');
   const [twoFactorError, setTwoFactorError] = useState<string | null>(null);
   const [recoveryCodes, setRecoveryCodes] = useState<string[] | null>(null);
-  // Recovery codes bypass both the password and 2FA, so the screen is guarded
-  // against capture while they are on it.
-  const codesConcealed = useSensitiveScreen(recoveryCodes !== null);
+  // The setup key can enroll another authenticator, while recovery codes can
+  // bypass 2FA entirely. Guard and conceal both kinds of secret.
+  const secretsConcealed = useSensitiveScreen(
+    recoveryCodes !== null || setupTwoFactor.data !== undefined,
+  );
 
   const [sessionsError, setSessionsError] = useState<string | null>(null);
   const [confirmingDeletion, setConfirmingDeletion] = useState(false);
@@ -643,7 +645,7 @@ export default function SettingsScreen() {
                     { borderColor: theme.border, backgroundColor: theme.elevated },
                   ]}
                 >
-                  {codesConcealed ? (
+                  {secretsConcealed ? (
                     <AppText muted style={styles.monospace}>
                       Hidden while the app is in the background.
                     </AppText>
@@ -702,9 +704,15 @@ export default function SettingsScreen() {
                       { borderColor: theme.border, backgroundColor: theme.elevated },
                     ]}
                   >
-                    <AppText selectable style={styles.monospace}>
-                      {setupTwoFactor.data.secret}
-                    </AppText>
+                    {secretsConcealed ? (
+                      <AppText muted style={styles.monospace}>
+                        Hidden while the app is in the background.
+                      </AppText>
+                    ) : (
+                      <AppText selectable style={styles.monospace}>
+                        {setupTwoFactor.data.secret}
+                      </AppText>
+                    )}
                   </View>
                 </View>
                 <View style={styles.field}>
