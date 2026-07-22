@@ -52,7 +52,7 @@ export default function PrivacyPage() {
           <ul>
             <li>Cloudflare R2 stores profile avatars, cached public media assets, catalog exports, and encrypted-at-rest infrastructure backups.</li>
             <li>TMDB supplies movie and television metadata. Search terms, media identifiers, language, and region may be sent from the Văzute server without the user's email or Văzute account identifier.</li>
-            <li>The self-hosted Mailcow service and the recipient's email provider process transactional email delivery.</li>
+            <li>Resend processes the recipient address and transactional message content for email delivery; the recipient's email provider also processes that delivery.</li>
             <li>For users who enable release alerts, Expo relays the push token and notification content to Google Firebase Cloud Messaging or Apple Push Notification service. No advertising identifier or Văzute account identifier is included in the notification payload.</li>
             <li>Apple, Google, and Expo may separately process app distribution or build information under their own policies; no advertising identifier is sent to Văzute.</li>
           </ul>
