@@ -17,6 +17,28 @@ const REGIONS: [string, string][] = [
   ['AU', 'Australia'],
 ];
 
+const JUSTWATCH_FALLBACK = 'https://www.justwatch.com';
+
+function safeWatchProviderLink(link: string | null | undefined): string {
+  if (!link) return JUSTWATCH_FALLBACK;
+  try {
+    const url = new URL(link);
+    const host = url.hostname.toLowerCase();
+    const trustedHost =
+      host === 'themoviedb.org' ||
+      host.endsWith('.themoviedb.org') ||
+      host === 'justwatch.com' ||
+      host.endsWith('.justwatch.com');
+    if (url.protocol !== 'https:' || url.username || url.password || !trustedHost) {
+      return JUSTWATCH_FALLBACK;
+    }
+    url.hash = '';
+    return url.href;
+  } catch {
+    return JUSTWATCH_FALLBACK;
+  }
+}
+
 function ProviderRow({ label, providers }: { label: string; providers: WatchProviderEntry[] }) {
   if (providers.length === 0) return null;
   return (
@@ -105,7 +127,7 @@ export function WatchProviders({ tmdbId, mediaType }: { tmdbId: number; mediaTyp
       <p className="mt-4 border-t border-[hsl(var(--border))] pt-3 text-xs text-[hsl(var(--muted-foreground))]">
         Streaming availability data provided by{' '}
         <a
-          href={data.link ?? 'https://www.justwatch.com'}
+          href={safeWatchProviderLink(data.link)}
           target="_blank"
           rel="noopener noreferrer"
           className="font-medium text-[hsl(var(--primary))] hover:underline"

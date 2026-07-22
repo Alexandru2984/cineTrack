@@ -409,6 +409,23 @@ pub struct WatchProvidersResponse {
     pub buy: Vec<WatchProviderEntry>,
 }
 
+fn trusted_watch_provider_link(link: Option<String>) -> Option<String> {
+    let mut url = reqwest::Url::parse(link?.trim()).ok()?;
+    let host = url.host_str()?.to_ascii_lowercase();
+    let trusted_host = matches!(host.as_str(), "themoviedb.org" | "justwatch.com")
+        || host.ends_with(".themoviedb.org")
+        || host.ends_with(".justwatch.com");
+    if url.scheme() != "https"
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || !trusted_host
+    {
+        return None;
+    }
+    url.set_fragment(None);
+    Some(url.into())
+}
+
 impl TmdbRegionProviders {
     /// Collapse the region's offers into the client shape, de-duplicating a
     /// provider that appears in several tiers and ordering by TMDB priority.
@@ -433,7 +450,7 @@ impl TmdbRegionProviders {
 
         WatchProvidersResponse {
             region,
-            link: self.link,
+            link: trusted_watch_provider_link(self.link),
             stream: entries(stream),
             rent: entries(self.rent),
             buy: entries(self.buy),
@@ -550,5 +567,31 @@ mod tests {
         assert!(value.validate().is_ok());
         value.language = Some("romanian".to_string());
         assert!(value.validate().is_err());
+    }
+
+    #[test]
+    fn watch_provider_links_allow_only_trusted_https_origins() {
+        for link in [
+            "javascript:alert(1)",
+            "http://www.justwatch.com/ro/film/example",
+            "https://justwatch.com@evil.example/ro/film/example",
+            "https://evil.example/?next=https://www.themoviedb.org",
+            "https://eviljustwatch.com/ro/film/example",
+        ] {
+            assert_eq!(trusted_watch_provider_link(Some(link.to_string())), None);
+        }
+
+        assert_eq!(
+            trusted_watch_provider_link(Some(
+                "https://www.themoviedb.org/movie/1/watch?locale=RO#fragment".to_string(),
+            )),
+            Some("https://www.themoviedb.org/movie/1/watch?locale=RO".to_string()),
+        );
+        assert_eq!(
+            trusted_watch_provider_link(Some(
+                "https://www.justwatch.com/ro/film/example".to_string(),
+            )),
+            Some("https://www.justwatch.com/ro/film/example".to_string()),
+        );
     }
 }

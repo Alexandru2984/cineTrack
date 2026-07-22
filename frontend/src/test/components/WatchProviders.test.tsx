@@ -43,6 +43,25 @@ describe('WatchProviders', () => {
     expect(screen.getByRole('link', { name: 'JustWatch' })).toBeInTheDocument();
   });
 
+  it('rejects an untrusted provider link from a compromised response or cache', () => {
+    mocks.result = {
+      isLoading: false,
+      data: {
+        region: 'RO',
+        link: 'javascript:alert(document.cookie)',
+        stream: [],
+        rent: [],
+        buy: [],
+      },
+    };
+    render(<WatchProviders tmdbId={603} mediaType="movie" />);
+
+    expect(screen.getByRole('link', { name: 'JustWatch' })).toHaveAttribute(
+      'href',
+      'https://www.justwatch.com',
+    );
+  });
+
   it('renders nothing while the first request is loading', () => {
     mocks.result = { isLoading: true, data: undefined };
     const { container } = render(<WatchProviders tmdbId={603} mediaType="movie" />);
