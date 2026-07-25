@@ -81,4 +81,5 @@ never be guessed or copied from an unrelated signing identity.
 - Test media/episode sharing, incoming app links while signed out, login return, and incoming links while offline.
 - Confirm `completed`, season bulk watch, and watched-through never add unreleased episodes.
 - Confirm privacy/cache clearing, crash-report redaction, notification opt-in/out, and device-token revocation.
+- Select valid and invalid TV Time exports, verify upload limits, background progress, and the completed library refresh.
 - Record the commit, version, version code/build number, signing identity, CI run, and artifact checksum in the release notes.

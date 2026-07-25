@@ -1,6 +1,7 @@
 import { API_BASE_URL } from '@/lib/config';
 
 const REQUEST_TIMEOUT_MS = 15_000;
+const UPLOAD_TIMEOUT_MS = 60_000;
 
 interface ErrorPayload {
   message?: string;
@@ -39,6 +40,11 @@ export interface RawRequestOptions {
   signal?: AbortSignal;
 }
 
+interface RawMultipartRequestOptions {
+  headers?: Record<string, string>;
+  signal?: AbortSignal;
+}
+
 export function withQuery(
   path: string,
   params: Record<string, string | number | boolean | null | undefined>,
@@ -53,24 +59,21 @@ export function withQuery(
   return suffix ? `${path}?${suffix}` : path;
 }
 
-export async function rawRequest<T>(
+async function request<T>(
   path: string,
-  options: RawRequestOptions = {},
+  init: RequestInit,
+  callerSignal: AbortSignal | undefined,
+  timeoutMs: number,
 ): Promise<T> {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
   const abortFromCaller = () => controller.abort();
-  options.signal?.addEventListener('abort', abortFromCaller, { once: true });
+  callerSignal?.addEventListener('abort', abortFromCaller, { once: true });
+  if (callerSignal?.aborted) controller.abort();
 
   try {
     const response = await fetch(`${API_BASE_URL}${path}`, {
-      method: options.method ?? 'GET',
-      headers: {
-        Accept: 'application/json',
-        ...(options.body === undefined ? {} : { 'Content-Type': 'application/json' }),
-        ...options.headers,
-      },
-      body: options.body === undefined ? undefined : JSON.stringify(options.body),
+      ...init,
       signal: controller.signal,
     });
     const text = await response.text();
@@ -99,13 +102,56 @@ export async function rawRequest<T>(
   } catch (error) {
     if (error instanceof ApiError) throw error;
     if (controller.signal.aborted) {
-      throw new ApiError('The request timed out', 0);
+      throw new ApiError(
+        callerSignal?.aborted ? 'The request was cancelled' : 'The request timed out',
+        0,
+      );
     }
     throw new ApiError('Could not connect to Văzute', 0);
   } finally {
     clearTimeout(timeout);
-    options.signal?.removeEventListener('abort', abortFromCaller);
+    callerSignal?.removeEventListener('abort', abortFromCaller);
   }
+}
+
+export function rawRequest<T>(
+  path: string,
+  options: RawRequestOptions = {},
+): Promise<T> {
+  return request<T>(
+    path,
+    {
+      method: options.method ?? 'GET',
+      headers: {
+        Accept: 'application/json',
+        ...(options.body === undefined ? {} : { 'Content-Type': 'application/json' }),
+        ...options.headers,
+      },
+      body: options.body === undefined ? undefined : JSON.stringify(options.body),
+    },
+    options.signal,
+    REQUEST_TIMEOUT_MS,
+  );
+}
+
+export function rawMultipartRequest<T>(
+  path: string,
+  form: FormData,
+  options: RawMultipartRequestOptions = {},
+): Promise<T> {
+  return request<T>(
+    path,
+    {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        ...options.headers,
+      },
+      body: form,
+    },
+    options.signal,
+    UPLOAD_TIMEOUT_MS,
+  );
 }
 
 export function getErrorMessage(error: unknown, fallback: string) {

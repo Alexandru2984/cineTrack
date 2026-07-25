@@ -1,5 +1,15 @@
 import { router } from 'expo-router';
-import { Bell, Clock3, Film, ListVideo, Search, Tv } from 'lucide-react-native';
+import {
+  Bell,
+  Clock3,
+  Film,
+  ListVideo,
+  Search,
+  Settings2,
+  Tv,
+  UploadCloud,
+  type LucideIcon,
+} from 'lucide-react-native';
 import { useMemo } from 'react';
 import {
   RefreshControl,
@@ -107,6 +117,39 @@ export default function HomeScreen() {
           }
         />
 
+        {stats.data &&
+        stats.data.total_movies === 0 &&
+        stats.data.total_shows === 0 ? (
+          <View
+            style={[
+              styles.onboarding,
+              { borderColor: theme.border, backgroundColor: theme.elevated },
+            ]}
+          >
+            <View style={styles.onboardingCopy}>
+              <AppText variant="section">Make Văzute yours</AppText>
+              <AppText variant="caption" muted>
+                Add a first title or bring your existing TV Time history.
+              </AppText>
+            </View>
+            <OnboardingAction
+              icon={Search}
+              label="Find your first movie or show"
+              onPress={() => router.push('/(tabs)/search')}
+            />
+            <OnboardingAction
+              icon={UploadCloud}
+              label="Import from TV Time"
+              onPress={() => router.push('/import-tvtime')}
+            />
+            <OnboardingAction
+              icon={Settings2}
+              label="Set your region and release alerts"
+              onPress={() => router.push('/settings')}
+            />
+          </View>
+        ) : null}
+
         {stats.data ? (
           <View style={styles.stats}>
             <Stat icon={Film} label="Movies" value={stats.data.total_movies} />
@@ -194,6 +237,37 @@ export default function HomeScreen() {
   );
 }
 
+function OnboardingAction({
+  icon: Icon,
+  label,
+  onPress,
+}: {
+  icon: LucideIcon;
+  label: string;
+  onPress: () => void;
+}) {
+  const theme = useTheme();
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.onboardingAction,
+        {
+          borderTopColor: theme.border,
+          opacity: pressed ? 0.7 : 1,
+        },
+      ]}
+    >
+      <Icon color={theme.primary} size={19} />
+      <AppText variant="label" style={styles.onboardingActionCopy}>
+        {label}
+      </AppText>
+    </Pressable>
+  );
+}
+
 function Stat({
   icon: Icon,
   label,
@@ -231,6 +305,25 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     paddingBottom: spacing.xxl,
     gap: spacing.xl,
+  },
+  onboarding: {
+    borderWidth: 1,
+    borderRadius: radius.lg,
+    paddingHorizontal: spacing.lg,
+  },
+  onboardingCopy: {
+    gap: spacing.xs,
+    paddingVertical: spacing.lg,
+  },
+  onboardingAction: {
+    minHeight: 52,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  onboardingActionCopy: {
+    flex: 1,
   },
   stats: {
     flexDirection: 'row',

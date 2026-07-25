@@ -9,6 +9,7 @@ import {
   Eye,
   EyeOff,
   Globe2,
+  HelpCircle,
   KeyRound,
   Laptop2,
   LogOut,
@@ -19,6 +20,7 @@ import {
   ShieldCheck,
   Smartphone,
   Trash2,
+  UploadCloud,
   UserRound,
 } from 'lucide-react-native';
 import { useState } from 'react';
@@ -976,6 +978,26 @@ export default function SettingsScreen() {
               <AppText variant="section">Privacy & data</AppText>
             </View>
             <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Import from TV Time"
+              onPress={() => router.push('/import-tvtime')}
+              style={({ pressed }) => [
+                styles.linkRow,
+                { borderColor: theme.border, opacity: pressed ? 0.72 : 1 },
+              ]}
+            >
+              <View style={styles.linkCopy}>
+                <UploadCloud color={theme.primary} size={18} />
+                <View style={styles.headingCopy}>
+                  <AppText variant="label">Import from TV Time</AppText>
+                  <AppText variant="caption" muted>
+                    Move your library and watch history
+                  </AppText>
+                </View>
+              </View>
+              <ExternalLink color={theme.mutedText} size={18} />
+            </Pressable>
+            <Pressable
               accessibilityRole="link"
               accessibilityLabel="Open Văzute privacy policy"
               onPress={() => void Linking.openURL('https://vazute.micutu.com/privacy')}
@@ -985,6 +1007,30 @@ export default function SettingsScreen() {
               ]}
             >
               <AppText variant="label">Privacy policy</AppText>
+              <ExternalLink color={theme.mutedText} size={18} />
+            </Pressable>
+            <Pressable
+              accessibilityRole="link"
+              accessibilityLabel="Email Văzute support"
+              onPress={() =>
+                void Linking.openURL(
+                  'mailto:postmaster@micutu.com?subject=Vazute%20mobile%20support',
+                )
+              }
+              style={({ pressed }) => [
+                styles.linkRow,
+                { borderColor: theme.border, opacity: pressed ? 0.72 : 1 },
+              ]}
+            >
+              <View style={styles.linkCopy}>
+                <HelpCircle color={theme.info} size={18} />
+                <View style={styles.headingCopy}>
+                  <AppText variant="label">Help & support</AppText>
+                  <AppText variant="caption" muted>
+                    postmaster@micutu.com
+                  </AppText>
+                </View>
+              </View>
               <ExternalLink color={theme.mutedText} size={18} />
             </Pressable>
             {cacheCleared ? <FormMessage message="Offline data cleared" success /> : null}
@@ -1365,6 +1411,13 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     borderBottomWidth: StyleSheet.hairlineWidth,
     paddingHorizontal: spacing.xs,
+  },
+  linkCopy: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
   },
   dangerZone: {
     gap: spacing.lg,

@@ -82,6 +82,21 @@ action removes it. Tokens remain in SecureStore. Exact history timestamps,
 custom lists, statistics, notifications, social data, account sessions, and
 user search results are excluded from persistence.
 
+## TV Time import and first-run guidance
+
+Accounts with an empty library get direct actions to search, import existing
+history, and configure region/release alerts. Settings can select
+`shows.json`, `movies.json`, and the optional `rewatched_episode.csv` through
+the platform document picker. The client checks exact filenames and the same
+16 MB/file and 24 MB/total limits enforced by the backend, uploads with the
+authenticated refreshable session, polls the bounded background job, and
+refreshes library/history/statistics on completion. Raw import files are parsed
+in memory by the backend and are not retained.
+
+Document selection grants access only to the files the user chooses; it does
+not request Android storage/media permissions. Settings also links the public
+privacy policy and the published support email.
+
 ## Crash diagnostics
 
 Render failures and uncaught JavaScript errors are sanitized on-device and

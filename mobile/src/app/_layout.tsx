@@ -118,6 +118,7 @@ export default function RootLayout() {
               <Stack.Screen name="people/[username]" options={{ title: 'Profile' }} />
               <Stack.Screen name="profile/[username]" options={{ title: 'Profile' }} />
               <Stack.Screen name="settings" options={{ title: 'Account settings' }} />
+              <Stack.Screen name="import-tvtime" options={{ title: 'Import data' }} />
             </Stack>
           </View>
         </MobileErrorBoundary>

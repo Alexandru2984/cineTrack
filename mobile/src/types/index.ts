@@ -29,6 +29,26 @@ export interface AccountSession {
   current: boolean;
 }
 
+export interface ImportTotals {
+  shows: number;
+  movies: number;
+  episodes_linked: number;
+  episodes_date_only: number;
+  rewatches: number;
+  unresolved: string[];
+}
+
+export type ImportStatus = 'pending' | 'running' | 'completed' | 'failed';
+
+export interface ImportJob {
+  id: string;
+  status: ImportStatus;
+  totals: ImportTotals | null;
+  error: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface MobileAuthResponse {
   access_token: string;
   refresh_token: string;

@@ -26,6 +26,12 @@ is deletable in-app.
 | **Contacts, calendar, SMS, microphone, camera** | **No** | — | — | None of these modules or permissions are present. |
 | **Financial info** | **No** | — | — | No payments. |
 
+TV Time import is user-initiated and processes the selected export as watch
+history/app activity under the entries above. The system document picker grants
+access only to explicitly selected files; no broad media or storage permission
+is requested, and the raw files are not retained after the import job is
+accepted.
+
 ## Answers to Play's specific questions
 
 - **Is any data shared with third parties?** No. Third parties (TMDB, Cloudflare,
