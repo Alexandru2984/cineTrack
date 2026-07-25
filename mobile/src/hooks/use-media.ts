@@ -1,7 +1,9 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useLocales } from 'expo-localization';
 
 import { apiRequest } from '@/lib/api';
 import { withQuery } from '@/lib/http';
+import { mediaLanguageFromLocales } from '@/lib/locale';
 import type {
   EpisodeReaction,
   DiscoveryResponse,
@@ -14,13 +16,12 @@ import type {
 } from '@/types';
 import { fetchWatchProviders } from '@/lib/watch-providers';
 
-function preferredLanguage() {
-  const locale = Intl.DateTimeFormat().resolvedOptions().locale;
-  return /^[A-Za-z]{2}(?:-[A-Za-z]{2})?$/.test(locale) ? locale : 'en-US';
+function usePreferredLanguage() {
+  return mediaLanguageFromLocales(useLocales());
 }
 
 export function useMediaSearch(query: string, type?: MediaType) {
-  const language = preferredLanguage();
+  const language = usePreferredLanguage();
   return useInfiniteQuery({
     queryKey: ['media-search', query, type, language],
     queryFn: ({ pageParam }) =>
@@ -40,7 +41,7 @@ export function useMediaSearch(query: string, type?: MediaType) {
 }
 
 export function useDiscovery() {
-  const language = preferredLanguage();
+  const language = usePreferredLanguage();
   return useQuery({
     queryKey: ['discovery', language],
     queryFn: () =>
@@ -52,7 +53,7 @@ export function useDiscovery() {
 }
 
 export function useMediaDetail(id: string, type: MediaType) {
-  const language = preferredLanguage();
+  const language = usePreferredLanguage();
   return useQuery({
     queryKey: ['media', id, type, language],
     queryFn: () =>

@@ -169,3 +169,11 @@ Associated Domains entitlement is prepared, but universal links still require
 the real Apple Developer Team ID and an Apple App Site Association file. Until
 those credentials exist, HTTPS links intentionally fall back to the web on iOS.
 See `STORE_RELEASE_CHECKLIST.md` for the remaining external steps.
+
+## Locale behavior
+
+Media search, discovery, and details use the device's preferred language and
+language region through `expo-localization`. Dates and times use the device
+locale. The application shell is currently English-only; do not advertise a
+fully translated interface until all user-facing strings have translation
+coverage.
