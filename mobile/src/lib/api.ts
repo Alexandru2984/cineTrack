@@ -62,13 +62,13 @@ export async function apiMultipartRequest<T>(path: string, form: FormData): Prom
   const generation = currentSessionGeneration();
   const auth = useAuthStore.getState();
   if (auth.status === 'offline') {
-    throw new ApiError('Connect to the internet to import data', 0);
+    throw new ApiError('Connect to the internet to upload files', 0);
   }
   if (auth.status !== 'authenticated' || !auth.accessToken) {
-    throw new ApiError('Sign in to import data', 401);
+    throw new ApiError('Sign in to upload files', 401);
   }
   const ownerId = auth.user?.id;
-  if (!ownerId) throw new ApiError('Sign in to import data', 401);
+  if (!ownerId) throw new ApiError('Sign in to upload files', 401);
   const controller = new AbortController();
   const unsubscribe = useAuthStore.subscribe((state) => {
     if (state.status !== 'authenticated' || state.user?.id !== ownerId) {

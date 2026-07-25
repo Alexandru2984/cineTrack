@@ -20,10 +20,11 @@ is deletable in-app.
 | **Name / username** | Yes | Yes | Account, app functionality | Public display name, chosen by the user. |
 | **App activity — watch history** | Yes | Yes | App functionality | The core feature: what the user marked watched. |
 | **App activity — other (reactions, ratings, lists)** | Optional | No | App functionality | Only what the user creates. |
+| **Photos** (profile avatar) | Optional | No | Account management, app functionality | Only the single profile picture the user explicitly chooses. |
 | **Device ID** (push token) | Optional | No | Send notifications | Only if the user enables release notifications. |
 | **App info & performance — crash logs / diagnostics** | Yes | No | App functionality (stability) | Sanitised on-device before sending: tokens, emails and URLs are redacted. |
 | **Approximate/precise location** | **No** | — | — | The app requests no location permission. |
-| **Contacts, calendar, SMS, microphone, camera** | **No** | — | — | None of these modules or permissions are present. |
+| **Contacts, calendar, SMS, microphone, camera** | **No** | — | — | None of these permissions are requested. |
 | **Financial info** | **No** | — | — | No payments. |
 
 TV Time import is user-initiated and processes the selected export as watch
@@ -31,6 +32,11 @@ history/app activity under the entries above. The system document picker grants
 access only to explicitly selected files; no broad media or storage permission
 is requested, and the raw files are not retained after the import job is
 accepted.
+
+Avatar upload is also user-initiated. The system photo picker grants access only
+to the selected image; the app resizes it and re-encodes it without EXIF
+metadata before upload. The resulting avatar is stored until the user removes
+it or deletes the account.
 
 ## Answers to Play's specific questions
 
@@ -45,8 +51,7 @@ accepted.
   store listing is `https://vazute.micutu.com/account-deletion`.
 - **Is data collection optional?** Email and username are required for an
   account. Everything else — push token, ratings, reactions, and lists — is
-  created only by user action. The mobile app can display an avatar already
-  stored on the account, but it does not currently upload photos.
+  created only by user action, including the optional profile picture.
 
 ## Permissions
 
@@ -71,11 +76,12 @@ What does ship, and why:
 The only runtime-prompt permission is `POST_NOTIFICATIONS`, requested only if
 the user turns on release notifications.
 
-Seven permissions that Expo modules would otherwise declare — media/storage
-read, storage write, system-alert-window, vibrate, biometric, and fingerprint —
-are removed via `blockedPermissions`. `READ_MEDIA_IMAGES` is contributed by
-`expo-screen-capture` for the optional screenshot-listener API; Văzute only
-blocks capture, which does not need photo access.
+Camera, microphone, media/storage read, storage write, system-alert-window,
+vibrate, biometric, and fingerprint permissions contributed by Expo modules
+are removed by plugin configuration or `blockedPermissions`.
+`READ_MEDIA_IMAGES` is contributed by `expo-screen-capture` for the optional
+screenshot-listener API; Văzute only blocks capture, which does not need photo
+access.
 
 ## Account deletion — Play's dedicated requirement
 

@@ -13,6 +13,11 @@ import {
   updateAccountProfile,
   type ProfileDraft,
 } from '@/lib/account';
+import {
+  deleteAvatar,
+  pickAndPrepareAvatar,
+  uploadAvatar,
+} from '@/lib/avatar';
 import { useAuthStore } from '@/store/auth';
 
 export const accountKeys = {
@@ -33,6 +38,31 @@ export function useUpdateAccountProfile() {
   return useMutation({
     mutationFn: (draft: ProfileDraft) => updateAccountProfile(draft),
     onSuccess: (user) => setUser(user),
+  });
+}
+
+export function useUploadAccountAvatar() {
+  const setUser = useAuthStore((state) => state.setUser);
+  return useMutation({
+    mutationFn: async () => {
+      const file = await pickAndPrepareAvatar();
+      return file ? uploadAvatar(file) : null;
+    },
+    onSuccess: (result) => {
+      const user = useAuthStore.getState().user;
+      if (user && result) setUser({ ...user, avatar_url: result.avatar_url });
+    },
+  });
+}
+
+export function useDeleteAccountAvatar() {
+  const setUser = useAuthStore((state) => state.setUser);
+  return useMutation({
+    mutationFn: deleteAvatar,
+    onSuccess: () => {
+      const user = useAuthStore.getState().user;
+      if (user) setUser({ ...user, avatar_url: null });
+    },
   });
 }
 

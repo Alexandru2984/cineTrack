@@ -56,7 +56,7 @@ describe('offline API guard', () => {
       apiMultipartRequest('/import/tvtime', new FormData()),
     ).rejects.toMatchObject({
       status: 0,
-      message: 'Connect to the internet to import data',
+      message: 'Connect to the internet to upload files',
     });
     expect(mockRawMultipartRequest).not.toHaveBeenCalled();
   });

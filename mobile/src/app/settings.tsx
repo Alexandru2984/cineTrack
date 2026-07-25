@@ -42,10 +42,12 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { AppButton } from '@/components/app-button';
 import { AppText } from '@/components/app-text';
 import { SegmentedControl } from '@/components/segmented-control';
+import { UserAvatar } from '@/components/user-avatar';
 import { radius, spacing } from '@/constants/theme';
 import {
   useAccountSessions,
   useChangeAccountPassword,
+  useDeleteAccountAvatar,
   useDisableTwoFactor,
   useEnableTwoFactor,
   useLogoutAllAccountSessions,
@@ -54,6 +56,7 @@ import {
   useRevokeAccountSession,
   useSetupTwoFactor,
   useUpdateAccountProfile,
+  useUploadAccountAvatar,
 } from '@/hooks/use-account';
 import {
   useCalendarPreferences,
@@ -97,6 +100,8 @@ export default function SettingsScreen() {
   const status = useAuthStore((state) => state.status);
   const user = useAuthStore((state) => state.user);
   const updateProfile = useUpdateAccountProfile();
+  const uploadAvatar = useUploadAccountAvatar();
+  const deleteAvatar = useDeleteAccountAvatar();
   const preferences = useCalendarPreferences(status === 'authenticated');
   const updatePreferences = useUpdateCalendarPreferences();
   const sessions = useAccountSessions(status === 'authenticated');
@@ -118,6 +123,7 @@ export default function SettingsScreen() {
   const [isPublic, setIsPublic] = useState(user?.is_public ?? false);
   const [profileError, setProfileError] = useState<string | null>(null);
   const [profileSaved, setProfileSaved] = useState(false);
+  const [avatarError, setAvatarError] = useState<string | null>(null);
 
   const [emailPassword, setEmailPassword] = useState('');
   const [newEmail, setNewEmail] = useState('');
@@ -180,6 +186,31 @@ export default function SettingsScreen() {
     } catch (error) {
       setProfileError(getErrorMessage(error, 'Could not update your profile'));
     }
+  };
+
+  const chooseAvatar = async () => {
+    setAvatarError(null);
+    try {
+      await uploadAvatar.mutateAsync();
+    } catch (error) {
+      setAvatarError(getErrorMessage(error, 'Could not update your profile picture'));
+    }
+  };
+
+  const confirmAvatarDeletion = () => {
+    setAvatarError(null);
+    Alert.alert('Remove profile picture?', 'Your default profile icon will be restored.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Remove',
+        style: 'destructive',
+        onPress: () => {
+          void deleteAvatar.mutateAsync().catch((error) => {
+            setAvatarError(getErrorMessage(error, 'Could not remove your profile picture'));
+          });
+        },
+      },
+    ]);
   };
 
   const submitEmailChange = async () => {
@@ -405,6 +436,34 @@ export default function SettingsScreen() {
                 </AppText>
               </View>
             </View>
+
+            <View style={styles.avatarEditor}>
+              <UserAvatar uri={user.avatar_url} size={80} />
+              <View style={styles.avatarActions}>
+                <AppButton
+                  label={user.avatar_url ? 'Change picture' : 'Choose picture'}
+                  variant="secondary"
+                  compact
+                  loading={uploadAvatar.isPending}
+                  disabled={deleteAvatar.isPending}
+                  onPress={() => void chooseAvatar()}
+                />
+                {user.avatar_url ? (
+                  <AppButton
+                    label="Remove picture"
+                    variant="danger"
+                    compact
+                    loading={deleteAvatar.isPending}
+                    disabled={uploadAvatar.isPending}
+                    onPress={confirmAvatarDeletion}
+                  />
+                ) : null}
+                <AppText variant="caption" muted>
+                  One photo you choose is resized and stripped of metadata before upload.
+                </AppText>
+              </View>
+            </View>
+            {avatarError ? <FormMessage message={avatarError} /> : null}
 
             <View style={styles.field}>
               <AppText variant="label">Username</AppText>
@@ -1270,6 +1329,17 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0,
     gap: spacing.xs,
+  },
+  avatarEditor: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.lg,
+  },
+  avatarActions: {
+    flex: 1,
+    minWidth: 0,
+    alignItems: 'flex-start',
+    gap: spacing.sm,
   },
   sectionTitleRow: {
     flexDirection: 'row',

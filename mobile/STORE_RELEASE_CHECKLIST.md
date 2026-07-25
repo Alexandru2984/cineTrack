@@ -82,4 +82,5 @@ never be guessed or copied from an unrelated signing identity.
 - Confirm `completed`, season bulk watch, and watched-through never add unreleased episodes.
 - Confirm privacy/cache clearing, crash-report redaction, notification opt-in/out, and device-token revocation.
 - Select valid and invalid TV Time exports, verify upload limits, background progress, and the completed library refresh.
+- Choose, replace, and remove a profile picture; confirm the system picker requests no camera or broad media permission.
 - Record the commit, version, version code/build number, signing identity, CI run, and artifact checksum in the release notes.

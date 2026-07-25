@@ -27,6 +27,7 @@ import { AppButton } from '@/components/app-button';
 import { AppText } from '@/components/app-text';
 import { ScreenHeader } from '@/components/screen-header';
 import { TmdbLogo } from '@/components/tmdb-logo';
+import { UserAvatar } from '@/components/user-avatar';
 import { spacing } from '@/constants/theme';
 import { useMyStats } from '@/hooks/use-stats';
 import { useNotificationSummary } from '@/hooks/use-notifications';
@@ -41,7 +42,6 @@ export default function ProfileScreen() {
   const notifications = useNotificationSummary();
   const unreadCount = notifications.data?.unread_count ?? 0;
   const [loggingOut, setLoggingOut] = useState(false);
-  const initial = user?.username.charAt(0).toUpperCase() || '?';
 
   const logout = async () => {
     setLoggingOut(true);
@@ -58,11 +58,7 @@ export default function ProfileScreen() {
         <ScreenHeader title="Profile" subtitle={user?.email} />
 
         <View style={styles.identity}>
-          <View style={[styles.avatar, { backgroundColor: theme.primarySoft }]}>
-            <AppText variant="title" style={{ color: theme.primary }}>
-              {initial}
-            </AppText>
-          </View>
+          <UserAvatar uri={user?.avatar_url ?? null} size={72} />
           <View style={styles.identityCopy}>
             <AppText variant="section" numberOfLines={2}>
               {user?.username}
@@ -300,13 +296,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.lg,
-  },
-  avatar: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   identityCopy: {
     flex: 1,
