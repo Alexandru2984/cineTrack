@@ -1,5 +1,3 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
-
 import { apiRequest } from '@/lib/api';
 import {
   captureClientError,
@@ -7,13 +5,13 @@ import {
   flushClientErrorReports,
   sanitizeDiagnosticText,
 } from '@/lib/client-errors';
+import { encryptedClientErrorStorage } from '@/lib/encrypted-storage';
 import { ApiError } from '@/lib/http';
 import { useAuthStore } from '@/store/auth';
 import type { User } from '@/types';
 
-jest.mock('@react-native-async-storage/async-storage', () => ({
-  __esModule: true,
-  default: {
+jest.mock('@/lib/encrypted-storage', () => ({
+  encryptedClientErrorStorage: {
     getItem: jest.fn(),
     setItem: jest.fn(),
     removeItem: jest.fn(),
@@ -45,9 +43,9 @@ const secondUser: User = {
 };
 
 const mockApiRequest = jest.mocked(apiRequest);
-const mockGetItem = jest.mocked(AsyncStorage.getItem);
-const mockSetItem = jest.mocked(AsyncStorage.setItem);
-const mockRemoveItem = jest.mocked(AsyncStorage.removeItem);
+const mockGetItem = jest.mocked(encryptedClientErrorStorage.getItem);
+const mockSetItem = jest.mocked(encryptedClientErrorStorage.setItem);
+const mockRemoveItem = jest.mocked(encryptedClientErrorStorage.removeItem);
 let storedValue: string | null;
 
 describe('self-hosted client error reporting', () => {

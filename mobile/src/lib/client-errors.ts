@@ -1,8 +1,8 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 
 import { apiRequest } from '@/lib/api';
+import { encryptedClientErrorStorage } from '@/lib/encrypted-storage';
 import { ApiError } from '@/lib/http';
 import { hasLocalSession, useAuthStore } from '@/store/auth';
 
@@ -177,23 +177,26 @@ function isQueuedReport(value: unknown): value is QueuedReport {
 
 async function readQueueUnlocked() {
   try {
-    const raw = await AsyncStorage.getItem(STORAGE_KEY);
+    const raw = await encryptedClientErrorStorage.getItem(STORAGE_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw) as unknown;
     if (!Array.isArray(parsed)) throw new Error('Invalid report queue');
     return parsed.filter(isQueuedReport).slice(-MAX_QUEUED_REPORTS);
   } catch {
-    await AsyncStorage.removeItem(STORAGE_KEY).catch(() => undefined);
+    await encryptedClientErrorStorage.removeItem(STORAGE_KEY).catch(() => undefined);
     return [];
   }
 }
 
 async function writeQueueUnlocked(queue: QueuedReport[]) {
   if (queue.length === 0) {
-    await AsyncStorage.removeItem(STORAGE_KEY);
+    await encryptedClientErrorStorage.removeItem(STORAGE_KEY);
     return;
   }
-  await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(queue.slice(-MAX_QUEUED_REPORTS)));
+  await encryptedClientErrorStorage.setItem(
+    STORAGE_KEY,
+    JSON.stringify(queue.slice(-MAX_QUEUED_REPORTS)),
+  );
 }
 
 async function enqueueReport(report: ClientErrorReport, ownerId: string, signature: string) {
@@ -314,7 +317,9 @@ export function flushClientErrorReports() {
 
 export function clearClientErrorReports() {
   recentSignatures.clear();
-  return withStorageLock(() => AsyncStorage.removeItem(STORAGE_KEY)).catch(() => undefined);
+  return withStorageLock(() => encryptedClientErrorStorage.removeItem(STORAGE_KEY)).catch(
+    () => undefined,
+  );
 }
 
 export function installGlobalErrorHandler() {

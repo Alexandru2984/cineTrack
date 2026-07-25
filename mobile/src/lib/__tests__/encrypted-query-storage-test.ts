@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 
+import { encryptedClientErrorStorage } from '@/lib/encrypted-storage';
 import { encryptedQueryStorage } from '@/lib/encrypted-query-storage';
 
 jest.mock('@react-native-async-storage/async-storage', () => ({
@@ -100,6 +101,28 @@ describe('encrypted query storage', () => {
     await expect(encryptedQueryStorage.getItem('vazute.query-cache')).resolves.toBe(value);
     expect(mockSetSecureItem).toHaveBeenCalledWith(
       'vazute.query-cache-key.v1',
+      'mock-device-key',
+      expect.objectContaining({
+        keychainAccessible: 'when-unlocked-this-device-only',
+      }),
+    );
+  });
+
+  it('uses a separate device key and never writes diagnostics in plaintext', async () => {
+    const value = JSON.stringify({
+      message: 'Private diagnostic context',
+      stack: 'sensitive-stack',
+    });
+
+    await encryptedClientErrorStorage.setItem('vazute.client-errors.v1', value);
+
+    expect(storedValue).toMatch(/^v1:mock:/);
+    expect(storedValue).not.toContain('Private diagnostic context');
+    await expect(
+      encryptedClientErrorStorage.getItem('vazute.client-errors.v1'),
+    ).resolves.toBe(value);
+    expect(mockSetSecureItem).toHaveBeenCalledWith(
+      'vazute.client-errors-key.v1',
       'mock-device-key',
       expect.objectContaining({
         keychainAccessible: 'when-unlocked-this-device-only',
