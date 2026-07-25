@@ -34,7 +34,15 @@ EAS_BUILD_PROFILE=production EXPO_UPDATES_ENABLED=false EXPO_USE_DEV_CLIENT=0 \
 python3 scripts/validate_native_config.py
 # With ANDROID_HOME configured:
 cd android && ./gradlew :app:assembleRelease --no-daemon
+# With exactly one emulator or USB-debug device running:
+cd .. && npm run e2e:android
 ```
+
+The native smoke suite installs the release APK, starts from cleared app data,
+denies optional permissions, verifies login/register/reset validation and the
+custom reset deep link, then cold-restarts the app. It uses Maestro 2.7.0 from
+the official GitHub release with a pinned SHA-256 and does not create accounts
+or submit data to production. Reports stay under ignored `artifacts/maestro/`.
 
 ## Builds
 

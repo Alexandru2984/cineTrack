@@ -71,6 +71,8 @@ export default function ForgotPasswordScreen() {
             <View style={styles.field}>
               <AppText variant="label">Email</AppText>
               <TextInput
+                testID="forgot-password-email"
+                accessibilityLabel="Email"
                 value={email}
                 onChangeText={setEmail}
                 autoCapitalize="none"

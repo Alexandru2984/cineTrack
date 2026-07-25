@@ -55,6 +55,7 @@
     "test": "jest --runInBand",
     "doctor": "expo install --check && expo-doctor",
     "export:android": "expo export --platform android",
+    "e2e:android": "scripts/run-android-smoke.sh",
     "verify": "npm run lint && npm run typecheck && npm test && npm run doctor"
   },
   "overrides": {

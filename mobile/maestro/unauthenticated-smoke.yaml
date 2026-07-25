@@ -1,0 +1,40 @@
+appId: ${APP_ID}
+name: Android unauthenticated release smoke
+tags:
+  - smoke
+  - android
+---
+- launchApp:
+    clearState: true
+    permissions:
+      all: deny
+- extendedWaitUntil:
+    visible: "Continue tracking what you watch"
+    timeout: 20000
+- assertVisible: "Sign in"
+- tapOn:
+    id: "auth-email"
+- inputText: "not-an-email"
+- hideKeyboard
+- tapOn: "Sign in"
+- assertVisible: "Enter a valid email address"
+- tapOn: "Forgot password?"
+- assertVisible: "Reset password"
+- tapOn:
+    id: "forgot-password-email"
+- inputText: "invalid"
+- hideKeyboard
+- tapOn: "Send reset link"
+- assertVisible: "Enter a valid email address"
+- tapOn: "Back to sign in"
+- tapOn: "Create account"
+- assertVisible: "Create your watch history"
+- tapOn: "Create account"
+- assertVisible: "Enter a valid email address"
+- openLink: "vazute://reset-password"
+- assertVisible: "This reset link is missing, malformed, or no longer complete."
+- tapOn: "Request a new link"
+- assertVisible: "Reset password"
+- stopApp
+- launchApp
+- assertVisible: "Continue tracking what you watch"

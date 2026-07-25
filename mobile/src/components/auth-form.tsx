@@ -125,6 +125,8 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
               <View style={styles.field}>
                 <AppText variant="label">Username</AppText>
                 <TextInput
+                  testID="auth-username"
+                  accessibilityLabel="Username"
                   value={username}
                   onChangeText={setUsername}
                   autoCapitalize="none"
@@ -148,6 +150,8 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
             <View style={styles.field}>
               <AppText variant="label">Email</AppText>
               <TextInput
+                testID="auth-email"
+                accessibilityLabel="Email"
                 value={email}
                 onChangeText={setEmail}
                 autoCapitalize="none"
@@ -192,6 +196,8 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
                 ]}
               >
                 <TextInput
+                  testID="auth-password"
+                  accessibilityLabel="Password"
                   value={password}
                   onChangeText={setPassword}
                   secureTextEntry={!showPassword}
