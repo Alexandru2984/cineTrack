@@ -295,6 +295,9 @@ jobs:
       - name: Backup and restore safety tests
         run: scripts/tests/backup_restore_test.sh
 
+      - name: Release worker metrics tests
+        run: scripts/tests/release_schedule_metrics_test.sh
+
       - name: Validate Alertmanager config permissions
         run: scripts/tests/alertmanager_config_test.sh
 

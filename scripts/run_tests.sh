@@ -36,6 +36,7 @@ bash -n scripts/*.sh scripts/tests/*.sh
 python3 scripts/tests/check_embedded_python.py \
   scripts/backup_to_r2.sh scripts/restore_from_r2.sh
 scripts/tests/backup_restore_test.sh
+scripts/tests/release_schedule_metrics_test.sh
 if command -v promtool >/dev/null; then
   promtool check rules ops/prometheus/cinetrack-alerts.yml
 else

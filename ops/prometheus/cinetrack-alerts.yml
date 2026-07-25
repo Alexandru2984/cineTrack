@@ -93,3 +93,86 @@ groups:
         annotations:
           summary: CineTrack transactional email failed
           description: At least one transactional email failed in the last 15 minutes.
+
+      - alert: CineTrackFatalMobileCrash
+        expr: increase(cinetrack_client_error_reports_total{fatal="true"}[15m]) > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: Văzute received a fatal mobile crash report
+          description: At least one authenticated Android or iOS client reported a fatal JavaScript crash in the last 15 minutes.
+
+  - name: cinetrack-releases
+    rules:
+      - alert: CineTrackReleaseWorkerMetricsMissing
+        expr: absent(cinetrack_release_worker_last_run_timestamp_seconds)
+        for: 90m
+        labels:
+          severity: warning
+        annotations:
+          summary: Văzute release worker metrics are missing
+          description: The release worker has not published textfile metrics to node exporter.
+
+      - alert: CineTrackReleaseWorkerFailed
+        expr: cinetrack_release_worker_last_run_success == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: Văzute release worker failed
+          description: The most recent schedule synchronization or push dispatch run exited unsuccessfully.
+
+      - alert: CineTrackReleaseWorkerStale
+        expr: time() - cinetrack_release_worker_last_success_timestamp_seconds > 10800
+        for: 15m
+        labels:
+          severity: critical
+        annotations:
+          summary: Văzute release worker is stale
+          description: No release schedule synchronization has completed successfully in the last three hours.
+
+      - alert: CineTrackReleaseWorkerDatabaseMetricsInvalid
+        expr: cinetrack_release_worker_database_metrics_valid == 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: Văzute release health metrics are incomplete
+          description: The worker ran but could not query schedule and push delivery health from PostgreSQL.
+
+      - alert: CineTrackReleaseScheduleStale
+        expr: cinetrack_release_schedule_stale_active_titles > 0
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: Văzute has stale active TV schedules
+          description: At least one active tracked TV title has not refreshed successfully in the last 12 hours.
+
+      - alert: CineTrackReleaseScheduleRepeatedFailures
+        expr: cinetrack_release_schedule_repeated_failures > 0
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: Văzute release schedules are repeatedly failing
+          description: At least one tracked title has accumulated three consecutive schedule refresh failures.
+
+      - alert: CineTrackPushDeliveryFailed
+        expr: cinetrack_release_push_failed_last_run > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Văzute release push delivery failed
+          description: At least one push notification became a terminal failure during the latest worker run.
+
+      - alert: CineTrackPushDeliveryOverdue
+        expr: cinetrack_release_push_overdue_deliveries > 0
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: Văzute release push deliveries are overdue
+          description: A push delivery has remained due for submission or receipt processing beyond its allowed window.

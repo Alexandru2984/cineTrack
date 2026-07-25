@@ -47,3 +47,10 @@ inhibit_rules:
   - source_matchers: [alertname = "CineTrackBackendDown"]
     target_matchers: [alertname = "CineTrackHighServerErrorRate"]
     equal: ["deployment"]
+
+  # A dead worker explains the downstream freshness and delivery alerts.
+  - source_matchers:
+      - alertname =~ "CineTrackReleaseWorker(MetricsMissing|Failed|Stale)"
+    target_matchers:
+      - alertname =~ "CineTrack(ReleaseSchedule.*|PushDelivery.*)"
+    equal: ["deployment"]

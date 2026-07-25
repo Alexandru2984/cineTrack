@@ -18,9 +18,10 @@ promtool check rules /path/to/cineTrack/ops/prometheus/cinetrack-alerts.yml
 promtool check config /etc/prometheus/prometheus.yml
 ```
 
-Backup metrics use the node exporter textfile collector. Set
-`BACKUP_METRICS_FILE` to a path in its configured directory. The script writes
-the file atomically, but the cron user needs write permission to that directory.
-On this host the collector directory is `/var/lib/prometheus/node-exporter`;
-grant access to a dedicated subdirectory or install a root-owned atomic copy
-step instead of making the entire collector directory writable.
+Backup and release-worker metrics use the node exporter textfile collector.
+`backup_to_r2.sh` and `sync_release_schedules.sh` default to the same
+`${XDG_STATE_HOME:-$HOME/.local/state}/cinetrack` directory mounted by
+`docker-compose.monitoring.yml`. Override `BACKUP_STATE_DIR` and
+`RELEASE_SCHEDULE_STATE_DIR` together if the cron user uses a different state
+path. Both scripts write their `.prom` files atomically with non-sensitive,
+low-cardinality gauges.

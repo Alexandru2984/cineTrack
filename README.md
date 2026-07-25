@@ -397,9 +397,11 @@ R2 is used for:
     scripts/restore_from_r2.sh restore cinetrack_restore_drill latest
   ```
 
-  The backup script emits node-exporter textfile metrics for failures, staleness,
-  encryption, size, and credential isolation. Prometheus scrape and alerting
-  snippets live under `ops/prometheus/`; they are not installed automatically.
+  The backup and release-worker scripts emit node-exporter textfile metrics.
+  Alerts cover backup safety, worker liveness, stale schedule data, repeated
+  provider failures, overdue/failed push deliveries, backend availability,
+  transactional email failures, and fatal mobile crashes. Prometheus scrape and
+  alerting configuration lives under `ops/prometheus/`.
 
 Apply the cache lifecycle rules once, then schedule the catalog sync after TMDB's daily exports are available. A second bounded job hydrates details for popular entries without scraping the entire catalog. The focused release job refreshes only distinct titles tracked by users and can run more often:
 

@@ -60,15 +60,13 @@ services:
       - ./ops/alertmanager/alertmanager.generated.yml:/etc/alertmanager/alertmanager.yml:ro
       - alertmanager_data:/alertmanager
 
-  # Publishes the backup script's textfile metrics. Without this the backup
-  # alerts have no series to evaluate and stay silently green.
+  # Publishes backup and release-worker textfile metrics. Without this the
+  # operational alerts have no series to evaluate and stay silently green.
   node-exporter:
     image: prom/node-exporter:v1.10.1
     restart: unless-stopped
-    # Runs as the backup script's owner. The state directory is mode 700 by
-    # design — it holds the lock alongside the metrics — so the default `nobody`
-    # cannot traverse it, and loosening the directory to suit the collector
-    # would be the wrong trade.
+    # Runs as the maintenance scripts' owner. The state directory is mode 700
+    # by design, so the default `nobody` cannot traverse it.
     user: "${METRICS_UID:-1001}:${METRICS_GID:-1001}"
     command:
       - --collector.textfile.directory=/var/lib/node_exporter/textfile
