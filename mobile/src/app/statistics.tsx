@@ -1,4 +1,4 @@
-import { Redirect } from 'expo-router';
+import { Redirect, router } from 'expo-router';
 import {
   ChevronLeft,
   ChevronRight,
@@ -6,6 +6,7 @@ import {
   Film,
   Flame,
   ListVideo,
+  Sparkles,
   Trophy,
   Tv,
 } from 'lucide-react-native';
@@ -19,6 +20,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { AppButton } from '@/components/app-button';
 import { AppText } from '@/components/app-text';
 import { EmptyState, ErrorState, LoadingState } from '@/components/screen-state';
 import { radius, spacing } from '@/constants/theme';
@@ -112,6 +114,28 @@ export default function StatisticsScreen() {
         }
         contentContainerStyle={styles.content}
       >
+        <View
+          style={[
+            styles.recap,
+            { backgroundColor: theme.primarySoft, borderColor: theme.primary },
+          ]}
+        >
+          <View style={styles.recapCopy}>
+            <Sparkles color={theme.primary} size={21} />
+            <View style={styles.sectionCopy}>
+              <AppText variant="section">Your year in review</AppText>
+              <AppText variant="caption" muted>
+                Top titles, genres, streaks, and monthly activity.
+              </AppText>
+            </View>
+          </View>
+          <AppButton
+            label="Open recap"
+            compact
+            onPress={() => router.push('/wrapped')}
+          />
+        </View>
+
         <View style={styles.statGrid}>
           <Stat icon={Film} label="Movies" value={stats.data.total_movies} color={theme.primary} />
           <Stat icon={Tv} label="Shows" value={stats.data.total_shows} color={theme.info} />
@@ -401,6 +425,17 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: spacing.sm,
+  },
+  recap: {
+    gap: spacing.lg,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: radius.lg,
+    padding: spacing.lg,
+  },
+  recapCopy: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
   },
   stat: {
     width: '48%',

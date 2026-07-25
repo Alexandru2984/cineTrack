@@ -83,4 +83,5 @@ never be guessed or copied from an unrelated signing identity.
 - Confirm privacy/cache clearing, crash-report redaction, notification opt-in/out, and device-token revocation.
 - Select valid and invalid TV Time exports, verify upload limits, background progress, and the completed library refresh.
 - Choose, replace, and remove a profile picture; confirm the system picker requests no camera or broad media permission.
+- Open the annual recap for a year with and without watch history; verify year navigation and title deep links.
 - Record the commit, version, version code/build number, signing identity, CI run, and artifact checksum in the release notes.

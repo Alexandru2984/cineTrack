@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 
 import { apiRequest } from '@/lib/api';
 import { withQuery } from '@/lib/http';
+import { fetchWrapped } from '@/lib/wrapped';
 import type {
   GenreDistribution,
   HeatmapDay,
@@ -43,6 +44,15 @@ export function useMonthlyActivity(enabled = true) {
   return useQuery({
     queryKey: ['stats', 'monthly'],
     queryFn: () => apiRequest<MonthlyActivity[]>('/stats/me/monthly'),
+    staleTime: STATS_STALE_TIME,
+    enabled,
+  });
+}
+
+export function useWrapped(year: number, enabled = true) {
+  return useQuery({
+    queryKey: ['stats', 'wrapped', year],
+    queryFn: () => fetchWrapped(year),
     staleTime: STATS_STALE_TIME,
     enabled,
   });

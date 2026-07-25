@@ -111,6 +111,7 @@ export default function RootLayout() {
               <Stack.Screen name="episodes/[id]" options={{ title: 'Episode' }} />
               <Stack.Screen name="notifications" options={{ title: 'Notifications' }} />
               <Stack.Screen name="statistics" options={{ title: 'Statistics' }} />
+              <Stack.Screen name="wrapped" options={{ title: 'Year in review' }} />
               <Stack.Screen name="history" options={{ title: 'Watch history' }} />
               <Stack.Screen name="lists" options={{ title: 'Custom lists' }} />
               <Stack.Screen name="lists/[id]" options={{ title: 'List' }} />
