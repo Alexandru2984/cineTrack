@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate security-sensitive Expo prebuild output without regexing XML/plists."""
+"""Validate security-sensitive Expo prebuild and packaged native output."""
 
 from __future__ import annotations
 
@@ -17,6 +17,34 @@ ANDROID_NS = "{http://schemas.android.com/apk/res/android}"
 TOOLS_NS = "{http://schemas.android.com/tools}"
 ASSOCIATED_PATHS = {"/reset-password", "/media", "/episodes", "/profile", "/lists"}
 FINGERPRINT_PATTERN = re.compile(r"^(?:[0-9A-F]{2}:){31}[0-9A-F]{2}$")
+ANDROID_COMPONENT_TAGS = ("activity", "activity-alias", "service", "receiver", "provider")
+ANDROID_RELEASE_PERMISSIONS = {
+    "android.permission.ACCESS_NETWORK_STATE",
+    "android.permission.ACCESS_WIFI_STATE",
+    "android.permission.DETECT_SCREEN_CAPTURE",
+    "android.permission.INTERNET",
+    "android.permission.POST_NOTIFICATIONS",
+    "android.permission.READ_APP_BADGE",
+    "android.permission.RECEIVE_BOOT_COMPLETED",
+    "android.permission.WAKE_LOCK",
+    "com.anddoes.launcher.permission.UPDATE_COUNT",
+    "com.google.android.c2dm.permission.RECEIVE",
+    "com.google.android.finsky.permission.BIND_GET_INSTALL_REFERRER_SERVICE",
+    "com.htc.launcher.permission.READ_SETTINGS",
+    "com.htc.launcher.permission.UPDATE_SHORTCUT",
+    "com.huawei.android.launcher.permission.CHANGE_BADGE",
+    "com.huawei.android.launcher.permission.READ_SETTINGS",
+    "com.huawei.android.launcher.permission.WRITE_SETTINGS",
+    "com.majeur.launcher.permission.UPDATE_BADGE",
+    "com.oppo.launcher.permission.READ_SETTINGS",
+    "com.oppo.launcher.permission.WRITE_SETTINGS",
+    "com.sec.android.provider.badge.permission.READ",
+    "com.sec.android.provider.badge.permission.WRITE",
+    "com.sonyericsson.home.permission.BROADCAST_BADGE",
+    "com.sonymobile.home.permission.PROVIDER_INSERT_BADGE",
+    "me.everything.badger.permission.BADGE_COUNT_READ",
+    "me.everything.badger.permission.BADGE_COUNT_WRITE",
+}
 
 
 def require(condition: bool, message: str) -> None:
@@ -107,6 +135,137 @@ def validate_android(config: dict[str, object]) -> None:
     )
 
 
+def validate_packaged_android(config: dict[str, object]) -> bool:
+    pattern = "android/app/build/intermediates/packaged_manifests/release/**/AndroidManifest.xml"
+    matches = list(ROOT.glob(pattern))
+    if not matches:
+        return False
+    require(len(matches) == 1, f"expected one packaged release manifest, found {len(matches)}")
+
+    manifest = ET.parse(matches[0]).getroot()
+    application = manifest.find("application")
+    require(application is not None, "packaged Android application element is missing")
+
+    android_config = config["android"]
+    require(isinstance(android_config, dict), "Android config is malformed")
+    package = android_config["package"]
+    require(manifest.get("package") == package, "packaged Android application ID changed")
+    require(
+        manifest.get(f"{ANDROID_NS}versionName") == config["version"],
+        "packaged Android version does not match app config",
+    )
+
+    uses_sdk = manifest.findall("uses-sdk")
+    require(len(uses_sdk) == 1, "packaged Android SDK declaration is missing or ambiguous")
+    require(
+        uses_sdk[0].get(f"{ANDROID_NS}minSdkVersion") == "24",
+        "packaged Android minimum SDK changed",
+    )
+    require(
+        uses_sdk[0].get(f"{ANDROID_NS}targetSdkVersion") == "36",
+        "packaged Android target SDK changed",
+    )
+
+    require(
+        application.get(f"{ANDROID_NS}allowBackup") == "false",
+        "packaged Android backup is enabled",
+    )
+    require(
+        application.get(f"{ANDROID_NS}usesCleartextTraffic") == "false",
+        "packaged Android cleartext traffic is enabled",
+    )
+    require(
+        application.get(f"{ANDROID_NS}debuggable") != "true",
+        "packaged Android application is debuggable",
+    )
+    require(
+        application.get(f"{ANDROID_NS}testOnly") != "true",
+        "packaged Android application is test-only",
+    )
+
+    metadata = {
+        node.get(f"{ANDROID_NS}name"): node.get(f"{ANDROID_NS}value")
+        for node in application.findall("meta-data")
+    }
+    require(
+        metadata.get("expo.modules.updates.ENABLED") == "false",
+        "packaged Android OTA is enabled",
+    )
+
+    permissions = {
+        node.get(f"{ANDROID_NS}name") for node in manifest.findall("uses-permission")
+    }
+    require(None not in permissions, "packaged Android contains a nameless permission")
+    expected_permissions = ANDROID_RELEASE_PERMISSIONS | {
+        f"{package}.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"
+    }
+    require(
+        permissions == expected_permissions,
+        "packaged Android permission set changed: "
+        f"added={sorted(permissions - expected_permissions)}, "
+        f"removed={sorted(expected_permissions - permissions)}",
+    )
+    for permission in android_config["blockedPermissions"]:
+        require(
+            permission not in permissions,
+            f"blocked packaged permission is active: {permission}",
+        )
+
+    components = [
+        (tag, component)
+        for tag in ANDROID_COMPONENT_TAGS
+        for component in application.findall(tag)
+    ]
+    for _, component in components:
+        name = component.get(f"{ANDROID_NS}name") or ""
+        lowered_name = name.lower()
+        require(
+            "expo.modules.devlauncher" not in lowered_name
+            and "expo.modules.devmenu" not in lowered_name,
+            f"development component is packaged: {name}",
+        )
+        for intent_filter in component.findall("intent-filter"):
+            actions = {
+                action.get(f"{ANDROID_NS}name") for action in intent_filter.findall("action")
+            }
+            require(
+                actions.isdisjoint(
+                    {"android.intent.action.SEND", "android.intent.action.SEND_MULTIPLE"}
+                ),
+                f"unreviewed inbound sharing is enabled: {name}",
+            )
+
+    exported = {
+        (
+            tag,
+            component.get(f"{ANDROID_NS}name"),
+            component.get(f"{ANDROID_NS}permission"),
+        )
+        for tag, component in components
+        if component.get(f"{ANDROID_NS}exported") == "true"
+    }
+    expected_exported = {
+        ("activity", f"{package}.MainActivity", None),
+        (
+            "receiver",
+            "com.google.firebase.iid.FirebaseInstanceIdReceiver",
+            "com.google.android.c2dm.permission.SEND",
+        ),
+        (
+            "receiver",
+            "androidx.profileinstaller.ProfileInstallReceiver",
+            "android.permission.DUMP",
+        ),
+    }
+    require(
+        exported == expected_exported,
+        "packaged Android exported components changed: "
+        f"added={sorted(exported - expected_exported)}, "
+        f"removed={sorted(expected_exported - exported)}",
+    )
+    return True
+
+
 def read_plist(path: Path) -> dict[str, object]:
     with path.open("rb") as source:
         return plistlib.load(source)
@@ -176,7 +335,9 @@ def main() -> None:
     validate_android(config)
     validate_ios(config)
     validate_android_asset_links(config)
-    print("native production config passed")
+    packaged_android = validate_packaged_android(config)
+    suffix = " (including packaged Android release)" if packaged_android else ""
+    print(f"native production config passed{suffix}")
 
 
 if __name__ == "__main__":

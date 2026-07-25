@@ -265,6 +265,11 @@ jobs:
           GRADLE_OPTS: -Dorg.gradle.jvmargs=-Xmx4g -Dorg.gradle.workers.max=2
         run: ./gradlew :app:assembleRelease --no-daemon --no-parallel --stacktrace
 
+      - name: Validate packaged Android release
+        if: steps.native.outputs.needed == 'true'
+        working-directory: mobile
+        run: python3 scripts/validate_native_config.py
+
       - name: Enable Android emulator acceleration
         if: steps.native.outputs.needed == 'true'
         working-directory: .
