@@ -12,6 +12,7 @@ import type {
   Season,
   TmdbSearchResponse,
 } from '@/types';
+import { fetchWatchProviders } from '@/lib/watch-providers';
 
 function preferredLanguage() {
   const locale = Intl.DateTimeFormat().resolvedOptions().locale;
@@ -59,6 +60,15 @@ export function useMediaDetail(id: string, type: MediaType) {
         withQuery(`/media/${id}`, { type, language }),
       ),
     enabled: Boolean(id),
+  });
+}
+
+export function useWatchProviders(id: string, type: MediaType) {
+  return useQuery({
+    queryKey: ['watch-providers', id, type],
+    queryFn: () => fetchWatchProviders(id, type),
+    enabled: Boolean(id),
+    staleTime: 60 * 60 * 1000,
   });
 }
 

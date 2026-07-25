@@ -560,7 +560,7 @@ export default function SettingsScreen() {
               </View>
             </View>
             <AppText muted>
-              Used for regional movie dates in Upcoming.
+              Used for regional movie dates and streaming availability.
             </AppText>
             {preferences.isLoading ? (
               <ActivityIndicator color={theme.primary} />

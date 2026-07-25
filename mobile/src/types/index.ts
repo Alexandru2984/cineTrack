@@ -20,6 +20,20 @@ export interface User {
   created_at: string;
 }
 
+export interface WatchProviderEntry {
+  provider_id: number;
+  name: string;
+  logo_path: string | null;
+}
+
+export interface WatchProviders {
+  region: string;
+  link: string | null;
+  stream: WatchProviderEntry[];
+  rent: WatchProviderEntry[];
+  buy: WatchProviderEntry[];
+}
+
 export interface AccountSession {
   id: string;
   user_agent: string | null;
