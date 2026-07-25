@@ -1,4 +1,4 @@
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router';
 import { Clock3, LockKeyhole, User, UserMinus, UserPlus } from 'lucide-react';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
 import { useFollow, useUnfollow } from '@/hooks/useSocial';

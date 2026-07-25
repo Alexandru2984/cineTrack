@@ -3,7 +3,7 @@ import { useTrackingInfinite, useUpdateTracking, useDeleteTracking } from '@/hoo
 import { LoadingSpinner } from '@/components/LoadingSpinner';
 import { getPosterUrl, STATUS_LABELS, STATUS_COLORS } from '@/lib/utils';
 import { Loader2, Star, Trash2, Heart, ListPlus } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router';
 import { TrackingFeedbackDialog } from '@/components/TrackingFeedbackDialog';
 import { getApiErrorMessage } from '@/lib/api';
 import type { TrackingItem } from '@/types';

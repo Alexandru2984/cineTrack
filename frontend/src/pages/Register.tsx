@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router';
 import { useRegister } from '@/hooks/useAuth';
 import { getApiErrorMessage } from '@/lib/api';
 import { Film, Loader2 } from 'lucide-react';

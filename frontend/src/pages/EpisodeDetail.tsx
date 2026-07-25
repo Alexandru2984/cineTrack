@@ -8,7 +8,7 @@ import {
   Loader2,
   Tv,
 } from 'lucide-react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useParams } from 'react-router';
 
 import { EpisodeReactions } from '@/components/EpisodeReactions';
 import { LoadingSpinner } from '@/components/LoadingSpinner';

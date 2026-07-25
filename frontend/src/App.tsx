@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect } from 'react';
-import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { Routes, Route, Navigate, useLocation } from 'react-router';
 import { Loader2 } from 'lucide-react';
 import { useAuthStore } from '@/store/auth';
 import { bootstrapSession } from '@/lib/api';

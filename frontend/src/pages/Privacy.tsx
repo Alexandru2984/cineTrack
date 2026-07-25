@@ -1,5 +1,5 @@
 import { Database, LockKeyhole, Mail, ShieldCheck, Trash2 } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router';
 
 const CONTACT_EMAIL = 'postmaster@micutu.com';
 

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router';
 import { CalendarRange, Clapperboard, Clock, Film, Flame, Sparkles, Tv } from 'lucide-react';
 import { useWrapped } from '@/hooks/useStats';
 import { usePageTitle } from '@/hooks/usePageTitle';

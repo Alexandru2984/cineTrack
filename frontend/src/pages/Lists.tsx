@@ -9,7 +9,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router';
 
 import { ListEditorDialog } from '@/components/ListEditorDialog';
 import { LoadingSpinner } from '@/components/LoadingSpinner';

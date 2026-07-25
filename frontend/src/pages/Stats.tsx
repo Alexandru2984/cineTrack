@@ -3,7 +3,7 @@ import { LoadingSpinner } from '@/components/LoadingSpinner';
 import CalendarHeatmap from 'react-calendar-heatmap';
 import 'react-calendar-heatmap/dist/styles.css';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router';
 import { Film, Tv, Clock, Flame, Trophy, Zap, Sparkles } from 'lucide-react';
 
 const COLORS = ['#8b5cf6', '#a78bfa', '#c4b5fd', '#ddd6fe', '#ede9fe', '#6d28d9', '#5b21b6', '#7c3aed'];

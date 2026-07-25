@@ -1,4 +1,4 @@
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router';
 import { getPosterUrl } from '@/lib/utils';
 import type { TmdbSearchResult } from '@/types';
 import { Star, Plus, Eye, BookmarkPlus } from 'lucide-react';

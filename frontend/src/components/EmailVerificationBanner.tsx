@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation } from 'react-router';
 import { MailWarning, X } from 'lucide-react';
 import { useResendVerification } from '@/hooks/useAuth';
 import { useAuthStore } from '@/store/auth';

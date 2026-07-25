@@ -1,5 +1,5 @@
 import { render, screen } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter } from 'react-router';
 import { beforeEach, describe, expect, it } from 'vitest';
 import AccountDeletionPage from '@/pages/AccountDeletion';
 import { useAuthStore } from '@/store/auth';

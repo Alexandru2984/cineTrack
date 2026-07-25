@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router';
 import { useMutationState } from '@tanstack/react-query';
 import {
   CONFIRM_EMAIL_CHANGE_MUTATION_KEY,

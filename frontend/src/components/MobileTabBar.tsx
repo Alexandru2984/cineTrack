@@ -1,5 +1,5 @@
 import { CalendarDays, Home, List, Search, User } from 'lucide-react';
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation } from 'react-router';
 import { useCalendarSummary } from '@/hooks/useCalendar';
 import { useAuthStore } from '@/store/auth';
 

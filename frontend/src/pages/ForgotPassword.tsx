@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router';
 import { useForgotPassword } from '@/hooks/useAuth';
 import { getApiErrorMessage } from '@/lib/api';
 import { Film, Loader2, MailCheck } from 'lucide-react';

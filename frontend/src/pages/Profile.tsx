@@ -1,4 +1,4 @@
-import { Link, useParams } from 'react-router-dom';
+import { Link, useParams } from 'react-router';
 import { useUserProfile, useUserActivity, useFollow, useUnfollow } from '@/hooks/useSocial';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
 import { ActivityList } from '@/components/ActivityList';

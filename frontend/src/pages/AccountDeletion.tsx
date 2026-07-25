@@ -1,5 +1,5 @@
 import { CheckCircle2, LogIn, Mail, ShieldCheck, Trash2 } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router';
 import { loginPathFor } from '@/lib/navigation';
 import { useAuthStore } from '@/store/auth';
 

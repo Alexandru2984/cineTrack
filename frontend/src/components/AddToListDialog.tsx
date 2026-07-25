@@ -1,6 +1,6 @@
 import { ListPlus, Loader2, Lock, Plus, X } from 'lucide-react';
 import { useEffect, useId } from 'react';
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router';
 
 import { useAddListItem, useMyLists } from '@/hooks/useLists';
 import { getApiErrorMessage } from '@/lib/api';
