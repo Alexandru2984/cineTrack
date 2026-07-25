@@ -28,7 +28,7 @@ storage configured.
 ```bash
 npm run verify
 npm run export:android
-npm audit --audit-level=high
+npm run audit:high
 EAS_BUILD_PROFILE=production EXPO_UPDATES_ENABLED=false EXPO_USE_DEV_CLIENT=0 \
   npx expo prebuild --platform all --no-install --clean
 python3 scripts/validate_native_config.py

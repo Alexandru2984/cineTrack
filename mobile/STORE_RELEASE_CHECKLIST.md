@@ -29,7 +29,7 @@ fingerprint alone will not verify Android App Links on store builds.
 
 - The Git worktree contains only the intended release commit.
 - GitHub CI is green, including the Android release compile and native config validation.
-- `npm ci && npm run verify && npm audit --audit-level=high` passes in `mobile/`.
+- `npm ci && npm run verify && npm run audit:high` passes in `mobile/`.
 - The production Expo config reports `updates.enabled=false`.
 - The app/runtime version is newer than every distributed native runtime using changed native modules.
 - The backend migration job succeeds before application replicas start.

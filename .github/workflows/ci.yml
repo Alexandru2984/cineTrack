@@ -208,7 +208,7 @@ jobs:
         run: npm run doctor
 
       - name: Audit high and critical vulnerabilities
-        run: npm audit --audit-level=high
+        run: npm run audit:high
 
       - name: Export Android bundle
         run: npm run export:android
