@@ -85,4 +85,5 @@ never be guessed or copied from an unrelated signing identity.
 - Choose, replace, and remove a profile picture; confirm the system picker requests no camera or broad media permission.
 - Open the annual recap for a year with and without watch history; verify year navigation and title deep links.
 - Log a watch with Today, Yesterday, and the native date picker; verify future dates cannot be selected.
+- Export account data with a correct and incorrect password; inspect the JSON for completeness and absence of credential fields.
 - Record the commit, version, version code/build number, signing identity, CI run, and artifact checksum in the release notes.

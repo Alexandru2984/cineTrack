@@ -105,6 +105,7 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
         web::scope("/users")
             .route("/me", web::patch().to(update_profile))
             .route("/me", web::delete().to(delete_account))
+            .route("/me/export", web::post().to(export_account_data))
             .route("/me/followers", web::get().to(my_followers))
             .route("/me/following", web::get().to(my_following))
             .route("/me/feed", web::get().to(my_activity_feed))
@@ -328,6 +329,319 @@ async fn update_profile(
     tx.commit().await?;
 
     Ok(HttpResponse::Ok().json(crate::dto::auth::UserResponse::from(user)))
+}
+
+/// Return a repeatable-read snapshot of the account's portable data. Secrets
+/// that grant access (password/token hashes, TOTP material, recovery codes,
+/// push tokens, and unregister secrets) are deliberately never selected.
+async fn export_account_data(
+    pool: web::Data<PgPool>,
+    req: HttpRequest,
+    body: web::Json<DataExportRequest>,
+) -> Result<HttpResponse, AppError> {
+    let user_id = require_auth(&req).await?;
+    body.validate()?;
+
+    let password_hash =
+        sqlx::query_scalar::<_, Option<String>>("SELECT password_hash FROM users WHERE id = $1")
+            .bind(user_id)
+            .fetch_optional(pool.get_ref())
+            .await?
+            .flatten()
+            .ok_or_else(|| AppError::BadRequest("Password login is not enabled".to_string()))?;
+    if !password::verify_password(&body.password, &password_hash).await? {
+        return Err(AppError::Unauthorized("Password is incorrect".to_string()));
+    }
+
+    let mut tx = pool.begin().await?;
+    sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
+        .execute(&mut *tx)
+        .await?;
+
+    let account = sqlx::query_scalar::<_, serde_json::Value>(
+        r#"SELECT jsonb_build_object(
+            'id', id,
+            'username', username,
+            'email', email,
+            'avatar_url', avatar_url,
+            'bio', bio,
+            'is_public', is_public,
+            'email_verified', email_verified,
+            'two_factor_enabled', totp_enabled,
+            'created_at', created_at,
+            'updated_at', updated_at
+        ) FROM users WHERE id = $1"#,
+    )
+    .bind(user_id)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(|| AppError::NotFound("User not found".to_string()))?;
+
+    let library = sqlx::query_scalar::<_, serde_json::Value>(
+        r#"SELECT jsonb_build_object(
+            'id', um.id,
+            'tmdb_id', m.tmdb_id,
+            'media_type', m.media_type,
+            'title', m.title,
+            'status', um.status,
+            'rating', um.rating,
+            'review', um.review,
+            'is_favorite', um.is_favorite,
+            'started_at', um.started_at,
+            'completed_at', um.completed_at,
+            'created_at', um.created_at,
+            'updated_at', um.updated_at
+        )
+        FROM user_media um
+        JOIN media m ON m.id = um.media_id
+        WHERE um.user_id = $1
+        ORDER BY um.created_at, um.id"#,
+    )
+    .bind(user_id)
+    .fetch_all(&mut *tx)
+    .await?;
+
+    let watch_history = sqlx::query_scalar::<_, serde_json::Value>(
+        r#"SELECT jsonb_build_object(
+            'id', wh.id,
+            'tmdb_id', m.tmdb_id,
+            'media_type', m.media_type,
+            'title', m.title,
+            'season_number', s.season_number,
+            'episode_number', e.episode_number,
+            'episode_name', e.name,
+            'watched_at', wh.watched_at,
+            'created_at', wh.created_at
+        )
+        FROM watch_history wh
+        JOIN media m ON m.id = wh.media_id
+        LEFT JOIN episodes e ON e.id = wh.episode_id
+        LEFT JOIN seasons s ON s.id = e.season_id
+        WHERE wh.user_id = $1
+        ORDER BY wh.watched_at, wh.id"#,
+    )
+    .bind(user_id)
+    .fetch_all(&mut *tx)
+    .await?;
+
+    let lists = sqlx::query_scalar::<_, serde_json::Value>(
+        r#"SELECT jsonb_build_object(
+            'id', l.id,
+            'name', l.name,
+            'description', l.description,
+            'is_public', l.is_public,
+            'created_at', l.created_at,
+            'items', COALESCE((
+                SELECT jsonb_agg(
+                    jsonb_build_object(
+                        'tmdb_id', m.tmdb_id,
+                        'media_type', m.media_type,
+                        'title', m.title,
+                        'added_at', li.added_at
+                    )
+                    ORDER BY li.added_at, m.tmdb_id
+                )
+                FROM list_items li
+                JOIN media m ON m.id = li.media_id
+                WHERE li.list_id = l.id
+            ), '[]'::jsonb)
+        )
+        FROM lists l
+        WHERE l.user_id = $1
+        ORDER BY l.created_at, l.id"#,
+    )
+    .bind(user_id)
+    .fetch_all(&mut *tx)
+    .await?;
+
+    let relationships = sqlx::query_scalar::<_, serde_json::Value>(
+        r#"SELECT jsonb_build_object(
+            'direction', CASE WHEN f.follower_id = $1 THEN 'following' ELSE 'follower' END,
+            'username', other.username,
+            'status', f.status,
+            'created_at', f.created_at,
+            'updated_at', f.updated_at
+        )
+        FROM follows f
+        JOIN users other ON other.id = CASE
+            WHEN f.follower_id = $1 THEN f.following_id
+            ELSE f.follower_id
+        END
+        WHERE f.follower_id = $1 OR f.following_id = $1
+        ORDER BY f.created_at, other.username"#,
+    )
+    .bind(user_id)
+    .fetch_all(&mut *tx)
+    .await?;
+
+    let episode_plans = sqlx::query_scalar::<_, serde_json::Value>(
+        r#"SELECT jsonb_build_object(
+            'tmdb_id', m.tmdb_id,
+            'title', m.title,
+            'season_number', s.season_number,
+            'episode_number', e.episode_number,
+            'episode_name', e.name,
+            'created_at', ep.created_at
+        )
+        FROM episode_plans ep
+        JOIN episodes e ON e.id = ep.episode_id
+        JOIN seasons s ON s.id = e.season_id
+        JOIN media m ON m.id = s.media_id
+        WHERE ep.user_id = $1
+        ORDER BY ep.created_at, m.tmdb_id, s.season_number, e.episode_number"#,
+    )
+    .bind(user_id)
+    .fetch_all(&mut *tx)
+    .await?;
+
+    let episode_reactions = sqlx::query_scalar::<_, serde_json::Value>(
+        r#"SELECT jsonb_build_object(
+            'tmdb_id', m.tmdb_id,
+            'title', m.title,
+            'season_number', s.season_number,
+            'episode_number', e.episode_number,
+            'episode_name', e.name,
+            'reaction', er.reaction,
+            'created_at', er.created_at,
+            'updated_at', er.updated_at
+        )
+        FROM episode_reactions er
+        JOIN episodes e ON e.id = er.episode_id
+        JOIN seasons s ON s.id = e.season_id
+        JOIN media m ON m.id = s.media_id
+        WHERE er.user_id = $1
+        ORDER BY er.created_at, m.tmdb_id, s.season_number, e.episode_number"#,
+    )
+    .bind(user_id)
+    .fetch_all(&mut *tx)
+    .await?;
+
+    let notifications = sqlx::query_scalar::<_, serde_json::Value>(
+        r#"SELECT jsonb_build_object(
+            'id', n.id,
+            'kind', n.kind,
+            'actor_username', actor.username,
+            'read_at', n.read_at,
+            'created_at', n.created_at
+        )
+        FROM notifications n
+        JOIN users actor ON actor.id = n.actor_id
+        WHERE n.user_id = $1
+        ORDER BY n.created_at, n.id"#,
+    )
+    .bind(user_id)
+    .fetch_all(&mut *tx)
+    .await?;
+
+    let sessions = sqlx::query_scalar::<_, serde_json::Value>(
+        r#"SELECT jsonb_build_object(
+            'id', id,
+            'expires_at', expires_at,
+            'created_at', created_at,
+            'consumed_at', consumed_at,
+            'revoked_at', revoked_at,
+            'user_agent', user_agent,
+            'ip_address', ip_address,
+            'last_used_at', last_used_at
+        )
+        FROM refresh_tokens
+        WHERE user_id = $1
+        ORDER BY created_at, id"#,
+    )
+    .bind(user_id)
+    .fetch_all(&mut *tx)
+    .await?;
+
+    let notification_devices = sqlx::query_scalar::<_, serde_json::Value>(
+        r#"SELECT jsonb_build_object(
+            'id', id,
+            'platform', platform,
+            'app_version', app_version,
+            'utc_offset_minutes', utc_offset_minutes,
+            'enabled_at', enabled_at,
+            'last_seen_at', last_seen_at,
+            'created_at', created_at,
+            'updated_at', updated_at
+        )
+        FROM push_devices
+        WHERE user_id = $1
+        ORDER BY created_at, id"#,
+    )
+    .bind(user_id)
+    .fetch_all(&mut *tx)
+    .await?;
+
+    let import_jobs = sqlx::query_scalar::<_, serde_json::Value>(
+        r#"SELECT jsonb_build_object(
+            'id', id,
+            'status', status,
+            'totals', totals,
+            'error', error,
+            'created_at', created_at,
+            'updated_at', updated_at
+        )
+        FROM import_jobs
+        WHERE user_id = $1
+        ORDER BY created_at, id"#,
+    )
+    .bind(user_id)
+    .fetch_all(&mut *tx)
+    .await?;
+
+    let calendar_preferences = sqlx::query_scalar::<_, serde_json::Value>(
+        r#"SELECT jsonb_build_object(
+            'country_code', country_code,
+            'updated_at', updated_at
+        )
+        FROM user_calendar_preferences
+        WHERE user_id = $1"#,
+    )
+    .bind(user_id)
+    .fetch_optional(&mut *tx)
+    .await?;
+
+    let oauth_accounts = sqlx::query_scalar::<_, serde_json::Value>(
+        r#"SELECT jsonb_build_object(
+            'provider', provider,
+            'provider_user_id', provider_user_id,
+            'created_at', created_at
+        )
+        FROM oauth_accounts
+        WHERE user_id = $1
+        ORDER BY created_at, id"#,
+    )
+    .bind(user_id)
+    .fetch_all(&mut *tx)
+    .await?;
+
+    tx.commit().await?;
+    log::info!("audit: account data exported user_id={user_id}");
+
+    Ok(HttpResponse::Ok()
+        .insert_header(("Cache-Control", "no-store"))
+        .insert_header(("Pragma", "no-cache"))
+        .insert_header(("X-Content-Type-Options", "nosniff"))
+        .insert_header((
+            "Content-Disposition",
+            "attachment; filename=\"vazute-account-export.json\"",
+        ))
+        .json(AccountDataExport {
+            format_version: 1,
+            exported_at: chrono::Utc::now(),
+            account,
+            library,
+            watch_history,
+            lists,
+            relationships,
+            episode_plans,
+            episode_reactions,
+            notifications,
+            sessions,
+            notification_devices,
+            import_jobs,
+            calendar_preferences,
+            oauth_accounts,
+        }))
 }
 
 /// Permanently delete the authenticated user's account. Requires re-entering

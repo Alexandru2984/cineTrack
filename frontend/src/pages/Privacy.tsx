@@ -83,7 +83,8 @@ export default function PrivacyPage() {
         <PolicySection title="Your choices and rights" icon={<Mail className="h-5 w-5" />}>
           <p>
             Account settings allow users to correct profile information, control profile visibility,
-            manage sessions, disable release alerts, and delete the account. System notification
+            manage sessions, export a portable JSON copy of their account data in the mobile app,
+            disable release alerts, and delete the account. System notification
             settings provide an additional platform-level control. Depending on local law, users may also request
             access, correction, restriction, portability, objection, or deletion by contacting the
             address above. EEA users may lodge a complaint with their local data-protection authority.

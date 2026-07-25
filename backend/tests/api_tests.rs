@@ -5393,6 +5393,88 @@ async fn test_update_profile_rejects_direct_avatar_urls() {
 
 #[actix_web::test]
 #[ignore = "requires test DB"]
+async fn test_account_export_requires_password_and_excludes_credentials() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (token, refresh_token, _) =
+        register_user(&app, "exportuser", "export@example.com", "Pass1234").await;
+
+    let unauthenticated = actix_test::TestRequest::post()
+        .uri("/api/users/me/export")
+        .set_json(json!({ "password": "Pass1234" }))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(
+        actix_test::call_service(&app, unauthenticated)
+            .await
+            .status(),
+        401
+    );
+
+    let wrong_password = actix_test::TestRequest::post()
+        .uri("/api/users/me/export")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .set_json(json!({ "password": "WrongPass1" }))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(
+        actix_test::call_service(&app, wrong_password)
+            .await
+            .status(),
+        401
+    );
+
+    let request = actix_test::TestRequest::post()
+        .uri("/api/users/me/export")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .set_json(json!({ "password": "Pass1234" }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let response = actix_test::call_service(&app, request).await;
+    assert_eq!(response.status(), 200);
+    assert_eq!(
+        response
+            .headers()
+            .get(header::CACHE_CONTROL)
+            .and_then(|value| value.to_str().ok()),
+        Some("no-store")
+    );
+    assert_eq!(
+        response
+            .headers()
+            .get(header::CONTENT_DISPOSITION)
+            .and_then(|value| value.to_str().ok()),
+        Some("attachment; filename=\"vazute-account-export.json\"")
+    );
+
+    let body: Value = actix_test::read_body_json(response).await;
+    assert_eq!(body["format_version"], 1);
+    assert_eq!(body["account"]["email"], "export@example.com");
+    assert_eq!(body["account"]["two_factor_enabled"], false);
+    assert!(body["library"].is_array());
+    assert!(body["watch_history"].is_array());
+    assert!(body["sessions"].is_array());
+
+    let serialized = body.to_string();
+    for forbidden in [
+        "password_hash",
+        "token_hash",
+        "totp_secret",
+        "code_hash",
+        "unregister_secret_hash",
+        "expo_push_token",
+        refresh_token.as_str(),
+    ] {
+        assert!(
+            !serialized.contains(forbidden),
+            "export leaked forbidden value or field: {forbidden}"
+        );
+    }
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
 async fn test_delete_account_requires_auth() {
     let pool = setup_pool().await;
     clean_db(&pool).await;

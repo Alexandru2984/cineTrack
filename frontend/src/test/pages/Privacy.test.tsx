@@ -12,6 +12,7 @@ describe('Privacy page', () => {
     );
 
     expect(screen.getByRole('heading', { name: 'Privacy policy' })).toBeVisible();
+    expect(screen.getByText(/export a portable JSON copy/i)).toBeVisible();
     expect(screen.getByText('postmaster@micutu.com')).toHaveAttribute(
       'href',
       'mailto:postmaster@micutu.com',

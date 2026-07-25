@@ -5,6 +5,7 @@ import { useSensitiveScreen } from '@/hooks/use-sensitive-screen';
 import {
   AlertTriangle,
   Bell,
+  Download,
   ExternalLink,
   Eye,
   EyeOff,
@@ -70,6 +71,7 @@ import {
   validatePasswordChange,
   validateProfileDraft,
 } from '@/lib/account';
+import { exportAndShareAccountData } from '@/lib/data-export';
 import { formatDateTime } from '@/lib/format';
 import { getErrorMessage } from '@/lib/http';
 import { clearOfflineQueryCache } from '@/lib/query-persistence';
@@ -155,6 +157,12 @@ export default function SettingsScreen() {
   const [deletionError, setDeletionError] = useState<string | null>(null);
   const [cacheClearing, setCacheClearing] = useState(false);
   const [cacheCleared, setCacheCleared] = useState(false);
+  const [exportConfirming, setExportConfirming] = useState(false);
+  const [exportPassword, setExportPassword] = useState('');
+  const [exportPasswordVisible, setExportPasswordVisible] = useState(false);
+  const [exportPending, setExportPending] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
+  const [exportShared, setExportShared] = useState(false);
 
   if (status !== 'authenticated' || !user) return <Redirect href="/" />;
 
@@ -343,6 +351,35 @@ export default function SettingsScreen() {
         },
       },
     ]);
+  };
+
+  const exportData = async () => {
+    if (!exportPassword || exportPassword.length > 128) {
+      setExportError('Enter your current password');
+      return;
+    }
+    setExportPending(true);
+    setExportError(null);
+    setExportShared(false);
+    try {
+      await exportAndShareAccountData(exportPassword);
+      setExportPassword('');
+      setExportPasswordVisible(false);
+      setExportConfirming(false);
+      setExportShared(true);
+    } catch (error) {
+      setExportError(getErrorMessage(error, 'Could not export your account data'));
+    } finally {
+      setExportPending(false);
+    }
+  };
+
+  const cancelExport = () => {
+    if (exportPending) return;
+    setExportConfirming(false);
+    setExportPassword('');
+    setExportPasswordVisible(false);
+    setExportError(null);
   };
 
   const startTwoFactorSetup = async () => {
@@ -1056,6 +1093,71 @@ export default function SettingsScreen() {
               </View>
               <ExternalLink color={theme.mutedText} size={18} />
             </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Export my account data"
+              onPress={() => {
+                setExportShared(false);
+                setExportError(null);
+                setExportConfirming(true);
+              }}
+              style={({ pressed }) => [
+                styles.linkRow,
+                { borderColor: theme.border, opacity: pressed ? 0.72 : 1 },
+              ]}
+            >
+              <View style={styles.linkCopy}>
+                <Download color={theme.success} size={18} />
+                <View style={styles.headingCopy}>
+                  <AppText variant="label">Export my data</AppText>
+                  <AppText variant="caption" muted>
+                    Save a portable JSON copy
+                  </AppText>
+                </View>
+              </View>
+              <ExternalLink color={theme.mutedText} size={18} />
+            </Pressable>
+            {exportConfirming ? (
+              <View style={styles.confirmation}>
+                <PasswordField
+                  label="Password to export private data"
+                  value={exportPassword}
+                  visible={exportPasswordVisible}
+                  autoComplete="current-password"
+                  onChange={(value) => {
+                    setExportPassword(value);
+                    setExportError(null);
+                  }}
+                  onToggleVisibility={() =>
+                    setExportPasswordVisible((visible) => !visible)
+                  }
+                  onSubmit={() => void exportData()}
+                />
+                <AppText variant="caption" muted>
+                  The temporary file is deleted from Văzute after the share sheet closes.
+                </AppText>
+                {exportError ? <FormMessage message={exportError} /> : null}
+                <View style={styles.actions}>
+                  <View style={styles.action}>
+                    <AppButton
+                      label="Create export"
+                      icon={<Download color="#FFFFFF" size={18} />}
+                      loading={exportPending}
+                      onPress={() => void exportData()}
+                    />
+                  </View>
+                  <View style={styles.action}>
+                    <AppButton
+                      label="Cancel"
+                      variant="secondary"
+                      disabled={exportPending}
+                      onPress={cancelExport}
+                    />
+                  </View>
+                </View>
+              </View>
+            ) : null}
+            {exportShared ? <FormMessage message="Account export ready to save" success /> : null}
             <Pressable
               accessibilityRole="link"
               accessibilityLabel="Open Văzute privacy policy"

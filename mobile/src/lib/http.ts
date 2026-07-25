@@ -2,6 +2,7 @@ import { API_BASE_URL } from '@/lib/config';
 
 const REQUEST_TIMEOUT_MS = 15_000;
 const UPLOAD_TIMEOUT_MS = 60_000;
+const MAX_REQUEST_TIMEOUT_MS = 120_000;
 
 interface ErrorPayload {
   message?: string;
@@ -38,6 +39,7 @@ export interface RawRequestOptions {
   body?: unknown;
   headers?: Record<string, string>;
   signal?: AbortSignal;
+  timeoutMs?: number;
 }
 
 interface RawMultipartRequestOptions {
@@ -130,7 +132,10 @@ export function rawRequest<T>(
       body: options.body === undefined ? undefined : JSON.stringify(options.body),
     },
     options.signal,
-    REQUEST_TIMEOUT_MS,
+    Math.min(
+      MAX_REQUEST_TIMEOUT_MS,
+      Math.max(1_000, options.timeoutMs ?? REQUEST_TIMEOUT_MS),
+    ),
   );
 }
 

@@ -38,6 +38,12 @@ to the selected image; the app resizes it and re-encodes it without EXIF
 metadata before upload. The resulting avatar is stored until the user removes
 it or deletes the account.
 
+Account export is user-initiated and password-confirmed. It creates a portable
+JSON snapshot, opens the operating system share sheet, and deletes the
+temporary plaintext cache file when that sheet closes. The export excludes
+password hashes, session token hashes, 2FA secrets and recovery-code hashes,
+push tokens, and device-unregister secrets.
+
 ## Answers to Play's specific questions
 
 - **Is any data shared with third parties?** No. Third parties (TMDB, Cloudflare,
