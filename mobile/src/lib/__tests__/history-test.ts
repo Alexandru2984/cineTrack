@@ -1,4 +1,5 @@
 import {
+  dateFromLocalInput,
   historyEpisodeLabel,
   localDateInput,
   previousLocalDate,
@@ -34,6 +35,8 @@ describe('mobile history helpers', () => {
     const date = new Date(2026, 6, 17, 1);
     expect(localDateInput(date)).toBe('2026-07-17');
     expect(previousLocalDate(date)).toBe('2026-07-16');
+    expect(localDateInput(dateFromLocalInput('2026-07-17')!)).toBe('2026-07-17');
+    expect(dateFromLocalInput('2026-02-30')).toBeNull();
   });
 
   it('formats episode context and deduplicates overlapping pages', () => {

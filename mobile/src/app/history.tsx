@@ -1,3 +1,6 @@
+import DateTimePicker, {
+  type DateTimePickerEvent,
+} from '@react-native-community/datetimepicker';
 import { Redirect, router } from 'expo-router';
 import {
   CalendarDays,
@@ -37,8 +40,9 @@ import {
 } from '@/hooks/use-history';
 import { useTheme } from '@/hooks/use-theme';
 import { useTrackingInfinite } from '@/hooks/use-tracking';
-import { formatDateTime } from '@/lib/format';
+import { formatDate, formatDateTime } from '@/lib/format';
 import {
+  dateFromLocalInput,
   historyEpisodeLabel,
   localDateInput,
   previousLocalDate,
@@ -92,6 +96,7 @@ export default function HistoryScreen() {
   const remove = useDeleteHistory();
   const [target, setTarget] = useState<HistoryTarget | null>(null);
   const [dateInput, setDateInput] = useState(localDateInput);
+  const [datePickerVisible, setDatePickerVisible] = useState(false);
   const [dateError, setDateError] = useState<string | null>(null);
   const [libraryQuery, setLibraryQuery] = useState('');
 
@@ -120,6 +125,7 @@ export default function HistoryScreen() {
     create.reset();
     setDateError(null);
     setDateInput(localDateInput());
+    setDatePickerVisible(false);
     setPickerVisible(false);
     setTarget(nextTarget);
   };
@@ -127,6 +133,14 @@ export default function HistoryScreen() {
   const closeLog = () => {
     if (create.isPending) return;
     setTarget(null);
+    setDateError(null);
+    setDatePickerVisible(false);
+  };
+
+  const selectDate = (event: DateTimePickerEvent, value?: Date) => {
+    if (Platform.OS === 'android') setDatePickerVisible(false);
+    if (event.type !== 'set' || !value) return;
+    setDateInput(localDateInput(value));
     setDateError(null);
   };
 
@@ -457,6 +471,7 @@ export default function HistoryScreen() {
                     selected={dateInput === localDateInput()}
                     onPress={() => {
                       setDateInput(localDateInput());
+                      setDatePickerVisible(false);
                       setDateError(null);
                     }}
                   />
@@ -465,6 +480,7 @@ export default function HistoryScreen() {
                     selected={dateInput === previousLocalDate()}
                     onPress={() => {
                       setDateInput(previousLocalDate());
+                      setDatePickerVisible(false);
                       setDateError(null);
                     }}
                   />
@@ -472,7 +488,11 @@ export default function HistoryScreen() {
 
                 <View style={styles.fieldGroup}>
                   <AppText variant="label">Watched date</AppText>
-                  <View
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={`Watched date, ${formatDate(dateInput)}. Open date picker`}
+                    disabled={create.isPending}
+                    onPress={() => setDatePickerVisible((visible) => !visible)}
                     style={[
                       styles.dateField,
                       {
@@ -482,20 +502,30 @@ export default function HistoryScreen() {
                     ]}
                   >
                     <CalendarDays color={theme.mutedText} size={18} />
-                    <TextInput
-                      accessibilityLabel="Watched date in year month day format"
-                      value={dateInput}
-                      onChangeText={(value) => {
-                        setDateInput(value);
-                        setDateError(null);
-                      }}
-                      placeholder="YYYY-MM-DD"
-                      placeholderTextColor={theme.mutedText}
-                      keyboardType="numbers-and-punctuation"
-                      maxLength={10}
-                      style={[styles.dateInput, { color: theme.text }]}
-                    />
-                  </View>
+                    <AppText style={styles.dateInput}>{formatDate(dateInput)}</AppText>
+                  </Pressable>
+                  {datePickerVisible ? (
+                    <View style={styles.datePicker}>
+                      <DateTimePicker
+                        value={dateFromLocalInput(dateInput) ?? new Date()}
+                        mode="date"
+                        display={Platform.OS === 'ios' ? 'inline' : 'default'}
+                        minimumDate={new Date(1900, 0, 1, 12)}
+                        maximumDate={new Date()}
+                        onChange={selectDate}
+                        accentColor={theme.primary}
+                        themeVariant={theme.background === '#09090B' ? 'dark' : 'light'}
+                      />
+                      {Platform.OS === 'ios' ? (
+                        <AppButton
+                          label="Done choosing date"
+                          variant="secondary"
+                          compact
+                          onPress={() => setDatePickerVisible(false)}
+                        />
+                      ) : null}
+                    </View>
+                  ) : null}
                   {dateError ? (
                     <AppText variant="caption" style={{ color: theme.danger }}>
                       {dateError}
@@ -715,9 +745,10 @@ const styles = StyleSheet.create({
   dateInput: {
     flex: 1,
     minWidth: 0,
-    minHeight: 44,
     fontSize: 16,
-    paddingVertical: 0,
+  },
+  datePicker: {
+    gap: spacing.sm,
   },
   sheetActions: {
     flexDirection: 'row',
