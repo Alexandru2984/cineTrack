@@ -27,7 +27,8 @@ tags:
 - tapOn: "Send reset link"
 - assertVisible: "Enter a valid email address"
 - tapOn: "Back to sign in"
-- tapOn: "Create account"
+- tapOn:
+    id: "auth-switch-mode"
 - assertVisible: "Create your watch history"
 - tapOn: "Create account"
 - assertVisible: "Enter a valid email address"

@@ -293,6 +293,7 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
           </View>
 
           <Pressable
+            testID="auth-switch-mode"
             accessibilityRole="link"
             onPress={() => {
               const pathname = isRegister ? '/(auth)/login' : '/(auth)/register';
