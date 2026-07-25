@@ -616,6 +616,7 @@ async fn export_account_data(
 
     tx.commit().await?;
     log::info!("audit: account data exported user_id={user_id}");
+    crate::metrics::record_product_action(crate::metrics::ProductAction::AccountDataExported);
 
     Ok(HttpResponse::Ok()
         .insert_header(("Cache-Control", "no-store"))

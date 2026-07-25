@@ -8,9 +8,10 @@ contradicts observable behaviour is grounds for removal.
 ## The one-line summary
 
 The app collects an email address (for the account), watch history (the core
-feature), and a push token (only if notifications are turned on). Nothing is
-sold. Nothing is shared with third parties for their own purposes. Everything
-is deletable in-app.
+feature), optional aggregate feature-interaction counts, and a push token (only
+if notifications are turned on). Nothing is sold. Nothing is shared with third
+parties for their own purposes. Account data is deletable in-app; the aggregate
+counters alone cannot identify an account.
 
 ## Data collected
 
@@ -20,6 +21,7 @@ is deletable in-app.
 | **Name / username** | Yes | Yes | Account, app functionality | Public display name, chosen by the user. |
 | **App activity — watch history** | Yes | Yes | App functionality | The core feature: what the user marked watched. |
 | **App activity — other (reactions, ratings, lists)** | Optional | No | App functionality | Only what the user creates. |
+| **App activity — app interactions** | Optional | No | Analytics | Successful use of a fixed set of optional features is counted only in aggregate, without a user/device identifier or free-form property. |
 | **Photos** (profile avatar) | Optional | No | Account management, app functionality | Only the single profile picture the user explicitly chooses. |
 | **Device ID** (push token) | Optional | No | Send notifications | Only if the user enables release notifications. |
 | **App info & performance — crash logs / diagnostics** | Yes | No | App functionality (stability) | Sanitised on-device before sending: tokens, emails and URLs are redacted. |
@@ -44,6 +46,13 @@ temporary plaintext cache file when that sheet closes. The export excludes
 password hashes, session token hashes, 2FA secrets and recovery-code hashes,
 push tokens, and device-unregister secrets.
 
+The backend derives fixed, aggregate product-action counters only after
+successful feature requests. The app sends no separate analytics event and
+contains no analytics SDK. Prometheus retains the counters for 30 days; the
+only label is one of eight source-controlled action names. There is no user or
+device identifier, IP address, search, title, per-action timestamp, or arbitrary
+event property in these counters.
+
 ## Answers to Play's specific questions
 
 - **Is any data shared with third parties?** No. Third parties (TMDB, Cloudflare,
@@ -56,8 +65,9 @@ push tokens, and device-unregister secrets.
   removes the account and all associated rows. The account-deletion URL for the
   store listing is `https://vazute.micutu.com/account-deletion`.
 - **Is data collection optional?** Email and username are required for an
-  account. Everything else — push token, ratings, reactions, and lists — is
-  created only by user action, including the optional profile picture.
+  account. Everything else — push token, ratings, reactions, lists, avatar, and
+  aggregate interaction counts for optional features — is created only by user
+  action.
 
 ## Permissions
 

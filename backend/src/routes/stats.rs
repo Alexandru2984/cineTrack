@@ -187,6 +187,7 @@ async fn my_wrapped(
     .await?;
     let (_, longest_streak) = calculate_streaks(&year_dates);
 
+    crate::metrics::record_product_action(crate::metrics::ProductAction::AnnualRecapViewed);
     Ok(HttpResponse::Ok().json(WrappedStats {
         year,
         total_watches,

@@ -25,3 +25,10 @@ Backup and release-worker metrics use the node exporter textfile collector.
 `RELEASE_SCHEDULE_STATE_DIR` together if the cron user uses a different state
 path. Both scripts write their `.prom` files atomically with non-sensitive,
 low-cardinality gauges.
+
+`cinetrack_product_actions_total` is deliberately limited to eight
+source-controlled action labels. It has no account, device, IP, media, search,
+per-action timestamp, or arbitrary event labels. Prometheus samples the
+aggregate counter over time and retains those samples for 30 days; do not add
+identifying or free-form labels, and treat a request to do so as a
+privacy-review change rather than a dashboard edit.

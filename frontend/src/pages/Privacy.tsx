@@ -13,7 +13,7 @@ export default function PrivacyPage() {
         </div>
         <h1 className="mt-3 text-2xl font-bold sm:text-3xl">Privacy policy</h1>
         <p className="mt-2 text-sm text-[hsl(var(--muted-foreground))]">
-          Effective and last updated: July 17, 2026
+          Effective and last updated: July 25, 2026
         </p>
       </header>
 
@@ -45,6 +45,13 @@ export default function PrivacyPage() {
             activities rely on performance of the service contract and legitimate interests in
             security and reliability. Văzute does not sell personal data and does not include
             advertising or third-party analytics SDKs.
+          </p>
+          <p>
+            Văzute keeps self-hosted aggregate counters for a fixed set of successful feature
+            actions, such as viewing the annual recap or starting an import. These counters are
+            retained for 30 days and contain no user or device identifier, IP address, search,
+            title, per-action timestamp, or other free-form property. The counters alone cannot
+            identify an account or device.
           </p>
         </PolicySection>
 

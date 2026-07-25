@@ -25,6 +25,8 @@ describe('Privacy page', () => {
     expect(screen.queryByText(/Mailcow/)).not.toBeInTheDocument();
     expect(screen.getByText(/delivery records are removed after 30 days/)).toBeVisible();
     expect(screen.getByText(/size-limited rotating server logs/)).toBeVisible();
+    expect(screen.getByText(/self-hosted aggregate counters/)).toBeVisible();
+    expect(screen.getByText(/counters alone cannot identify/)).toBeVisible();
     expect(screen.getByRole('link', { name: 'account deletion page' })).toHaveAttribute(
       'href',
       '/account-deletion',

@@ -355,6 +355,7 @@ async fn get_watch_providers(
         .get_watch_providers(pool.get_ref(), &media_type, tmdb_id)
         .await?;
     let region_data = providers.results.get(&region).cloned().unwrap_or_default();
+    crate::metrics::record_product_action(crate::metrics::ProductAction::WatchProvidersViewed);
     Ok(HttpResponse::Ok().json(region_data.into_response(region)))
 }
 

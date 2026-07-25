@@ -401,6 +401,7 @@ async fn upload_avatar(
         .await?;
     tx.commit().await?;
 
+    crate::metrics::record_product_action(crate::metrics::ProductAction::AvatarUploaded);
     Ok(HttpResponse::Ok().json(serde_json::json!({ "avatar_url": avatar_url })))
 }
 
@@ -423,6 +424,7 @@ async fn delete_avatar(
         .execute(&mut *tx)
         .await?;
     tx.commit().await?;
+    crate::metrics::record_product_action(crate::metrics::ProductAction::AvatarRemoved);
     Ok(HttpResponse::Ok().json(serde_json::json!({ "message": "Avatar removed" })))
 }
 

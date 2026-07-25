@@ -21,6 +21,67 @@ struct ClientErrorMetrics {
     reports: IntCounterVec,
 }
 
+#[derive(Clone)]
+struct ProductMetrics {
+    actions: IntCounterVec,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum ProductAction {
+    AccountDataExported,
+    AnnualRecapViewed,
+    AvatarRemoved,
+    AvatarUploaded,
+    ReleaseAlertsDisabled,
+    ReleaseAlertsEnabled,
+    TvTimeImportStarted,
+    WatchProvidersViewed,
+}
+
+const PRODUCT_ACTIONS: [ProductAction; 8] = [
+    ProductAction::AccountDataExported,
+    ProductAction::AnnualRecapViewed,
+    ProductAction::AvatarRemoved,
+    ProductAction::AvatarUploaded,
+    ProductAction::ReleaseAlertsDisabled,
+    ProductAction::ReleaseAlertsEnabled,
+    ProductAction::TvTimeImportStarted,
+    ProductAction::WatchProvidersViewed,
+];
+
+impl ProductAction {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::AccountDataExported => "account_data_exported",
+            Self::AnnualRecapViewed => "annual_recap_viewed",
+            Self::AvatarRemoved => "avatar_removed",
+            Self::AvatarUploaded => "avatar_uploaded",
+            Self::ReleaseAlertsDisabled => "release_alerts_disabled",
+            Self::ReleaseAlertsEnabled => "release_alerts_enabled",
+            Self::TvTimeImportStarted => "tv_time_import_started",
+            Self::WatchProvidersViewed => "watch_providers_viewed",
+        }
+    }
+}
+
+impl ProductMetrics {
+    fn new() -> Self {
+        let actions = IntCounterVec::new(
+            Opts::new(
+                "product_actions_total",
+                "Successful product actions without user or device identifiers",
+            )
+            .namespace("cinetrack"),
+            &["action"],
+        )
+        .expect("Product action metric must be valid");
+        for action in PRODUCT_ACTIONS {
+            actions.with_label_values(&[action.as_str()]);
+        }
+        Self { actions }
+    }
+}
+
 impl ClientErrorMetrics {
     fn new() -> Self {
         let reports = IntCounterVec::new(
@@ -121,6 +182,7 @@ impl TmdbMetrics {
 static TMDB_METRICS: LazyLock<TmdbMetrics> = LazyLock::new(TmdbMetrics::new);
 static EMAIL_METRICS: LazyLock<EmailMetrics> = LazyLock::new(EmailMetrics::new);
 static CLIENT_ERROR_METRICS: LazyLock<ClientErrorMetrics> = LazyLock::new(ClientErrorMetrics::new);
+static PRODUCT_METRICS: LazyLock<ProductMetrics> = LazyLock::new(ProductMetrics::new);
 
 pub fn record_tmdb_request(endpoint: &'static str, outcome: &'static str, duration: Duration) {
     TMDB_METRICS
@@ -161,6 +223,13 @@ pub fn record_client_error(platform: &'static str, fatal: bool) {
         .inc();
 }
 
+pub(crate) fn record_product_action(action: ProductAction) {
+    PRODUCT_METRICS
+        .actions
+        .with_label_values(&[action.as_str()])
+        .inc();
+}
+
 /// Build the Prometheus metrics middleware. It records per-request count and
 /// latency and serves them at `/metrics`. That endpoint lives on the app's own
 /// port and is not proxied by nginx (which only forwards `/api/`), so it stays
@@ -196,6 +265,10 @@ pub fn build() -> PrometheusMetrics {
         .register(Box::new(CLIENT_ERROR_METRICS.reports.clone()))
         .expect("Failed to register client error report metric");
     prometheus
+        .registry
+        .register(Box::new(PRODUCT_METRICS.actions.clone()))
+        .expect("Failed to register product action metric");
+    prometheus
 }
 
 #[cfg(test)]
@@ -209,6 +282,7 @@ mod tests {
         record_email_send("password_reset", "smtp_accepted");
         record_email_send_duration("password_reset", Duration::from_millis(20));
         record_client_error("android", false);
+        record_product_action(ProductAction::AnnualRecapViewed);
         let prometheus = build();
         let names = prometheus
             .registry
@@ -235,6 +309,9 @@ mod tests {
         assert!(names
             .iter()
             .any(|name| name == "cinetrack_client_error_reports_total"));
+        assert!(names
+            .iter()
+            .any(|name| name == "cinetrack_product_actions_total"));
     }
 
     #[test]
@@ -253,5 +330,31 @@ mod tests {
         assert!(encoded
             .iter()
             .any(|name| name == "cinetrack_email_send_duration_seconds"));
+    }
+
+    #[test]
+    fn product_metrics_have_only_fixed_action_labels() {
+        let prometheus = build();
+        let family = prometheus
+            .registry
+            .gather()
+            .into_iter()
+            .find(|family| family.name() == "cinetrack_product_actions_total")
+            .expect("product action metric is registered");
+        let mut actions = family
+            .get_metric()
+            .iter()
+            .flat_map(|metric| metric.get_label())
+            .filter(|label| label.name() == "action")
+            .map(|label| label.value().to_string())
+            .collect::<Vec<_>>();
+        actions.sort();
+
+        let mut expected = PRODUCT_ACTIONS
+            .into_iter()
+            .map(|action| action.as_str().to_string())
+            .collect::<Vec<_>>();
+        expected.sort();
+        assert_eq!(actions, expected);
     }
 }

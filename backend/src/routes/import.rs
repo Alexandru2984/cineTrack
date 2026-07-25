@@ -360,6 +360,7 @@ async fn start_import(
         }
     });
 
+    crate::metrics::record_product_action(crate::metrics::ProductAction::TvTimeImportStarted);
     Ok(HttpResponse::Accepted().json(serde_json::json!({ "job_id": job_id })))
 }
 

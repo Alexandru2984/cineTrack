@@ -121,6 +121,9 @@ async fn register_device(
     }
     tx.commit().await?;
 
+    if !same_installation {
+        crate::metrics::record_product_action(crate::metrics::ProductAction::ReleaseAlertsEnabled);
+    }
     Ok(HttpResponse::Ok().json(serde_json::json!({ "enabled": true })))
 }
 
@@ -130,7 +133,7 @@ async fn revoke_device(
 ) -> Result<HttpResponse, AppError> {
     body.validate()?;
     let data = body.into_inner();
-    sqlx::query(
+    let result = sqlx::query(
         "DELETE FROM push_devices
          WHERE expo_push_token = $1 AND unregister_secret_hash = $2",
     )
@@ -139,5 +142,8 @@ async fn revoke_device(
     .execute(pool.get_ref())
     .await?;
 
+    if result.rows_affected() > 0 {
+        crate::metrics::record_product_action(crate::metrics::ProductAction::ReleaseAlertsDisabled);
+    }
     Ok(HttpResponse::Ok().json(serde_json::json!({ "enabled": false })))
 }
