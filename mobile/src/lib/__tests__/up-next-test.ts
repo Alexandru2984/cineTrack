@@ -1,4 +1,4 @@
-import { groupUpNext, isDormant, lastWatchedLabel } from '@/lib/up-next';
+import { elapsedSince, groupUpNext, isDormant } from '@/lib/up-next';
 import type { UpNextEpisode } from '@/types';
 
 const NOW = new Date('2026-07-21T18:00:00Z').getTime();
@@ -56,9 +56,15 @@ describe('up next grouping', () => {
   });
 
   it('describes elapsed time in units that stay readable as it grows', () => {
-    expect(lastWatchedLabel(episode('a', 45).last_watched_at, NOW)).toBe('45 days ago');
-    expect(lastWatchedLabel(episode('b', 90).last_watched_at, NOW)).toBe('3 months ago');
-    expect(lastWatchedLabel(episode('c', 400).last_watched_at, NOW)).toBe('a year ago');
-    expect(lastWatchedLabel(episode('d', 1100).last_watched_at, NOW)).toBe('3 years ago');
+    expect(elapsedSince(episode('a', 45).last_watched_at, NOW)).toEqual({ unit: 'days', count: 45 });
+    expect(elapsedSince(episode('b', 90).last_watched_at, NOW)).toEqual({
+      unit: 'months',
+      count: 3,
+    });
+    expect(elapsedSince(episode('c', 400).last_watched_at, NOW)).toEqual({ unit: 'aYear' });
+    expect(elapsedSince(episode('d', 1100).last_watched_at, NOW)).toEqual({
+      unit: 'years',
+      count: 3,
+    });
   });
 });

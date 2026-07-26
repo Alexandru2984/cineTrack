@@ -12,7 +12,8 @@ export function isDormant(item: UpNextEpisode, now = Date.now()) {
 
 export type UpNextGroup = {
   key: 'continuing' | 'dormant';
-  title: string;
+  /** i18n key resolved by the caller, so this stays a pure, locale-agnostic helper. */
+  titleKey: 'upNext.continueWatching' | 'upNext.pickBackUp';
   items: UpNextEpisode[];
 };
 
@@ -22,22 +23,30 @@ export function groupUpNext(items: UpNextEpisode[], now = Date.now()): UpNextGro
   const groups: UpNextGroup[] = [
     {
       key: 'continuing',
-      title: 'Continue watching',
+      titleKey: 'upNext.continueWatching',
       items: items.filter((item) => !isDormant(item, now)),
     },
     {
       key: 'dormant',
-      title: 'Pick back up',
+      titleKey: 'upNext.pickBackUp',
       items: items.filter((item) => isDormant(item, now)),
     },
   ];
   return groups.filter((group) => group.items.length > 0);
 }
 
-export function lastWatchedLabel(value: string, now = Date.now()) {
+/** A locale-agnostic description of how long ago something happened; the caller
+ *  maps it to a localized string (see `upNext.daysAgo` and friends). */
+export type ElapsedSince =
+  | { unit: 'days'; count: number }
+  | { unit: 'months'; count: number }
+  | { unit: 'aYear' }
+  | { unit: 'years'; count: number };
+
+export function elapsedSince(value: string, now = Date.now()): ElapsedSince {
   const days = Math.floor((now - new Date(value).getTime()) / DAY_MS);
-  if (days < 60) return `${days} days ago`;
-  if (days < 365) return `${Math.round(days / 30)} months ago`;
+  if (days < 60) return { unit: 'days', count: days };
+  if (days < 365) return { unit: 'months', count: Math.round(days / 30) };
   const years = Math.floor(days / 365);
-  return years === 1 ? 'a year ago' : `${years} years ago`;
+  return years === 1 ? { unit: 'aYear' } : { unit: 'years', count: years };
 }

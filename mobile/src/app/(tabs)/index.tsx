@@ -34,13 +34,32 @@ import {
 import { useDiscovery } from '@/hooks/use-media';
 import { useNotificationSummary } from '@/hooks/use-notifications';
 import { useMyStats } from '@/hooks/use-stats';
+import { useT } from '@/hooks/use-t';
 import { useTheme } from '@/hooks/use-theme';
 import { getErrorMessage } from '@/lib/http';
-import { groupUpNext, lastWatchedLabel } from '@/lib/up-next';
+import { elapsedSince, groupUpNext } from '@/lib/up-next';
 import { useAuthStore } from '@/store/auth';
+
+type Translate = ReturnType<typeof useT>;
+
+/** Maps the pure elapsed descriptor to a localized "N days ago" style label. */
+function formatElapsed(t: Translate, value: string): string {
+  const elapsed = elapsedSince(value);
+  switch (elapsed.unit) {
+    case 'days':
+      return t('upNext.daysAgo', { count: elapsed.count });
+    case 'months':
+      return t('upNext.monthsAgo', { count: elapsed.count });
+    case 'aYear':
+      return t('upNext.aYearAgo');
+    case 'years':
+      return t('upNext.yearsAgo', { count: elapsed.count });
+  }
+}
 
 export default function HomeScreen() {
   const theme = useTheme();
+  const t = useT();
   const user = useAuthStore((state) => state.user);
   const upNext = useUpNext();
   const stats = useMyStats();
@@ -86,16 +105,16 @@ export default function HomeScreen() {
         contentContainerStyle={styles.content}
       >
         <ScreenHeader
-          title={`Hello, ${user?.username || 'there'}`}
-          subtitle="Your watching overview"
+          title={t('home.greeting', { name: user?.username || t('home.greetingFallback') })}
+          subtitle={t('home.overview')}
           right={
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel={`Open notifications${
+              accessibilityLabel={
                 unreadCount
-                  ? `, ${unreadCount} unread`
-                  : ''
-              }`}
+                  ? t('home.openNotificationsUnread', { count: unreadCount })
+                  : t('home.openNotifications')
+              }
               onPress={() => router.push('/notifications')}
               style={({ pressed }) => [
                 styles.notificationButton,
@@ -128,24 +147,24 @@ export default function HomeScreen() {
             ]}
           >
             <View style={styles.onboardingCopy}>
-              <AppText variant="section">Make Văzute yours</AppText>
+              <AppText variant="section">{t('home.onboardingTitle')}</AppText>
               <AppText variant="caption" muted>
-                Add a first title or bring your existing TV Time history.
+                {t('home.onboardingSubtitle')}
               </AppText>
             </View>
             <OnboardingAction
               icon={Search}
-              label="Find your first movie or show"
+              label={t('home.onboardingSearch')}
               onPress={() => router.push('/(tabs)/search')}
             />
             <OnboardingAction
               icon={UploadCloud}
-              label="Import from TV Time"
+              label={t('home.onboardingImport')}
               onPress={() => router.push('/import-tvtime')}
             />
             <OnboardingAction
               icon={Settings2}
-              label="Set your region and release alerts"
+              label={t('home.onboardingSettings')}
               onPress={() => router.push('/settings')}
             />
           </View>
@@ -153,20 +172,20 @@ export default function HomeScreen() {
 
         {stats.data ? (
           <View style={styles.stats}>
-            <Stat icon={Film} label="Movies" value={stats.data.total_movies} />
-            <Stat icon={Tv} label="Shows" value={stats.data.total_shows} />
-            <Stat icon={Clock3} label="Hours" value={Math.round(stats.data.total_hours)} />
-            <Stat icon={ListVideo} label="Episodes" value={stats.data.total_episodes} />
+            <Stat icon={Film} label={t('home.movies')} value={stats.data.total_movies} />
+            <Stat icon={Tv} label={t('home.shows')} value={stats.data.total_shows} />
+            <Stat icon={Clock3} label={t('home.hours')} value={Math.round(stats.data.total_hours)} />
+            <Stat icon={ListVideo} label={t('home.episodes')} value={stats.data.total_episodes} />
           </View>
         ) : null}
 
         <View style={styles.section}>
-          <AppText variant="section">Up next</AppText>
+          <AppText variant="section">{t('upNext.title')}</AppText>
           {upNext.isLoading ? (
-            <LoadingState label="Loading your next episodes" />
+            <LoadingState label={t('upNext.loading')} />
           ) : upNext.isError ? (
             <ErrorState
-              message={getErrorMessage(upNext.error, 'Your queue could not be loaded')}
+              message={getErrorMessage(upNext.error, t('upNext.loadError'))}
               onRetry={() => void upNext.refetch()}
             />
           ) : upNextGroups.length ? (
@@ -174,7 +193,7 @@ export default function HomeScreen() {
               <View key={group.key} style={styles.upNextGroup}>
                 {upNextGroups.length > 1 ? (
                   <AppText variant="caption" muted>
-                    {group.title.toUpperCase()}
+                    {t(group.titleKey).toUpperCase()}
                   </AppText>
                 ) : null}
                 <View style={[styles.list, { borderTopColor: theme.border }]}>
@@ -184,7 +203,9 @@ export default function HomeScreen() {
                       item={item}
                       note={
                         group.key === 'dormant'
-                          ? `watched ${lastWatchedLabel(item.last_watched_at)}`
+                          ? t('upNext.watchedAgo', {
+                              when: formatElapsed(t, item.last_watched_at),
+                            })
                           : undefined
                       }
                       onPlan={() =>
@@ -204,22 +225,24 @@ export default function HomeScreen() {
           ) : (
             <EmptyState
               icon={Search}
-              title="Nothing queued"
-              message="Tracked shows with available unwatched episodes will appear here."
-              actionLabel="Find a show"
+              title={t('upNext.emptyTitle')}
+              message={t('upNext.emptyMessage')}
+              actionLabel={t('upNext.findShow')}
               onAction={() => router.push('/(tabs)/search')}
             />
           )}
           {plan.error || watched.error ? (
             <AppText variant="caption" style={{ color: theme.danger }}>
-              {getErrorMessage(plan.error || watched.error, 'The episode could not be updated')}
+              {getErrorMessage(plan.error || watched.error, t('upNext.updateError'))}
             </AppText>
           ) : null}
         </View>
 
         {becauseYouWatched && becauseYouWatched.results.length ? (
           <View style={styles.section}>
-            <AppText variant="section">{`Because you watched ${becauseYouWatched.seed_title}`}</AppText>
+            <AppText variant="section">
+              {t('home.becauseYouWatched', { title: becauseYouWatched.seed_title })}
+            </AppText>
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
@@ -235,7 +258,7 @@ export default function HomeScreen() {
         {recommendations.length ? (
           <View style={styles.section}>
             <AppText variant="section">
-              {discovery.data?.personalized ? 'For you' : 'Discover'}
+              {discovery.data?.personalized ? t('home.forYou') : t('home.discover')}
             </AppText>
             <ScrollView
               horizontal
