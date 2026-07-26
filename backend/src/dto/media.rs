@@ -80,6 +80,21 @@ pub struct DiscoveryResponse {
     pub recommendation_basis: Vec<String>,
     pub popular_movies: Vec<TmdbSearchResult>,
     pub popular_shows: Vec<TmdbSearchResult>,
+    /// TMDB's collaborative "because you watched <seed>" row, seeded from the
+    /// viewer's strongest library signal. `None` when there is no seed yet or
+    /// the upstream call is unavailable (this section is best-effort and never
+    /// fails the rest of discovery).
+    pub because_you_watched: Option<BecauseYouWatched>,
+}
+
+/// One "Because you watched <seed_title>" row: TMDB recommendations for a seed
+/// title from the viewer's library, already filtered of titles they track.
+#[derive(Debug, Serialize)]
+pub struct BecauseYouWatched {
+    pub seed_tmdb_id: i32,
+    pub seed_media_type: String,
+    pub seed_title: String,
+    pub results: Vec<TmdbSearchResult>,
 }
 
 #[derive(Debug, Serialize)]

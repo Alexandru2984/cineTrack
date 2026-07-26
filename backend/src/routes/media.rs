@@ -110,14 +110,19 @@ async fn get_episode_detail(
 
 async fn discovery(
     pool: web::Data<PgPool>,
+    tmdb: web::Data<TmdbService>,
     req: HttpRequest,
     query: web::Query<DiscoveryQuery>,
 ) -> Result<HttpResponse, AppError> {
     let user_id = require_auth(&req).await?;
     query.validate()?;
-    let response =
-        discovery_service::load_discovery(pool.get_ref(), user_id, query.language.as_deref())
-            .await?;
+    let response = discovery_service::load_discovery(
+        pool.get_ref(),
+        tmdb.get_ref(),
+        user_id,
+        query.language.as_deref(),
+    )
+    .await?;
     Ok(HttpResponse::Ok().json(response))
 }
 

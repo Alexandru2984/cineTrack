@@ -678,6 +678,113 @@ impl TmdbService {
         }
     }
 
+    /// TMDB "recommendations" for a title — the collaborative "because you
+    /// watched" signal, complementary to the local genre-affinity ranking.
+    pub async fn get_recommendations(
+        &self,
+        tmdb_id: i32,
+        media_type: &str,
+        language: Option<&str>,
+    ) -> Result<TmdbSearchResponse, AppError> {
+        if tmdb_id <= 0 {
+            return Err(AppError::BadRequest("TMDB ID must be positive".to_string()));
+        }
+        let kind = if media_type == "tv" { "tv" } else { "movie" };
+        let language = Self::canonical_language(language);
+        let request = self.authed(
+            self.client
+                .get(format!(
+                    "{}/{}/{}/recommendations",
+                    self.base_url, kind, tmdb_id
+                ))
+                .query(&[("language", language.as_str()), ("page", "1")]),
+        );
+        self.send_api("recommendations", request).await
+    }
+
+    /// Cached wrapper over [`Self::get_recommendations`], mirroring
+    /// `search_cached`: fresh/stale windows, single-flight refresh, and
+    /// stale-on-error fallback, so a busy dashboard does not fan out to TMDB on
+    /// every load.
+    pub async fn get_recommendations_cached(
+        &self,
+        pool: &PgPool,
+        tmdb_id: i32,
+        media_type: &str,
+        language: Option<&str>,
+    ) -> Result<TmdbSearchResponse, AppError> {
+        let kind = if media_type == "tv" { "tv" } else { "movie" };
+        let language = Self::canonical_language(language);
+        let cache_key =
+            Self::provider_cache_key("recommendations", &[&language, kind, &tmdb_id.to_string()]);
+
+        let cached = match Self::load_provider_response::<TmdbSearchResponse>(pool, &cache_key).await
+        {
+            Ok(cached) => cached,
+            Err(error) => {
+                crate::metrics::record_tmdb_cache("recommendations", "read_error");
+                log::warn!("TMDB recommendations cache lookup failed: {error}");
+                None
+            }
+        };
+        if let Some(entry) = &cached {
+            if entry.expires_at > Utc::now() {
+                crate::metrics::record_tmdb_cache("recommendations", "hit");
+                return Ok(entry.value.clone());
+            }
+        }
+
+        let _refresh_guard = self.acquire_request_lock(&cache_key).await;
+        let cached = match Self::load_provider_response::<TmdbSearchResponse>(pool, &cache_key).await
+        {
+            Ok(cached) => cached,
+            Err(error) => {
+                crate::metrics::record_tmdb_cache("recommendations", "read_error");
+                log::warn!("TMDB recommendations cache recheck failed: {error}");
+                cached
+            }
+        };
+        if let Some(entry) = &cached {
+            if entry.expires_at > Utc::now() {
+                crate::metrics::record_tmdb_cache("recommendations", "hit");
+                return Ok(entry.value.clone());
+            }
+        }
+        crate::metrics::record_tmdb_cache("recommendations", "miss");
+
+        match self
+            .get_recommendations(tmdb_id, media_type, Some(&language))
+            .await
+        {
+            Ok(response) => {
+                if let Err(error) = Self::store_provider_response(
+                    pool,
+                    &cache_key,
+                    "recommendations",
+                    &response,
+                    chrono::Duration::hours(SEARCH_CACHE_FRESH_HOURS),
+                    chrono::Duration::days(SEARCH_CACHE_STALE_DAYS),
+                )
+                .await
+                {
+                    crate::metrics::record_tmdb_cache("recommendations", "write_error");
+                    log::warn!("TMDB recommendations cache write failed: {error}");
+                }
+                Ok(response)
+            }
+            Err(error) => {
+                if let Some(entry) = cached {
+                    if entry.stale_until > Utc::now() {
+                        crate::metrics::record_tmdb_cache("recommendations", "stale");
+                        log::warn!("Serving stale TMDB recommendations after upstream failure");
+                        return Ok(entry.value);
+                    }
+                }
+                Err(error)
+            }
+        }
+    }
+
     pub async fn get_movie_detail(&self, tmdb_id: i32) -> Result<TmdbMovieDetail, AppError> {
         let request = self.authed(
             self.client

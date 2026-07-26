@@ -1,13 +1,17 @@
+use std::collections::HashSet;
+
 use chrono::NaiveDate;
 use sqlx::{FromRow, PgPool};
 use uuid::Uuid;
 
-use crate::dto::media::{DiscoveryResponse, TmdbSearchResult};
+use crate::dto::media::{BecauseYouWatched, DiscoveryResponse, TmdbSearchResult};
 use crate::services::catalog;
+use crate::services::tmdb::TmdbService;
 
 const SECTION_SIZE: i64 = 12;
 const CANDIDATES_PER_TYPE: i64 = 500;
 const MAX_PREFERENCES: i64 = 20;
+const BECAUSE_YOU_WATCHED_SIZE: usize = 12;
 
 #[derive(FromRow)]
 struct PreferenceRow {
@@ -367,8 +371,139 @@ async fn load_popular(
     .await
 }
 
+#[derive(FromRow)]
+struct SeedRow {
+    tmdb_id: i32,
+    media_type: String,
+    title: String,
+}
+
+/// Pick the viewer's single strongest library signal to seed a "because you
+/// watched" row: favorites and highly-rated completed titles rank first, ties
+/// broken by how recently they were touched.
+async fn load_seed(pool: &PgPool, user_id: Uuid) -> Result<Option<SeedRow>, sqlx::Error> {
+    sqlx::query_as::<_, SeedRow>(
+        r#"SELECT m.tmdb_id, m.media_type, m.title
+        FROM user_media um
+        JOIN media m ON m.id = um.media_id
+        WHERE um.user_id = $1
+          AND m.tmdb_id > 0
+          AND (um.is_favorite OR um.rating >= 7 OR um.status = 'completed')
+        ORDER BY
+            (
+                CASE WHEN um.is_favorite THEN 4 ELSE 0 END
+                + CASE WHEN um.rating >= 8 THEN 2 WHEN um.rating >= 7 THEN 1 ELSE 0 END
+                + CASE WHEN um.status = 'completed' THEN 1 ELSE 0 END
+            ) DESC,
+            um.updated_at DESC,
+            m.tmdb_id
+        LIMIT 1"#,
+    )
+    .bind(user_id)
+    .fetch_optional(pool)
+    .await
+}
+
+/// The TMDB ids the viewer already tracks for a media type, used to drop
+/// recommendations they have already seen.
+async fn load_tracked_tmdb_ids(
+    pool: &PgPool,
+    user_id: Uuid,
+    media_type: &str,
+) -> Result<Vec<i32>, sqlx::Error> {
+    sqlx::query_scalar::<_, i32>(
+        r#"SELECT m.tmdb_id
+        FROM user_media um
+        JOIN media m ON m.id = um.media_id
+        WHERE um.user_id = $1 AND m.media_type = $2 AND m.tmdb_id > 0"#,
+    )
+    .bind(user_id)
+    .bind(media_type)
+    .fetch_all(pool)
+    .await
+}
+
+/// Drop the seed itself, posterless entries, and titles already in the library;
+/// dedupe; backfill the media type (movie/tv recommendation results omit it);
+/// cap at `limit`. Pure so it is unit-testable.
+fn filter_recommendations(
+    results: Vec<TmdbSearchResult>,
+    seed_tmdb_id: i32,
+    seed_media_type: &str,
+    tracked: &HashSet<i32>,
+    limit: usize,
+) -> Vec<TmdbSearchResult> {
+    let mut seen = HashSet::new();
+    results
+        .into_iter()
+        .filter(|result| result.poster_path.is_some())
+        .filter(|result| result.id != seed_tmdb_id)
+        .filter(|result| !tracked.contains(&result.id))
+        .filter(|result| seen.insert(result.id))
+        .map(|mut result| {
+            if result.media_type.is_none() {
+                result.media_type = Some(seed_media_type.to_string());
+            }
+            result
+        })
+        .take(limit)
+        .collect()
+}
+
+/// Best-effort "because you watched" row. Any failure (no seed, TMDB down, a
+/// DB hiccup) resolves to `None` rather than failing the whole discovery load.
+async fn load_because_you_watched(
+    pool: &PgPool,
+    tmdb: &TmdbService,
+    user_id: Uuid,
+    language_code: Option<&str>,
+) -> Option<BecauseYouWatched> {
+    let seed = match load_seed(pool, user_id).await {
+        Ok(Some(seed)) => seed,
+        Ok(None) => return None,
+        Err(error) => {
+            log::warn!("because-you-watched seed lookup failed: {error}");
+            return None;
+        }
+    };
+    let response = match tmdb
+        .get_recommendations_cached(pool, seed.tmdb_id, &seed.media_type, language_code)
+        .await
+    {
+        Ok(response) => response,
+        Err(error) => {
+            log::warn!("because-you-watched recommendations unavailable: {error}");
+            return None;
+        }
+    };
+    let tracked = match load_tracked_tmdb_ids(pool, user_id, &seed.media_type).await {
+        Ok(ids) => ids.into_iter().collect::<HashSet<_>>(),
+        Err(error) => {
+            log::warn!("because-you-watched tracked lookup failed: {error}");
+            return None;
+        }
+    };
+    let results = filter_recommendations(
+        response.results,
+        seed.tmdb_id,
+        &seed.media_type,
+        &tracked,
+        BECAUSE_YOU_WATCHED_SIZE,
+    );
+    if results.is_empty() {
+        return None;
+    }
+    Some(BecauseYouWatched {
+        seed_tmdb_id: seed.tmdb_id,
+        seed_media_type: seed.media_type,
+        seed_title: seed.title,
+        results,
+    })
+}
+
 pub async fn load_discovery(
     pool: &PgPool,
+    tmdb: &TmdbService,
     user_id: Uuid,
     language: Option<&str>,
 ) -> Result<DiscoveryResponse, sqlx::Error> {
@@ -383,6 +518,8 @@ pub async fn load_discovery(
     )
     .await?;
     let popular_rows = load_popular(pool, language_code.as_deref(), region_code.as_deref()).await?;
+    let because_you_watched =
+        load_because_you_watched(pool, tmdb, user_id, language_code.as_deref()).await;
 
     let personalized = recommendation_rows.iter().any(|row| row.affinity > 0.0);
     let recommendation_basis = preferences
@@ -405,5 +542,64 @@ pub async fn load_discovery(
         recommendation_basis,
         popular_movies,
         popular_shows,
+        because_you_watched,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn result(id: i32, poster: Option<&str>) -> TmdbSearchResult {
+        TmdbSearchResult {
+            id,
+            title: Some(format!("Title {id}")),
+            name: None,
+            original_title: None,
+            original_name: None,
+            overview: None,
+            poster_path: poster.map(str::to_string),
+            backdrop_path: None,
+            release_date: None,
+            first_air_date: None,
+            vote_average: None,
+            media_type: None,
+            genre_ids: None,
+        }
+    }
+
+    #[test]
+    fn filter_recommendations_drops_seed_tracked_and_posterless() {
+        let tracked = HashSet::from([200]);
+        let results = vec![
+            result(100, Some("/seed.jpg")), // the seed itself
+            result(200, Some("/tracked.jpg")), // already in the library
+            result(300, None),              // no poster
+            result(400, Some("/keep.jpg")), // kept
+            result(400, Some("/dupe.jpg")), // duplicate id
+        ];
+
+        let filtered = filter_recommendations(results, 100, "movie", &tracked, 12);
+
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].id, 400);
+        // movie/tv recommendation results omit media_type; it is backfilled.
+        assert_eq!(filtered[0].media_type.as_deref(), Some("movie"));
+    }
+
+    #[test]
+    fn filter_recommendations_respects_the_limit() {
+        let tracked = HashSet::new();
+        let results = (1..=20).map(|id| result(id, Some("/p.jpg"))).collect();
+        let filtered = filter_recommendations(results, 999, "tv", &tracked, 5);
+        assert_eq!(filtered.len(), 5);
+        assert!(filtered.iter().all(|r| r.media_type.as_deref() == Some("tv")));
+    }
+
+    #[test]
+    fn filter_recommendations_can_be_empty() {
+        let tracked = HashSet::from([1, 2, 3]);
+        let results = vec![result(1, Some("/a.jpg")), result(2, Some("/b.jpg"))];
+        assert!(filter_recommendations(results, 999, "movie", &tracked, 12).is_empty());
+    }
 }
