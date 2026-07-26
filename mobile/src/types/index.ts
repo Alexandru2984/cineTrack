@@ -422,6 +422,14 @@ export interface CalendarPreferences {
   country_code: string;
 }
 
+export interface CalendarFeedStatus {
+  enabled: boolean;
+}
+
+export interface CalendarFeedCredential {
+  feed_url: string;
+}
+
 export interface CalendarWatchResponse {
   history_id: string;
   media_id: string;

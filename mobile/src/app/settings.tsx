@@ -42,6 +42,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { AppButton } from '@/components/app-button';
 import { AppText } from '@/components/app-text';
+import { CalendarFeedSection } from '@/components/calendar-feed-section';
 import { SegmentedControl } from '@/components/segmented-control';
 import { UserAvatar } from '@/components/user-avatar';
 import { radius, spacing } from '@/constants/theme';
@@ -618,6 +619,8 @@ export default function SettingsScreen() {
               />
             ) : null}
           </View>
+
+          <CalendarFeedSection />
 
           <View style={[styles.section, { borderBottomColor: theme.border }]}>
             <View style={styles.sectionHeading}>

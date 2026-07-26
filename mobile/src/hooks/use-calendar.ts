@@ -6,9 +6,15 @@ import {
 } from '@tanstack/react-query';
 
 import { apiRequest } from '@/lib/api';
+import {
+  disableCalendarFeed,
+  enableCalendarFeed,
+  fetchCalendarFeedStatus,
+} from '@/lib/calendar-feed';
 import { withQuery } from '@/lib/http';
 import type {
   CalendarEpisodePage,
+  CalendarFeedStatus,
   CalendarPreferences,
   CalendarSummary,
   CalendarWatchResponse,
@@ -36,7 +42,36 @@ export const calendarKeys = {
     ['calendar', 'new', today, includeSpecials] as const,
   upcoming: (today: string, type: string, includeSpecials: boolean) =>
     ['calendar', 'upcoming', today, type, includeSpecials] as const,
+  feed: ['calendar', 'feed'] as const,
 };
+
+export function useCalendarFeedStatus(enabled = true) {
+  return useQuery({
+    queryKey: calendarKeys.feed,
+    queryFn: fetchCalendarFeedStatus,
+    enabled,
+  });
+}
+
+export function useEnableCalendarFeed() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: enableCalendarFeed,
+    onSuccess: () => {
+      queryClient.setQueryData<CalendarFeedStatus>(calendarKeys.feed, { enabled: true });
+    },
+  });
+}
+
+export function useDisableCalendarFeed() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: disableCalendarFeed,
+    onSuccess: () => {
+      queryClient.setQueryData<CalendarFeedStatus>(calendarKeys.feed, { enabled: false });
+    },
+  });
+}
 
 export function useCalendarPreferences(enabled = true) {
   return useQuery({
