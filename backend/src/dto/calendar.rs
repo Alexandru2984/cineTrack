@@ -4,6 +4,19 @@ use uuid::Uuid;
 
 use crate::errors::AppError;
 
+/// Whether the viewer's iCal feed URL is currently active.
+#[derive(Debug, Serialize)]
+pub struct CalendarFeedStatus {
+    pub enabled: bool,
+}
+
+/// The plaintext feed URL, returned only at the moment the feed is enabled or
+/// regenerated — the server stores only its hash and can never show it again.
+#[derive(Debug, Serialize)]
+pub struct CalendarFeedCredential {
+    pub feed_url: String,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct NewCalendarQuery {

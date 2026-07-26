@@ -4,10 +4,18 @@ use sqlx::{PgPool, Postgres, Transaction};
 use uuid::Uuid;
 
 use crate::available_through;
+use crate::config::Config;
 use crate::dto::calendar::*;
 use crate::errors::AppError;
 use crate::middleware::auth::require_auth;
+use crate::services::ical::{build_calendar, FeedEvent};
 use crate::services::quota;
+use crate::utils::calendar_feed;
+
+/// How far ahead the subscribable feed looks, and a cap on entries so a huge
+/// library cannot produce an unbounded document.
+const FEED_HORIZON_DAYS: i64 = 180;
+const FEED_MAX_EVENTS: i64 = 1000;
 
 pub fn configure(cfg: &mut web::ServiceConfig) {
     cfg.service(
@@ -16,6 +24,13 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
             .route("/new", web::get().to(new_episodes))
             .route("/upcoming", web::get().to(upcoming_releases))
             .route("/summary", web::get().to(calendar_summary))
+            // The unauthenticated feed URL: the token in the path is the sole
+            // credential. Registered before the authenticated `/feed` routes;
+            // the extra path segment keeps them distinct.
+            .route("/feed/{token}", web::get().to(serve_feed))
+            .route("/feed", web::get().to(feed_status))
+            .route("/feed", web::post().to(enable_feed))
+            .route("/feed", web::delete().to(disable_feed))
             .route("/preferences", web::get().to(get_preferences))
             .route("/preferences", web::put().to(update_preferences))
             .route("/episodes/{episode_id}/plan", web::put().to(plan_episode))
@@ -448,6 +463,132 @@ async fn calendar_country(pool: &PgPool, user_id: Uuid) -> Result<String, AppErr
     .bind(user_id)
     .fetch_one(pool)
     .await?)
+}
+
+#[derive(sqlx::FromRow)]
+struct FeedEpisodeRow {
+    episode_id: Uuid,
+    title: String,
+    season_number: i32,
+    episode_number: i32,
+    episode_name: Option<String>,
+    air_date: chrono::NaiveDate,
+}
+
+fn episode_code(season_number: i32, episode_number: i32) -> String {
+    format!("S{season_number:02}E{episode_number:02}")
+}
+
+async fn feed_status(pool: web::Data<PgPool>, req: HttpRequest) -> Result<HttpResponse, AppError> {
+    let user_id = require_auth(&req).await?;
+    let enabled = sqlx::query_scalar::<_, bool>(
+        "SELECT calendar_feed_token_hash IS NOT NULL FROM users WHERE id = $1",
+    )
+    .bind(user_id)
+    .fetch_one(pool.get_ref())
+    .await?;
+    Ok(HttpResponse::Ok().json(CalendarFeedStatus { enabled }))
+}
+
+/// Enable or regenerate the feed. A fresh token is minted and only its hash is
+/// stored, so any previously issued URL stops working immediately. The
+/// plaintext URL is returned here and nowhere else.
+async fn enable_feed(
+    pool: web::Data<PgPool>,
+    config: web::Data<Config>,
+    req: HttpRequest,
+) -> Result<HttpResponse, AppError> {
+    let user_id = require_auth(&req).await?;
+    let token = calendar_feed::generate_feed_token();
+    let token_hash = calendar_feed::hash_feed_token(&token);
+    sqlx::query("UPDATE users SET calendar_feed_token_hash = $2, updated_at = NOW() WHERE id = $1")
+        .bind(user_id)
+        .bind(&token_hash)
+        .execute(pool.get_ref())
+        .await?;
+    let feed_url = format!("{}/api/calendar/feed/{}.ics", config.frontend_url, token);
+    Ok(HttpResponse::Ok().json(CalendarFeedCredential { feed_url }))
+}
+
+async fn disable_feed(pool: web::Data<PgPool>, req: HttpRequest) -> Result<HttpResponse, AppError> {
+    let user_id = require_auth(&req).await?;
+    sqlx::query("UPDATE users SET calendar_feed_token_hash = NULL, updated_at = NOW() WHERE id = $1")
+        .bind(user_id)
+        .execute(pool.get_ref())
+        .await?;
+    Ok(HttpResponse::Ok().json(CalendarFeedStatus { enabled: false }))
+}
+
+/// Serve the iCal document. Unauthenticated: the path token is the credential.
+/// An unknown or malformed token is a generic 404 so the endpoint does not
+/// confirm which tokens exist.
+async fn serve_feed(
+    pool: web::Data<PgPool>,
+    path: web::Path<String>,
+) -> Result<HttpResponse, AppError> {
+    let raw = path.into_inner();
+    let token = raw.strip_suffix(".ics").unwrap_or(&raw);
+    if !calendar_feed::is_valid_feed_token(token) {
+        return Err(AppError::NotFound("Feed not found".to_string()));
+    }
+    let token_hash = calendar_feed::hash_feed_token(token);
+    let user_id =
+        sqlx::query_scalar::<_, Uuid>("SELECT id FROM users WHERE calendar_feed_token_hash = $1")
+            .bind(&token_hash)
+            .fetch_optional(pool.get_ref())
+            .await?
+            .ok_or_else(|| AppError::NotFound("Feed not found".to_string()))?;
+
+    let rows = sqlx::query_as::<_, FeedEpisodeRow>(
+        r#"SELECT
+            episodes.id AS episode_id,
+            media.title,
+            seasons.season_number,
+            episodes.episode_number,
+            episodes.name AS episode_name,
+            episodes.air_date
+        FROM user_media tracked
+        JOIN media ON media.id = tracked.media_id AND media.media_type = 'tv'
+        JOIN seasons ON seasons.media_id = media.id
+        JOIN episodes ON episodes.season_id = seasons.id
+        WHERE tracked.user_id = $1
+          AND tracked.status <> 'dropped'
+          AND seasons.season_number > 0
+          AND episodes.air_date >= CURRENT_DATE
+          AND episodes.air_date <= CURRENT_DATE + $2
+        ORDER BY episodes.air_date, seasons.season_number, episodes.episode_number
+        LIMIT $3"#,
+    )
+    .bind(user_id)
+    .bind(FEED_HORIZON_DAYS as i32)
+    .bind(FEED_MAX_EVENTS)
+    .fetch_all(pool.get_ref())
+    .await?;
+
+    let events = rows
+        .into_iter()
+        .map(|row| {
+            let code = episode_code(row.season_number, row.episode_number);
+            let summary = match row.episode_name {
+                Some(name) if !name.is_empty() => format!("{} {} — {}", row.title, code, name),
+                _ => format!("{} {}", row.title, code),
+            };
+            FeedEvent {
+                // episode id is a UUID, so this UID is globally unique and
+                // stable across refreshes.
+                uid: format!("{}@vazute.micutu.com", row.episode_id),
+                date: row.air_date,
+                summary,
+                description: None,
+            }
+        })
+        .collect::<Vec<_>>();
+
+    let body = build_calendar("Văzute — Upcoming Episodes", &events, Utc::now());
+    Ok(HttpResponse::Ok()
+        .content_type("text/calendar; charset=utf-8")
+        .insert_header(("Content-Disposition", "inline; filename=\"vazute.ics\""))
+        .body(body))
 }
 
 async fn plan_episode(

@@ -4,6 +4,7 @@ pub mod catalog_hydration;
 pub mod completion;
 pub mod discovery;
 pub mod email;
+pub mod ical;
 pub mod importer;
 pub mod media_cache;
 pub mod notifications;
