@@ -423,6 +423,19 @@ export const ro: Dictionary = {
     request: 'Cere',
     pageN: 'Pagina {page}',
   },
+  pwa: {
+    offline: 'Ești offline',
+    updateReady: 'O versiune nouă este gata',
+    offlineReady: 'Gata pentru lansare offline',
+    update: 'Actualizează',
+  },
+  install: {
+    title: 'Instalează Văzute',
+    installApp: 'Instalează aplicația',
+    iosPrompt: 'Deschide această pagină în Safari, apoi:',
+    share: 'Distribuie',
+    addToHomeScreen: 'Adaugă pe ecranul principal',
+  },
   mediaCard: {
     unknown: 'Necunoscut',
     done: 'Gata',

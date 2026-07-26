@@ -9,6 +9,7 @@ import { useRegisterSW } from 'virtual:pwa-register/react';
 import { PwaContext, type PwaContextValue } from '@/hooks/usePwaInstall';
 import { useAuthStore } from '@/store/auth';
 import { isIosInstallPlatform } from '@/lib/pwa';
+import { useT } from '@/hooks/useT';
 
 interface InstallChoice {
   outcome: 'accepted' | 'dismissed';
@@ -123,6 +124,7 @@ export function PwaStatus({
   onDismissReady,
   hasMobileTabs = false,
 }: PwaStatusProps) {
+  const t = useT();
   const state = !isOnline
     ? 'offline'
     : needRefresh
@@ -152,10 +154,10 @@ export function PwaStatus({
 
       <p className="min-w-0 flex-1 text-sm font-medium">
         {state === 'offline'
-          ? 'You are offline'
+          ? t('pwa.offline')
           : state === 'update'
-            ? 'A new version is ready'
-            : 'Ready for offline launch'}
+            ? t('pwa.updateReady')
+            : t('pwa.offlineReady')}
       </p>
 
       {state === 'update' && (
@@ -165,7 +167,7 @@ export function PwaStatus({
           className="inline-flex h-9 items-center gap-2 rounded-md bg-[hsl(var(--primary))] px-3 text-sm font-medium text-white"
         >
           <RefreshCw className="h-4 w-4" aria-hidden="true" />
-          Update
+          {t('pwa.update')}
         </button>
       )}
 
@@ -173,8 +175,8 @@ export function PwaStatus({
         <button
           type="button"
           onClick={state === 'update' ? onDismissUpdate : onDismissReady}
-          aria-label="Dismiss"
-          title="Dismiss"
+          aria-label={t('banner.dismiss')}
+          title={t('banner.dismiss')}
           className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--accent))]"
         >
           <X className="h-4 w-4" aria-hidden="true" />

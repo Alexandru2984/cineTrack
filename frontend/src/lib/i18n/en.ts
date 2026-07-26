@@ -421,6 +421,19 @@ export const en = {
     request: 'Request',
     pageN: 'Page {page}',
   },
+  pwa: {
+    offline: 'You are offline',
+    updateReady: 'A new version is ready',
+    offlineReady: 'Ready for offline launch',
+    update: 'Update',
+  },
+  install: {
+    title: 'Install Văzute',
+    installApp: 'Install app',
+    iosPrompt: 'Open this page in Safari, then:',
+    share: 'Share',
+    addToHomeScreen: 'Add to Home Screen',
+  },
   mediaCard: {
     unknown: 'Unknown',
     done: 'Done',
