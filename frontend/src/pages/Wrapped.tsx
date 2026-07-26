@@ -5,9 +5,15 @@ import { useWrapped } from '@/hooks/useStats';
 import { usePageTitle } from '@/hooks/usePageTitle';
 import { getPosterUrl, formatDate } from '@/lib/utils';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
+import { useT } from '@/hooks/useT';
+import { useLocaleStore } from '@/store/locale';
 import type { WrappedStats } from '@/types';
 
-const MONTH_LABELS = ['J', 'F', 'M', 'A', 'M', 'J', 'J', 'A', 'S', 'O', 'N', 'D'];
+/** Locale-aware single-letter month initials (Intl "narrow" month). */
+function monthInitials(tag: string): string[] {
+  const format = new Intl.DateTimeFormat(tag, { month: 'narrow' });
+  return Array.from({ length: 12 }, (_, index) => format.format(new Date(2020, index, 1)));
+}
 
 function StatTile({
   icon: Icon,
@@ -28,30 +34,36 @@ function StatTile({
 }
 
 function Recap({ data }: { data: WrappedStats }) {
+  const t = useT();
+  const locale = useLocaleStore((state) => state.locale);
+  const monthLabels = monthInitials(locale === 'ro' ? 'ro-RO' : 'en-US');
   const maxMonth = Math.max(1, ...data.monthly.map((m) => m.count));
   const maxGenre = Math.max(1, ...data.top_genres.map((g) => g.count));
 
   return (
     <div className="space-y-8">
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-        <StatTile icon={Sparkles} label="Titles watched" value={data.distinct_titles} />
-        <StatTile icon={Clock} label="Hours" value={Math.round(data.total_hours)} />
-        <StatTile icon={Clapperboard} label="Total plays" value={data.total_watches} />
-        <StatTile icon={Film} label="Movies" value={data.movies_watched} />
-        <StatTile icon={Tv} label="Episodes" value={data.episodes_watched} />
-        <StatTile icon={Flame} label="Longest streak" value={`${data.longest_streak}d`} />
+        <StatTile icon={Sparkles} label={t('wrapped.titlesWatched')} value={data.distinct_titles} />
+        <StatTile icon={Clock} label={t('wrapped.hours')} value={Math.round(data.total_hours)} />
+        <StatTile icon={Clapperboard} label={t('wrapped.totalPlays')} value={data.total_watches} />
+        <StatTile icon={Film} label={t('wrapped.movies')} value={data.movies_watched} />
+        <StatTile icon={Tv} label={t('wrapped.episodes')} value={data.episodes_watched} />
+        <StatTile icon={Flame} label={t('wrapped.longestStreak')} value={`${data.longest_streak}d`} />
       </div>
 
       {data.first_watch && data.last_watch && (
         <p className="flex items-center gap-2 text-sm text-[hsl(var(--muted-foreground))]">
           <CalendarRange className="h-4 w-4" aria-hidden="true" />
-          From {formatDate(data.first_watch)} to {formatDate(data.last_watch)}
+          {t('wrapped.dateRange', {
+            from: formatDate(data.first_watch),
+            to: formatDate(data.last_watch),
+          })}
         </p>
       )}
 
       {data.top_shows.length > 0 && (
         <section>
-          <h2 className="mb-3 text-lg font-semibold">Most watched</h2>
+          <h2 className="mb-3 text-lg font-semibold">{t('wrapped.mostWatched')}</h2>
           <div className="flex gap-3 overflow-x-auto pb-2">
             {data.top_shows.map((title) => (
               <Link
@@ -76,7 +88,9 @@ function Recap({ data }: { data: WrappedStats }) {
                 </div>
                 <p className="mt-1 line-clamp-1 text-sm font-medium">{title.title}</p>
                 <p className="text-xs text-[hsl(var(--muted-foreground))]">
-                  {title.count} {title.count === 1 ? 'play' : 'plays'}
+                  {title.count === 1
+                    ? t('wrapped.playsOne')
+                    : t('wrapped.playsMany', { count: title.count })}
                 </p>
               </Link>
             ))}
@@ -86,7 +100,7 @@ function Recap({ data }: { data: WrappedStats }) {
 
       {data.top_genres.length > 0 && (
         <section>
-          <h2 className="mb-3 text-lg font-semibold">Top genres</h2>
+          <h2 className="mb-3 text-lg font-semibold">{t('wrapped.topGenres')}</h2>
           <ul className="space-y-2">
             {data.top_genres.map((genre) => (
               <li key={genre.genre} className="flex items-center gap-3">
@@ -107,7 +121,7 @@ function Recap({ data }: { data: WrappedStats }) {
       )}
 
       <section>
-        <h2 className="mb-3 text-lg font-semibold">By month</h2>
+        <h2 className="mb-3 text-lg font-semibold">{t('wrapped.byMonth')}</h2>
         <div className="flex h-28 items-end gap-1.5">
           {data.monthly.map((month, index) => (
             <div key={month.month} className="flex h-full flex-1 flex-col items-center">
@@ -115,11 +129,11 @@ function Recap({ data }: { data: WrappedStats }) {
                 <div
                   className="w-full rounded-t bg-[hsl(var(--primary))]"
                   style={{ height: `${maxMonth ? (month.count / maxMonth) * 100 : 0}%` }}
-                  title={`${month.count} in month ${month.month}`}
+                  title={t('wrapped.monthTooltip', { count: month.count, month: month.month })}
                 />
               </div>
               <span className="mt-1 text-[10px] text-[hsl(var(--muted-foreground))]">
-                {MONTH_LABELS[index]}
+                {monthLabels[index]}
               </span>
             </div>
           ))}
@@ -130,6 +144,7 @@ function Recap({ data }: { data: WrappedStats }) {
 }
 
 export default function WrappedPage() {
+  const t = useT();
   const currentYear = new Date().getFullYear();
   const [year, setYear] = useState(currentYear);
   usePageTitle(`${year} Wrapped`);
@@ -142,12 +157,12 @@ export default function WrappedPage() {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <p className="flex items-center gap-2 text-sm font-medium opacity-90">
-              <Sparkles className="h-4 w-4" aria-hidden="true" /> Your Wrapped
+              <Sparkles className="h-4 w-4" aria-hidden="true" /> {t('stats.yourWrapped')}
             </p>
             <h1 className="mt-1 text-3xl font-bold">{year}</h1>
           </div>
           <label className="flex items-center gap-2 text-sm">
-            <span className="opacity-90">Year</span>
+            <span className="opacity-90">{t('wrapped.year')}</span>
             <select
               value={year}
               onChange={(e) => setYear(Number(e.target.value))}
@@ -167,14 +182,14 @@ export default function WrappedPage() {
         <LoadingSpinner />
       ) : isError ? (
         <p className="py-12 text-center text-sm text-[hsl(var(--destructive))]">
-          Could not load your Wrapped. Please try again.
+          {t('wrapped.loadError')}
         </p>
       ) : !data || data.total_watches === 0 ? (
         <div className="py-12 text-center text-[hsl(var(--muted-foreground))]">
           <Clapperboard className="mx-auto h-10 w-10" aria-hidden="true" />
-          <p className="mt-3">No watch history for {year} yet.</p>
+          <p className="mt-3">{t('wrapped.noHistory', { year })}</p>
           <Link to="/stats" className="mt-2 inline-block text-sm text-[hsl(var(--primary))] hover:underline">
-            Back to stats
+            {t('wrapped.backToStats')}
           </Link>
         </div>
       ) : (
