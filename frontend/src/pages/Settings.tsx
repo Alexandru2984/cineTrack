@@ -47,6 +47,7 @@ import {
   X,
 } from 'lucide-react';
 import { InstallAppCard } from '@/components/InstallAppCard';
+import { CalendarFeedCard } from '@/components/CalendarFeedCard';
 import { useAuthStore } from '@/store/auth';
 
 function SignOutCard() {
@@ -975,6 +976,7 @@ export default function SettingsPage() {
       <ProfilePictureCard />
       <PrivacyCard />
       <InstallAppCard />
+      <CalendarFeedCard />
       <FollowRequestsCard />
       <ImportCard />
       <ChangeEmailCard />

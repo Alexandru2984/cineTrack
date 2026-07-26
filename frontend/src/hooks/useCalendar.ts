@@ -2,6 +2,8 @@ import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tansta
 import api from '@/lib/api';
 import type {
   CalendarEpisodePage,
+  CalendarFeedCredential,
+  CalendarFeedStatus,
   CalendarPreferences,
   CalendarSummary,
   CalendarWatchResponse,
@@ -23,6 +25,7 @@ export const calendarKeys = {
   upcoming: (today: string, itemType: string, includeSpecials: boolean) =>
     ['calendar', 'upcoming', today, itemType, includeSpecials] as const,
   preferences: ['calendar', 'preferences'] as const,
+  feed: ['calendar', 'feed'] as const,
 };
 
 export function localDateKey(date = new Date()): string {
@@ -141,6 +144,44 @@ export function useUpdateCalendarPreferences() {
     onSuccess: (preferences) => {
       queryClient.setQueryData(calendarKeys.preferences, preferences);
       void queryClient.invalidateQueries({ queryKey: calendarKeys.all });
+    },
+  });
+}
+
+export function useCalendarFeedStatus(enabled = true) {
+  return useQuery<CalendarFeedStatus>({
+    queryKey: calendarKeys.feed,
+    queryFn: async () => {
+      const response = await api.get<CalendarFeedStatus>('/calendar/feed');
+      return response.data;
+    },
+    enabled,
+  });
+}
+
+export function useEnableCalendarFeed() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      // Enabling or regenerating both POST; the plaintext URL is returned only
+      // here and is never retrievable again.
+      const response = await api.post<CalendarFeedCredential>('/calendar/feed');
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.setQueryData<CalendarFeedStatus>(calendarKeys.feed, { enabled: true });
+    },
+  });
+}
+
+export function useDisableCalendarFeed() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      await api.delete('/calendar/feed');
+    },
+    onSuccess: () => {
+      queryClient.setQueryData<CalendarFeedStatus>(calendarKeys.feed, { enabled: false });
     },
   });
 }

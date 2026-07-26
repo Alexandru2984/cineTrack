@@ -34,6 +34,14 @@ export interface CommunityRating {
   distribution: number[] | null;
 }
 
+export interface CalendarFeedStatus {
+  enabled: boolean;
+}
+
+export interface CalendarFeedCredential {
+  feed_url: string;
+}
+
 export interface UserSummary {
   id: string;
   username: string;
