@@ -201,6 +201,19 @@ export const en = {
     confirmDelete: 'Delete “{name}”? The titles inside will not be deleted.',
     deleteError: 'The list could not be deleted',
   },
+  stats: {
+    title: 'Statistics',
+    yourWrapped: 'Your Wrapped',
+    movies: 'Movies',
+    tvShows: 'TV Shows',
+    episodes: 'Episodes',
+    hours: 'Hours',
+    currentStreak: 'Current Streak',
+    bestStreak: 'Best Streak',
+    heatmapTitle: 'Watch Activity Heatmap',
+    monthlyActivity: 'Monthly Activity',
+    genreDistribution: 'Genre Distribution',
+  },
   calendarFeed: {
     title: 'Calendar feed',
     description:

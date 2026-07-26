@@ -203,6 +203,19 @@ export const ro: Dictionary = {
     confirmDelete: 'Ștergi „{name}”? Titlurile din interior nu vor fi șterse.',
     deleteError: 'Lista nu a putut fi ștearsă',
   },
+  stats: {
+    title: 'Statistici',
+    yourWrapped: 'Retrospectiva ta',
+    movies: 'Filme',
+    tvShows: 'Seriale',
+    episodes: 'Episoade',
+    hours: 'Ore',
+    currentStreak: 'Serie curentă',
+    bestStreak: 'Cea mai bună serie',
+    heatmapTitle: 'Hartă activitate de vizionare',
+    monthlyActivity: 'Activitate lunară',
+    genreDistribution: 'Distribuție pe genuri',
+  },
   calendarFeed: {
     title: 'Feed de calendar',
     description:

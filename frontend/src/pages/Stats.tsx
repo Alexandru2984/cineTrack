@@ -5,6 +5,7 @@ import 'react-calendar-heatmap/dist/styles.css';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import { Link } from 'react-router';
 import { Film, Tv, Clock, Flame, Trophy, Zap, Sparkles } from 'lucide-react';
+import { useT } from '@/hooks/useT';
 
 const COLORS = ['#8b5cf6', '#a78bfa', '#c4b5fd', '#ddd6fe', '#ede9fe', '#6d28d9', '#5b21b6', '#7c3aed'];
 
@@ -14,6 +15,7 @@ function renderGenreLabel(props: unknown) {
 }
 
 export default function StatsPage() {
+  const t = useT();
   const { data: stats, isLoading } = useMyStats();
   const { data: heatmap } = useHeatmap();
   const { data: genres } = useGenreDistribution();
@@ -27,30 +29,30 @@ export default function StatsPage() {
   return (
     <div className="mx-auto max-w-7xl px-4 py-8 space-y-8">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-3xl font-bold">Statistics</h1>
+        <h1 className="text-3xl font-bold">{t('stats.title')}</h1>
         <Link
           to="/wrapped"
           className="flex items-center gap-2 rounded-md bg-gradient-to-br from-[hsl(var(--primary))] to-purple-600 px-4 py-2 text-sm font-medium text-white hover:opacity-90"
         >
-          <Sparkles className="h-4 w-4" aria-hidden="true" /> Your Wrapped
+          <Sparkles className="h-4 w-4" aria-hidden="true" /> {t('stats.yourWrapped')}
         </Link>
       </div>
 
       {/* Stats overview */}
       {stats && (
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-          <StatCard icon={<Film className="h-5 w-5" />} label="Movies" value={stats.total_movies} />
-          <StatCard icon={<Tv className="h-5 w-5" />} label="TV Shows" value={stats.total_shows} />
-          <StatCard icon={<Zap className="h-5 w-5" />} label="Episodes" value={stats.total_episodes} />
-          <StatCard icon={<Clock className="h-5 w-5" />} label="Hours" value={Math.round(stats.total_hours)} />
-          <StatCard icon={<Flame className="h-5 w-5" />} label="Current Streak" value={`${stats.current_streak}d`} />
-          <StatCard icon={<Trophy className="h-5 w-5" />} label="Best Streak" value={`${stats.longest_streak}d`} />
+          <StatCard icon={<Film className="h-5 w-5" />} label={t('stats.movies')} value={stats.total_movies} />
+          <StatCard icon={<Tv className="h-5 w-5" />} label={t('stats.tvShows')} value={stats.total_shows} />
+          <StatCard icon={<Zap className="h-5 w-5" />} label={t('stats.episodes')} value={stats.total_episodes} />
+          <StatCard icon={<Clock className="h-5 w-5" />} label={t('stats.hours')} value={Math.round(stats.total_hours)} />
+          <StatCard icon={<Flame className="h-5 w-5" />} label={t('stats.currentStreak')} value={`${stats.current_streak}d`} />
+          <StatCard icon={<Trophy className="h-5 w-5" />} label={t('stats.bestStreak')} value={`${stats.longest_streak}d`} />
         </div>
       )}
 
       {/* Heatmap */}
       <div className="rounded-lg border border-[hsl(var(--border))] p-6 bg-[hsl(var(--card))]">
-        <h2 className="text-lg font-semibold mb-4">Watch Activity Heatmap</h2>
+        <h2 className="text-lg font-semibold mb-4">{t('stats.heatmapTitle')}</h2>
         <div className="overflow-x-auto">
           <CalendarHeatmap
             startDate={startDate}
@@ -71,7 +73,7 @@ export default function StatsPage() {
         {/* Monthly activity */}
         {monthly && monthly.length > 0 && (
           <div className="rounded-lg border border-[hsl(var(--border))] p-6 bg-[hsl(var(--card))]">
-            <h2 className="text-lg font-semibold mb-4">Monthly Activity</h2>
+            <h2 className="text-lg font-semibold mb-4">{t('stats.monthlyActivity')}</h2>
             <ResponsiveContainer width="100%" height={300}>
               <BarChart data={[...monthly].reverse()}>
                 <XAxis dataKey="month" tick={{ fontSize: 12 }} />
@@ -86,7 +88,7 @@ export default function StatsPage() {
         {/* Genre distribution */}
         {genres && genres.length > 0 && (
           <div className="rounded-lg border border-[hsl(var(--border))] p-6 bg-[hsl(var(--card))]">
-            <h2 className="text-lg font-semibold mb-4">Genre Distribution</h2>
+            <h2 className="text-lg font-semibold mb-4">{t('stats.genreDistribution')}</h2>
             <ResponsiveContainer width="100%" height={300}>
               <PieChart>
                 <Pie data={genres} dataKey="count" nameKey="genre" cx="50%" cy="50%" outerRadius={100} label={renderGenreLabel}>
