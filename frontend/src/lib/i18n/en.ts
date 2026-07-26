@@ -184,6 +184,23 @@ export const en = {
     loadOlder: 'Load older notifications',
     updateError: 'Could not update notifications',
   },
+  lists: {
+    subtitle: 'Collections independent from your watching status.',
+    createList: 'Create list',
+    createShort: 'Create',
+    loadError: 'Your lists could not be loaded',
+    empty: 'No custom lists',
+    emptyHint: 'Create a collection, then add titles from their detail pages.',
+    createFirst: 'Create your first list',
+    titleCountOne: '1 title',
+    titleCountMany: '{count} titles',
+    public: 'Public',
+    private: 'Private',
+    editName: 'Edit {name}',
+    deleteName: 'Delete {name}',
+    confirmDelete: 'Delete “{name}”? The titles inside will not be deleted.',
+    deleteError: 'The list could not be deleted',
+  },
   calendarFeed: {
     title: 'Calendar feed',
     description:

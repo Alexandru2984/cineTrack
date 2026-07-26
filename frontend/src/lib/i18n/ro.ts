@@ -186,6 +186,23 @@ export const ro: Dictionary = {
     loadOlder: 'Încarcă notificări mai vechi',
     updateError: 'Notificările nu au putut fi actualizate',
   },
+  lists: {
+    subtitle: 'Colecții independente de starea vizionării.',
+    createList: 'Creează listă',
+    createShort: 'Creează',
+    loadError: 'Listele tale nu au putut fi încărcate',
+    empty: 'Nicio listă personalizată',
+    emptyHint: 'Creează o colecție, apoi adaugă titluri din paginile lor de detalii.',
+    createFirst: 'Creează prima ta listă',
+    titleCountOne: 'un titlu',
+    titleCountMany: '{count} titluri',
+    public: 'Publică',
+    private: 'Privată',
+    editName: 'Editează {name}',
+    deleteName: 'Șterge {name}',
+    confirmDelete: 'Ștergi „{name}”? Titlurile din interior nu vor fi șterse.',
+    deleteError: 'Lista nu a putut fi ștearsă',
+  },
   calendarFeed: {
     title: 'Feed de calendar',
     description:

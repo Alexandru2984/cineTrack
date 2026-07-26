@@ -21,11 +21,13 @@ import {
   type ListInput,
 } from '@/hooks/useLists';
 import { getApiErrorMessage } from '@/lib/api';
+import { useT } from '@/hooks/useT';
 import type { ListResponse } from '@/types';
 
 type EditorState = { mode: 'create' } | { mode: 'edit'; list: ListResponse } | null;
 
 export default function ListsPage() {
+  const t = useT();
   const lists = useMyLists();
   const createList = useCreateList();
   const updateList = useUpdateList();
@@ -55,7 +57,7 @@ export default function ListsPage() {
   };
 
   const confirmDelete = (list: ListResponse) => {
-    if (!window.confirm(`Delete “${list.name}”? The titles inside will not be deleted.`)) {
+    if (!window.confirm(t('lists.confirmDelete', { name: list.name }))) {
       return;
     }
     deleteList.mutate(list.id);
@@ -65,9 +67,9 @@ export default function ListsPage() {
     <div className="mx-auto max-w-5xl px-4 py-6 sm:py-8">
       <header className="flex min-h-16 items-center justify-between gap-4">
         <div className="min-w-0">
-          <h1 className="text-2xl font-bold sm:text-3xl">Custom lists</h1>
+          <h1 className="text-2xl font-bold sm:text-3xl">{t('tracking.customLists')}</h1>
           <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">
-            Collections independent from your watching status.
+            {t('lists.subtitle')}
           </p>
         </div>
         <button
@@ -76,8 +78,8 @@ export default function ListsPage() {
           className="flex h-10 shrink-0 items-center gap-2 rounded-md bg-[hsl(var(--primary))] px-3 text-sm font-medium text-white sm:px-4"
         >
           <Plus className="h-4 w-4" aria-hidden="true" />
-          <span className="hidden sm:inline">Create list</span>
-          <span className="sm:hidden">Create</span>
+          <span className="hidden sm:inline">{t('lists.createList')}</span>
+          <span className="sm:hidden">{t('lists.createShort')}</span>
         </button>
       </header>
 
@@ -86,14 +88,14 @@ export default function ListsPage() {
       {lists.isError ? (
         <div className="flex min-h-64 flex-col items-center justify-center gap-3 text-center">
           <p className="text-sm text-[hsl(var(--destructive))]">
-            {getApiErrorMessage(lists.error, 'Your lists could not be loaded')}
+            {getApiErrorMessage(lists.error, t('lists.loadError'))}
           </p>
           <button
             type="button"
             onClick={() => void lists.refetch()}
             className="h-10 rounded-md border border-[hsl(var(--border))] px-4 text-sm font-medium"
           >
-            Try again
+            {t('common.tryAgain')}
           </button>
         </div>
       ) : null}
@@ -102,9 +104,9 @@ export default function ListsPage() {
         <div className="flex min-h-72 flex-col items-center justify-center gap-4 px-6 text-center">
           <ListPlus className="h-10 w-10 text-[hsl(var(--muted-foreground))]" aria-hidden="true" />
           <div>
-            <h2 className="text-lg font-semibold">No custom lists</h2>
+            <h2 className="text-lg font-semibold">{t('lists.empty')}</h2>
             <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">
-              Create a collection, then add titles from their detail pages.
+              {t('lists.emptyHint')}
             </p>
           </div>
           <button
@@ -112,7 +114,7 @@ export default function ListsPage() {
             onClick={openCreate}
             className="h-10 rounded-md border border-[hsl(var(--border))] px-4 text-sm font-medium"
           >
-            Create your first list
+            {t('lists.createFirst')}
           </button>
         </div>
       ) : null}
@@ -140,7 +142,11 @@ export default function ListsPage() {
                     </span>
                   ) : null}
                   <span className="mt-1 block text-xs text-[hsl(var(--muted-foreground))]">
-                    {list.item_count} {list.item_count === 1 ? 'title' : 'titles'} · {list.is_public ? 'Public' : 'Private'}
+                    {list.item_count === 1
+                      ? t('lists.titleCountOne')
+                      : t('lists.titleCountMany', { count: list.item_count })}
+                    {' · '}
+                    {list.is_public ? t('lists.public') : t('lists.private')}
                   </span>
                 </span>
                 <ChevronRight className="h-5 w-5 shrink-0 text-[hsl(var(--muted-foreground))]" aria-hidden="true" />
@@ -148,8 +154,8 @@ export default function ListsPage() {
               <div className="flex shrink-0 items-center gap-2">
                 <button
                   type="button"
-                  title={`Edit ${list.name}`}
-                  aria-label={`Edit ${list.name}`}
+                  title={t('lists.editName', { name: list.name })}
+                  aria-label={t('lists.editName', { name: list.name })}
                   onClick={() => openEdit(list)}
                   className="flex h-10 w-10 items-center justify-center rounded-md border border-[hsl(var(--border))]"
                 >
@@ -157,8 +163,8 @@ export default function ListsPage() {
                 </button>
                 <button
                   type="button"
-                  title={`Delete ${list.name}`}
-                  aria-label={`Delete ${list.name}`}
+                  title={t('lists.deleteName', { name: list.name })}
+                  aria-label={t('lists.deleteName', { name: list.name })}
                   disabled={deleteList.isPending}
                   onClick={() => confirmDelete(list)}
                   className="flex h-10 w-10 items-center justify-center rounded-md border border-[hsl(var(--border))] text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--destructive))] disabled:opacity-50"
@@ -177,7 +183,7 @@ export default function ListsPage() {
 
       {deleteList.error ? (
         <p className="mt-4 text-sm text-[hsl(var(--destructive))]" role="alert">
-          {getApiErrorMessage(deleteList.error, 'The list could not be deleted')}
+          {getApiErrorMessage(deleteList.error, t('lists.deleteError'))}
         </p>
       ) : null}
 
