@@ -24,8 +24,10 @@ import { getApiErrorMessage } from '@/lib/api';
 import { getPosterUrl } from '@/lib/utils';
 import { useAuthStore } from '@/store/auth';
 import { usePageTitle } from '@/hooks/usePageTitle';
+import { useT } from '@/hooks/useT';
 
 export default function ListDetailPage() {
+  const t = useT();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const user = useAuthStore((state) => state.user);
@@ -41,9 +43,9 @@ export default function ListDetailPage() {
   if (detail.isError || !detail.data) {
     return (
       <div className="mx-auto flex min-h-[60dvh] max-w-xl flex-col items-center justify-center gap-4 px-4 text-center">
-        <h1 className="text-xl font-semibold">List unavailable</h1>
+        <h1 className="text-xl font-semibold">{t('listDetail.unavailable')}</h1>
         <p className="text-sm text-[hsl(var(--muted-foreground))]">
-          {getApiErrorMessage(detail.error, 'This list is private, missing, or could not be loaded.')}
+          {getApiErrorMessage(detail.error, t('listDetail.unavailableHint'))}
         </p>
         <div className="flex gap-3">
           <button
@@ -51,14 +53,14 @@ export default function ListDetailPage() {
             onClick={() => void detail.refetch()}
             className="h-10 rounded-md border border-[hsl(var(--border))] px-4 text-sm font-medium"
           >
-            Try again
+            {t('common.tryAgain')}
           </button>
           {user ? (
             <Link
               to="/lists"
               className="flex h-10 items-center rounded-md bg-[hsl(var(--primary))] px-4 text-sm font-medium text-white"
             >
-              My lists
+              {t('listDetail.myLists')}
             </Link>
           ) : null}
         </div>
@@ -77,7 +79,7 @@ export default function ListDetailPage() {
   };
 
   const confirmDelete = () => {
-    if (!window.confirm(`Delete “${list.name}”? The titles inside will not be deleted.`)) {
+    if (!window.confirm(t('lists.confirmDelete', { name: list.name }))) {
       return;
     }
     deleteList.mutate(list.id, { onSuccess: () => navigate('/lists') });
@@ -105,7 +107,7 @@ export default function ListDetailPage() {
         className="inline-flex min-h-10 items-center gap-2 text-sm text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))]"
       >
         <ArrowLeft className="h-4 w-4" aria-hidden="true" />
-        {user ? 'My lists' : 'Home'}
+        {user ? t('listDetail.myLists') : t('nav.home')}
       </Link>
 
       <header className="mt-3 border-b border-[hsl(var(--border))] pb-6">
@@ -117,7 +119,7 @@ export default function ListDetailPage() {
               ) : (
                 <Lock className="h-4 w-4" aria-hidden="true" />
               )}
-              {list.is_public ? 'Public list' : 'Private list'}
+              {list.is_public ? t('listDetail.publicList') : t('listDetail.privateList')}
             </div>
             <h1 className="mt-2 break-words text-2xl font-bold sm:text-3xl">{list.name}</h1>
             {list.description ? (
@@ -126,7 +128,9 @@ export default function ListDetailPage() {
               </p>
             ) : null}
             <p className="mt-3 text-xs text-[hsl(var(--muted-foreground))]">
-              {items.length} {items.length === 1 ? 'title' : 'titles'}
+              {items.length === 1
+                ? t('lists.titleCountOne')
+                : t('lists.titleCountMany', { count: items.length })}
             </p>
           </div>
           <div className="flex shrink-0 flex-wrap gap-2">
@@ -137,7 +141,7 @@ export default function ListDetailPage() {
                 className="flex h-10 items-center gap-2 rounded-md border border-[hsl(var(--border))] px-3 text-sm font-medium"
               >
                 {shared ? <Check className="h-4 w-4" aria-hidden="true" /> : <Share2 className="h-4 w-4" aria-hidden="true" />}
-                {shared ? 'Shared' : 'Share'}
+                {shared ? t('listDetail.shared') : t('listDetail.share')}
               </button>
             ) : null}
             {isOwner ? (
@@ -150,11 +154,11 @@ export default function ListDetailPage() {
                   }}
                   className="flex h-10 items-center gap-2 rounded-md border border-[hsl(var(--border))] px-3 text-sm font-medium"
                 >
-                  <Pencil className="h-4 w-4" aria-hidden="true" /> Edit
+                  <Pencil className="h-4 w-4" aria-hidden="true" /> {t('common.edit')}
                 </button>
                 <button
                   type="button"
-                  aria-label={`Delete ${list.name}`}
+                  aria-label={t('lists.deleteName', { name: list.name })}
                   disabled={deleteList.isPending}
                   onClick={confirmDelete}
                   className="flex h-10 w-10 items-center justify-center rounded-md border border-[hsl(var(--border))] text-[hsl(var(--destructive))] disabled:opacity-50"
@@ -189,19 +193,19 @@ export default function ListDetailPage() {
                 </div>
                 <div className="min-h-16 p-3">
                   <h2 className="line-clamp-2 text-sm font-medium">{item.title}</h2>
-                  <p className="mt-1 text-xs capitalize text-[hsl(var(--muted-foreground))]">
-                    {item.media_type === 'tv' ? 'TV show' : 'Movie'}
+                  <p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">
+                    {item.media_type === 'tv' ? t('listDetail.tvShow') : t('listDetail.movie')}
                   </p>
                 </div>
               </Link>
               {isOwner ? (
                 <button
                   type="button"
-                  title={`Remove ${item.title} from ${list.name}`}
-                  aria-label={`Remove ${item.title} from ${list.name}`}
+                  title={t('listDetail.removeItem', { title: item.title, list: list.name })}
+                  aria-label={t('listDetail.removeItem', { title: item.title, list: list.name })}
                   disabled={removeItem.isPending}
                   onClick={() => {
-                    if (window.confirm(`Remove “${item.title}” from this list?`)) {
+                    if (window.confirm(t('listDetail.confirmRemoveItem', { title: item.title }))) {
                       removeItem.mutate({ listId: list.id, mediaId: item.id });
                     }
                   }}
@@ -215,11 +219,9 @@ export default function ListDetailPage() {
         </div>
       ) : (
         <div className="flex min-h-72 flex-col items-center justify-center gap-3 px-6 text-center">
-          <p className="font-medium">This list is empty</p>
+          <p className="font-medium">{t('listDetail.empty')}</p>
           <p className="max-w-md text-sm text-[hsl(var(--muted-foreground))]">
-            {isOwner
-              ? 'Open a movie or show and use “Custom list” to add it here.'
-              : 'The owner has not added any titles yet.'}
+            {isOwner ? t('listDetail.emptyOwner') : t('listDetail.emptyOther')}
           </p>
         </div>
       )}
@@ -228,7 +230,7 @@ export default function ListDetailPage() {
         <p className="mt-4 text-sm text-[hsl(var(--destructive))]" role="alert">
           {getApiErrorMessage(
             removeItem.error ?? deleteList.error,
-            'The list could not be updated',
+            t('listDetail.updateError'),
           )}
         </p>
       ) : null}
