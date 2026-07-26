@@ -34,6 +34,16 @@ export interface WatchProviders {
   buy: WatchProviderEntry[];
 }
 
+// Aggregate of Văzute members' own 1–10 ratings for a title (distinct from
+// TMDB's vote_average). `average`/`distribution` are null below the server's
+// display floor; `count` is always present. `distribution` has ten buckets,
+// index 0 = one star … index 9 = ten stars.
+export interface CommunityRating {
+  count: number;
+  average: number | null;
+  distribution: number[] | null;
+}
+
 export interface AccountSession {
   id: string;
   user_agent: string | null;

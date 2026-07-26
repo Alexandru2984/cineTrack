@@ -14,6 +14,7 @@ import type {
   Season,
   TmdbSearchResponse,
 } from '@/types';
+import { fetchCommunityRating } from '@/lib/community-rating';
 import { fetchWatchProviders } from '@/lib/watch-providers';
 
 function usePreferredLanguage() {
@@ -70,6 +71,16 @@ export function useWatchProviders(id: string, type: MediaType) {
     queryFn: () => fetchWatchProviders(id, type),
     enabled: Boolean(id),
     staleTime: 60 * 60 * 1000,
+  });
+}
+
+export function useCommunityRating(id: string, type: MediaType) {
+  return useQuery({
+    queryKey: ['community-rating', id, type],
+    queryFn: () => fetchCommunityRating(id, type),
+    enabled: Boolean(id),
+    // Aggregates move slowly; no need to refetch on every visit.
+    staleTime: 10 * 60 * 1000,
   });
 }
 

@@ -27,6 +27,7 @@ import { ErrorState, LoadingState } from '@/components/screen-state';
 import { SegmentedControl } from '@/components/segmented-control';
 import { TrackingFeedbackSheet } from '@/components/tracking-feedback-sheet';
 import { WatchProviders } from '@/components/watch-providers';
+import { CommunityRating } from '@/components/community-rating';
 import { radius, spacing } from '@/constants/theme';
 import { useEpisodes, useMediaDetail, useSeasons } from '@/hooks/use-media';
 import {
@@ -441,6 +442,10 @@ export default function MediaDetailScreen() {
             <AppText muted>{item.overview}</AppText>
           </View>
         ) : null}
+
+        <View style={styles.section}>
+          <CommunityRating tmdbId={item.tmdb_id} mediaType={type} />
+        </View>
 
         <View style={styles.section}>
           <WatchProviders tmdbId={item.tmdb_id} mediaType={type} />
