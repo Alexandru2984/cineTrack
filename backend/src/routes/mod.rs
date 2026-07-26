@@ -2,6 +2,7 @@ pub mod assets;
 pub mod auth;
 pub mod calendar;
 pub mod client_errors;
+pub mod csp_report;
 pub mod health;
 pub mod history;
 pub mod import;
@@ -40,6 +41,7 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
             .configure(push::configure)
             .configure(calendar::configure)
             .configure(client_errors::configure)
+            .configure(csp_report::configure)
             .configure(media::configure)
             .configure(tracking::configure)
             .configure(history::configure)
@@ -53,6 +55,7 @@ pub fn configure_with_rate_limits(
     cfg: &mut web::ServiceConfig,
     auth_rate_limiter: &auth::AuthGovernorConfig,
     client_error_rate_limiter: &client_errors::ClientErrorGovernorConfig,
+    csp_report_rate_limiter: &csp_report::CspReportGovernorConfig,
     push_rate_limiter: &push::PushGovernorConfig,
     image_rate_limiter: &assets::ImageGovernorConfig,
     shared_rate_limiter: &SharedGovernorConfig,
@@ -76,6 +79,7 @@ pub fn configure_with_rate_limits(
             .configure(|cfg| push::configure_rate_limited(cfg, push_rate_limiter))
             .configure(calendar::configure)
             .configure(|cfg| client_errors::configure_rate_limited(cfg, client_error_rate_limiter))
+            .configure(|cfg| csp_report::configure_rate_limited(cfg, csp_report_rate_limiter))
             .configure(media::configure)
             .configure(tracking::configure)
             .configure(history::configure)

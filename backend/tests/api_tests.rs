@@ -7891,6 +7891,7 @@ fn build_rate_limited_app(
         .expect("shared limiter");
     let auth = cinetrack::routes::auth::build_rate_limiter();
     let client_error = cinetrack::routes::client_errors::build_rate_limiter();
+    let csp_report = cinetrack::routes::csp_report::build_rate_limiter();
     let push = cinetrack::routes::push::build_rate_limiter();
     let image = cinetrack::routes::assets::build_image_rate_limiter();
 
@@ -7908,6 +7909,7 @@ fn build_rate_limited_app(
                 cfg,
                 &auth,
                 &client_error,
+                &csp_report,
                 &push,
                 &image,
                 &shared,

@@ -341,6 +341,7 @@ async fn main() -> std::io::Result<()> {
     // inside route configuration would multiply scoped bursts by worker count.
     let auth_governor_conf = routes::auth::build_rate_limiter();
     let client_error_governor_conf = routes::client_errors::build_rate_limiter();
+    let csp_report_governor_conf = routes::csp_report::build_rate_limiter();
     let push_governor_conf = routes::push::build_rate_limiter();
     let image_governor_conf = routes::assets::build_image_rate_limiter();
 
@@ -349,6 +350,7 @@ async fn main() -> std::io::Result<()> {
     HttpServer::new(move || {
         let auth_governor_conf = auth_governor_conf.clone();
         let client_error_governor_conf = client_error_governor_conf.clone();
+        let csp_report_governor_conf = csp_report_governor_conf.clone();
         let push_governor_conf = push_governor_conf.clone();
         let image_governor_conf = image_governor_conf.clone();
         let governor_conf = governor_conf.clone();
@@ -409,6 +411,7 @@ async fn main() -> std::io::Result<()> {
                     cfg,
                     &auth_governor_conf,
                     &client_error_governor_conf,
+                    &csp_report_governor_conf,
                     &push_governor_conf,
                     &image_governor_conf,
                     &governor_conf,

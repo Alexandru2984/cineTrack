@@ -22,6 +22,59 @@ struct ClientErrorMetrics {
 }
 
 #[derive(Clone)]
+struct CspReportMetrics {
+    reports: IntCounterVec,
+}
+
+/// The bounded label set for CSP violation reports. `blocked-uri` and
+/// `document-uri` are attacker-influenced and unbounded, so they never become
+/// labels — only the violated directive (from a fixed CSP vocabulary) and the
+/// disposition do, keeping metric cardinality fixed.
+pub(crate) const CSP_REPORT_DIRECTIVES: &[&str] = &[
+    "default-src",
+    "script-src",
+    "script-src-elem",
+    "script-src-attr",
+    "style-src",
+    "style-src-elem",
+    "style-src-attr",
+    "img-src",
+    "connect-src",
+    "font-src",
+    "media-src",
+    "object-src",
+    "frame-src",
+    "child-src",
+    "worker-src",
+    "manifest-src",
+    "frame-ancestors",
+    "base-uri",
+    "form-action",
+    "other",
+];
+
+pub(crate) const CSP_REPORT_DISPOSITIONS: &[&str] = &["enforce", "report"];
+
+/// Map an arbitrary reported directive (e.g. `"script-src 'self'"` or
+/// `"script-src-elem"`) to one of the fixed labels above, or `"other"`.
+pub(crate) fn normalize_csp_directive(raw: &str) -> &'static str {
+    let token = raw.split_whitespace().next().unwrap_or_default();
+    CSP_REPORT_DIRECTIVES
+        .iter()
+        .copied()
+        .find(|directive| directive.eq_ignore_ascii_case(token))
+        .unwrap_or("other")
+}
+
+/// Map the report `disposition` to `"enforce"` (default) or `"report"`.
+pub(crate) fn normalize_csp_disposition(raw: Option<&str>) -> &'static str {
+    match raw {
+        Some(value) if value.eq_ignore_ascii_case("report") => "report",
+        _ => "enforce",
+    }
+}
+
+#[derive(Clone)]
 struct ProductMetrics {
     actions: IntCounterVec,
 }
@@ -96,6 +149,26 @@ impl ClientErrorMetrics {
         for platform in ["android", "ios"] {
             for fatal in ["true", "false"] {
                 reports.with_label_values(&[platform, fatal]);
+            }
+        }
+        Self { reports }
+    }
+}
+
+impl CspReportMetrics {
+    fn new() -> Self {
+        let reports = IntCounterVec::new(
+            Opts::new(
+                "csp_reports_total",
+                "Content-Security-Policy violation reports by violated directive and disposition",
+            )
+            .namespace("cinetrack"),
+            &["directive", "disposition"],
+        )
+        .expect("CSP report metric must be valid");
+        for directive in CSP_REPORT_DIRECTIVES {
+            for disposition in CSP_REPORT_DISPOSITIONS {
+                reports.with_label_values(&[directive, disposition]);
             }
         }
         Self { reports }
@@ -182,6 +255,7 @@ impl TmdbMetrics {
 static TMDB_METRICS: LazyLock<TmdbMetrics> = LazyLock::new(TmdbMetrics::new);
 static EMAIL_METRICS: LazyLock<EmailMetrics> = LazyLock::new(EmailMetrics::new);
 static CLIENT_ERROR_METRICS: LazyLock<ClientErrorMetrics> = LazyLock::new(ClientErrorMetrics::new);
+static CSP_REPORT_METRICS: LazyLock<CspReportMetrics> = LazyLock::new(CspReportMetrics::new);
 static PRODUCT_METRICS: LazyLock<ProductMetrics> = LazyLock::new(ProductMetrics::new);
 
 pub fn record_tmdb_request(endpoint: &'static str, outcome: &'static str, duration: Duration) {
@@ -220,6 +294,13 @@ pub fn record_client_error(platform: &'static str, fatal: bool) {
     CLIENT_ERROR_METRICS
         .reports
         .with_label_values(&[platform, if fatal { "true" } else { "false" }])
+        .inc();
+}
+
+pub fn record_csp_report(directive: &'static str, disposition: &'static str) {
+    CSP_REPORT_METRICS
+        .reports
+        .with_label_values(&[directive, disposition])
         .inc();
 }
 
@@ -266,6 +347,10 @@ pub fn build() -> PrometheusMetrics {
         .expect("Failed to register client error report metric");
     prometheus
         .registry
+        .register(Box::new(CSP_REPORT_METRICS.reports.clone()))
+        .expect("Failed to register CSP report metric");
+    prometheus
+        .registry
         .register(Box::new(PRODUCT_METRICS.actions.clone()))
         .expect("Failed to register product action metric");
     prometheus
@@ -282,6 +367,7 @@ mod tests {
         record_email_send("password_reset", "smtp_accepted");
         record_email_send_duration("password_reset", Duration::from_millis(20));
         record_client_error("android", false);
+        record_csp_report("script-src", "enforce");
         record_product_action(ProductAction::AnnualRecapViewed);
         let prometheus = build();
         let names = prometheus
@@ -309,9 +395,21 @@ mod tests {
         assert!(names
             .iter()
             .any(|name| name == "cinetrack_client_error_reports_total"));
+        assert!(names.iter().any(|name| name == "cinetrack_csp_reports_total"));
         assert!(names
             .iter()
             .any(|name| name == "cinetrack_product_actions_total"));
+    }
+
+    #[test]
+    fn csp_directive_normalization_is_bounded() {
+        assert_eq!(normalize_csp_directive("script-src 'self'"), "script-src");
+        assert_eq!(normalize_csp_directive("IMG-SRC"), "img-src");
+        assert_eq!(normalize_csp_directive("some-future-directive"), "other");
+        assert_eq!(normalize_csp_directive(""), "other");
+        assert_eq!(normalize_csp_disposition(Some("report")), "report");
+        assert_eq!(normalize_csp_disposition(Some("enforce")), "enforce");
+        assert_eq!(normalize_csp_disposition(None), "enforce");
     }
 
     #[test]
