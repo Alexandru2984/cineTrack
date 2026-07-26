@@ -19,20 +19,22 @@ import { radius, spacing } from '@/constants/theme';
 import { useDebouncedValue } from '@/hooks/use-debounced-value';
 import { useMediaSearch } from '@/hooks/use-media';
 import { useCreateTracking, useTrackingLookup } from '@/hooks/use-tracking';
+import { useT } from '@/hooks/use-t';
 import { useTheme } from '@/hooks/use-theme';
+import { formatNumber } from '@/lib/format';
 import { getErrorMessage } from '@/lib/http';
 import type { MediaType, TmdbSearchResult } from '@/types';
 
 type SearchType = 'all' | MediaType;
 
-const typeOptions = [
-  { value: 'all', label: 'All' },
-  { value: 'movie', label: 'Movies' },
-  { value: 'tv', label: 'TV shows' },
-] as const;
-
 export default function SearchScreen() {
   const theme = useTheme();
+  const t = useT();
+  const typeOptions = [
+    { value: 'all', label: t('common.all') },
+    { value: 'movie', label: t('search.filterMovies') },
+    { value: 'tv', label: t('search.filterShows') },
+  ] as const;
   const { width } = useWindowDimensions();
   const [query, setQuery] = useState('');
   const [type, setType] = useState<SearchType>('all');
@@ -119,7 +121,7 @@ export default function SearchScreen() {
         }
         ListHeaderComponent={
           <View style={styles.header}>
-            <ScreenHeader title="Search" subtitle="Movies and TV shows" />
+            <ScreenHeader title={t('search.title')} subtitle={t('search.subtitle')} />
             <View
               style={[
                 styles.searchBox,
@@ -130,7 +132,7 @@ export default function SearchScreen() {
               <TextInput
                 value={query}
                 onChangeText={setQuery}
-                placeholder="Search titles"
+                placeholder={t('search.placeholder')}
                 placeholderTextColor={theme.mutedText}
                 autoCapitalize="none"
                 autoCorrect={false}
@@ -142,12 +144,12 @@ export default function SearchScreen() {
             <SegmentedControl value={type} options={typeOptions} onChange={setType} />
             {debouncedQuery.length >= 2 && search.data ? (
               <AppText variant="caption" muted>
-                {totalResults.toLocaleString()} results
+                {t('search.results', { count: formatNumber(totalResults) })}
               </AppText>
             ) : null}
             {add.error ? (
               <AppText variant="caption" style={{ color: theme.danger }}>
-                {getErrorMessage(add.error, 'Could not add this title')}
+                {getErrorMessage(add.error, t('search.addError'))}
               </AppText>
             ) : null}
           </View>
@@ -156,26 +158,26 @@ export default function SearchScreen() {
           debouncedQuery.length < 2 ? (
             <EmptyState
               icon={SearchIcon}
-              title="Search your catalog"
-              message="Enter at least two characters."
+              title={t('search.promptTitle')}
+              message={t('search.promptMessage')}
             />
           ) : search.isLoading ? (
-            <LoadingState label="Searching" />
+            <LoadingState label={t('search.searching')} />
           ) : search.isError ? (
             <ErrorState
-              message={getErrorMessage(search.error, 'Search could not be loaded')}
+              message={getErrorMessage(search.error, t('search.loadError'))}
               onRetry={() => void search.refetch()}
             />
           ) : (
             <EmptyState
               icon={SearchIcon}
-              title="No results"
-              message="Try another title or media type."
+              title={t('search.noResultsTitle')}
+              message={t('search.noResultsMessage')}
             />
           )
         }
         ListFooterComponent={
-          search.isFetchingNextPage ? <LoadingState label="Loading more" /> : null
+          search.isFetchingNextPage ? <LoadingState label={t('common.loadingMore')} /> : null
         }
         renderItem={({ item }) => {
           const mediaType = mediaResultType(item, type === 'all' ? undefined : type);

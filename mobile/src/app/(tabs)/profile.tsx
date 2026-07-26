@@ -31,12 +31,14 @@ import { UserAvatar } from '@/components/user-avatar';
 import { spacing } from '@/constants/theme';
 import { useMyStats } from '@/hooks/use-stats';
 import { useNotificationSummary } from '@/hooks/use-notifications';
+import { useT } from '@/hooks/use-t';
 import { useTheme } from '@/hooks/use-theme';
 import { logoutSession } from '@/lib/session';
 import { useAuthStore } from '@/store/auth';
 
 export default function ProfileScreen() {
   const theme = useTheme();
+  const t = useT();
   const user = useAuthStore((state) => state.user);
   const stats = useMyStats();
   const notifications = useNotificationSummary();
@@ -55,7 +57,7 @@ export default function ProfileScreen() {
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: theme.background }]} edges={['top']}>
       <ScrollView contentContainerStyle={styles.content}>
-        <ScreenHeader title="Profile" subtitle={user?.email} />
+        <ScreenHeader title={t('profileTab.title')} subtitle={user?.email} />
 
         <View style={styles.identity}>
           <UserAvatar uri={user?.avatar_url ?? null} size={72} />
@@ -66,7 +68,7 @@ export default function ProfileScreen() {
             <View style={styles.privacy}>
               <ShieldCheck color={theme.success} size={16} />
               <AppText variant="caption" muted>
-                {user?.is_public ? 'Public profile' : 'Private profile'}
+                {user?.is_public ? t('profileTab.publicProfile') : t('profileTab.privateProfile')}
               </AppText>
             </View>
           </View>
@@ -74,19 +76,19 @@ export default function ProfileScreen() {
 
         {stats.data ? (
           <View style={[styles.stats, { borderColor: theme.border }]}>
-            <ProfileStat label="Movies" value={stats.data.total_movies} />
-            <ProfileStat label="Shows" value={stats.data.total_shows} />
-            <ProfileStat label="Episodes" value={stats.data.total_episodes} />
-            <ProfileStat label="Hours" value={Math.round(stats.data.total_hours)} />
+            <ProfileStat label={t('stats.movies')} value={stats.data.total_movies} />
+            <ProfileStat label={t('stats.shows')} value={stats.data.total_shows} />
+            <ProfileStat label={t('stats.episodes')} value={stats.data.total_episodes} />
+            <ProfileStat label={t('stats.hours')} value={Math.round(stats.data.total_hours)} />
           </View>
         ) : null}
 
         <View style={styles.section}>
-          <AppText variant="section">Account</AppText>
+          <AppText variant="section">{t('profileTab.account')}</AppText>
           <View style={[styles.navigationGroup, { borderTopColor: theme.border }]}>
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel="Open social"
+            accessibilityLabel={t('profileTab.openSocial')}
             onPress={() => router.push('/social')}
             style={({ pressed }) => [
               styles.navigationRow,
@@ -98,17 +100,17 @@ export default function ProfileScreen() {
           >
             <View style={styles.navigationLabel}>
               <Users color={theme.mutedText} size={20} />
-              <AppText variant="label">Social</AppText>
+              <AppText variant="label">{t('profileTab.social')}</AppText>
             </View>
             <ChevronRight color={theme.mutedText} size={18} />
           </Pressable>
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel={`Open notifications${
+            accessibilityLabel={
               unreadCount
-                ? `, ${unreadCount} unread`
-                : ''
-            }`}
+                ? t('home.openNotificationsUnread', { count: unreadCount })
+                : t('home.openNotifications')
+            }
             onPress={() => router.push('/notifications')}
             style={({ pressed }) => [
               styles.navigationRow,
@@ -120,7 +122,7 @@ export default function ProfileScreen() {
           >
             <View style={styles.navigationLabel}>
               <Bell color={theme.mutedText} size={20} />
-              <AppText variant="label">Notifications</AppText>
+              <AppText variant="label">{t('profileTab.notifications')}</AppText>
             </View>
             <View style={styles.navigationMeta}>
               {unreadCount > 0 ? (
@@ -135,7 +137,7 @@ export default function ProfileScreen() {
           </Pressable>
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel="Open statistics"
+            accessibilityLabel={t('profileTab.openStatistics')}
             onPress={() => router.push('/statistics')}
             style={({ pressed }) => [
               styles.navigationRow,
@@ -147,13 +149,13 @@ export default function ProfileScreen() {
           >
             <View style={styles.navigationLabel}>
               <ChartNoAxesColumnIncreasing color={theme.mutedText} size={20} />
-              <AppText variant="label">Statistics</AppText>
+              <AppText variant="label">{t('profileTab.statistics')}</AppText>
             </View>
             <ChevronRight color={theme.mutedText} size={18} />
           </Pressable>
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel="Open watch history"
+            accessibilityLabel={t('profileTab.openWatchHistory')}
             onPress={() => router.push('/history')}
             style={({ pressed }) => [
               styles.navigationRow,
@@ -165,13 +167,13 @@ export default function ProfileScreen() {
           >
             <View style={styles.navigationLabel}>
               <History color={theme.mutedText} size={20} />
-              <AppText variant="label">Watch history</AppText>
+              <AppText variant="label">{t('profileTab.watchHistory')}</AppText>
             </View>
             <ChevronRight color={theme.mutedText} size={18} />
           </Pressable>
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel="Open custom lists"
+            accessibilityLabel={t('profileTab.openCustomLists')}
             onPress={() => router.push('/lists')}
             style={({ pressed }) => [
               styles.navigationRow,
@@ -183,13 +185,13 @@ export default function ProfileScreen() {
           >
             <View style={styles.navigationLabel}>
               <ListPlus color={theme.mutedText} size={20} />
-              <AppText variant="label">Custom lists</AppText>
+              <AppText variant="label">{t('profileTab.customLists')}</AppText>
             </View>
             <ChevronRight color={theme.mutedText} size={18} />
           </Pressable>
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel="Open account settings"
+            accessibilityLabel={t('profileTab.openAccountSettings')}
             onPress={() => router.push('/settings')}
             style={({ pressed }) => [
               styles.navigationRow,
@@ -201,7 +203,7 @@ export default function ProfileScreen() {
           >
             <View style={styles.navigationLabel}>
               <Settings color={theme.mutedText} size={20} />
-              <AppText variant="label">Account settings</AppText>
+              <AppText variant="label">{t('profileTab.accountSettings')}</AppText>
             </View>
             <ChevronRight color={theme.mutedText} size={18} />
           </Pressable>
@@ -211,30 +213,26 @@ export default function ProfileScreen() {
         <View style={styles.section}>
           <View style={styles.sectionTitle}>
             <Database color={theme.info} size={20} />
-            <AppText variant="section">Data sources</AppText>
+            <AppText variant="section">{t('profileTab.dataSources')}</AppText>
           </View>
 
           <View style={[styles.sourceRow, { borderColor: theme.border }]}>
             <Pressable
               accessibilityRole="link"
-              accessibilityLabel="Open The Movie Database"
+              accessibilityLabel={t('profileTab.openTmdb')}
               onPress={() => void Linking.openURL('https://www.themoviedb.org')}
               style={({ pressed }) => [{ opacity: pressed ? 0.72 : 1 }]}
             >
               <TmdbLogo />
             </Pressable>
-            <AppText muted>
-              Movie and TV metadata and images are provided by The Movie Database.
-            </AppText>
-            <AppText variant="caption">
-              This product uses the TMDB API but is not endorsed or certified by TMDB.
-            </AppText>
+            <AppText muted>{t('profileTab.tmdbBody')}</AppText>
+            <AppText variant="caption">{t('profileTab.tmdbDisclaimer')}</AppText>
           </View>
 
           <View style={[styles.sourceRow, { borderColor: theme.border }]}>
             <Pressable
               accessibilityRole="link"
-              accessibilityLabel="Open JustWatch Romania"
+              accessibilityLabel={t('profileTab.openJustWatch')}
               onPress={() => void Linking.openURL('https://www.justwatch.com/ro')}
               style={({ pressed }) => [
                 styles.justWatchLink,
@@ -246,9 +244,7 @@ export default function ProfileScreen() {
               </AppText>
               <ExternalLink color="#FBC500" size={16} />
             </Pressable>
-            <AppText muted>
-              Streaming availability data, when displayed, is provided by JustWatch.
-            </AppText>
+            <AppText muted>{t('profileTab.justWatchBody')}</AppText>
           </View>
         </View>
 
@@ -257,7 +253,7 @@ export default function ProfileScreen() {
             Văzute {Constants.expoConfig?.version || '1.0.0'}
           </AppText>
           <AppButton
-            label="Sign out"
+            label={t('profileTab.signOut')}
             icon={<LogOut color="#FFFFFF" size={18} />}
             variant="danger"
             loading={loggingOut}

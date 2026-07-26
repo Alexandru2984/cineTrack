@@ -31,29 +31,28 @@ import {
   useTrackingInfinite,
   useUpdateTracking,
 } from '@/hooks/use-tracking';
+import { useT } from '@/hooks/use-t';
 import { useTheme } from '@/hooks/use-theme';
-import { trackingStatusLabels } from '@/lib/format';
 import { getErrorMessage } from '@/lib/http';
 import type { TrackingItem, TrackingStatus } from '@/types';
 
 type LibraryFilter = 'all' | TrackingStatus;
 
-const filterOptions = [
-  { value: 'all', label: 'All' },
-  { value: 'watching', label: 'Watching' },
-  { value: 'plan_to_watch', label: 'Plan to watch' },
-  { value: 'completed', label: 'Completed' },
-  { value: 'on_hold', label: 'On hold' },
-  { value: 'dropped', label: 'Dropped' },
-] as const;
-
-const statusOptions = filterOptions.slice(1) as readonly {
-  value: TrackingStatus;
-  label: string;
-}[];
-
 export default function LibraryScreen() {
   const theme = useTheme();
+  const t = useT();
+  const filterOptions = [
+    { value: 'all', label: t('common.all') },
+    { value: 'watching', label: t('status.watching') },
+    { value: 'plan_to_watch', label: t('status.plan_to_watch') },
+    { value: 'completed', label: t('status.completed') },
+    { value: 'on_hold', label: t('status.on_hold') },
+    { value: 'dropped', label: t('status.dropped') },
+  ] as const;
+  const statusOptions = filterOptions.slice(1) as readonly {
+    value: TrackingStatus;
+    label: string;
+  }[];
   const [filter, setFilter] = useState<LibraryFilter>('all');
   const [statusItem, setStatusItem] = useState<TrackingItem | null>(null);
   const [feedbackItem, setFeedbackItem] = useState<TrackingItem | null>(null);
@@ -64,10 +63,10 @@ export default function LibraryScreen() {
   const items = tracking.data?.pages.flatMap((page) => page) ?? [];
 
   const confirmRemove = (item: TrackingItem) => {
-    Alert.alert('Remove from library?', item.title, [
-      { text: 'Cancel', style: 'cancel' },
+    Alert.alert(t('library.removeConfirmTitle'), item.title, [
+      { text: t('common.cancel'), style: 'cancel' },
       {
-        text: 'Remove',
+        text: t('common.remove'),
         style: 'destructive',
         onPress: () => remove.mutate(item.id),
       },
@@ -97,41 +96,41 @@ export default function LibraryScreen() {
         ListHeaderComponent={
           <View style={styles.header}>
             <ScreenHeader
-              title="Library"
+              title={t('library.title')}
               subtitle={
                 tracking.data
-                  ? `${items.length}${tracking.hasNextPage ? '+' : ''} ${
-                      items.length === 1 ? 'title' : 'titles'
-                    }`
-                  : 'Your tracked titles'
+                  ? t(items.length === 1 ? 'library.titleCount' : 'library.titleCountPlural', {
+                      count: `${items.length}${tracking.hasNextPage ? '+' : ''}`,
+                    })
+                  : t('library.subtitleFallback')
               }
             />
             <SegmentedControl value={filter} options={filterOptions} onChange={setFilter} />
             {mutationError ? (
               <AppText variant="caption" style={{ color: theme.danger }}>
-                {getErrorMessage(mutationError, 'The library could not be updated')}
+                {getErrorMessage(mutationError, t('library.updateError'))}
               </AppText>
             ) : null}
           </View>
         }
         ListEmptyComponent={
           tracking.isLoading ? (
-            <LoadingState label="Loading your library" />
+            <LoadingState label={t('library.loading')} />
           ) : tracking.isError ? (
             <ErrorState
-              message={getErrorMessage(tracking.error, 'Your library could not be loaded')}
+              message={getErrorMessage(tracking.error, t('library.loadError'))}
               onRetry={() => void tracking.refetch()}
             />
           ) : (
             <EmptyState
               icon={SlidersHorizontal}
-              title="No titles here"
-              message="Change the filter or add a title from Search."
+              title={t('library.emptyTitle')}
+              message={t('library.emptyMessage')}
             />
           )
         }
         ListFooterComponent={
-          tracking.isFetchingNextPage ? <LoadingState label="Loading more" /> : null
+          tracking.isFetchingNextPage ? <LoadingState label={t('common.loadingMore')} /> : null
         }
         renderItem={({ item }) => (
           <View style={[styles.row, { borderBottomColor: theme.border }]}>
@@ -153,11 +152,11 @@ export default function LibraryScreen() {
                   {item.title}
                 </AppText>
                 <AppText variant="caption" muted>
-                  {item.media_type === 'tv' ? 'TV show' : 'Movie'}
+                  {t(item.media_type === 'tv' ? 'mediaType.tv' : 'mediaType.movie')}
                 </AppText>
                 {item.rating ? (
                   <AppText variant="caption" style={{ color: theme.warning }}>
-                    {item.rating}/10
+                    {t('library.rating', { value: item.rating })}
                   </AppText>
                 ) : null}
               </View>
@@ -165,7 +164,7 @@ export default function LibraryScreen() {
             <View style={styles.actions}>
               <Pressable
                 accessibilityRole="button"
-                accessibilityLabel={`Edit rating and review for ${item.title}`}
+                accessibilityLabel={t('library.editRatingFor', { title: item.title })}
                 onPress={() => {
                   update.reset();
                   setFeedbackItem(item);
@@ -180,7 +179,7 @@ export default function LibraryScreen() {
               </Pressable>
               <Pressable
                 accessibilityRole="button"
-                accessibilityLabel={`Change status for ${item.title}`}
+                accessibilityLabel={t('library.changeStatusFor', { title: item.title })}
                 onPress={() => setStatusItem(item)}
                 style={({ pressed }) => [
                   styles.statusButton,
@@ -193,13 +192,15 @@ export default function LibraryScreen() {
               >
                 <SlidersHorizontal color={theme.mutedText} size={16} />
                 <AppText variant="caption" numberOfLines={1}>
-                  {trackingStatusLabels[item.status]}
+                  {t(`status.${item.status}`)}
                 </AppText>
               </Pressable>
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel={
-                  item.is_favorite ? `Remove ${item.title} from favorites` : `Favorite ${item.title}`
+                  item.is_favorite
+                    ? t('library.removeFavorite', { title: item.title })
+                    : t('library.addFavorite', { title: item.title })
                 }
                 onPress={() =>
                   update.mutate({ id: item.id, is_favorite: !item.is_favorite })
@@ -214,7 +215,7 @@ export default function LibraryScreen() {
               </Pressable>
               <Pressable
                 accessibilityRole="button"
-                accessibilityLabel={`Remove ${item.title} from library`}
+                accessibilityLabel={t('library.removeFromLibraryFor', { title: item.title })}
                 onPress={() => confirmRemove(item)}
                 style={[styles.iconButton, { borderColor: theme.border }]}
               >
@@ -241,7 +242,7 @@ export default function LibraryScreen() {
           >
             <Pressable onPress={(event) => event.stopPropagation()}>
               <View style={styles.sheetHeader}>
-                <AppText variant="section">Tracking status</AppText>
+                <AppText variant="section">{t('library.trackingStatus')}</AppText>
                 <AppText muted numberOfLines={1}>
                   {statusItem?.title}
                 </AppText>
@@ -269,7 +270,7 @@ export default function LibraryScreen() {
                 })}
               </View>
               <AppButton
-                label="Cancel"
+                label={t('common.cancel')}
                 variant="secondary"
                 onPress={() => setStatusItem(null)}
               />
@@ -283,7 +284,7 @@ export default function LibraryScreen() {
           pending={update.isPending}
           error={
             update.error
-              ? getErrorMessage(update.error, 'Your rating could not be saved')
+              ? getErrorMessage(update.error, t('library.ratingSaveError'))
               : undefined
           }
           onClose={() => {
