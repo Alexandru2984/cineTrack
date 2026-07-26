@@ -162,12 +162,22 @@ export interface TmdbSearchResponse {
   results: TmdbSearchResult[];
 }
 
+export interface BecauseYouWatched {
+  seed_tmdb_id: number;
+  seed_media_type: string;
+  seed_title: string;
+  results: TmdbSearchResult[];
+}
+
 export interface DiscoveryResponse {
   recommendations: TmdbSearchResult[];
   personalized: boolean;
   recommendation_basis: string[];
   popular_movies: TmdbSearchResult[];
   popular_shows: TmdbSearchResult[];
+  // TMDB's collaborative "because you watched" row; absent when there is no
+  // seed yet or the upstream call was unavailable.
+  because_you_watched?: BecauseYouWatched | null;
 }
 
 export interface TrackingItem {

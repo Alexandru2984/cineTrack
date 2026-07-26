@@ -77,6 +77,35 @@ describe('Dashboard discovery', () => {
     expect(screen.getByText('Popular Show')).toBeVisible();
   });
 
+  it('renders the because-you-watched shelf when present', () => {
+    mocks.useDiscovery.mockReturnValue({
+      data: {
+        recommendations: [],
+        personalized: false,
+        recommendation_basis: [],
+        popular_movies: [],
+        popular_shows: [],
+        because_you_watched: {
+          seed_tmdb_id: 27205,
+          seed_media_type: 'movie',
+          seed_title: 'Inception',
+          results: [{ id: 155, media_type: 'movie', title: 'The Dark Knight' }],
+        },
+      },
+      isLoading: false,
+      isError: false,
+      isFetching: false,
+      refetch: mocks.refetchDiscovery,
+    });
+
+    render(<Dashboard />);
+
+    expect(
+      screen.getByRole('heading', { name: 'Because you watched Inception' }),
+    ).toBeVisible();
+    expect(screen.getByText('The Dark Knight')).toBeVisible();
+  });
+
   it('renders cold start and retries a failed discovery request', async () => {
     const user = userEvent.setup();
     mocks.useDiscovery.mockReturnValueOnce({

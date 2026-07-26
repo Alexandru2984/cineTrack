@@ -82,6 +82,17 @@ export default function Dashboard() {
         </section>
       ) : (
         <>
+          {discovery?.because_you_watched && discovery.because_you_watched.results.length > 0 && (
+            <MediaShelf
+              id="because-you-watched-heading"
+              title={`Because you watched ${discovery.because_you_watched.seed_title}`}
+              icon={<Sparkles className="h-5 w-5 text-[hsl(var(--primary))]" aria-hidden="true" />}
+              items={discovery.because_you_watched.results}
+              isLoading={false}
+              emptyMessage="No related titles yet"
+              showQuickAdd
+            />
+          )}
           <MediaShelf
             id="recommendations-heading"
             title={discovery?.personalized ? 'For You' : 'Recommended'}
