@@ -4,8 +4,10 @@ import { useResetPassword } from '@/hooks/useAuth';
 import { getApiErrorMessage } from '@/lib/api';
 import { readFragmentOneTimeToken, scrubOneTimeTokenUrl } from '@/lib/oneTimeToken';
 import { Film, Loader2 } from 'lucide-react';
+import { useT } from '@/hooks/useT';
 
 export default function ResetPasswordPage() {
+  const t = useT();
   const [token] = useState(() => readFragmentOneTimeToken(window.location.hash));
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
@@ -35,25 +37,25 @@ export default function ResetPasswordPage() {
       <div className="w-full max-w-md space-y-8">
         <div className="text-center">
           <Film className="mx-auto h-12 w-12 text-[hsl(var(--primary))]" />
-          <h1 className="mt-4 text-3xl font-bold">Choose a new password</h1>
+          <h1 className="mt-4 text-3xl font-bold">{t('auth.chooseNewPassword')}</h1>
         </div>
 
         {!token ? (
           <div className="rounded-md border border-[hsl(var(--border))] p-4 text-center text-sm text-[hsl(var(--destructive))]">
-            This reset link is missing its token. Request a new one from the{' '}
+            {t('auth.resetMissingTokenPre')}{' '}
             <Link to="/forgot-password" className="text-[hsl(var(--primary))] hover:underline">
-              forgot password
+              {t('auth.forgotPasswordLink')}
             </Link>{' '}
-            page.
+            {t('auth.resetMissingTokenPost')}
           </div>
         ) : reset.isSuccess ? (
           <div className="rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--accent))] p-4 text-center text-sm">
-            Password updated. Redirecting you to sign in…
+            {t('auth.passwordUpdated')}
           </div>
         ) : (
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label htmlFor="reset-new-password" className="block text-sm font-medium mb-1">New password</label>
+              <label htmlFor="reset-new-password" className="block text-sm font-medium mb-1">{t('auth.newPassword')}</label>
               <input
                 id="reset-new-password"
                 type="password"
@@ -63,11 +65,11 @@ export default function ResetPasswordPage() {
                 required
                 minLength={8}
                 className="w-full rounded-md border border-[hsl(var(--input))] bg-transparent px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[hsl(var(--ring))]"
-                placeholder="Min 8 characters"
+                placeholder={t('auth.passwordMinPlaceholder')}
               />
             </div>
             <div>
-              <label htmlFor="reset-confirm-password" className="block text-sm font-medium mb-1">Confirm new password</label>
+              <label htmlFor="reset-confirm-password" className="block text-sm font-medium mb-1">{t('auth.confirmNewPassword')}</label>
               <input
                 id="reset-confirm-password"
                 type="password"
@@ -77,16 +79,16 @@ export default function ResetPasswordPage() {
                 required
                 minLength={8}
                 className="w-full rounded-md border border-[hsl(var(--input))] bg-transparent px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[hsl(var(--ring))]"
-                placeholder="Repeat new password"
+                placeholder={t('auth.confirmPasswordPlaceholder')}
               />
             </div>
 
             {mismatch && (
-              <p className="text-sm text-[hsl(var(--destructive))]">Passwords do not match</p>
+              <p className="text-sm text-[hsl(var(--destructive))]">{t('auth.passwordsMismatch')}</p>
             )}
             {reset.error && (
               <p className="text-sm text-[hsl(var(--destructive))]">
-                {getApiErrorMessage(reset.error, 'Could not reset password')}
+                {getApiErrorMessage(reset.error, t('auth.resetError'))}
               </p>
             )}
 
@@ -96,13 +98,13 @@ export default function ResetPasswordPage() {
               className="w-full rounded-md bg-[hsl(var(--primary))] py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-2"
             >
               {reset.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
-              Set new password
+              {t('auth.setNewPassword')}
             </button>
           </form>
         )}
 
         <p className="text-center text-sm text-[hsl(var(--muted-foreground))]">
-          <Link to="/login" className="text-[hsl(var(--primary))] hover:underline">Back to sign in</Link>
+          <Link to="/login" className="text-[hsl(var(--primary))] hover:underline">{t('auth.backToSignIn')}</Link>
         </p>
       </div>
     </div>

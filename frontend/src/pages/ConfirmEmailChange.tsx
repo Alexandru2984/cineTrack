@@ -9,6 +9,7 @@ import { useAuthStore } from '@/store/auth';
 import { getApiErrorMessage } from '@/lib/api';
 import { readFragmentOneTimeToken, scrubOneTimeTokenUrl } from '@/lib/oneTimeToken';
 import { CheckCircle2, Film, Loader2, XCircle } from 'lucide-react';
+import { useT } from '@/hooks/useT';
 
 /**
  * Same one-time-token handling as `VerifyEmail`, and for the same reasons: the
@@ -29,6 +30,7 @@ function readTokenOnce(): string {
 }
 
 export default function ConfirmEmailChangePage() {
+  const t = useT();
   const token = readTokenOnce();
   const isAuthenticated = useAuthStore((s) => s.status === 'authenticated');
   const confirm = useConfirmEmailChange();
@@ -56,49 +58,44 @@ export default function ConfirmEmailChangePage() {
       <div className="w-full max-w-md space-y-8 text-center">
         <div>
           <Film className="mx-auto h-12 w-12 text-[hsl(var(--primary))]" />
-          <h1 className="mt-4 text-3xl font-bold">Confirm your new email</h1>
+          <h1 className="mt-4 text-3xl font-bold">{t('auth.confirmNewEmail')}</h1>
         </div>
 
         {!token ? (
           <div className="rounded-md border border-[hsl(var(--border))] p-4 text-sm text-[hsl(var(--destructive))]">
-            This confirmation link is missing its token. Open the most recent link from your
-            inbox, or start the change again from your account settings.
+            {t('auth.changeMissingToken')}
           </div>
         ) : pending ? (
           <div className="flex items-center justify-center gap-2 text-sm text-[hsl(var(--muted-foreground))]">
-            <Loader2 className="h-5 w-5 animate-spin" /> Confirming your new address…
+            <Loader2 className="h-5 w-5 animate-spin" /> {t('auth.confirmingNewAddress')}
           </div>
         ) : succeeded ? (
           <div className="space-y-4">
             <div className="flex items-center justify-center gap-2 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--accent))] p-4 text-sm">
               <CheckCircle2 className="h-5 w-5 text-[hsl(var(--primary))]" />
-              This address is now the one on your account. Sign in with it from now on.
+              {t('auth.newAddressConfirmed')}
             </div>
             <Link
               to={isAuthenticated ? '/settings' : '/login'}
               className="inline-block rounded-md bg-[hsl(var(--primary))] px-4 py-2 text-sm font-medium text-white hover:opacity-90"
             >
-              {isAuthenticated ? 'Back to settings' : 'Sign in'}
+              {isAuthenticated ? t('auth.backToSettings') : t('auth.signIn')}
             </Link>
           </div>
         ) : (
           <div className="space-y-4">
             <div className="flex items-center justify-center gap-2 rounded-md border border-[hsl(var(--border))] p-4 text-sm text-[hsl(var(--destructive))]">
               <XCircle className="h-5 w-5" />
-              {getApiErrorMessage(
-                attempt?.error,
-                'This confirmation link is invalid or has expired.',
-              )}
+              {getApiErrorMessage(attempt?.error, t('auth.verifyInvalid'))}
             </div>
             <p className="text-sm text-[hsl(var(--muted-foreground))]">
-              Your account keeps the address it had. You can start the change again from
-              settings.
+              {t('auth.changeRequestFresh')}
             </p>
             <Link
               to={isAuthenticated ? '/settings' : '/login'}
               className="inline-block rounded-md border border-[hsl(var(--border))] px-4 py-2 text-sm hover:bg-[hsl(var(--accent))]"
             >
-              {isAuthenticated ? 'Go to settings' : 'Sign in'}
+              {isAuthenticated ? t('auth.goToSettings') : t('auth.signIn')}
             </Link>
           </div>
         )}

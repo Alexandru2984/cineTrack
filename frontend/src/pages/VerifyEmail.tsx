@@ -6,6 +6,7 @@ import { useAuthStore } from '@/store/auth';
 import { getApiErrorMessage } from '@/lib/api';
 import { readFragmentOneTimeToken, scrubOneTimeTokenUrl } from '@/lib/oneTimeToken';
 import { CheckCircle2, Film, Loader2, XCircle } from 'lucide-react';
+import { useT } from '@/hooks/useT';
 
 /**
  * The confirmation token is a one-time credential that only exists in the URL,
@@ -28,6 +29,7 @@ function readTokenOnce(): string {
 }
 
 export default function VerifyEmailPage() {
+  const t = useT();
   const token = readTokenOnce();
   const isAuthenticated = useAuthStore((s) => s.status === 'authenticated');
   const verify = useVerifyEmail();
@@ -57,45 +59,44 @@ export default function VerifyEmailPage() {
       <div className="w-full max-w-md space-y-8 text-center">
         <div>
           <Film className="mx-auto h-12 w-12 text-[hsl(var(--primary))]" />
-          <h1 className="mt-4 text-3xl font-bold">Confirm your email</h1>
+          <h1 className="mt-4 text-3xl font-bold">{t('auth.confirmEmail')}</h1>
         </div>
 
         {!token ? (
           <div className="rounded-md border border-[hsl(var(--border))] p-4 text-sm text-[hsl(var(--destructive))]">
-            This confirmation link is missing its token. Open the most recent link from your
-            inbox, or request a new one from your account settings.
+            {t('auth.verifyMissingToken')}
           </div>
         ) : pending ? (
           <div className="flex items-center justify-center gap-2 text-sm text-[hsl(var(--muted-foreground))]">
-            <Loader2 className="h-5 w-5 animate-spin" /> Confirming your email…
+            <Loader2 className="h-5 w-5 animate-spin" /> {t('auth.confirmingEmail')}
           </div>
         ) : succeeded ? (
           <div className="space-y-4">
             <div className="flex items-center justify-center gap-2 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--accent))] p-4 text-sm">
               <CheckCircle2 className="h-5 w-5 text-[hsl(var(--primary))]" />
-              Your email is confirmed. Thanks!
+              {t('auth.emailConfirmed')}
             </div>
             <Link
               to={isAuthenticated ? '/' : '/login'}
               className="inline-block rounded-md bg-[hsl(var(--primary))] px-4 py-2 text-sm font-medium text-white hover:opacity-90"
             >
-              {isAuthenticated ? 'Go to your dashboard' : 'Sign in'}
+              {isAuthenticated ? t('auth.goToDashboard') : t('auth.signIn')}
             </Link>
           </div>
         ) : (
           <div className="space-y-4">
             <div className="flex items-center justify-center gap-2 rounded-md border border-[hsl(var(--border))] p-4 text-sm text-[hsl(var(--destructive))]">
               <XCircle className="h-5 w-5" />
-              {getApiErrorMessage(attempt?.error, 'This confirmation link is invalid or has expired.')}
+              {getApiErrorMessage(attempt?.error, t('auth.verifyInvalid'))}
             </div>
             <p className="text-sm text-[hsl(var(--muted-foreground))]">
-              You can request a fresh link from your account settings after signing in.
+              {t('auth.verifyRequestFresh')}
             </p>
             <Link
               to={isAuthenticated ? '/settings' : '/login'}
               className="inline-block rounded-md border border-[hsl(var(--border))] px-4 py-2 text-sm hover:bg-[hsl(var(--accent))]"
             >
-              {isAuthenticated ? 'Go to settings' : 'Sign in'}
+              {isAuthenticated ? t('auth.goToSettings') : t('auth.signIn')}
             </Link>
           </div>
         )}
