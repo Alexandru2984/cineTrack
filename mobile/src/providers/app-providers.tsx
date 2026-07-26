@@ -25,6 +25,7 @@ import {
 } from '@/lib/release-notifications';
 import { flushPendingLogoutRevocations, resumeOfflineSession } from '@/lib/session';
 import { useAuthStore } from '@/store/auth';
+import { useLocaleStore } from '@/store/locale';
 
 function refreshReleaseNotifications() {
   void flushPendingLogoutRevocations().catch(() => undefined);
@@ -55,6 +56,11 @@ export function AppProviders({ children }: PropsWithChildren) {
       return client;
     },
   );
+
+  useEffect(() => {
+    // Apply a saved language override on top of the device default.
+    void useLocaleStore.getState().hydrate();
+  }, []);
 
   useEffect(() => {
     refreshReleaseNotifications();

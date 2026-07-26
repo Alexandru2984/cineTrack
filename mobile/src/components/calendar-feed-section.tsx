@@ -10,6 +10,7 @@ import {
   useDisableCalendarFeed,
   useEnableCalendarFeed,
 } from '@/hooks/use-calendar';
+import { useT } from '@/hooks/use-t';
 import { useTheme } from '@/hooks/use-theme';
 import { getErrorMessage } from '@/lib/http';
 
@@ -20,6 +21,7 @@ import { getErrorMessage } from '@/lib/http';
  */
 export function CalendarFeedSection() {
   const theme = useTheme();
+  const t = useT();
   const status = useCalendarFeedStatus();
   const enableFeed = useEnableCalendarFeed();
   const disableFeed = useDisableCalendarFeed();
@@ -51,28 +53,29 @@ export function CalendarFeedSection() {
       <View style={styles.heading}>
         <CalendarClock color={theme.primary} size={20} />
         <View style={styles.headingCopy}>
-          <AppText variant="section">Calendar feed</AppText>
+          <AppText variant="section">{t('calendarFeed.title')}</AppText>
           <AppText variant="caption" muted>
-            Subscribe to upcoming episodes.
+            {t('calendarFeed.subtitle')}
           </AppText>
         </View>
       </View>
-      <AppText muted>
-        Add your upcoming episodes to any calendar app. Anyone with the link can see your schedule,
-        so keep it private and regenerate it if it ever leaks.
-      </AppText>
+      <AppText muted>{t('calendarFeed.description')}</AppText>
 
       {status.isLoading ? (
         <ActivityIndicator color={theme.primary} />
       ) : revealedUrl ? (
         <View style={styles.revealed}>
           <AppText variant="caption" muted>
-            Share or save this link now — for your security it won&apos;t be shown again.
+            {t('calendarFeed.revealWarning')}
           </AppText>
           <AppText selectable style={[styles.url, { color: theme.primary }]}>
             {revealedUrl}
           </AppText>
-          <AppButton variant="secondary" label="Share link" onPress={() => void shareUrl()} />
+          <AppButton
+            variant="secondary"
+            label={t('calendarFeed.share')}
+            onPress={() => void shareUrl()}
+          />
         </View>
       ) : null}
 
@@ -81,25 +84,29 @@ export function CalendarFeedSection() {
           <>
             <AppButton
               variant="secondary"
-              label="Regenerate URL"
+              label={t('calendarFeed.regenerate')}
               loading={enableFeed.isPending}
               onPress={generate}
             />
             <AppButton
               variant="danger"
-              label="Disable"
+              label={t('calendarFeed.disable')}
               loading={disableFeed.isPending}
               onPress={disable}
             />
           </>
         ) : (
-          <AppButton label="Generate feed URL" loading={enableFeed.isPending} onPress={generate} />
+          <AppButton
+            label={t('calendarFeed.generate')}
+            loading={enableFeed.isPending}
+            onPress={generate}
+          />
         )}
       </View>
 
       {error ? (
         <AppText variant="caption" style={{ color: theme.danger }}>
-          {getErrorMessage(error, 'Could not update the calendar feed')}
+          {getErrorMessage(error, t('calendarFeed.error'))}
         </AppText>
       ) : null}
     </View>
