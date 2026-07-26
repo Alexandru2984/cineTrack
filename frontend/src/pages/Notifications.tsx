@@ -7,6 +7,7 @@ import {
   useNotifications,
 } from '@/hooks/useNotifications';
 import { getApiErrorMessage } from '@/lib/api';
+import { useT } from '@/hooks/useT';
 import type { SocialNotification } from '@/types';
 
 function uniqueNotifications(pages: { items: SocialNotification[] }[] | undefined) {
@@ -21,6 +22,7 @@ function uniqueNotifications(pages: { items: SocialNotification[] }[] | undefine
 }
 
 export default function NotificationsPage() {
+  const t = useT();
   const notifications = useNotifications();
   const summary = useNotificationSummary();
   const markRead = useMarkNotificationRead();
@@ -36,11 +38,13 @@ export default function NotificationsPage() {
     <main className="mx-auto max-w-3xl px-4 py-8 sm:px-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold">Notifications</h1>
+          <h1 className="text-2xl font-bold">{t('nav.notifications')}</h1>
           <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]" aria-live="polite">
             {unreadCount === 0
-              ? 'You are all caught up.'
-              : `${unreadCount} unread notification${unreadCount === 1 ? '' : 's'}`}
+              ? t('notifications.allCaughtUp')
+              : unreadCount === 1
+                ? t('notifications.unreadOne')
+                : t('notifications.unreadMany', { count: unreadCount })}
           </p>
         </div>
         <button
@@ -54,13 +58,13 @@ export default function NotificationsPage() {
           ) : (
             <CheckCheck className="h-4 w-4" aria-hidden="true" />
           )}
-          Mark all as read
+          {t('nav.markAllRead')}
         </button>
       </div>
 
       <section
         className="mt-6 overflow-hidden border-y border-[hsl(var(--border))]"
-        aria-label="Notification history"
+        aria-label={t('notifications.historyAria')}
       >
         <NotificationList
           items={items}
@@ -81,7 +85,7 @@ export default function NotificationsPage() {
             {notifications.isFetchingNextPage && (
               <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
             )}
-            Load older notifications
+            {t('notifications.loadOlder')}
           </button>
         </div>
       )}
@@ -90,7 +94,7 @@ export default function NotificationsPage() {
         <p className="mt-4 text-sm text-[hsl(var(--destructive))]" role="alert">
           {getApiErrorMessage(
             markRead.error ?? markAllRead.error,
-            'Could not update notifications',
+            t('notifications.updateError'),
           )}
         </p>
       )}

@@ -178,6 +178,14 @@ export const ro: Dictionary = {
     emptyMedia: 'Caută filme și seriale',
     emptyPeople: 'Găsește persoane',
   },
+  notifications: {
+    allCaughtUp: 'Ești la zi.',
+    unreadOne: 'o notificare necitită',
+    unreadMany: '{count} notificări necitite',
+    historyAria: 'Istoric notificări',
+    loadOlder: 'Încarcă notificări mai vechi',
+    updateError: 'Notificările nu au putut fi actualizate',
+  },
   calendarFeed: {
     title: 'Feed de calendar',
     description:

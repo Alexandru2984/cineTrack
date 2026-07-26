@@ -176,6 +176,14 @@ export const en = {
     emptyMedia: 'Search movies and TV shows',
     emptyPeople: 'Find people',
   },
+  notifications: {
+    allCaughtUp: 'You are all caught up.',
+    unreadOne: '1 unread notification',
+    unreadMany: '{count} unread notifications',
+    historyAria: 'Notification history',
+    loadOlder: 'Load older notifications',
+    updateError: 'Could not update notifications',
+  },
   calendarFeed: {
     title: 'Calendar feed',
     description:
