@@ -15,6 +15,7 @@ import { CommunityRating } from '@/components/CommunityRating';
 import { usePageTitle } from '@/hooks/usePageTitle';
 import { getPosterUrl, getBackdropUrl, formatDate, formatRuntime } from '@/lib/utils';
 import { getApiErrorMessage } from '@/lib/api';
+import { useT } from '@/hooks/useT';
 import {
   Calendar,
   Check,
@@ -55,6 +56,7 @@ function localDateKey(): string {
 }
 
 export default function MediaDetail() {
+  const t = useT();
   const { id } = useParams<{ id: string }>();
   const [searchParams] = useSearchParams();
   const type = searchParams.get('type') || 'movie';
@@ -93,7 +95,7 @@ export default function MediaDetail() {
   const [listFeedback, setListFeedback] = useState<string | null>(null);
 
   if (isLoading) return <LoadingSpinner />;
-  if (!media) return <div className="text-center py-16">Media not found</div>;
+  if (!media) return <div className="text-center py-16">{t('media.notFound')}</div>;
 
   const genres: Genre[] = Array.isArray(media.genres) ? media.genres : [];
   const watchedEpisodeSet = new Set(watchedEpisodes);
@@ -245,7 +247,7 @@ export default function MediaDetail() {
                   }`}
                 >
                   <Plus className="h-4 w-4" />
-                  {status === 'watching' ? 'Watching' : status === 'plan_to_watch' ? 'Plan to Watch' : 'Completed'}
+                  {t(`status.${status}`)}
                 </button>
               ))}
               <button
@@ -257,7 +259,7 @@ export default function MediaDetail() {
                 className="flex items-center gap-2 rounded-md border border-[hsl(var(--border))] px-4 py-2 text-sm font-medium transition-colors hover:bg-[hsl(var(--secondary))]"
               >
                 <ListPlus className="h-4 w-4" aria-hidden="true" />
-                Custom list
+                {t('media.customList')}
               </button>
             </div>
             {listFeedback ? (
@@ -267,14 +269,14 @@ export default function MediaDetail() {
             ) : null}
             {createTracking.error && (
               <p className="text-sm text-[hsl(var(--destructive))]">
-                {getApiErrorMessage(createTracking.error, 'Could not update your list')}
+                {getApiErrorMessage(createTracking.error, t('media.listUpdateError'))}
               </p>
             )}
 
             {/* Overview */}
             {media.overview && (
               <div>
-                <h2 className="text-lg font-semibold mb-2">Overview</h2>
+                <h2 className="text-lg font-semibold mb-2">{t('media.overview')}</h2>
                 <p className="text-[hsl(var(--muted-foreground))] leading-relaxed">{media.overview}</p>
               </div>
             )}
@@ -290,7 +292,7 @@ export default function MediaDetail() {
         {/* Seasons */}
         {type === 'tv' && seasons.length > 0 && (
           <section className="mt-10">
-            <h2 className="text-2xl font-bold mb-4">Seasons</h2>
+            <h2 className="text-2xl font-bold mb-4">{t('media.seasons')}</h2>
             <div className="flex gap-2 overflow-x-auto border-b border-[hsl(var(--border))] pb-3" role="tablist">
               {seasons.map((season) => {
                 const progress = progressBySeason.get(season.season_number);
@@ -311,7 +313,9 @@ export default function MediaDetail() {
                         : 'border border-[hsl(var(--border))] hover:bg-[hsl(var(--secondary))]'
                     }`}
                   >
-                    {season.season_number === 0 ? 'Specials' : `Season ${season.season_number}`}
+                    {season.season_number === 0
+                      ? t('media.specials')
+                      : t('media.seasonN', { number: season.season_number })}
                     {total != null && (
                       <span className="ml-2 opacity-70">
                         {progress ? `${progress.watched_count}/${total}` : total}
@@ -326,12 +330,15 @@ export default function MediaDetail() {
               {episodesLoading ? (
                 <LoadingSpinner />
               ) : episodes.length === 0 ? (
-                <p className="py-8 text-[hsl(var(--muted-foreground))]">No episodes available</p>
+                <p className="py-8 text-[hsl(var(--muted-foreground))]">{t('media.noEpisodes')}</p>
               ) : (
                 <>
                   <div className="mb-2 flex min-h-10 flex-wrap items-center justify-between gap-2 border-b border-[hsl(var(--border))] pb-2">
                     <p className="text-sm text-[hsl(var(--muted-foreground))]">
-                      {watchedEpisodeSet.size} of {episodes.length} watched
+                      {t('media.watchedOfTotal', {
+                        watched: watchedEpisodeSet.size,
+                        total: episodes.length,
+                      })}
                     </p>
                     <button
                       type="button"
@@ -352,7 +359,7 @@ export default function MediaDetail() {
                         : selectedSeasonUnwatchedCount === 0
                           ? <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
                           : <CheckCheck className="h-4 w-4" aria-hidden="true" />}
-                      {selectedSeasonUnwatchedCount === 0 ? 'Season watched' : 'Mark season watched'}
+                      {selectedSeasonUnwatchedCount === 0 ? t('media.seasonWatched') : t('media.markSeasonWatched')}
                     </button>
                   </div>
                   <div className="divide-y divide-[hsl(var(--border))]">
@@ -368,7 +375,7 @@ export default function MediaDetail() {
                               to={`/episodes/${episode.id}`}
                               className="font-medium hover:text-[hsl(var(--primary))]"
                             >
-                              {episode.name || `Episode ${episode.episode_number}`}
+                              {episode.name || t('media.episodeN', { number: episode.episode_number })}
                             </Link>
                             <div className="mt-1 flex flex-wrap gap-x-3 text-xs text-[hsl(var(--muted-foreground))]">
                               {episode.air_date && <span>{formatDate(episode.air_date)}</span>}
@@ -382,7 +389,7 @@ export default function MediaDetail() {
                           </div>
                           <button
                             type="button"
-                            title={watched ? 'Watched' : 'Mark watched'}
+                            title={watched ? t('media.watched') : t('media.markWatched')}
                             disabled={watched || markEpisodeWatched.isPending || bulkWatchPending}
                             onClick={() => handleEpisodeWatch(episode)}
                             className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-md border transition-colors sm:w-32 sm:gap-2 ${
@@ -392,7 +399,7 @@ export default function MediaDetail() {
                             } disabled:cursor-default disabled:opacity-70`}
                           >
                             {watched ? <CheckCircle2 className="h-4 w-4" /> : <Check className="h-4 w-4" />}
-                            <span className="hidden text-sm sm:inline">{watched ? 'Watched' : 'Mark watched'}</span>
+                            <span className="hidden text-sm sm:inline">{watched ? t('media.watched') : t('media.markWatched')}</span>
                           </button>
                         </div>
                       );
@@ -402,7 +409,7 @@ export default function MediaDetail() {
               )}
               {watchError && (
                 <p className="mt-3 text-sm text-[hsl(var(--destructive))]">
-                  {getApiErrorMessage(watchError, 'Could not update watched episodes')}
+                  {getApiErrorMessage(watchError, t('media.episodesUpdateError'))}
                 </p>
               )}
             </div>
@@ -455,7 +462,7 @@ export default function MediaDetail() {
           title={media.title}
           onClose={() => setListPickerOpen(false)}
           onAdded={(listName) => {
-            setListFeedback(`Added to ${listName}.`);
+            setListFeedback(t('media.addedToList', { name: listName }));
             setListPickerOpen(false);
           }}
         />
@@ -481,6 +488,7 @@ function WatchConfirmationDialog({
   onEpisodeAndPrevious: () => void;
   onSeason: () => void;
 }) {
+  const t = useT();
   useEffect(() => {
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
@@ -518,19 +526,27 @@ function WatchConfirmationDialog({
           <div>
             <h2 id="watch-confirmation-title" className="text-lg font-semibold">
               {confirmation.kind === 'episode'
-                ? `Mark ${episodeLabel} watched?`
-                : `Mark ${confirmation.season.name || `Season ${confirmation.season.season_number}`} watched?`}
+                ? t('media.markCodeWatched', { code: episodeLabel ?? '' })
+                : t('media.markSeasonNameWatched', {
+                    name:
+                      confirmation.season.name
+                      || t('media.seasonN', { number: confirmation.season.season_number }),
+                  })}
             </h2>
             <p className="mt-2 text-sm leading-relaxed text-[hsl(var(--muted-foreground))]">
               {confirmation.kind === 'episode'
-                ? `${confirmation.previousUnwatchedCount} earlier unwatched episode${confirmation.previousUnwatchedCount === 1 ? '' : 's'} can be added at the same time.`
-                : `${confirmation.unwatchedCount} available episode${confirmation.unwatchedCount === 1 ? '' : 's'} will be added to your history.`}
+                ? confirmation.previousUnwatchedCount === 1
+                  ? t('media.earlierUnwatchedOne')
+                  : t('media.earlierUnwatchedMany', { count: confirmation.previousUnwatchedCount })
+                : confirmation.unwatchedCount === 1
+                  ? t('media.availableEpisodesOne')
+                  : t('media.availableEpisodesMany', { count: confirmation.unwatchedCount })}
             </p>
           </div>
           <button
             type="button"
-            title="Close"
-            aria-label="Close"
+            title={t('common.close')}
+            aria-label={t('common.close')}
             disabled={pending}
             onClick={onClose}
             className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md hover:bg-[hsl(var(--accent))] disabled:opacity-50"
@@ -546,7 +562,7 @@ function WatchConfirmationDialog({
             onClick={onClose}
             className="h-10 rounded-md border border-[hsl(var(--border))] px-4 text-sm font-medium hover:bg-[hsl(var(--accent))] disabled:opacity-50"
           >
-            Cancel
+            {t('common.cancel')}
           </button>
           {confirmation.kind === 'episode' ? (
             <>
@@ -557,7 +573,7 @@ function WatchConfirmationDialog({
                 onClick={onOnlyEpisode}
                 className="h-10 rounded-md border border-[hsl(var(--border))] px-4 text-sm font-medium hover:bg-[hsl(var(--accent))] disabled:opacity-50"
               >
-                Only this episode
+                {t('media.onlyThisEpisode')}
               </button>
               <button
                 type="button"
@@ -566,7 +582,7 @@ function WatchConfirmationDialog({
                 className="flex h-10 items-center justify-center gap-2 rounded-md bg-emerald-600 px-4 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
               >
                 {pending && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
-                This and previous
+                {t('media.thisAndPrevious')}
               </button>
             </>
           ) : (
@@ -578,7 +594,7 @@ function WatchConfirmationDialog({
               className="flex h-10 items-center justify-center gap-2 rounded-md bg-emerald-600 px-4 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
             >
               {pending && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
-              Mark season
+              {t('media.markSeason')}
             </button>
           )}
         </div>

@@ -51,6 +51,7 @@ vi.mock('@/hooks/useMedia', () => ({
   }),
   useEpisodes: (...args: unknown[]) => mocks.useEpisodes(...args),
   useWatchProviders: () => ({ data: undefined, isLoading: false }),
+  useCommunityRating: () => ({ data: undefined, isLoading: false }),
 }));
 
 vi.mock('@/hooks/useTracking', () => ({
