@@ -5,6 +5,7 @@ import {
   useDisableCalendarFeed,
   useEnableCalendarFeed,
 } from '@/hooks/useCalendar';
+import { useT } from '@/hooks/useT';
 import { getApiErrorMessage } from '@/lib/api';
 
 const BUTTON_BASE =
@@ -16,6 +17,7 @@ const BUTTON_BASE =
  * affordance and a warning; the server keeps only its hash.
  */
 export function CalendarFeedCard() {
+  const t = useT();
   const status = useCalendarFeedStatus();
   const enableFeed = useEnableCalendarFeed();
   const disableFeed = useDisableCalendarFeed();
@@ -56,24 +58,23 @@ export function CalendarFeedCard() {
     <section className="rounded-lg border border-[hsl(var(--border))] p-6">
       <h2 className="flex items-center gap-2 text-lg font-semibold">
         <CalendarClock className="h-5 w-5 text-[hsl(var(--primary))]" aria-hidden="true" />
-        Calendar feed
+        {t('calendarFeed.title')}
       </h2>
       <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">
-        Subscribe to your upcoming episodes in Google, Apple, or Outlook Calendar. Anyone with the
-        link can see your schedule, so keep it private and regenerate it if it ever leaks.
+        {t('calendarFeed.description')}
       </p>
 
       {revealedUrl && (
         <div className="mt-4 space-y-2">
           <p className="text-sm font-medium text-[hsl(var(--foreground))]">
-            Copy this URL now — for your security it won&apos;t be shown again.
+            {t('calendarFeed.revealWarning')}
           </p>
           <div className="flex flex-col gap-2 sm:flex-row">
             <input
               type="text"
               readOnly
               value={revealedUrl}
-              aria-label="Calendar feed URL"
+              aria-label={t('calendarFeed.urlLabel')}
               onFocus={(event) => event.currentTarget.select()}
               className="min-w-0 flex-1 rounded-md border border-[hsl(var(--input))] bg-transparent px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[hsl(var(--ring))]"
             />
@@ -83,7 +84,7 @@ export function CalendarFeedCard() {
               className={`${BUTTON_BASE} border border-[hsl(var(--border))] hover:bg-[hsl(var(--secondary))]`}
             >
               {copied ? <Check className="h-4 w-4" aria-hidden="true" /> : <Copy className="h-4 w-4" aria-hidden="true" />}
-              {copied ? 'Copied' : 'Copy'}
+              {copied ? t('common.copied') : t('common.copy')}
             </button>
           </div>
         </div>
@@ -98,7 +99,7 @@ export function CalendarFeedCard() {
               disabled={enableFeed.isPending}
               className={`${BUTTON_BASE} border border-[hsl(var(--border))] hover:bg-[hsl(var(--secondary))]`}
             >
-              Regenerate URL
+              {t('calendarFeed.regenerate')}
             </button>
             <button
               type="button"
@@ -106,7 +107,7 @@ export function CalendarFeedCard() {
               disabled={disableFeed.isPending}
               className={`${BUTTON_BASE} border border-[hsl(var(--destructive))] text-[hsl(var(--destructive))] hover:bg-[hsl(var(--destructive))] hover:text-white`}
             >
-              Disable
+              {t('calendarFeed.disable')}
             </button>
           </>
         ) : (
@@ -116,14 +117,14 @@ export function CalendarFeedCard() {
             disabled={enableFeed.isPending}
             className={`${BUTTON_BASE} bg-[hsl(var(--primary))] text-white hover:opacity-90`}
           >
-            Generate feed URL
+            {t('calendarFeed.generate')}
           </button>
         )}
       </div>
 
       {error && (
         <p className="mt-2 text-sm text-[hsl(var(--destructive))]">
-          {getApiErrorMessage(error, 'Could not update the calendar feed')}
+          {getApiErrorMessage(error, t('calendarFeed.error'))}
         </p>
       )}
     </section>
