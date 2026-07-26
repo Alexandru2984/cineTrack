@@ -2,7 +2,10 @@ import { Link } from 'react-router';
 import { User } from 'lucide-react';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
 import { formatDateTime } from '@/lib/utils';
+import { useT } from '@/hooks/useT';
 import type { NotificationKind, SocialNotification } from '@/types';
+
+type Translate = (key: string, params?: Record<string, string | number>) => string;
 
 interface NotificationListProps {
   items?: SocialNotification[];
@@ -14,14 +17,14 @@ interface NotificationListProps {
   onNavigate?: () => void;
 }
 
-function notificationAction(kind: NotificationKind): string {
+function notificationAction(t: Translate, kind: NotificationKind): string {
   switch (kind) {
     case 'follow_request':
-      return 'requested to follow you';
+      return t('notifications.actionFollowRequest');
     case 'follow_accepted':
-      return 'accepted your follow request';
+      return t('notifications.actionFollowAccepted');
     case 'new_follower':
-      return 'started following you';
+      return t('notifications.actionNewFollower');
   }
 }
 
@@ -35,23 +38,26 @@ export function NotificationList({
   isLoading = false,
   isError = false,
   compact = false,
-  emptyMessage = 'No notifications yet',
+  emptyMessage,
   onRead,
   onNavigate,
 }: NotificationListProps) {
+  const t = useT();
   if (isLoading) return <LoadingSpinner />;
 
   if (isError) {
     return (
       <p className="px-4 py-6 text-sm text-[hsl(var(--destructive))]" role="alert">
-        Notifications could not be loaded
+        {t('notifications.listLoadError')}
       </p>
     );
   }
 
   if (!items?.length) {
     return (
-      <p className="px-4 py-6 text-sm text-[hsl(var(--muted-foreground))]">{emptyMessage}</p>
+      <p className="px-4 py-6 text-sm text-[hsl(var(--muted-foreground))]">
+        {emptyMessage ?? t('notifications.emptyDefault')}
+      </p>
     );
   }
 
@@ -96,7 +102,7 @@ export function NotificationList({
               <span className="block text-sm leading-5">
                 <span className="break-words font-semibold">{notification.actor_username}</span>{' '}
                 <span className="text-[hsl(var(--muted-foreground))]">
-                  {notificationAction(notification.kind)}
+                  {notificationAction(t, notification.kind)}
                 </span>
               </span>
               <time
@@ -110,7 +116,7 @@ export function NotificationList({
             {isUnread && (
               <span
                 className="mt-2 h-2 w-2 shrink-0 rounded-full bg-[hsl(var(--primary))]"
-                aria-label="Unread"
+                aria-label={t('notifications.unread')}
               />
             )}
           </Link>

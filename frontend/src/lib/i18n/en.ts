@@ -224,6 +224,18 @@ export const en = {
     historyAria: 'Notification history',
     loadOlder: 'Load older notifications',
     updateError: 'Could not update notifications',
+    listLoadError: 'Notifications could not be loaded',
+    emptyDefault: 'No notifications yet',
+    unread: 'Unread',
+    actionFollowRequest: 'requested to follow you',
+    actionFollowAccepted: 'accepted your follow request',
+    actionNewFollower: 'started following you',
+  },
+  activity: {
+    loadError: 'Activity could not be loaded',
+    empty: 'No recent activity',
+    openMedia: 'Open {title}',
+    posterAlt: '{title} poster',
   },
   lists: {
     subtitle: 'Collections independent from your watching status.',

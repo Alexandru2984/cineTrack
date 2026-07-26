@@ -2,6 +2,7 @@ import { Link } from 'react-router';
 import { User } from 'lucide-react';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
 import { formatDateTime, getPosterUrl } from '@/lib/utils';
+import { useT } from '@/hooks/useT';
 import type { ActivityItem } from '@/types';
 
 interface ActivityListProps {
@@ -24,18 +25,19 @@ export function ActivityList({
   isError = false,
   showUser = true,
 }: ActivityListProps) {
+  const t = useT();
   if (isLoading) return <LoadingSpinner />;
 
   if (isError) {
     return (
       <p className="py-6 text-sm text-[hsl(var(--destructive))]" role="alert">
-        Activity could not be loaded
+        {t('activity.loadError')}
       </p>
     );
   }
 
   if (!items?.length) {
-    return <p className="py-6 text-[hsl(var(--muted-foreground))]">No recent activity</p>;
+    return <p className="py-6 text-[hsl(var(--muted-foreground))]">{t('activity.empty')}</p>;
   }
 
   return (
@@ -49,11 +51,11 @@ export function ActivityList({
             <Link
               to={mediaUrl}
               className="h-[4.5rem] w-12 shrink-0 overflow-hidden rounded bg-[hsl(var(--muted))]"
-              aria-label={`Open ${item.media_title}`}
+              aria-label={t('activity.openMedia', { title: item.media_title })}
             >
               <img
                 src={getPosterUrl(item.poster_path, 'w92')}
-                alt={`${item.media_title} poster`}
+                alt={t('activity.posterAlt', { title: item.media_title })}
                 className="h-full w-full object-cover"
                 loading="lazy"
                 decoding="async"
@@ -111,7 +113,7 @@ export function ActivityList({
                 </p>
               )}
               <p className="mt-1 flex flex-wrap items-center gap-x-2 text-xs text-[hsl(var(--muted-foreground))]">
-                <span>{item.media_type === 'tv' ? 'TV show' : 'Movie'}</span>
+                <span>{item.media_type === 'tv' ? t('listDetail.tvShow') : t('listDetail.movie')}</span>
                 <span aria-hidden="true">·</span>
                 <time dateTime={item.timestamp}>{formatDateTime(item.timestamp)}</time>
               </p>

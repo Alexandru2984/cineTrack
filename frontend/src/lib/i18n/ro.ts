@@ -226,6 +226,18 @@ export const ro: Dictionary = {
     historyAria: 'Istoric notificări',
     loadOlder: 'Încarcă notificări mai vechi',
     updateError: 'Notificările nu au putut fi actualizate',
+    listLoadError: 'Notificările nu au putut fi încărcate',
+    emptyDefault: 'Nicio notificare încă',
+    unread: 'Necitit',
+    actionFollowRequest: 'a cerut să te urmărească',
+    actionFollowAccepted: 'ți-a acceptat cererea de urmărire',
+    actionNewFollower: 'a început să te urmărească',
+  },
+  activity: {
+    loadError: 'Activitatea nu a putut fi încărcată',
+    empty: 'Nicio activitate recentă',
+    openMedia: 'Deschide {title}',
+    posterAlt: 'Afiș {title}',
   },
   lists: {
     subtitle: 'Colecții independente de starea vizionării.',
