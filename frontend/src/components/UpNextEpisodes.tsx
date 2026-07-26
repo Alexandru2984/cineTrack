@@ -18,7 +18,11 @@ import {
 } from '@/hooks/useCalendar';
 import { getApiErrorMessage } from '@/lib/api';
 import { formatRuntime, getPosterUrl } from '@/lib/utils';
+import { useT } from '@/hooks/useT';
+import { useLocaleStore } from '@/store/locale';
 import type { CalendarEpisode, UpNextEpisode } from '@/types';
+
+type Translate = (key: string, params?: Record<string, string | number>) => string;
 
 /** A show untouched for this long is something you dropped mid-run, not
  *  something you are watching. Both are worth surfacing, but not in one list. */
@@ -29,27 +33,28 @@ function isDormant(item: UpNextEpisode): boolean {
   return elapsed > RESUME_AFTER_DAYS * 24 * 60 * 60 * 1000;
 }
 
-function lastWatchedLabel(value: string): string {
+function lastWatchedLabel(t: Translate, value: string): string {
   const days = Math.floor((Date.now() - new Date(value).getTime()) / 86_400_000);
-  if (days < 60) return `${days} days ago`;
-  if (days < 365) return `${Math.round(days / 30)} months ago`;
+  if (days < 60) return t('upNext.daysAgo', { count: days });
+  if (days < 365) return t('upNext.monthsAgo', { count: Math.round(days / 30) });
   const years = Math.floor(days / 365);
-  return years === 1 ? 'a year ago' : `${years} years ago`;
+  return years === 1 ? t('upNext.aYearAgo') : t('upNext.yearsAgo', { count: years });
 }
 
 function episodeCode(item: CalendarEpisode): string {
   return `S${String(item.season_number).padStart(2, '0')}E${String(item.episode_number).padStart(2, '0')}`;
 }
 
-function airDateLabel(value: string): string {
-  if (value === localDateKey()) return 'Today';
-  return new Intl.DateTimeFormat('en-US', {
+function airDateLabel(t: Translate, tag: string, value: string): string {
+  if (value === localDateKey()) return t('calendar.bucketToday');
+  return new Intl.DateTimeFormat(tag, {
     month: 'short',
     day: 'numeric',
   }).format(new Date(`${value}T12:00:00`));
 }
 
 export function UpNextEpisodes() {
+  const t = useT();
   const upNext = useUpNextEpisodes();
   const setPlanned = useSetEpisodePlanned();
   const markWatched = useMarkCalendarEpisodeWatched();
@@ -58,8 +63,8 @@ export function UpNextEpisodes() {
   // Headings only earn their space when there is something to tell apart; with
   // a single group the list speaks for itself.
   const groups = [
-    { key: 'continuing', title: 'Continue watching', items: items.filter((item) => !isDormant(item)) },
-    { key: 'dormant', title: 'Pick back up', items: items.filter(isDormant) },
+    { key: 'continuing', title: t('upNext.continueWatching'), items: items.filter((item) => !isDormant(item)) },
+    { key: 'dormant', title: t('upNext.pickBackUp'), items: items.filter(isDormant) },
   ].filter((group) => group.items.length > 0);
   const showHeadings = groups.length > 1;
 
@@ -71,13 +76,13 @@ export function UpNextEpisodes() {
             className="h-5 w-5 text-emerald-600 dark:text-emerald-400"
             aria-hidden="true"
           />
-          Up Next
+          {t('upNext.title')}
         </h2>
         <Link
           to="/calendar"
           className="flex h-10 items-center gap-1 rounded-md px-2 text-sm font-medium text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--accent))] hover:text-[hsl(var(--foreground))]"
         >
-          Calendar
+          {t('nav.calendar')}
           <ChevronRight className="h-4 w-4" aria-hidden="true" />
         </Link>
       </div>
@@ -88,7 +93,7 @@ export function UpNextEpisodes() {
           className="mb-2 flex items-center gap-2 border-y border-[hsl(var(--destructive))]/40 py-3 text-sm text-[hsl(var(--destructive))]"
         >
           <AlertCircle className="h-4 w-4 shrink-0" aria-hidden="true" />
-          {getApiErrorMessage(actionError, 'Could not update this episode')}
+          {getApiErrorMessage(actionError, t('calendar.updateError'))}
         </div>
       )}
 
@@ -98,13 +103,13 @@ export function UpNextEpisodes() {
         <div className="flex min-h-24 items-center justify-between gap-3 border-y border-[hsl(var(--border))] py-4">
           <div className="flex items-center gap-2 text-sm text-[hsl(var(--destructive))]">
             <AlertCircle className="h-5 w-5" aria-hidden="true" />
-            Up Next unavailable
+            {t('upNext.unavailable')}
           </div>
           <button
             type="button"
             onClick={() => void upNext.refetch()}
-            aria-label="Retry Up Next"
-            title="Retry"
+            aria-label={t('upNext.retryAria')}
+            title={t('calendar.retry')}
             className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-[hsl(var(--border))] hover:bg-[hsl(var(--accent))]"
           >
             <RefreshCw className="h-4 w-4" aria-hidden="true" />
@@ -117,9 +122,9 @@ export function UpNextEpisodes() {
             aria-hidden="true"
           />
           <div>
-            <p className="text-sm font-semibold">You're caught up</p>
+            <p className="text-sm font-semibold">{t('upNext.caughtUp')}</p>
             <p className="text-xs text-[hsl(var(--muted-foreground))]">
-              New episodes from your library will appear here.
+              {t('upNext.caughtUpHint')}
             </p>
           </div>
         </div>
@@ -177,13 +182,15 @@ function UpNextRow({
   onPlan: () => void;
   onWatched: () => void;
 }) {
-  const episodeName = item.episode_name || `Episode ${item.episode_number}`;
+  const t = useT();
+  const tag = useLocaleStore((state) => state.locale) === 'ro' ? 'ro-RO' : 'en-US';
+  const episodeName = item.episode_name || t('media.episodeN', { number: item.episode_number });
 
   return (
     <article className="grid min-h-20 grid-cols-[5rem_minmax(0,1fr)] items-center gap-x-3 gap-y-2 py-3 sm:grid-cols-[6rem_minmax(0,1fr)_auto]">
       <Link
         to={`/episodes/${item.episode_id}`}
-        aria-label={`Open ${episodeName}`}
+        aria-label={t('upNext.open', { name: episodeName })}
         className="row-span-2 flex h-14 w-20 items-center justify-center overflow-hidden rounded bg-[hsl(var(--muted))] sm:row-span-1 sm:h-16 sm:w-24"
       >
         <img
@@ -213,9 +220,11 @@ function UpNextRow({
           {episodeName}
         </Link>
         <p className="mt-1 flex gap-2 text-[11px] text-[hsl(var(--muted-foreground))]">
-          <span>{airDateLabel(item.air_date)}</span>
+          <span>{airDateLabel(t, tag, item.air_date)}</span>
           {item.runtime_minutes != null && <span>{formatRuntime(item.runtime_minutes)}</span>}
-          {showLastWatched && <span>Watched {lastWatchedLabel(item.last_watched_at)}</span>}
+          {showLastWatched && (
+            <span>{t('upNext.watchedAgo', { when: lastWatchedLabel(t, item.last_watched_at) })}</span>
+          )}
         </p>
       </div>
       <div className="col-start-2 row-start-2 flex items-center gap-1 sm:col-start-3 sm:row-start-1">
@@ -223,10 +232,14 @@ function UpNextRow({
           type="button"
           aria-label={
             item.is_planned
-              ? `Remove ${episodeName} from Watch next`
-              : `Add ${episodeName} to Watch next`
+              ? t('calendar.removeFromWatchNext', { name: episodeName })
+              : t('calendar.addToWatchNext', { name: episodeName })
           }
-          title={item.is_planned ? 'Remove from Watch next' : 'Add to Watch next'}
+          title={
+            item.is_planned
+              ? t('calendar.removeFromWatchNextShort')
+              : t('calendar.addToWatchNextShort')
+          }
           disabled={planPending || watchedPending}
           onClick={onPlan}
           className={`flex h-10 w-10 items-center justify-center rounded-md border transition-colors disabled:opacity-50 ${
@@ -245,8 +258,8 @@ function UpNextRow({
         </button>
         <button
           type="button"
-          aria-label={`Mark ${episodeName} watched`}
-          title="Mark watched"
+          aria-label={t('calendar.markWatchedName', { name: episodeName })}
+          title={t('calendar.markWatched')}
           disabled={planPending || watchedPending}
           onClick={onWatched}
           className="flex h-10 w-10 items-center justify-center rounded-md border border-[hsl(var(--border))] transition-colors hover:border-emerald-500 hover:bg-emerald-500/10 hover:text-emerald-600 disabled:opacity-50 dark:hover:text-emerald-400"
@@ -263,12 +276,13 @@ function UpNextRow({
 }
 
 function UpNextSkeleton() {
+  const t = useT();
   return (
     <div
       role="status"
       className="animate-pulse divide-y divide-[hsl(var(--border))] border-y border-[hsl(var(--border))]"
     >
-      <span className="sr-only">Loading Up Next</span>
+      <span className="sr-only">{t('upNext.loading')}</span>
       {Array.from({ length: 3 }, (_, index) => (
         <div key={index} className="flex h-20 items-center gap-3 py-3" aria-hidden="true">
           <div className="h-14 w-20 rounded bg-[hsl(var(--muted))]" />

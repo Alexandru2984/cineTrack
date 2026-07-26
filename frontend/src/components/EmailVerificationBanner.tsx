@@ -3,8 +3,10 @@ import { useLocation } from 'react-router';
 import { MailWarning, X } from 'lucide-react';
 import { useResendVerification } from '@/hooks/useAuth';
 import { useAuthStore } from '@/store/auth';
+import { useT } from '@/hooks/useT';
 
 export function EmailVerificationBanner() {
+  const t = useT();
   const user = useAuthStore((s) => s.user);
   const location = useLocation();
   const [dismissed, setDismissed] = useState(false);
@@ -24,9 +26,12 @@ export function EmailVerificationBanner() {
         <MailWarning className="h-4 w-4 shrink-0 text-[hsl(var(--primary))]" aria-hidden="true" />
         <p className="min-w-0 flex-1">
           {resend.isSuccess ? (
-            <>Confirmation link sent to <span className="font-medium">{user.email}</span>. Check your inbox.</>
+            <>
+              {t('banner.linkSentPre')} <span className="font-medium">{user.email}</span>
+              {t('banner.linkSentPost')}
+            </>
           ) : (
-            <>Confirm your email to secure your account and password recovery.</>
+            <>{t('banner.confirmPrompt')}</>
           )}
         </p>
         <div className="flex items-center gap-2">
@@ -37,13 +42,13 @@ export function EmailVerificationBanner() {
               disabled={resend.isPending}
               className="rounded-md bg-[hsl(var(--primary))] px-3 py-1.5 text-xs font-medium text-white hover:opacity-90 disabled:opacity-50"
             >
-              {resend.isPending ? 'Sending…' : 'Resend link'}
+              {resend.isPending ? t('banner.sending') : t('banner.resendLink')}
             </button>
           )}
           <button
             type="button"
             onClick={() => setDismissed(true)}
-            aria-label="Dismiss"
+            aria-label={t('banner.dismiss')}
             className="rounded-md p-1 text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--muted))]"
           >
             <X className="h-4 w-4" aria-hidden="true" />
