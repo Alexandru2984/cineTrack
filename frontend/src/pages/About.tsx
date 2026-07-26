@@ -1,19 +1,21 @@
 import { Database, ExternalLink, Film } from 'lucide-react';
+import { useT } from '@/hooks/useT';
 
 export default function AboutPage() {
+  const t = useT();
   return (
     <div className="mx-auto w-full max-w-3xl px-4 py-8 sm:px-6 sm:py-12">
       <header className="border-b border-[hsl(var(--border))] pb-6">
         <h1 className="flex items-center gap-2 text-2xl font-bold sm:text-3xl">
           <Film className="h-7 w-7 text-[hsl(var(--primary))]" aria-hidden="true" />
-          About Văzute
+          {t('about.title')}
         </h1>
       </header>
 
       <section className="py-8" aria-labelledby="data-sources-heading">
         <h2 id="data-sources-heading" className="flex items-center gap-2 text-lg font-semibold">
           <Database className="h-5 w-5 text-cyan-600 dark:text-cyan-400" aria-hidden="true" />
-          Data sources
+          {t('about.dataSources')}
         </h2>
 
         <div className="mt-5 divide-y divide-[hsl(var(--border))] border-y border-[hsl(var(--border))]">
@@ -22,7 +24,7 @@ export default function AboutPage() {
               href="https://www.themoviedb.org"
               target="_blank"
               rel="noreferrer"
-              aria-label="The Movie Database"
+              aria-label={t('about.tmdbAria')}
               className="shrink-0 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--ring))]"
             >
               <img
@@ -34,9 +36,9 @@ export default function AboutPage() {
               />
             </a>
             <div className="space-y-2 text-sm leading-6 text-[hsl(var(--muted-foreground))]">
-              <p>Movie and TV metadata and images are provided by The Movie Database.</p>
+              <p>{t('about.tmdbBody')}</p>
               <p className="text-[hsl(var(--foreground))]">
-                This product uses the TMDB API but is not endorsed or certified by TMDB.
+                {t('about.tmdbDisclaimer')}
               </p>
               <a
                 href="https://www.themoviedb.org"
@@ -60,7 +62,7 @@ export default function AboutPage() {
               JustWatch
             </a>
             <p className="text-sm leading-6 text-[hsl(var(--muted-foreground))]">
-              Streaming availability data, when displayed, is provided by JustWatch.
+              {t('about.justwatchBody')}
             </p>
           </div>
         </div>

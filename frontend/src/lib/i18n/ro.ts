@@ -423,6 +423,37 @@ export const ro: Dictionary = {
     request: 'Cere',
     pageN: 'Pagina {page}',
   },
+  about: {
+    title: 'Despre Văzute',
+    dataSources: 'Surse de date',
+    tmdbBody: 'Metadatele și imaginile despre filme și seriale sunt oferite de The Movie Database.',
+    tmdbDisclaimer: 'Acest produs folosește API-ul TMDB, dar nu este aprobat sau certificat de TMDB.',
+    tmdbAria: 'The Movie Database',
+    justwatchBody:
+      'Datele despre disponibilitatea în streaming, când sunt afișate, sunt oferite de JustWatch.',
+  },
+  accountDeletion: {
+    badge: 'Control cont Văzute',
+    title: 'Șterge-ți contul Văzute',
+    intro: 'Ștergerea contului este permanentă și elimină contul și datele personale asociate.',
+    webTitle: 'Șterge în siguranță pe web',
+    webBody:
+      'Autentifică-te, deschide secțiunea evidențiată Șterge contul, introdu parola curentă și confirmă ștergerea permanentă.',
+    continueButton: 'Continuă către ștergerea contului',
+    mobileTitle: 'Șterge din aplicația mobilă',
+    mobileBody:
+      'Deschide Profil, alege Setări cont, apoi Șterge contul meu. Aplicația cere parola curentă și o confirmare finală distructivă.',
+    deletedTitle: 'Ce se șterge',
+    deletedBody:
+      'Profilul activ, emailul, credențialele, sesiunile, avatarul, biblioteca, istoricul de vizionare, notele, recenziile, listele personalizate, planurile de episoade, importurile, urmăririle și notificările sunt eliminate. Backupurile de recuperare în caz de dezastru expiră în 14 zile. Metadatele partajate despre filme și seriale care nu sunt legate de cont pot rămâne în cache.',
+    helpTitle: 'Nu poți accesa contul?',
+    helpBodyPre: 'Trimite o cerere de ștergere de la adresa de email a contului către',
+    helpBodyPost:
+      '. Include numele de utilizator, dar nu trimite niciodată parola. Identitatea ar putea necesita verificare înainte de ștergere.',
+    retentionPre: 'Detalii despre procesare și păstrare sunt disponibile în',
+    privacyLink: 'politica de confidențialitate',
+    retentionPost: '.',
+  },
   pwa: {
     offline: 'Ești offline',
     updateReady: 'O versiune nouă este gata',

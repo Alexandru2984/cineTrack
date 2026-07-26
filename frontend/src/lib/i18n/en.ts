@@ -421,6 +421,36 @@ export const en = {
     request: 'Request',
     pageN: 'Page {page}',
   },
+  about: {
+    title: 'About Văzute',
+    dataSources: 'Data sources',
+    tmdbBody: 'Movie and TV metadata and images are provided by The Movie Database.',
+    tmdbDisclaimer: 'This product uses the TMDB API but is not endorsed or certified by TMDB.',
+    tmdbAria: 'The Movie Database',
+    justwatchBody: 'Streaming availability data, when displayed, is provided by JustWatch.',
+  },
+  accountDeletion: {
+    badge: 'Văzute account control',
+    title: 'Delete your Văzute account',
+    intro: 'Account deletion is permanent and removes the account and its associated personal data.',
+    webTitle: 'Delete securely on the web',
+    webBody:
+      'Sign in, open the highlighted Delete account section, enter the current password, and confirm the permanent deletion.',
+    continueButton: 'Continue to account deletion',
+    mobileTitle: 'Delete in the mobile app',
+    mobileBody:
+      'Open Profile, choose Account settings, then Delete my account. The app requires the current password and a final destructive confirmation.',
+    deletedTitle: 'What is deleted',
+    deletedBody:
+      'The live profile, email, credentials, sessions, avatar, library, watch history, ratings, reviews, custom lists, episode plans, imports, follows, and notifications are removed. Disaster-recovery backups expire within 14 days. Shared movie and television metadata that is not linked to the account may remain cached.',
+    helpTitle: 'Cannot access the account?',
+    helpBodyPre: 'Send a deletion request from the account email address to',
+    helpBodyPost:
+      '. Include the username, but never send a password. Identity may need to be verified before deletion.',
+    retentionPre: 'Details about processing and retention are available in the',
+    privacyLink: 'privacy policy',
+    retentionPost: '.',
+  },
   pwa: {
     offline: 'You are offline',
     updateReady: 'A new version is ready',
