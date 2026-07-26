@@ -2,7 +2,18 @@ import { useState } from 'react';
 import { Tv } from 'lucide-react';
 import { useWatchProviders } from '@/hooks/useMedia';
 import { getLogoUrl } from '@/lib/utils';
+import { useT } from '@/hooks/useT';
+import { useLocaleStore } from '@/store/locale';
 import type { WatchProviderEntry } from '@/types';
+
+/** Localized country display name from an ISO code (falls back to the code). */
+function countryName(code: string, tag: string): string {
+  try {
+    return new Intl.DisplayNames([tag], { type: 'region' }).of(code) ?? code;
+  } catch {
+    return code;
+  }
+}
 
 const REGIONS: [string, string][] = [
   ['RO', 'Romania'],
@@ -71,6 +82,8 @@ function ProviderRow({ label, providers }: { label: string; providers: WatchProv
 }
 
 export function WatchProviders({ tmdbId, mediaType }: { tmdbId: number; mediaType: string }) {
+  const t = useT();
+  const tag = useLocaleStore((state) => state.locale) === 'ro' ? 'ro-RO' : 'en-US';
   const [region, setRegion] = useState<string | undefined>(undefined);
   const { data, isLoading } = useWatchProviders(String(tmdbId), mediaType, region);
 
@@ -93,18 +106,18 @@ export function WatchProviders({ tmdbId, mediaType }: { tmdbId: number; mediaTyp
     <section className="mt-8 rounded-lg border border-[hsl(var(--border))] p-4 sm:p-6">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <h2 className="flex items-center gap-2 text-lg font-semibold">
-          <Tv className="h-5 w-5 text-[hsl(var(--primary))]" aria-hidden="true" /> Where to watch
+          <Tv className="h-5 w-5 text-[hsl(var(--primary))]" aria-hidden="true" /> {t('watchProviders.title')}
         </h2>
         <label className="flex items-center gap-2 text-sm">
-          <span className="text-[hsl(var(--muted-foreground))]">Region</span>
+          <span className="text-[hsl(var(--muted-foreground))]">{t('watchProviders.region')}</span>
           <select
             value={activeRegion}
             onChange={(e) => setRegion(e.target.value)}
             className="rounded-md border border-[hsl(var(--input))] bg-transparent px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-[hsl(var(--ring))]"
           >
-            {options.map(([code, name]) => (
+            {options.map(([code]) => (
               <option key={code} value={code}>
-                {name}
+                {countryName(code, tag)}
               </option>
             ))}
           </select>
@@ -113,19 +126,19 @@ export function WatchProviders({ tmdbId, mediaType }: { tmdbId: number; mediaTyp
 
       {hasAny ? (
         <div className="space-y-3">
-          <ProviderRow label="Stream" providers={stream} />
-          <ProviderRow label="Rent" providers={rent} />
-          <ProviderRow label="Buy" providers={buy} />
+          <ProviderRow label={t('watchProviders.stream')} providers={stream} />
+          <ProviderRow label={t('watchProviders.rent')} providers={rent} />
+          <ProviderRow label={t('watchProviders.buy')} providers={buy} />
         </div>
       ) : (
         <p className="text-sm text-[hsl(var(--muted-foreground))]">
-          No streaming, rental, or purchase options are listed for {activeRegion}.
+          {t('watchProviders.none', { region: activeRegion })}
         </p>
       )}
 
       {/* JustWatch attribution is required wherever this data is shown. */}
       <p className="mt-4 border-t border-[hsl(var(--border))] pt-3 text-xs text-[hsl(var(--muted-foreground))]">
-        Streaming availability data provided by{' '}
+        {t('watchProviders.attributionPre')}{' '}
         <a
           href={safeWatchProviderLink(data.link)}
           target="_blank"

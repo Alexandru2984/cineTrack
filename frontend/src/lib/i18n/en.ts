@@ -132,6 +132,7 @@ export const en = {
     close: 'Close',
     save: 'Save',
     edit: 'Edit',
+    loading: 'Loading',
   },
   status: {
     watching: 'Watching',
@@ -419,6 +420,20 @@ export const en = {
     cancelRequest: 'Cancel request',
     request: 'Request',
     pageN: 'Page {page}',
+  },
+  mediaCard: {
+    unknown: 'Unknown',
+    done: 'Done',
+    addedAs: '✓ Added as {status}',
+  },
+  watchProviders: {
+    title: 'Where to watch',
+    region: 'Region',
+    stream: 'Stream',
+    rent: 'Rent',
+    buy: 'Buy',
+    none: 'No streaming, rental, or purchase options are listed for {region}.',
+    attributionPre: 'Streaming availability data provided by',
   },
   reactions: {
     title: 'How it landed',

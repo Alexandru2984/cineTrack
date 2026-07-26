@@ -4,6 +4,7 @@ import type { TmdbSearchResult } from '@/types';
 import { Star, Plus, Eye, BookmarkPlus } from 'lucide-react';
 import { useCreateTracking } from '@/hooks/useTracking';
 import { useState } from 'react';
+import { useT } from '@/hooks/useT';
 
 interface Props {
   item: TmdbSearchResult;
@@ -11,7 +12,8 @@ interface Props {
 }
 
 export function MediaCard({ item, showQuickAdd = false }: Props) {
-  const title = item.title || item.name || 'Unknown';
+  const t = useT();
+  const title = item.title || item.name || t('mediaCard.unknown');
   const date = item.release_date || item.first_air_date;
   const type = item.media_type || 'movie';
   const year = date ? new Date(date).getFullYear() : '';
@@ -45,8 +47,8 @@ export function MediaCard({ item, showQuickAdd = false }: Props) {
             {item.vote_average.toFixed(1)}
           </div>
         )}
-        <div className="absolute top-2 left-2 rounded-full bg-[hsl(var(--primary))]/90 px-2 py-0.5 text-xs text-white capitalize">
-          {type === 'tv' ? 'TV' : 'Movie'}
+        <div className="absolute top-2 left-2 rounded-full bg-[hsl(var(--primary))]/90 px-2 py-0.5 text-xs text-white">
+          {type === 'tv' ? t('mediaType.tv') : t('mediaType.movie')}
         </div>
         {showQuickAdd && !added && (
           <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-2 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -54,21 +56,21 @@ export function MediaCard({ item, showQuickAdd = false }: Props) {
               <button
                 onClick={(e) => handleQuickAdd(e, 'watching')}
                 className="flex items-center gap-1 rounded-full bg-[hsl(var(--primary))] px-2 py-1 text-xs text-white hover:opacity-90"
-                title="Watching"
+                title={t('status.watching')}
               >
-                <Eye className="h-3 w-3" /> Watching
+                <Eye className="h-3 w-3" /> {t('status.watching')}
               </button>
               <button
                 onClick={(e) => handleQuickAdd(e, 'completed')}
                 className="flex items-center gap-1 rounded-full bg-green-600 px-2 py-1 text-xs text-white hover:opacity-90"
-                title="Completed"
+                title={t('status.completed')}
               >
-                <Plus className="h-3 w-3" /> Done
+                <Plus className="h-3 w-3" /> {t('mediaCard.done')}
               </button>
               <button
                 onClick={(e) => handleQuickAdd(e, 'plan_to_watch')}
                 className="flex items-center gap-1 rounded-full bg-blue-600 px-2 py-1 text-xs text-white hover:opacity-90"
-                title="Plan to Watch"
+                title={t('status.plan_to_watch')}
               >
                 <BookmarkPlus className="h-3 w-3" />
               </button>
@@ -77,7 +79,7 @@ export function MediaCard({ item, showQuickAdd = false }: Props) {
         )}
         {added && (
           <div className="absolute bottom-0 left-0 right-0 bg-green-600/90 p-2 text-center text-xs text-white font-medium">
-            ✓ Added as {added.replace('_', ' ')}
+            {t('mediaCard.addedAs', { status: t(`status.${added}`) })}
           </div>
         )}
       </div>

@@ -134,6 +134,7 @@ export const ro: Dictionary = {
     close: 'Închide',
     save: 'Salvează',
     edit: 'Editează',
+    loading: 'Se încarcă',
   },
   status: {
     watching: 'Se vizionează',
@@ -421,6 +422,20 @@ export const ro: Dictionary = {
     cancelRequest: 'Anulează cererea',
     request: 'Cere',
     pageN: 'Pagina {page}',
+  },
+  mediaCard: {
+    unknown: 'Necunoscut',
+    done: 'Gata',
+    addedAs: '✓ Adăugat ca {status}',
+  },
+  watchProviders: {
+    title: 'Unde vezi',
+    region: 'Regiune',
+    stream: 'Streaming',
+    rent: 'Închiriere',
+    buy: 'Cumpărare',
+    none: 'Nicio opțiune de streaming, închiriere sau cumpărare listată pentru {region}.',
+    attributionPre: 'Date despre disponibilitate oferite de',
   },
   reactions: {
     title: 'Cum a picat',
