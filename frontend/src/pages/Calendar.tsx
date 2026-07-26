@@ -25,7 +25,26 @@ import {
 } from '@/hooks/useCalendar';
 import { getApiErrorMessage } from '@/lib/api';
 import { formatRuntime, getPosterUrl } from '@/lib/utils';
+import { useT } from '@/hooks/useT';
+import { useLocaleStore } from '@/store/locale';
+import type { Locale } from '@/lib/i18n';
 import type { CalendarEpisode, UpcomingCalendarItem } from '@/types';
+
+type Translate = (key: string, params?: Record<string, string | number>) => string;
+
+/** BCP 47 tag for Intl formatting from the app locale. */
+function localeTag(locale: Locale): string {
+  return locale === 'ro' ? 'ro-RO' : 'en-US';
+}
+
+/** Localized country display name from an ISO code (falls back to the code). */
+function countryName(code: string, tag: string): string {
+  try {
+    return new Intl.DisplayNames([tag], { type: 'region' }).of(code) ?? code;
+  } catch {
+    return code;
+  }
+}
 
 type CalendarView = 'new' | 'upcoming';
 type UpcomingFilter = 'all' | 'tv' | 'movie';
@@ -47,21 +66,12 @@ const COUNTRY_OPTIONS = [
   ['KR', 'South Korea'],
 ] as const;
 
-const RELEASE_TYPE_LABELS: Record<number, string> = {
-  1: 'Premiere',
-  2: 'Limited cinema',
-  3: 'Cinema',
-  4: 'Digital',
-  5: 'Physical',
-  6: 'TV',
-};
-
 function parseCalendarDate(value: string): Date {
   return new Date(`${value}T12:00:00`);
 }
 
-function formatCalendarDate(value: string, includeWeekday = true): string {
-  return new Intl.DateTimeFormat('en-US', {
+function formatCalendarDate(value: string, includeWeekday = true, tag = 'en-US'): string {
+  return new Intl.DateTimeFormat(tag, {
     ...(includeWeekday && { weekday: 'long' }),
     month: 'long',
     day: 'numeric',
@@ -77,19 +87,21 @@ function episodeCode(season: number, episode: number): string {
   return `S${String(season).padStart(2, '0')}E${String(episode).padStart(2, '0')}`;
 }
 
-function newEpisodeBucket(airDate: string, today: string): string {
-  if (airDate === today) return 'Today';
+function newEpisodeBucket(airDate: string, today: string): 'today' | 'thisWeek' | 'earlier' {
+  if (airDate === today) return 'today';
   const daysAgo = Math.round(
     (parseCalendarDate(today).getTime() - parseCalendarDate(airDate).getTime()) / 86_400_000,
   );
-  return daysAgo <= 7 ? 'This week' : 'Earlier';
+  return daysAgo <= 7 ? 'thisWeek' : 'earlier';
 }
 
-function actionError(error: unknown): string | null {
-  return error ? getApiErrorMessage(error, 'Could not update this episode') : null;
+function actionError(t: Translate, error: unknown): string | null {
+  return error ? getApiErrorMessage(error, t('calendar.updateError')) : null;
 }
 
 export default function CalendarPage() {
+  const t = useT();
+  const tag = localeTag(useLocaleStore((state) => state.locale));
   const [view, setView] = useState<CalendarView>('new');
   const [upcomingFilter, setUpcomingFilter] = useState<UpcomingFilter>('all');
   const [includeSpecials, setIncludeSpecials] = useState(false);
@@ -126,7 +138,7 @@ export default function CalendarPage() {
   const fetchNextPage = activeQuery.fetchNextPage;
   const hasNextPage = activeQuery.hasNextPage;
   const isFetchingNextPage = activeQuery.isFetchingNextPage;
-  const mutationError = actionError(setPlanned.error) ?? actionError(markWatched.error);
+  const mutationError = actionError(t, setPlanned.error) ?? actionError(t, markWatched.error);
   const loadMoreRef = useRef<HTMLDivElement>(null);
   const countryCode = updatePreferences.variables
     ?? preferences.data?.country_code
@@ -167,20 +179,22 @@ export default function CalendarPage() {
         <div>
           <h1 className="flex items-center gap-2 text-2xl font-bold sm:text-3xl">
             <CalendarDays className="h-6 w-6 text-cyan-600 dark:text-cyan-400" aria-hidden="true" />
-            Calendar
+            {t('nav.calendar')}
           </h1>
           {summary.data?.last_synced_at && (
             <p className="mt-1 flex items-center gap-1.5 text-xs text-[hsl(var(--muted-foreground))]">
               <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
-              Updated {new Date(summary.data.last_synced_at).toLocaleString()}
+              {t('calendar.updated', {
+                when: new Date(summary.data.last_synced_at).toLocaleString(tag),
+              })}
             </p>
           )}
         </div>
 
         <label className="flex items-center gap-2 text-sm">
-          <span className="text-[hsl(var(--muted-foreground))]">Region</span>
+          <span className="text-[hsl(var(--muted-foreground))]">{t('calendar.region')}</span>
           <select
-            aria-label="Release region"
+            aria-label={t('calendar.releaseRegion')}
             value={countryCode}
             disabled={preferences.isLoading || updatePreferences.isPending}
             onChange={(event) => updatePreferences.mutate(event.target.value)}
@@ -189,8 +203,8 @@ export default function CalendarPage() {
             {!COUNTRY_OPTIONS.some(([code]) => code === countryCode) && (
               <option value={countryCode}>{countryCode}</option>
             )}
-            {COUNTRY_OPTIONS.map(([code, name]) => (
-              <option key={code} value={code}>{name}</option>
+            {COUNTRY_OPTIONS.map(([code]) => (
+              <option key={code} value={code}>{countryName(code, tag)}</option>
             ))}
           </select>
         </label>
@@ -200,7 +214,7 @@ export default function CalendarPage() {
         <div
           className="inline-flex h-10 w-full overflow-hidden rounded-md border border-[hsl(var(--border))] sm:w-auto"
           role="tablist"
-          aria-label="Calendar view"
+          aria-label={t('calendar.viewAria')}
         >
           <button
             type="button"
@@ -213,7 +227,7 @@ export default function CalendarPage() {
                 : 'hover:bg-[hsl(var(--accent))]'
             }`}
           >
-            New episodes
+            {t('calendar.newEpisodes')}
             {(summary.data?.new_count ?? 0) > 0 && (
               <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-cyan-600 px-1 text-[11px] font-semibold text-white">
                 {summary.data!.new_count > 99 ? '99+' : summary.data!.new_count}
@@ -231,7 +245,7 @@ export default function CalendarPage() {
                 : 'hover:bg-[hsl(var(--accent))]'
             }`}
           >
-            Upcoming
+            {t('calendar.upcoming')}
           </button>
         </div>
 
@@ -239,7 +253,7 @@ export default function CalendarPage() {
           {view === 'upcoming' && (
             <div
               className="inline-flex h-9 overflow-hidden rounded-md border border-[hsl(var(--border))]"
-              aria-label="Upcoming media type"
+              aria-label={t('calendar.upcomingType')}
             >
               {(['all', 'tv', 'movie'] as const).map((filter) => (
                 <button
@@ -247,13 +261,17 @@ export default function CalendarPage() {
                   type="button"
                   aria-pressed={upcomingFilter === filter}
                   onClick={() => setUpcomingFilter(filter)}
-                  className={`border-r border-[hsl(var(--border))] px-3 text-xs font-medium capitalize last:border-r-0 ${
+                  className={`border-r border-[hsl(var(--border))] px-3 text-xs font-medium last:border-r-0 ${
                     upcomingFilter === filter
                       ? 'bg-[hsl(var(--accent))] text-[hsl(var(--foreground))]'
                       : 'text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))]'
                   }`}
                 >
-                  {filter === 'tv' ? 'Shows' : filter === 'movie' ? 'Movies' : 'All'}
+                  {filter === 'tv'
+                    ? t('calendar.filterShows')
+                    : filter === 'movie'
+                      ? t('calendar.filterMovies')
+                      : t('calendar.filterAll')}
                 </button>
               ))}
             </div>
@@ -265,7 +283,7 @@ export default function CalendarPage() {
               onChange={(event) => setIncludeSpecials(event.target.checked)}
               className="h-4 w-4 accent-cyan-600"
             />
-            Specials
+            {t('calendar.specials')}
           </label>
         </div>
       </div>
@@ -318,7 +336,7 @@ export default function CalendarPage() {
             {isFetchingNextPage
               ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
               : <ChevronDown className="h-4 w-4" aria-hidden="true" />}
-            {view === 'new' ? 'Load older episodes' : 'Load later releases'}
+            {view === 'new' ? t('calendar.loadOlder') : t('calendar.loadLater')}
           </button>
         </div>
       )}
@@ -339,6 +357,7 @@ function NewEpisodeList({
   planPendingId?: string;
   watchedPendingId?: string;
 }) {
+  const t = useT();
   const today = localDateKey();
   const planned = items.filter((item) => item.is_planned);
   const remaining = items.filter((item) => !item.is_planned);
@@ -351,7 +370,7 @@ function NewEpisodeList({
   return (
     <div className="space-y-7">
       {planned.length > 0 && (
-        <CalendarGroup title="Watch next" icon={<BookmarkCheck className="h-4 w-4 text-amber-500" />}>
+        <CalendarGroup title={t('calendar.watchNext')} icon={<BookmarkCheck className="h-4 w-4 text-amber-500" />}>
           {planned.map((item) => (
             <EpisodeRow
               key={item.episode_id}
@@ -364,8 +383,11 @@ function NewEpisodeList({
           ))}
         </CalendarGroup>
       )}
-      {Array.from(groups.entries()).map(([title, groupItems]) => (
-        <CalendarGroup key={title} title={title}>
+      {Array.from(groups.entries()).map(([bucketKey, groupItems]) => (
+        <CalendarGroup
+          key={bucketKey}
+          title={t(`calendar.bucket${bucketKey.charAt(0).toUpperCase()}${bucketKey.slice(1)}`)}
+        >
           {groupItems.map((item) => (
             <EpisodeRow
               key={item.episode_id}
@@ -391,6 +413,7 @@ function UpcomingList({
   onPlan: (item: UpcomingCalendarItem) => void;
   planPendingId?: string;
 }) {
+  const tag = localeTag(useLocaleStore((state) => state.locale));
   const groups = new Map<string, UpcomingCalendarItem[]>();
   for (const item of items) {
     groups.set(item.release_date, [...(groups.get(item.release_date) ?? []), item]);
@@ -399,7 +422,7 @@ function UpcomingList({
   return (
     <div className="space-y-7">
       {Array.from(groups.entries()).map(([date, groupItems]) => (
-        <CalendarGroup key={date} title={formatCalendarDate(date)}>
+        <CalendarGroup key={date} title={formatCalendarDate(date, true, tag)}>
           {groupItems.map((item) =>
             item.item_kind === 'episode' ? (
               <UpcomingEpisodeRow
@@ -456,6 +479,9 @@ function EpisodeRow({
   planPending: boolean;
   watchedPending: boolean;
 }) {
+  const t = useT();
+  const tag = localeTag(useLocaleStore((state) => state.locale));
+  const episodeName = item.episode_name || t('calendar.episodeN', { number: item.episode_number });
   return (
     <article className="flex min-h-24 items-center gap-3 py-3 sm:gap-4">
       <EpisodeImage stillPath={item.still_path} posterPath={item.poster_path} title={item.title} />
@@ -473,15 +499,15 @@ function EpisodeRow({
           <span className="mr-2 font-mono text-xs text-[hsl(var(--muted-foreground))]">
             {episodeCode(item.season_number, item.episode_number)}
           </span>
-          {item.episode_name || `Episode ${item.episode_number}`}
+          {episodeName}
         </Link>
         <div className="mt-1 flex flex-wrap gap-x-3 text-xs text-[hsl(var(--muted-foreground))]">
-          <span>{formatCalendarDate(item.air_date, false)}</span>
+          <span>{formatCalendarDate(item.air_date, false, tag)}</span>
           {item.runtime_minutes != null && <span>{formatRuntime(item.runtime_minutes)}</span>}
         </div>
       </div>
       <EpisodeActions
-        episodeName={item.episode_name || `Episode ${item.episode_number}`}
+        episodeName={episodeName}
         planned={item.is_planned}
         onPlan={onPlan}
         onWatched={onWatched}
@@ -501,7 +527,9 @@ function UpcomingEpisodeRow({
   onPlan: () => void;
   planPending: boolean;
 }) {
-  const episodeName = item.episode_name || `Episode ${item.episode_number}`;
+  const t = useT();
+  const episodeName =
+    item.episode_name || t('calendar.episodeN', { number: item.episode_number ?? 0 });
   return (
     <article className="flex min-h-24 items-center gap-3 py-3 sm:gap-4">
       <EpisodeImage stillPath={item.still_path} posterPath={item.poster_path} title={item.title} />
@@ -524,8 +552,8 @@ function UpcomingEpisodeRow({
       </div>
       <button
         type="button"
-        aria-label={item.is_planned ? `Remove ${episodeName} from Watch next` : `Add ${episodeName} to Watch next`}
-        title={item.is_planned ? 'Remove from Watch next' : 'Add to Watch next'}
+        aria-label={item.is_planned ? t('calendar.removeFromWatchNext', { name: episodeName }) : t('calendar.addToWatchNext', { name: episodeName })}
+        title={item.is_planned ? t('calendar.removeFromWatchNextShort') : t('calendar.addToWatchNextShort')}
         disabled={planPending}
         onClick={onPlan}
         className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-md border transition-colors disabled:opacity-50 ${
@@ -545,6 +573,11 @@ function UpcomingEpisodeRow({
 }
 
 function MovieReleaseRow({ item }: { item: UpcomingCalendarItem }) {
+  const t = useT();
+  const releaseLabel =
+    item.release_type != null && item.release_type >= 1 && item.release_type <= 6
+      ? t(`calendar.releaseType${item.release_type}`)
+      : t('calendar.release');
   return (
     <article className="flex min-h-24 items-center gap-3 py-3 sm:gap-4">
       <img
@@ -562,7 +595,7 @@ function MovieReleaseRow({ item }: { item: UpcomingCalendarItem }) {
         </Link>
         <div className="mt-1 flex items-center gap-2 text-xs text-[hsl(var(--muted-foreground))]">
           <Film className="h-3.5 w-3.5" aria-hidden="true" />
-          {item.release_type != null ? RELEASE_TYPE_LABELS[item.release_type] ?? 'Release' : 'Release'}
+          {releaseLabel}
         </div>
       </div>
     </article>
@@ -606,12 +639,13 @@ function EpisodeActions({
   planPending: boolean;
   watchedPending: boolean;
 }) {
+  const t = useT();
   return (
     <div className="flex shrink-0 items-center gap-2">
       <button
         type="button"
-        aria-label={planned ? `Remove ${episodeName} from Watch next` : `Add ${episodeName} to Watch next`}
-        title={planned ? 'Remove from Watch next' : 'Add to Watch next'}
+        aria-label={planned ? t('calendar.removeFromWatchNext', { name: episodeName }) : t('calendar.addToWatchNext', { name: episodeName })}
+        title={planned ? t('calendar.removeFromWatchNextShort') : t('calendar.addToWatchNextShort')}
         disabled={planPending || watchedPending}
         onClick={onPlan}
         className={`flex h-10 w-10 items-center justify-center rounded-md border transition-colors disabled:opacity-50 ${
@@ -628,8 +662,8 @@ function EpisodeActions({
       </button>
       <button
         type="button"
-        aria-label={`Mark ${episodeName} watched`}
-        title="Mark watched"
+        aria-label={t('calendar.markWatchedName', { name: episodeName })}
+        title={t('calendar.markWatched')}
         disabled={planPending || watchedPending}
         onClick={onWatched}
         className="flex h-10 w-10 items-center justify-center rounded-md border border-[hsl(var(--border))] transition-colors hover:border-emerald-500 hover:bg-emerald-500/10 hover:text-emerald-600 disabled:opacity-50 dark:hover:text-emerald-400"
@@ -643,9 +677,10 @@ function EpisodeActions({
 }
 
 function CalendarSkeleton() {
+  const t = useT();
   return (
     <div className="animate-pulse divide-y divide-[hsl(var(--border))] border-y border-[hsl(var(--border))]" role="status">
-      <span className="sr-only">Loading calendar</span>
+      <span className="sr-only">{t('calendar.loading')}</span>
       {Array.from({ length: 5 }, (_, index) => (
         <div key={index} className="flex h-24 items-center gap-4 py-3" aria-hidden="true">
           <div className="h-16 w-24 rounded bg-[hsl(var(--muted))] sm:h-20 sm:w-32" />
@@ -661,17 +696,18 @@ function CalendarSkeleton() {
 }
 
 function CalendarError({ onRetry }: { onRetry: () => void }) {
+  const t = useT();
   return (
     <div className="flex items-center justify-between gap-4 border-y border-[hsl(var(--border))] py-6">
       <div className="flex items-center gap-3 text-sm text-[hsl(var(--destructive))]">
         <AlertCircle className="h-5 w-5" aria-hidden="true" />
-        Calendar unavailable
+        {t('calendar.unavailable')}
       </div>
       <button
         type="button"
         onClick={onRetry}
-        title="Retry"
-        aria-label="Retry calendar"
+        title={t('calendar.retry')}
+        aria-label={t('calendar.retryAria')}
         className="flex h-10 w-10 items-center justify-center rounded-md border border-[hsl(var(--border))] hover:bg-[hsl(var(--accent))]"
       >
         <RefreshCw className="h-4 w-4" />
@@ -681,13 +717,14 @@ function CalendarError({ onRetry }: { onRetry: () => void }) {
 }
 
 function CalendarEmpty({ view }: { view: CalendarView }) {
+  const t = useT();
   return (
     <div className="flex min-h-56 flex-col items-center justify-center border-y border-[hsl(var(--border))] text-center text-[hsl(var(--muted-foreground))]">
       {view === 'new'
         ? <Tv className="mb-3 h-7 w-7" aria-hidden="true" />
         : <Clock3 className="mb-3 h-7 w-7" aria-hidden="true" />}
       <p className="text-sm font-medium text-[hsl(var(--foreground))]">
-        {view === 'new' ? 'No new episodes' : 'Nothing scheduled'}
+        {view === 'new' ? t('calendar.emptyNew') : t('calendar.emptyUpcoming')}
       </p>
     </div>
   );
