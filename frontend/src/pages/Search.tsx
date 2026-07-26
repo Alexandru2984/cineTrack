@@ -7,10 +7,12 @@ import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { useSearch } from '@/hooks/useMedia';
 import { useUserSearch } from '@/hooks/useSocial';
 import { getApiErrorMessage } from '@/lib/api';
+import { useT } from '@/hooks/useT';
 
 type SearchMode = 'media' | 'people';
 
 export default function SearchPage() {
+  const t = useT();
   const [query, setQuery] = useState('');
   const [type, setType] = useState<string>('');
   const [mode, setMode] = useState<SearchMode>('media');
@@ -35,11 +37,11 @@ export default function SearchPage() {
 
   return (
     <div className="mx-auto max-w-7xl space-y-6 px-4 py-6 sm:py-8">
-      <h1 className="text-2xl font-bold sm:text-3xl">Search</h1>
+      <h1 className="text-2xl font-bold sm:text-3xl">{t('search.title')}</h1>
 
       <div
         role="tablist"
-        aria-label="Search category"
+        aria-label={t('search.category')}
         className="inline-flex rounded-md border border-[hsl(var(--border))] p-1"
       >
         <button
@@ -53,7 +55,7 @@ export default function SearchPage() {
               : 'text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))]'
           }`}
         >
-          <Clapperboard className="h-4 w-4" aria-hidden="true" /> Movies &amp; TV
+          <Clapperboard className="h-4 w-4" aria-hidden="true" /> {t('search.moviesAndTv')}
         </button>
         <button
           type="button"
@@ -66,7 +68,7 @@ export default function SearchPage() {
               : 'text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))]'
           }`}
         >
-          <Users className="h-4 w-4" aria-hidden="true" /> People
+          <Users className="h-4 w-4" aria-hidden="true" /> {t('search.people')}
         </button>
       </div>
 
@@ -78,7 +80,7 @@ export default function SearchPage() {
           />
           <input
             type="search"
-            aria-label={mode === 'media' ? 'Search movies and TV shows' : 'Search people'}
+            aria-label={mode === 'media' ? t('search.searchMoviesAria') : t('search.searchPeopleAria')}
             autoComplete="off"
             maxLength={mode === 'media' ? 200 : 50}
             value={query}
@@ -86,13 +88,17 @@ export default function SearchPage() {
               setQuery(event.target.value);
               setPage(1);
             }}
-            placeholder={mode === 'media' ? 'Search movies & TV shows...' : 'Search usernames...'}
+            placeholder={
+              mode === 'media'
+                ? t('search.searchMoviesPlaceholder')
+                : t('search.searchUsernamesPlaceholder')
+            }
             className="w-full rounded-md border border-[hsl(var(--input))] bg-transparent py-2 pl-10 pr-3 text-sm focus:outline-none focus:ring-2 focus:ring-[hsl(var(--ring))]"
           />
         </div>
         {mode === 'media' && (
           <select
-            aria-label="Media type"
+            aria-label={t('search.mediaType')}
             value={type}
             onChange={(event) => {
               setType(event.target.value);
@@ -100,16 +106,16 @@ export default function SearchPage() {
             }}
             className="rounded-md border border-[hsl(var(--input))] bg-transparent px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[hsl(var(--ring))]"
           >
-            <option value="">All</option>
-            <option value="movie">Movies</option>
-            <option value="tv">TV Shows</option>
+            <option value="">{t('search.all')}</option>
+            <option value="movie">{t('search.movies')}</option>
+            <option value="tv">{t('search.tvShows')}</option>
           </select>
         )}
       </div>
 
       {peopleValidationError && (
         <p className="text-sm text-[hsl(var(--destructive))]" role="alert">
-          Use 2-50 letters, numbers, underscores, or hyphens
+          {t('search.usernameValidation')}
         </p>
       )}
 
@@ -126,14 +132,14 @@ export default function SearchPage() {
       {mode === 'media' && mediaSearch.isLoading && <LoadingSpinner />}
       {mode === 'media' && mediaSearch.isError && (
         <p className="py-8 text-sm text-[hsl(var(--destructive))]" role="alert">
-          {getApiErrorMessage(mediaSearch.error, 'Media search could not be loaded')}
+          {getApiErrorMessage(mediaSearch.error, t('search.mediaSearchError'))}
         </p>
       )}
 
       {mode === 'media' && mediaSearch.data && (
         <>
           <p className="text-sm text-[hsl(var(--muted-foreground))]">
-            {mediaSearch.data.total_results} results
+            {t('search.resultsCount', { count: mediaSearch.data.total_results })}
           </p>
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
             {mediaSearch.data.results.map((item) => (
@@ -153,10 +159,13 @@ export default function SearchPage() {
                 onClick={() => setPage(page - 1)}
                 className="rounded-md border border-[hsl(var(--border))] px-4 py-2 text-sm disabled:opacity-50"
               >
-                Previous
+                {t('common.previous')}
               </button>
               <span className="text-sm">
-                Page {mediaSearch.data.page} of {mediaSearch.data.total_pages}
+                {t('common.pageOf', {
+                  page: mediaSearch.data.page,
+                  total: mediaSearch.data.total_pages,
+                })}
               </span>
               <button
                 type="button"
@@ -164,7 +173,7 @@ export default function SearchPage() {
                 onClick={() => setPage(page + 1)}
                 className="rounded-md border border-[hsl(var(--border))] px-4 py-2 text-sm disabled:opacity-50"
               >
-                Next
+                {t('common.next')}
               </button>
             </div>
           )}
@@ -178,7 +187,7 @@ export default function SearchPage() {
           ) : (
             <Users className="mx-auto mb-4 h-12 w-12 opacity-50" aria-hidden="true" />
           )}
-          <p>{mode === 'media' ? 'Search movies and TV shows' : 'Find people'}</p>
+          <p>{mode === 'media' ? t('search.emptyMedia') : t('search.emptyPeople')}</p>
         </div>
       )}
     </div>
