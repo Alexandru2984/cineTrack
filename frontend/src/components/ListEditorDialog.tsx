@@ -2,6 +2,7 @@ import { Loader2, X } from 'lucide-react';
 import { useEffect, useId, useState, type FormEvent } from 'react';
 
 import { getApiErrorMessage } from '@/lib/api';
+import { useT } from '@/hooks/useT';
 import type { ListInput } from '@/hooks/useLists';
 
 interface EditableList {
@@ -23,6 +24,7 @@ export function ListEditorDialog({
   onClose: () => void;
   onSave: (input: ListInput) => void;
 }) {
+  const t = useT();
   const titleId = useId();
   const descriptionId = useId();
   const [name, setName] = useState(list?.name ?? '');
@@ -47,7 +49,7 @@ export function ListEditorDialog({
     event.preventDefault();
     const trimmedName = name.trim();
     if (!trimmedName) {
-      setValidationError('List name cannot be blank.');
+      setValidationError(t('listEditor.nameBlank'));
       return;
     }
     setValidationError(null);
@@ -75,15 +77,15 @@ export function ListEditorDialog({
         <div className="flex items-start justify-between gap-4">
           <div>
             <h2 id={titleId} className="text-xl font-semibold">
-              {list ? 'Edit list' : 'Create list'}
+              {list ? t('listEditor.editTitle') : t('lists.createList')}
             </h2>
             <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">
-              Organize movies and shows independently from tracking status.
+              {t('listEditor.subtitle')}
             </p>
           </div>
           <button
             type="button"
-            aria-label="Close list editor"
+            aria-label={t('listEditor.closeAria')}
             disabled={pending}
             onClick={onClose}
             className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-[hsl(var(--border))] disabled:opacity-50"
@@ -94,7 +96,7 @@ export function ListEditorDialog({
 
         <form className="mt-6 space-y-5" onSubmit={submit}>
           <label className="block space-y-2">
-            <span className="text-sm font-medium">Name</span>
+            <span className="text-sm font-medium">{t('listEditor.name')}</span>
             <input
               autoFocus
               required
@@ -106,13 +108,13 @@ export function ListEditorDialog({
                 setValidationError(null);
               }}
               className="h-11 w-full rounded-md border border-[hsl(var(--input))] bg-transparent px-3 text-sm outline-none focus:border-[hsl(var(--primary))]"
-              placeholder="Weekend movies"
+              placeholder={t('listEditor.namePlaceholder')}
             />
           </label>
 
           <div className="space-y-2">
             <label htmlFor={descriptionId} className="block text-sm font-medium">
-              Description
+              {t('listEditor.description')}
             </label>
             <textarea
               id={descriptionId}
@@ -120,7 +122,7 @@ export function ListEditorDialog({
               value={description}
               onChange={(event) => setDescription(event.target.value)}
               className="min-h-28 w-full resize-y rounded-md border border-[hsl(var(--input))] bg-transparent px-3 py-2 text-sm outline-none focus:border-[hsl(var(--primary))]"
-              placeholder="Optional context for this collection"
+              placeholder={t('listEditor.descriptionPlaceholder')}
             />
             <span className="block text-right text-xs text-[hsl(var(--muted-foreground))]">
               {description.length}/1000
@@ -129,9 +131,9 @@ export function ListEditorDialog({
 
           <label className="flex min-h-12 cursor-pointer items-center justify-between gap-4 rounded-md border border-[hsl(var(--border))] px-3">
             <span className="min-w-0">
-              <span className="block text-sm font-medium">Public list</span>
+              <span className="block text-sm font-medium">{t('listDetail.publicList')}</span>
               <span className="block text-xs text-[hsl(var(--muted-foreground))]">
-                Anyone with its link can view it.
+                {t('listEditor.publicHint')}
               </span>
             </span>
             <input
@@ -144,7 +146,7 @@ export function ListEditorDialog({
 
           {validationError || error ? (
             <p className="text-sm text-[hsl(var(--destructive))]" role="alert">
-              {validationError ?? getApiErrorMessage(error, 'The list could not be saved')}
+              {validationError ?? getApiErrorMessage(error, t('listEditor.saveError'))}
             </p>
           ) : null}
 
@@ -155,7 +157,7 @@ export function ListEditorDialog({
               onClick={onClose}
               className="h-11 flex-1 rounded-md border border-[hsl(var(--border))] px-4 text-sm font-medium disabled:opacity-50"
             >
-              Cancel
+              {t('common.cancel')}
             </button>
             <button
               type="submit"
@@ -163,7 +165,7 @@ export function ListEditorDialog({
               className="flex h-11 flex-1 items-center justify-center gap-2 rounded-md bg-[hsl(var(--primary))] px-4 text-sm font-medium text-white disabled:opacity-50"
             >
               {pending ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : null}
-              {list ? 'Save changes' : 'Create list'}
+              {list ? t('listEditor.saveChanges') : t('lists.createList')}
             </button>
           </div>
         </form>

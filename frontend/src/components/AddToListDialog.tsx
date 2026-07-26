@@ -4,6 +4,7 @@ import { Link } from 'react-router';
 
 import { useAddListItem, useMyLists } from '@/hooks/useLists';
 import { getApiErrorMessage } from '@/lib/api';
+import { useT } from '@/hooks/useT';
 
 export function AddToListDialog({
   mediaId,
@@ -16,6 +17,7 @@ export function AddToListDialog({
   onClose: () => void;
   onAdded: (listName: string) => void;
 }) {
+  const t = useT();
   const titleId = useId();
   const lists = useMyLists();
   const addItem = useAddListItem();
@@ -49,14 +51,14 @@ export function AddToListDialog({
       >
         <div className="flex items-start gap-4 border-b border-[hsl(var(--border))] p-5">
           <div className="min-w-0 flex-1">
-            <h2 id={titleId} className="text-xl font-semibold">Add to custom list</h2>
+            <h2 id={titleId} className="text-xl font-semibold">{t('addToList.title')}</h2>
             <p className="mt-1 truncate text-sm text-[hsl(var(--muted-foreground))]">
               {title}
             </p>
           </div>
           <button
             type="button"
-            aria-label="Close list picker"
+            aria-label={t('addToList.closeAria')}
             disabled={addItem.isPending}
             onClick={onClose}
             className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-[hsl(var(--border))] disabled:opacity-50"
@@ -69,19 +71,19 @@ export function AddToListDialog({
           {lists.isLoading ? (
             <div className="flex min-h-48 items-center justify-center gap-2 text-sm text-[hsl(var(--muted-foreground))]">
               <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-              Loading lists
+              {t('addToList.loading')}
             </div>
           ) : lists.isError ? (
             <div className="flex min-h-48 flex-col items-center justify-center gap-3 text-center">
               <p className="text-sm text-[hsl(var(--destructive))]">
-                {getApiErrorMessage(lists.error, 'Your lists could not be loaded')}
+                {getApiErrorMessage(lists.error, t('lists.loadError'))}
               </p>
               <button
                 type="button"
                 onClick={() => void lists.refetch()}
                 className="h-10 rounded-md border border-[hsl(var(--border))] px-4 text-sm font-medium"
               >
-                Try again
+                {t('common.tryAgain')}
               </button>
             </div>
           ) : lists.data?.length ? (
@@ -104,7 +106,9 @@ export function AddToListDialog({
                     <span className="block truncate text-sm font-medium">{list.name}</span>
                     <span className="flex items-center gap-1 text-xs text-[hsl(var(--muted-foreground))]">
                       {!list.is_public ? <Lock className="h-3 w-3" aria-hidden="true" /> : null}
-                      {list.item_count} {list.item_count === 1 ? 'title' : 'titles'}
+                      {list.item_count === 1
+                        ? t('lists.titleCountOne')
+                        : t('lists.titleCountMany', { count: list.item_count })}
                     </span>
                   </span>
                   <Plus className="h-5 w-5 shrink-0" aria-hidden="true" />
@@ -115,9 +119,9 @@ export function AddToListDialog({
             <div className="flex min-h-48 flex-col items-center justify-center gap-3 px-5 text-center">
               <ListPlus className="h-8 w-8 text-[hsl(var(--muted-foreground))]" aria-hidden="true" />
               <div>
-                <p className="font-medium">No custom lists yet</p>
+                <p className="font-medium">{t('addToList.empty')}</p>
                 <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">
-                  Create one before adding this title.
+                  {t('addToList.emptyHint')}
                 </p>
               </div>
               <Link
@@ -125,13 +129,13 @@ export function AddToListDialog({
                 onClick={onClose}
                 className="flex h-10 items-center rounded-md bg-[hsl(var(--primary))] px-4 text-sm font-medium text-white"
               >
-                Create a list
+                {t('addToList.createList')}
               </Link>
             </div>
           )}
           {addItem.error ? (
             <p className="px-2 pt-3 text-sm text-[hsl(var(--destructive))]" role="alert">
-              {getApiErrorMessage(addItem.error, 'This title could not be added')}
+              {getApiErrorMessage(addItem.error, t('addToList.addError'))}
             </p>
           ) : null}
         </div>

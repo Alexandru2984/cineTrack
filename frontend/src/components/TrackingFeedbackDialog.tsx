@@ -6,6 +6,7 @@ import {
   MAX_REVIEW_LENGTH,
   type TrackingFeedbackPayload,
 } from '@/lib/trackingFeedback';
+import { useT } from '@/hooks/useT';
 import type { TrackingItem } from '@/types';
 
 export function TrackingFeedbackDialog({
@@ -21,6 +22,7 @@ export function TrackingFeedbackDialog({
   onClose: () => void;
   onSave: (payload: TrackingFeedbackPayload) => void;
 }) {
+  const t = useT();
   const dialogRef = useRef<HTMLDialogElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const titleId = useId();
@@ -67,7 +69,7 @@ export function TrackingFeedbackDialog({
       >
         <header className="flex min-h-16 items-start gap-3 border-b border-[hsl(var(--border))] p-4">
           <div className="min-w-0 flex-1">
-            <h2 id={titleId} className="text-lg font-semibold">Your rating and review</h2>
+            <h2 id={titleId} className="text-lg font-semibold">{t('feedback.title')}</h2>
             <p id={descriptionId} className="mt-1 truncate text-sm text-[hsl(var(--muted-foreground))]">
               {item.title}
             </p>
@@ -75,7 +77,7 @@ export function TrackingFeedbackDialog({
           <button
             ref={closeButtonRef}
             type="button"
-            aria-label="Close rating editor"
+            aria-label={t('feedback.closeAria')}
             disabled={pending}
             onClick={onClose}
             className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--secondary))] disabled:opacity-50"
@@ -86,11 +88,11 @@ export function TrackingFeedbackDialog({
 
         <div className="space-y-6 p-4">
           <fieldset>
-            <legend className="mb-2 text-sm font-medium">Rating</legend>
+            <legend className="mb-2 text-sm font-medium">{t('feedback.rating')}</legend>
             <div className="flex min-h-11 flex-wrap items-center gap-2">
               <button
                 type="button"
-                aria-label="Decrease rating"
+                aria-label={t('feedback.decrease')}
                 disabled={pending || rating === null || rating <= 1}
                 onClick={() => changeRating(-1)}
                 className="flex h-11 w-11 items-center justify-center rounded-md border border-[hsl(var(--border))] disabled:opacity-40"
@@ -107,7 +109,7 @@ export function TrackingFeedbackDialog({
               </output>
               <button
                 type="button"
-                aria-label="Increase rating"
+                aria-label={t('feedback.increase')}
                 disabled={pending || rating === 10}
                 onClick={() => changeRating(1)}
                 className="flex h-11 w-11 items-center justify-center rounded-md border border-[hsl(var(--border))] disabled:opacity-40"
@@ -120,14 +122,14 @@ export function TrackingFeedbackDialog({
                 onClick={() => setRating(null)}
                 className="h-11 rounded-md border border-[hsl(var(--border))] px-3 text-sm font-medium disabled:opacity-40"
               >
-                Clear rating
+                {t('feedback.clearRating')}
               </button>
             </div>
           </fieldset>
 
           <div>
             <div className="mb-2 flex items-center justify-between gap-3">
-              <label htmlFor={`${descriptionId}-review`} className="text-sm font-medium">Review</label>
+              <label htmlFor={`${descriptionId}-review`} className="text-sm font-medium">{t('feedback.review')}</label>
               <span className="text-xs text-[hsl(var(--muted-foreground))]">
                 {review.length}/{MAX_REVIEW_LENGTH}
               </span>
@@ -138,7 +140,7 @@ export function TrackingFeedbackDialog({
               disabled={pending}
               maxLength={MAX_REVIEW_LENGTH}
               rows={6}
-              placeholder="What did you think?"
+              placeholder={t('feedback.reviewPlaceholder')}
               onChange={(event) => setReview(event.target.value)}
               className="w-full resize-y rounded-md border border-[hsl(var(--input))] bg-transparent p-3 text-sm leading-relaxed outline-none focus:border-[hsl(var(--primary))] focus:ring-2 focus:ring-[hsl(var(--primary))]/20 disabled:opacity-60"
             />
@@ -158,14 +160,14 @@ export function TrackingFeedbackDialog({
             onClick={onClose}
             className="h-11 flex-1 rounded-md border border-[hsl(var(--border))] px-4 text-sm font-medium disabled:opacity-50"
           >
-            Cancel
+            {t('common.cancel')}
           </button>
           <button
             type="submit"
             disabled={pending}
             className="h-11 flex-1 rounded-md bg-[hsl(var(--primary))] px-4 text-sm font-medium text-white disabled:opacity-50"
           >
-            {pending ? 'Saving...' : 'Save'}
+            {pending ? t('feedback.saving') : t('common.save')}
           </button>
         </footer>
       </form>
