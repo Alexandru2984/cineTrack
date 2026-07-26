@@ -1,5 +1,6 @@
 import { EPISODE_REACTIONS } from '@/types';
 import type { EpisodeReaction, ReactionCount } from '@/types';
+import { useT } from '@/hooks/useT';
 
 /**
  * A fixed set of reactions rather than a comment box.
@@ -12,13 +13,13 @@ import type { EpisodeReaction, ReactionCount } from '@/types';
  * Only totals are shown — never who reacted — so a private profile stays
  * private without this component knowing anything about visibility.
  */
-const REACTION_LABELS: Record<EpisodeReaction, { emoji: string; label: string }> = {
-  loved: { emoji: '❤️', label: 'Loved it' },
-  funny: { emoji: '😂', label: 'Funny' },
-  shocked: { emoji: '😱', label: 'Shocked' },
-  sad: { emoji: '😢', label: 'Sad' },
-  tense: { emoji: '😬', label: 'Tense' },
-  bored: { emoji: '🥱', label: 'Bored' },
+const REACTION_EMOJI: Record<EpisodeReaction, string> = {
+  loved: '❤️',
+  funny: '😂',
+  shocked: '😱',
+  sad: '😢',
+  tense: '😬',
+  bored: '🥱',
 };
 
 interface EpisodeReactionsProps {
@@ -37,25 +38,29 @@ export function EpisodeReactions({
   pending,
   onSelect,
 }: EpisodeReactionsProps) {
+  const t = useT();
   const counts = new Map(reactions.map((entry) => [entry.reaction, entry.count]));
   const total = reactions.reduce((sum, entry) => sum + entry.count, 0);
 
   return (
     <section className="border-t border-[hsl(var(--border))] py-7" aria-labelledby="episode-reactions">
       <h2 id="episode-reactions" className="text-lg font-semibold">
-        How it landed
+        {t('reactions.title')}
       </h2>
       <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">
         {!canReact
-          ? 'Mark the episode watched to add your reaction.'
+          ? t('reactions.markToReact')
           : total === 0
-            ? 'Be the first to react.'
-            : `${total} ${total === 1 ? 'reaction' : 'reactions'}`}
+            ? t('reactions.beFirst')
+            : total === 1
+              ? t('reactions.countOne')
+              : t('reactions.countMany', { count: total })}
       </p>
 
       <ul className="mt-4 flex flex-wrap gap-2">
         {EPISODE_REACTIONS.map((reaction) => {
-          const { emoji, label } = REACTION_LABELS[reaction];
+          const emoji = REACTION_EMOJI[reaction];
+          const label = t(`reactions.${reaction}`);
           const count = counts.get(reaction) ?? 0;
           const mine = myReaction === reaction;
           return (
