@@ -99,6 +99,55 @@ pub struct MediaResponse {
     pub vote_average: Option<f64>,
 }
 
+/// Below this many ratings the average and distribution are withheld: with one
+/// or two ratings an "average" is effectively a single person's private rating
+/// reflected back in aggregate. The raw count is never sensitive, so it is
+/// always returned. Recommendation scoring may use the underlying counts
+/// server-side without this display floor.
+pub const MIN_RATINGS_FOR_AGGREGATE: i64 = 3;
+
+/// Aggregate of Văzute users' own 1–10 ratings for a title (distinct from
+/// TMDB's `vote_average`). Individual ratings are never exposed cross-user;
+/// only this anonymised aggregate is.
+#[derive(Debug, Serialize, PartialEq)]
+pub struct CommunityRatingResponse {
+    pub count: i64,
+    pub average: Option<f64>,
+    /// Ten buckets, index 0 = one star … index 9 = ten stars. `None` when the
+    /// count is below the display floor.
+    pub distribution: Option<Vec<i64>>,
+}
+
+/// Fold `(score, count)` rows (as returned by `GROUP BY rating`) into the
+/// response, applying the display floor. Pure so it is unit-testable without a
+/// database.
+pub fn build_community_rating(counts_by_score: &[(i16, i64)]) -> CommunityRatingResponse {
+    let mut distribution = vec![0_i64; 10];
+    let mut count = 0_i64;
+    let mut weighted = 0_i64;
+    for &(score, n) in counts_by_score {
+        if (1..=10).contains(&score) && n > 0 {
+            distribution[(score - 1) as usize] += n;
+            count += n;
+            weighted += i64::from(score) * n;
+        }
+    }
+    if count < MIN_RATINGS_FOR_AGGREGATE {
+        return CommunityRatingResponse {
+            count,
+            average: None,
+            distribution: None,
+        };
+    }
+    // One decimal place, matching how TMDB's vote_average is displayed.
+    let average = (weighted as f64 / count as f64 * 10.0).round() / 10.0;
+    CommunityRatingResponse {
+        count,
+        average: Some(average),
+        distribution: Some(distribution),
+    }
+}
+
 #[derive(Debug, Serialize)]
 pub struct SeasonResponse {
     pub id: String,
@@ -469,6 +518,59 @@ mod tests {
             page: None,
             language: None,
         }
+    }
+
+    #[test]
+    fn community_rating_withholds_average_below_the_floor() {
+        // Two ratings is below MIN_RATINGS_FOR_AGGREGATE (3): count is exposed
+        // but the average and distribution are not.
+        let result = build_community_rating(&[(9, 1), (10, 1)]);
+        assert_eq!(
+            result,
+            CommunityRatingResponse {
+                count: 2,
+                average: None,
+                distribution: None,
+            }
+        );
+    }
+
+    #[test]
+    fn community_rating_aggregates_at_or_above_the_floor() {
+        // Scores 8, 8, 6, 10 → average 8.0, count 4, buckets filled by score.
+        let result = build_community_rating(&[(6, 1), (8, 2), (10, 1)]);
+        assert_eq!(result.count, 4);
+        assert_eq!(result.average, Some(8.0));
+        let distribution = result.distribution.expect("distribution present at/above floor");
+        assert_eq!(distribution.len(), 10);
+        assert_eq!(distribution[5], 1); // score 6
+        assert_eq!(distribution[7], 2); // score 8
+        assert_eq!(distribution[9], 1); // score 10
+        assert_eq!(distribution.iter().sum::<i64>(), 4);
+    }
+
+    #[test]
+    fn community_rating_average_is_rounded_to_one_decimal() {
+        // 7 + 8 + 8 = 23 / 3 = 7.666… → 7.7
+        let result = build_community_rating(&[(7, 1), (8, 2)]);
+        assert_eq!(result.average, Some(7.7));
+    }
+
+    #[test]
+    fn community_rating_ignores_out_of_range_scores() {
+        // Defensive: rows outside 1..=10 (should never come from the CHECK
+        // constraint) are dropped rather than skewing the aggregate.
+        let result = build_community_rating(&[(0, 5), (11, 5), (5, 3)]);
+        assert_eq!(result.count, 3);
+        assert_eq!(result.average, Some(5.0));
+    }
+
+    #[test]
+    fn community_rating_empty_is_zero() {
+        let result = build_community_rating(&[]);
+        assert_eq!(result.count, 0);
+        assert_eq!(result.average, None);
+        assert_eq!(result.distribution, None);
     }
 
     fn provider(id: i32, name: &str, priority: i32) -> TmdbWatchProvider {

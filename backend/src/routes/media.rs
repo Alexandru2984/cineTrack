@@ -27,6 +27,10 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
             )
             .route("/{id}", web::get().to(get_detail))
             .route("/{id}/watch-providers", web::get().to(get_watch_providers))
+            .route(
+                "/{id}/community-rating",
+                web::get().to(get_community_rating),
+            )
             .route("/{id}/seasons", web::get().to(get_seasons))
             .route(
                 "/{id}/seasons/{season_number}/episodes",
@@ -304,6 +308,50 @@ fn normalize_region(raw: &str) -> Result<String, AppError> {
             "region must be a two-letter ISO code".to_string(),
         ))
     }
+}
+
+/// Aggregate rating for a title from Văzute's own users (distinct from TMDB's
+/// `vote_average`). Addressed like the detail route: a local media UUID, or a
+/// TMDB id plus `?type=`. Below the display floor only the count is returned;
+/// see `build_community_rating`.
+async fn get_community_rating(
+    pool: web::Data<PgPool>,
+    req: HttpRequest,
+    path: web::Path<String>,
+    query: web::Query<MediaDetailQuery>,
+) -> Result<HttpResponse, AppError> {
+    require_auth(&req).await?;
+    query.validate()?;
+    let id_str = path.into_inner();
+
+    // Resolve to a local media row. A title nobody has tracked has no local row
+    // and therefore no ratings, which folds to a zero aggregate.
+    let media_id: Option<Uuid> = if let Ok(uuid) = id_str.parse::<Uuid>() {
+        Some(uuid)
+    } else {
+        let tmdb_id = id_str
+            .parse::<i32>()
+            .map_err(|_| AppError::BadRequest("Invalid media id".to_string()))?;
+        let media_type = query.media_type.as_deref().unwrap_or("movie");
+        sqlx::query_scalar::<_, Uuid>("SELECT id FROM media WHERE tmdb_id = $1 AND media_type = $2")
+            .bind(tmdb_id)
+            .bind(media_type)
+            .fetch_optional(pool.get_ref())
+            .await?
+    };
+
+    let counts_by_score = match media_id {
+        Some(id) => sqlx::query_as::<_, (i16, i64)>(
+            "SELECT rating, COUNT(*) FROM user_media \
+             WHERE media_id = $1 AND rating IS NOT NULL GROUP BY rating",
+        )
+        .bind(id)
+        .fetch_all(pool.get_ref())
+        .await?,
+        None => Vec::new(),
+    };
+
+    Ok(HttpResponse::Ok().json(build_community_rating(&counts_by_score)))
 }
 
 async fn get_watch_providers(
