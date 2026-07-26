@@ -257,6 +257,15 @@ export const en = {
     thisAndPrevious: 'This and previous',
     markSeason: 'Mark season',
   },
+  episode: {
+    notFound: 'Episode not found',
+    airDateTba: 'Air date TBA',
+    addToLibraryHint: 'Add the series to your library to manage this episode.',
+    notAvailableHint: 'This episode can be marked watched after its release date.',
+    noOverview: 'No overview is available for this episode.',
+    watchedOnce: 'Watched 1 time · Last on {date}',
+    watchedMany: 'Watched {count} times · Last on {date}',
+  },
   calendarFeed: {
     title: 'Calendar feed',
     description:

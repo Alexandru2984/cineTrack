@@ -20,12 +20,14 @@ import { useEpisodeDetail, useSetEpisodeReaction } from '@/hooks/useMedia';
 import { usePageTitle } from '@/hooks/usePageTitle';
 import { getApiErrorMessage } from '@/lib/api';
 import { formatDate, formatDateTime, formatRuntime, getPosterUrl } from '@/lib/utils';
+import { useT } from '@/hooks/useT';
 
 function episodeCode(season: number, episode: number) {
   return `S${String(season).padStart(2, '0')}E${String(episode).padStart(2, '0')}`;
 }
 
 export default function EpisodeDetailPage() {
+  const t = useT();
   const { id } = useParams<{ id: string }>();
   const episode = useEpisodeDetail(id);
   const setReaction = useSetEpisodeReaction(id);
@@ -42,21 +44,21 @@ export default function EpisodeDetailPage() {
       <div className="mx-auto flex min-h-64 max-w-3xl items-center justify-between gap-4 px-4 py-10">
         <div className="flex items-center gap-2 text-sm text-[hsl(var(--destructive))]">
           <AlertCircle className="h-5 w-5" aria-hidden="true" />
-          {getApiErrorMessage(episode.error, 'Episode not found')}
+          {getApiErrorMessage(episode.error, t('episode.notFound'))}
         </div>
         <button
           type="button"
           onClick={() => void episode.refetch()}
           className="h-10 rounded-md border border-[hsl(var(--border))] px-3 text-sm font-medium"
         >
-          Retry
+          {t('calendar.retry')}
         </button>
       </div>
     );
   }
 
   const code = episodeCode(item.season_number, item.episode_number);
-  const episodeName = item.episode_name || `Episode ${item.episode_number}`;
+  const episodeName = item.episode_name || t('media.episodeN', { number: item.episode_number });
   const actionError = setPlanned.error ?? markWatched.error;
   const canManage = item.tracking_status !== null && item.tracking_status !== 'dropped';
   const artwork = getPosterUrl(
@@ -81,8 +83,8 @@ export default function EpisodeDetailPage() {
           <p className="mt-4 font-mono text-sm text-[hsl(var(--muted-foreground))]">{code}</p>
           <h1 className="mt-1 text-2xl font-bold sm:text-3xl">{episodeName}</h1>
           <div className="mt-3 flex flex-wrap gap-x-4 gap-y-2 text-sm text-[hsl(var(--muted-foreground))]">
-            <span>{item.season_name || `Season ${item.season_number}`}</span>
-            <span>{item.air_date ? formatDate(item.air_date) : 'Air date TBA'}</span>
+            <span>{item.season_name || t('media.seasonN', { number: item.season_number })}</span>
+            <span>{item.air_date ? formatDate(item.air_date) : t('episode.airDateTba')}</span>
             {item.runtime_minutes != null && (
               <span className="inline-flex items-center gap-1">
                 <Clock3 className="h-4 w-4" aria-hidden="true" />
@@ -107,7 +109,7 @@ export default function EpisodeDetailPage() {
               ) : (
                 <Bookmark className="h-4 w-4" aria-hidden="true" />
               )}
-              {item.is_planned ? 'Remove from Watch next' : 'Watch next'}
+              {item.is_planned ? t('calendar.removeFromWatchNextShort') : t('calendar.watchNext')}
             </button>
             {item.is_available && (
               <button
@@ -123,18 +125,18 @@ export default function EpisodeDetailPage() {
                 ) : (
                   <Check className="h-4 w-4" aria-hidden="true" />
                 )}
-                {item.is_watched ? 'Watched' : 'Mark watched'}
+                {item.is_watched ? t('media.watched') : t('media.markWatched')}
               </button>
             )}
           </div>
           {!canManage && (
             <p className="mt-3 text-xs text-[hsl(var(--muted-foreground))]">
-              Add the series to your library to manage this episode.
+              {t('episode.addToLibraryHint')}
             </p>
           )}
           {!item.is_available && (
             <p className="mt-3 text-xs text-[hsl(var(--muted-foreground))]">
-              This episode can be marked watched after its release date.
+              {t('episode.notAvailableHint')}
             </p>
           )}
         </div>
@@ -146,19 +148,23 @@ export default function EpisodeDetailPage() {
           className="mt-5 flex items-center gap-2 text-sm text-[hsl(var(--destructive))]"
         >
           <AlertCircle className="h-4 w-4" aria-hidden="true" />
-          {getApiErrorMessage(actionError, 'Could not update this episode')}
+          {getApiErrorMessage(actionError, t('calendar.updateError'))}
         </div>
       )}
 
       <section className="py-7" aria-labelledby="episode-overview">
-        <h2 id="episode-overview" className="text-lg font-semibold">Overview</h2>
+        <h2 id="episode-overview" className="text-lg font-semibold">{t('media.overview')}</h2>
         <p className="mt-3 max-w-3xl text-sm leading-7 text-[hsl(var(--muted-foreground))]">
-          {item.overview || 'No overview is available for this episode.'}
+          {item.overview || t('episode.noOverview')}
         </p>
         {item.last_watched_at && (
           <p className="mt-5 text-xs text-[hsl(var(--muted-foreground))]">
-            Watched {item.watch_count} {item.watch_count === 1 ? 'time' : 'times'} · Last on{' '}
-            {formatDateTime(item.last_watched_at)}
+            {item.watch_count === 1
+              ? t('episode.watchedOnce', { date: formatDateTime(item.last_watched_at) })
+              : t('episode.watchedMany', {
+                  count: item.watch_count,
+                  date: formatDateTime(item.last_watched_at),
+                })}
           </p>
         )}
       </section>

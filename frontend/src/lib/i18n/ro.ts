@@ -259,6 +259,15 @@ export const ro: Dictionary = {
     thisAndPrevious: 'Acesta și cele anterioare',
     markSeason: 'Marchează sezonul',
   },
+  episode: {
+    notFound: 'Episod negăsit',
+    airDateTba: 'Data difuzării: TBA',
+    addToLibraryHint: 'Adaugă serialul în biblioteca ta pentru a gestiona acest episod.',
+    notAvailableHint: 'Acest episod poate fi marcat vizionat după data lansării.',
+    noOverview: 'Nu există o prezentare disponibilă pentru acest episod.',
+    watchedOnce: 'Vizionat o dată · Ultima dată pe {date}',
+    watchedMany: 'Vizionat de {count} ori · Ultima dată pe {date}',
+  },
   calendarFeed: {
     title: 'Feed de calendar',
     description:
