@@ -8,6 +8,13 @@ export const ro: Dictionary = {
     english: 'English',
     romanian: 'Română',
   },
+  nav: {
+    home: 'Acasă',
+    calendar: 'Calendar',
+    search: 'Caută',
+    library: 'Bibliotecă',
+    profile: 'Profil',
+  },
   calendarFeed: {
     title: 'Feed de calendar',
     subtitle: 'Abonează-te la episoadele viitoare.',

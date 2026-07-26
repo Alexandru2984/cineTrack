@@ -8,12 +8,14 @@ import {
 } from 'lucide-react-native';
 
 import { LoadingState } from '@/components/screen-state';
+import { useT } from '@/hooks/use-t';
 import { useTheme } from '@/hooks/use-theme';
 import { useNotificationSummary } from '@/hooks/use-notifications';
 import { hasLocalSession, useAuthStore } from '@/store/auth';
 
 export default function TabsLayout() {
   const theme = useTheme();
+  const t = useT();
   const status = useAuthStore((state) => state.status);
   const notificationSummary = useNotificationSummary(status === 'authenticated', true);
   const unreadCount = notificationSummary.data?.unread_count ?? 0;
@@ -45,35 +47,35 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="index"
         options={{
-          title: 'Home',
+          title: t('nav.home'),
           tabBarIcon: ({ color, size }) => <Home color={color} size={size} />,
         }}
       />
       <Tabs.Screen
         name="calendar"
         options={{
-          title: 'Calendar',
+          title: t('nav.calendar'),
           tabBarIcon: ({ color, size }) => <CalendarDays color={color} size={size} />,
         }}
       />
       <Tabs.Screen
         name="search"
         options={{
-          title: 'Search',
+          title: t('nav.search'),
           tabBarIcon: ({ color, size }) => <Search color={color} size={size} />,
         }}
       />
       <Tabs.Screen
         name="library"
         options={{
-          title: 'Library',
+          title: t('nav.library'),
           tabBarIcon: ({ color, size }) => <Library color={color} size={size} />,
         }}
       />
       <Tabs.Screen
         name="profile"
         options={{
-          title: 'Profile',
+          title: t('nav.profile'),
           tabBarIcon: ({ color, size }) => <UserRound color={color} size={size} />,
           tabBarBadge: unreadCount > 0 ? (unreadCount > 99 ? '99+' : unreadCount) : undefined,
           tabBarBadgeStyle: {

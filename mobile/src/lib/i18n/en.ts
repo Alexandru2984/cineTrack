@@ -8,6 +8,13 @@ export const en = {
     english: 'English',
     romanian: 'Română',
   },
+  nav: {
+    home: 'Home',
+    calendar: 'Calendar',
+    search: 'Search',
+    library: 'Library',
+    profile: 'Profile',
+  },
   calendarFeed: {
     title: 'Calendar feed',
     subtitle: 'Subscribe to upcoming episodes.',
