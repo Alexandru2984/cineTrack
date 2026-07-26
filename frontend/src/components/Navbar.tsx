@@ -26,11 +26,15 @@ import {
 } from '@/hooks/useNotifications';
 import { useAuthStore } from '@/store/auth';
 import { useThemeStore } from '@/store/theme';
+import { useT } from '@/hooks/useT';
 
-function unreadLabel(count: number) {
-  return count === 0
-    ? 'Notifications, no unread notifications'
-    : `Notifications, ${count} unread notification${count === 1 ? '' : 's'}`;
+type Translate = (key: string, params?: Record<string, string | number>) => string;
+
+function unreadLabel(t: Translate, count: number) {
+  if (count === 0) return t('nav.notificationsNoUnread');
+  return count === 1
+    ? t('nav.notificationsUnreadOne')
+    : t('nav.notificationsUnreadMany', { count });
 }
 
 function UnreadBadge({ count }: { count: number }) {
@@ -43,6 +47,7 @@ function UnreadBadge({ count }: { count: number }) {
 }
 
 export function Navbar() {
+  const t = useT();
   const { user, isAuthenticated } = useAuthStore();
   const { isDark, toggle } = useThemeStore();
   const navigate = useNavigate();
@@ -109,19 +114,19 @@ export function Navbar() {
                 to="/search"
                 className="flex items-center gap-1 text-sm transition-colors hover:text-[hsl(var(--primary))]"
               >
-                <Search className="h-4 w-4" /> Search
+                <Search className="h-4 w-4" /> {t('nav.search')}
               </Link>
               <Link
                 to="/tracking"
                 className="flex items-center gap-1 text-sm transition-colors hover:text-[hsl(var(--primary))]"
               >
-                <BarChart3 className="h-4 w-4" /> My List
+                <BarChart3 className="h-4 w-4" /> {t('nav.myList')}
               </Link>
               <Link
                 to="/calendar"
                 className="flex items-center gap-1 text-sm transition-colors hover:text-cyan-600 dark:hover:text-cyan-400"
               >
-                <CalendarDays className="h-4 w-4" /> Calendar
+                <CalendarDays className="h-4 w-4" /> {t('nav.calendar')}
                 {newEpisodeCount > 0 && (
                   <span className="ml-0.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-cyan-600 px-1 text-[10px] font-semibold leading-none text-white">
                     {newEpisodeCount > 99 ? '99+' : newEpisodeCount}
@@ -132,26 +137,26 @@ export function Navbar() {
                 to="/stats"
                 className="flex items-center gap-1 text-sm transition-colors hover:text-[hsl(var(--primary))]"
               >
-                <BarChart3 className="h-4 w-4" /> Stats
+                <BarChart3 className="h-4 w-4" /> {t('nav.stats')}
               </Link>
               <Link
                 to="/lists"
                 className="flex items-center gap-1 text-sm transition-colors hover:text-[hsl(var(--primary))]"
               >
-                <ListPlus className="h-4 w-4" /> Lists
+                <ListPlus className="h-4 w-4" /> {t('nav.lists')}
               </Link>
 
               <div ref={notificationsRef} className="relative">
                 <button
                   ref={notificationButtonRef}
                   type="button"
-                  aria-label={unreadLabel(unreadCount)}
+                  aria-label={unreadLabel(t, unreadCount)}
                   aria-expanded={notificationsOpen}
                   aria-haspopup="true"
                   aria-controls="notification-preview"
                   onClick={() => setNotificationsOpen((open) => !open)}
                   className="relative flex h-9 w-9 items-center justify-center rounded-md transition-colors hover:bg-[hsl(var(--accent))]"
-                  title="Notifications"
+                  title={t('nav.notifications')}
                 >
                   <Bell className="h-4 w-4" aria-hidden="true" />
                   <UnreadBadge count={unreadCount} />
@@ -164,12 +169,12 @@ export function Navbar() {
                     className="absolute right-0 top-full mt-2 flex max-h-[calc(100vh-5rem)] w-[min(24rem,calc(100vw-2rem))] flex-col overflow-hidden rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--popover))] text-[hsl(var(--popover-foreground))] shadow-xl"
                   >
                     <div className="flex h-12 shrink-0 items-center justify-between border-b border-[hsl(var(--border))] px-4">
-                      <h2 className="text-sm font-semibold">Notifications</h2>
+                      <h2 className="text-sm font-semibold">{t('nav.notifications')}</h2>
                       {unreadCount > 0 && (
                         <button
                           type="button"
-                          aria-label="Mark all notifications as read"
-                          title="Mark all as read"
+                          aria-label={t('nav.markAllRead')}
+                          title={t('nav.markAllRead')}
                           disabled={markAllRead.isPending}
                           onClick={() => markAllRead.mutate()}
                           className="rounded-md p-2 text-[hsl(var(--muted-foreground))] transition-colors hover:bg-[hsl(var(--accent))] hover:text-[hsl(var(--foreground))] disabled:opacity-50"
@@ -195,7 +200,7 @@ export function Navbar() {
                       onClick={() => setNotificationsOpen(false)}
                       className="block shrink-0 border-t border-[hsl(var(--border))] px-4 py-3 text-center text-sm font-medium transition-colors hover:bg-[hsl(var(--accent))] hover:text-[hsl(var(--primary))]"
                     >
-                      View all notifications
+                      {t('nav.viewAllNotifications')}
                     </Link>
                   </section>
                 )}
@@ -212,21 +217,21 @@ export function Navbar() {
                 to="/settings"
                 className="flex items-center gap-1 text-sm transition-colors hover:text-[hsl(var(--primary))]"
               >
-                <Settings className="h-4 w-4" /> Settings
+                <Settings className="h-4 w-4" /> {t('nav.settings')}
               </Link>
               <button
                 type="button"
                 onClick={handleLogout}
                 className="flex items-center gap-1 text-sm text-[hsl(var(--muted-foreground))] transition-colors hover:text-[hsl(var(--destructive))]"
               >
-                <LogOut className="h-4 w-4" /> Logout
+                <LogOut className="h-4 w-4" /> {t('nav.logout')}
               </button>
               <button
                 type="button"
                 onClick={toggle}
                 className="rounded-md p-2 transition-colors hover:bg-[hsl(var(--accent))]"
-                title="Toggle theme"
-                aria-label="Toggle theme"
+                title={t('nav.toggleTheme')}
+                aria-label={t('nav.toggleTheme')}
               >
                 {isDark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
               </button>
@@ -239,25 +244,25 @@ export function Navbar() {
                 type="button"
                 onClick={toggle}
                 className="rounded-md p-2 transition-colors hover:bg-[hsl(var(--accent))]"
-                title="Toggle theme"
-                aria-label="Toggle theme"
+                title={t('nav.toggleTheme')}
+                aria-label={t('nav.toggleTheme')}
               >
                 {isDark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
               </button>
               <Link to="/login" className="text-sm hover:text-[hsl(var(--primary))]">
-                Login
+                {t('nav.login')}
               </Link>
               <Link to="/about" className="text-sm hover:text-[hsl(var(--primary))]">
-                About
+                {t('nav.about')}
               </Link>
               <Link to="/privacy" className="text-sm hover:text-[hsl(var(--primary))]">
-                Privacy
+                {t('nav.privacy')}
               </Link>
               <Link
                 to="/register"
                 className="rounded-md bg-[hsl(var(--primary))] px-4 py-2 text-sm text-white hover:opacity-90"
               >
-                Register
+                {t('nav.register')}
               </Link>
             </div>
           )}
@@ -267,7 +272,7 @@ export function Navbar() {
               <>
                 <Link
                   to="/notifications"
-                  aria-label={unreadLabel(unreadCount)}
+                  aria-label={unreadLabel(t, unreadCount)}
                   className="relative flex h-10 w-10 items-center justify-center rounded-md transition-colors hover:bg-[hsl(var(--accent))]"
                 >
                   <Bell className="h-5 w-5" aria-hidden="true" />
@@ -275,8 +280,8 @@ export function Navbar() {
                 </Link>
                 <Link
                   to="/settings"
-                  aria-label="Settings"
-                  title="Settings"
+                  aria-label={t('nav.settings')}
+                  title={t('nav.settings')}
                   className="flex h-10 w-10 items-center justify-center rounded-md transition-colors hover:bg-[hsl(var(--accent))]"
                 >
                   <Settings className="h-5 w-5" aria-hidden="true" />
@@ -307,11 +312,11 @@ export function Navbar() {
             >
               {isDark ? (
                 <>
-                  <Sun className="h-4 w-4" /> Light Mode
+                  <Sun className="h-4 w-4" /> {t('nav.lightMode')}
                 </>
               ) : (
                 <>
-                  <Moon className="h-4 w-4" /> Dark Mode
+                  <Moon className="h-4 w-4" /> {t('nav.darkMode')}
                 </>
               )}
             </button>
@@ -320,28 +325,28 @@ export function Navbar() {
               className="block py-2 text-sm"
               onClick={() => setMobileOpen(false)}
             >
-              Login
+              {t('nav.login')}
             </Link>
             <Link
               to="/about"
               className="block py-2 text-sm"
               onClick={() => setMobileOpen(false)}
             >
-              About
+              {t('nav.about')}
             </Link>
             <Link
               to="/privacy"
               className="block py-2 text-sm"
               onClick={() => setMobileOpen(false)}
             >
-              Privacy
+              {t('nav.privacy')}
             </Link>
             <Link
               to="/register"
               className="block py-2 text-sm"
               onClick={() => setMobileOpen(false)}
             >
-              Register
+              {t('nav.register')}
             </Link>
           </div>
         )}

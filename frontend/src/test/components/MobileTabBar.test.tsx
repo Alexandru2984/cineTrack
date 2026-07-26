@@ -3,6 +3,7 @@ import { MemoryRouter } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { MobileTabBar } from '@/components/MobileTabBar';
 import { useAuthStore } from '@/store/auth';
+import { useLocaleStore } from '@/store/locale';
 
 vi.mock('@/hooks/useCalendar', () => ({
   useCalendarSummary: () => ({
@@ -16,6 +17,7 @@ vi.mock('@/hooks/useCalendar', () => ({
 
 describe('MobileTabBar', () => {
   beforeEach(() => {
+    useLocaleStore.getState().setLocale('en');
     useAuthStore.setState({
       token: 'test-token',
       status: 'authenticated',
@@ -59,5 +61,24 @@ describe('MobileTabBar', () => {
       'href',
       '/profile/mobile_user',
     );
+  });
+
+  it('renders the localized labels in Romanian', () => {
+    useLocaleStore.getState().setLocale('ro');
+    render(
+      <MemoryRouter initialEntries={['/calendar']}>
+        <MobileTabBar />
+      </MemoryRouter>,
+    );
+
+    const navigation = screen.getByRole('navigation', {
+      name: 'Primary mobile navigation',
+    });
+    expect(within(navigation).getByRole('link', { name: 'Acasă' })).toBeInTheDocument();
+    expect(within(navigation).getByRole('link', { name: 'Bibliotecă' })).toBeInTheDocument();
+    expect(within(navigation).getByRole('link', { name: 'Profil' })).toBeInTheDocument();
+    expect(
+      within(navigation).getByRole('link', { name: 'Calendar, 4 episoade noi' }),
+    ).toBeInTheDocument();
   });
 });
