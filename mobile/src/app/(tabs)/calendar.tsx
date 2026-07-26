@@ -31,6 +31,7 @@ import {
   useSetEpisodePlanned,
   useUpcoming,
 } from '@/hooks/use-calendar';
+import { useT } from '@/hooks/use-t';
 import { useTheme } from '@/hooks/use-theme';
 import { episodeCode, formatDate } from '@/lib/format';
 import { getErrorMessage } from '@/lib/http';
@@ -42,19 +43,18 @@ type CalendarListItem =
   | { kind: 'new'; item: CalendarEpisode }
   | { kind: 'upcoming'; item: UpcomingCalendarItem };
 
-const viewOptions = [
-  { value: 'new', label: 'New episodes' },
-  { value: 'upcoming', label: 'Upcoming' },
-] as const;
-
-const filterOptions = [
-  { value: 'all', label: 'All' },
-  { value: 'tv', label: 'TV shows' },
-  { value: 'movie', label: 'Movies' },
-] as const;
-
 export default function CalendarScreen() {
   const theme = useTheme();
+  const t = useT();
+  const viewOptions = [
+    { value: 'new', label: t('calendar.newEpisodes') },
+    { value: 'upcoming', label: t('calendar.upcoming') },
+  ] as const;
+  const filterOptions = [
+    { value: 'all', label: t('calendar.filterAll') },
+    { value: 'tv', label: t('calendar.filterShows') },
+    { value: 'movie', label: t('calendar.filterMovies') },
+  ] as const;
   const [view, setView] = useState<CalendarView>('new');
   const [filter, setFilter] = useState<UpcomingFilter>('all');
   const [includeSpecials, setIncludeSpecials] = useState(false);
@@ -118,11 +118,14 @@ export default function CalendarScreen() {
         ListHeaderComponent={
           <View style={styles.header}>
             <ScreenHeader
-              title="Calendar"
+              title={t('calendar.title')}
               subtitle={
                 summary.data
-                  ? `${summary.data.new_count} unwatched · ${summary.data.planned_count} planned`
-                  : 'Releases from your library'
+                  ? t('calendar.summary', {
+                      new: summary.data.new_count,
+                      planned: summary.data.planned_count,
+                    })
+                  : t('calendar.summaryFallback')
               }
             />
             <SegmentedControl value={view} options={viewOptions} onChange={setView} />
@@ -131,9 +134,9 @@ export default function CalendarScreen() {
             ) : null}
             <View style={[styles.switchRow, { borderColor: theme.border }]}>
               <View style={styles.switchCopy}>
-                <AppText variant="label">Special episodes</AppText>
+                <AppText variant="label">{t('calendar.specialEpisodes')}</AppText>
                 <AppText variant="caption" muted>
-                  Include season 0
+                  {t('calendar.includeSeasonZero')}
                 </AppText>
               </View>
               <Switch
@@ -145,38 +148,42 @@ export default function CalendarScreen() {
             </View>
             {region && view === 'upcoming' ? (
               <AppText variant="caption" muted>
-                Movie release region: {region}
+                {t('calendar.movieRegion', { region })}
               </AppText>
             ) : null}
             {actionError ? (
               <AppText variant="caption" style={{ color: theme.danger }}>
-                {getErrorMessage(actionError, 'The calendar item could not be updated')}
+                {getErrorMessage(actionError, t('calendar.updateError'))}
               </AppText>
             ) : null}
           </View>
         }
         ListEmptyComponent={
           activeQuery.isLoading ? (
-            <LoadingState label={view === 'new' ? 'Loading new episodes' : 'Loading releases'} />
+            <LoadingState
+              label={view === 'new' ? t('calendar.loadingNew') : t('calendar.loadingReleases')}
+            />
           ) : activeQuery.isError ? (
             <ErrorState
-              message={getErrorMessage(activeQuery.error, 'The calendar could not be loaded')}
+              message={getErrorMessage(activeQuery.error, t('calendar.loadError'))}
               onRetry={() => void activeQuery.refetch()}
             />
           ) : (
             <EmptyState
               icon={CalendarDays}
-              title={view === 'new' ? 'You are caught up' : 'No upcoming releases'}
+              title={view === 'new' ? t('calendar.caughtUpTitle') : t('calendar.noUpcomingTitle')}
               message={
                 view === 'new'
-                  ? 'There are no available unwatched episodes in this view.'
-                  : 'Tracked releases will appear here when dates are available.'
+                  ? t('calendar.caughtUpMessage')
+                  : t('calendar.noUpcomingMessage')
               }
             />
           )
         }
         ListFooterComponent={
-          activeQuery.isFetchingNextPage ? <LoadingState label="Loading more" /> : null
+          activeQuery.isFetchingNextPage ? (
+            <LoadingState label={t('calendar.loadingMore')} />
+          ) : null
         }
         renderItem={({ item: entry }) =>
           entry.kind === 'new' ? (
@@ -214,15 +221,6 @@ export default function CalendarScreen() {
   );
 }
 
-const releaseLabels: Record<number, string> = {
-  1: 'Premiere',
-  2: 'Limited cinema',
-  3: 'Cinema',
-  4: 'Digital',
-  5: 'Physical',
-  6: 'TV',
-};
-
 function UpcomingRow({
   item,
   onPlan,
@@ -233,7 +231,10 @@ function UpcomingRow({
   pending: boolean;
 }) {
   const theme = useTheme();
+  const t = useT();
   const isEpisode = item.item_kind === 'episode';
+  const releaseLabel = (type: number | null | undefined) =>
+    type && type >= 1 && type <= 6 ? t(`calendar.releaseType${type}`) : t('calendar.release');
   return (
     <View style={[styles.upcomingRow, { borderBottomColor: theme.border }]}>
       <Pressable
@@ -257,9 +258,7 @@ function UpcomingRow({
               ? `${episodeCode(item.season_number ?? 0, item.episode_number ?? 0)} ${
                   item.episode_name || ''
                 }`
-              : item.release_type
-                ? releaseLabels[item.release_type] || 'Release'
-                : 'Release'}
+              : releaseLabel(item.release_type)}
           </AppText>
           <AppText variant="caption" muted>
             {formatDate(item.release_date, true)}
@@ -269,7 +268,9 @@ function UpcomingRow({
       {isEpisode ? (
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={item.is_planned ? 'Remove from Watch next' : 'Add to Watch next'}
+          accessibilityLabel={
+            item.is_planned ? t('calendar.removeFromWatchNext') : t('calendar.addToWatchNext')
+          }
           disabled={pending}
           onPress={onPlan}
           style={({ pressed }) => [

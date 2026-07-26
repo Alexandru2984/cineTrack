@@ -8,12 +8,22 @@ export const trackingStatusLabels: Record<TrackingStatus, string> = {
   dropped: 'Dropped',
 };
 
+// The active UI locale tag, kept in sync by the locale store (see
+// `store/locale.ts`). Keeping it here lets these stay plain functions the whole
+// codebase can import directly, while still following the user's chosen
+// language instead of the device default.
+let activeLocaleTag = 'en-US';
+
+export function setFormatLocaleTag(tag: string) {
+  activeLocaleTag = tag;
+}
+
 export function episodeCode(season: number, episode: number) {
   return `S${String(season).padStart(2, '0')}E${String(episode).padStart(2, '0')}`;
 }
 
 export function formatDate(value: string, weekday = false) {
-  return new Intl.DateTimeFormat(undefined, {
+  return new Intl.DateTimeFormat(activeLocaleTag, {
     ...(weekday ? { weekday: 'short' as const } : {}),
     day: 'numeric',
     month: 'short',
@@ -29,8 +39,12 @@ export function formatRuntime(minutes: number | null | undefined) {
 }
 
 export function formatDateTime(value: string) {
-  return new Intl.DateTimeFormat(undefined, {
+  return new Intl.DateTimeFormat(activeLocaleTag, {
     dateStyle: 'medium',
     timeStyle: 'short',
   }).format(new Date(value));
+}
+
+export function formatNumber(value: number) {
+  return new Intl.NumberFormat(activeLocaleTag).format(value);
 }

@@ -8,6 +8,13 @@ export const SUPPORTED_LOCALES: readonly Locale[] = ['en', 'ro'];
 
 export const dictionaries = { en, ro } as const;
 
+/** BCP-47 tags used for locale-aware `Intl` date and number formatting. */
+const LOCALE_TAGS: Record<Locale, string> = { en: 'en-US', ro: 'ro-RO' };
+
+export function localeTag(locale: Locale): string {
+  return LOCALE_TAGS[locale];
+}
+
 function lookup(dictionary: unknown, key: string): string | undefined {
   const value = key.split('.').reduce<unknown>((accumulator, part) => {
     if (accumulator && typeof accumulator === 'object') {
