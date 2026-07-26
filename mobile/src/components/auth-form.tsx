@@ -16,6 +16,7 @@ import { AppButton } from '@/components/app-button';
 import { AppText } from '@/components/app-text';
 import { SegmentedControl } from '@/components/segmented-control';
 import { radius, spacing } from '@/constants/theme';
+import { useT } from '@/hooks/use-t';
 import { useTheme } from '@/hooks/use-theme';
 import { safePostAuthRedirect } from '@/lib/deep-links';
 import { getErrorMessage, isTwoFactorRequired } from '@/lib/http';
@@ -26,13 +27,13 @@ import {
   type SecondFactorMode,
 } from '@/lib/two-factor';
 
-const SECOND_FACTOR_OPTIONS = [
-  { value: 'authenticator', label: 'Authenticator' },
-  { value: 'recovery', label: 'Recovery code' },
-] as const;
-
 export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
   const theme = useTheme();
+  const t = useT();
+  const secondFactorOptions = [
+    { value: 'authenticator', label: t('auth.authenticatorOption') },
+    { value: 'recovery', label: t('auth.recoveryOption') },
+  ] as const;
   const params = useLocalSearchParams<{ redirect?: string | string[] }>();
   const redirect = safePostAuthRedirect(params.redirect);
   const [username, setUsername] = useState('');
@@ -50,19 +51,19 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
     setError(null);
     const normalizedEmail = email.trim();
     if (!normalizedEmail.includes('@')) {
-      setError('Enter a valid email address');
+      setError(t('auth.invalidEmail'));
       return;
     }
     if (isRegister && username.trim().length < 3) {
-      setError('Username must contain at least 3 characters');
+      setError(t('auth.usernameTooShort'));
       return;
     }
     if (!password || (isRegister && password.length < 8)) {
-      setError(isRegister ? 'Password must contain at least 8 characters' : 'Enter your password');
+      setError(isRegister ? t('auth.passwordTooShort') : t('auth.enterPassword'));
       return;
     }
     if (isRegister && (!/[A-Za-z]/.test(password) || !/\d/.test(password))) {
-      setError('Password must contain at least one letter and one number');
+      setError(t('auth.passwordNeedsLetterNumber'));
       return;
     }
 
@@ -93,7 +94,7 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
         setMfaRequired(true);
         setError(null);
       } else {
-        setError(getErrorMessage(submitError, 'Authentication failed'));
+        setError(getErrorMessage(submitError, t('auth.authFailed')));
       }
     } finally {
       setPending(false);
@@ -116,24 +117,24 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
             </View>
             <AppText variant="title">Văzute</AppText>
             <AppText muted style={styles.center}>
-              {isRegister ? 'Create your watch history' : 'Continue tracking what you watch'}
+              {isRegister ? t('auth.registerSubtitle') : t('auth.loginSubtitle')}
             </AppText>
           </View>
 
           <View style={styles.form}>
             {isRegister ? (
               <View style={styles.field}>
-                <AppText variant="label">Username</AppText>
+                <AppText variant="label">{t('auth.username')}</AppText>
                 <TextInput
                   testID="auth-username"
-                  accessibilityLabel="Username"
+                  accessibilityLabel={t('auth.username')}
                   value={username}
                   onChangeText={setUsername}
                   autoCapitalize="none"
                   autoCorrect={false}
                   maxLength={50}
                   textContentType="username"
-                  placeholder="your_username"
+                  placeholder={t('auth.usernamePlaceholder')}
                   placeholderTextColor={theme.mutedText}
                   style={[
                     styles.input,
@@ -148,17 +149,17 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
             ) : null}
 
             <View style={styles.field}>
-              <AppText variant="label">Email</AppText>
+              <AppText variant="label">{t('auth.email')}</AppText>
               <TextInput
                 testID="auth-email"
-                accessibilityLabel="Email"
+                accessibilityLabel={t('auth.email')}
                 value={email}
                 onChangeText={setEmail}
                 autoCapitalize="none"
                 autoCorrect={false}
                 keyboardType="email-address"
                 textContentType="emailAddress"
-                placeholder="you@example.com"
+                placeholder={t('auth.emailPlaceholder')}
                 placeholderTextColor={theme.mutedText}
                 style={[
                   styles.input,
@@ -173,7 +174,7 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
 
             <View style={styles.field}>
               <View style={styles.passwordLabelRow}>
-                <AppText variant="label">Password</AppText>
+                <AppText variant="label">{t('auth.password')}</AppText>
                 {!isRegister ? (
                   <Pressable
                     accessibilityRole="link"
@@ -181,7 +182,7 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
                     onPress={() => router.push('/(auth)/forgot-password')}
                   >
                     <AppText variant="caption" style={{ color: theme.primary }}>
-                      Forgot password?
+                      {t('auth.forgotPassword')}
                     </AppText>
                   </Pressable>
                 ) : null}
@@ -204,14 +205,14 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
                   autoCapitalize="none"
                   autoCorrect={false}
                   textContentType={isRegister ? 'newPassword' : 'password'}
-                  placeholder="Password"
+                  placeholder={t('auth.passwordPlaceholder')}
                   placeholderTextColor={theme.mutedText}
                   style={[styles.passwordInput, { color: theme.text }]}
                   onSubmitEditing={() => void submit()}
                 />
                 <Pressable
                   accessibilityRole="button"
-                  accessibilityLabel={showPassword ? 'Hide password' : 'Show password'}
+                  accessibilityLabel={showPassword ? t('auth.hidePassword') : t('auth.showPassword')}
                   hitSlop={8}
                   onPress={() => setShowPassword((visible) => !visible)}
                   style={styles.iconButton}
@@ -229,7 +230,7 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
               <View style={styles.field}>
                 <SegmentedControl
                   value={secondFactorMode}
-                  options={SECOND_FACTOR_OPTIONS}
+                  options={secondFactorOptions}
                   disabled={pending}
                   onChange={(value) => {
                     setSecondFactorMode(value);
@@ -239,8 +240,8 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
                 />
                 <AppText variant="label">
                   {secondFactorMode === 'authenticator'
-                    ? 'Authentication code'
-                    : 'Recovery code'}
+                    ? t('auth.authCode')
+                    : t('auth.recoveryCode')}
                 </AppText>
                 <TextInput
                   value={secondFactorCode}
@@ -256,7 +257,9 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
                   maxLength={secondFactorMode === 'authenticator' ? 6 : 19}
                   autoFocus
                   placeholder={
-                    secondFactorMode === 'authenticator' ? '123456' : 'xxxx-xxxx-xxxx-xxxx'
+                    secondFactorMode === 'authenticator'
+                      ? t('auth.authCodePlaceholder')
+                      : t('auth.recoveryCodePlaceholder')
                   }
                   placeholderTextColor={theme.mutedText}
                   onSubmitEditing={() => void submit()}
@@ -271,8 +274,8 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
                 />
                 <AppText variant="caption" muted>
                   {secondFactorMode === 'authenticator'
-                    ? 'Use the current 6-digit code from your authenticator app.'
-                    : 'Each recovery code can be used once.'}
+                    ? t('auth.authCodeHint')
+                    : t('auth.recoveryCodeHint')}
                 </AppText>
               </View>
             ) : null}
@@ -286,7 +289,13 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
             ) : null}
 
             <AppButton
-              label={isRegister ? 'Create account' : mfaRequired ? 'Verify' : 'Sign in'}
+              label={
+                isRegister
+                  ? t('auth.createAccount')
+                  : mfaRequired
+                    ? t('auth.verify')
+                    : t('auth.signIn')
+              }
               loading={pending}
               onPress={() => void submit()}
             />
@@ -306,9 +315,9 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
             style={styles.switchMode}
           >
             <AppText muted>
-              {isRegister ? 'Already have an account? ' : 'New to Văzute? '}
+              {isRegister ? t('auth.haveAccount') : t('auth.newToApp')}
               <AppText variant="label" style={{ color: theme.primary }}>
-                {isRegister ? 'Sign in' : 'Create account'}
+                {isRegister ? t('auth.signIn') : t('auth.createAccount')}
               </AppText>
             </AppText>
           </Pressable>

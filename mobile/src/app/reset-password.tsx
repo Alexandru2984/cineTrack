@@ -15,6 +15,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { AppButton } from '@/components/app-button';
 import { AppText } from '@/components/app-text';
 import { radius, spacing } from '@/constants/theme';
+import { useT } from '@/hooks/use-t';
 import { useTheme } from '@/hooks/use-theme';
 import { getErrorMessage, rawRequest } from '@/lib/http';
 import { extractPasswordResetToken } from '@/lib/password-reset';
@@ -27,6 +28,7 @@ type ResetLinkParams = {
 
 export default function ResetPasswordScreen() {
   const theme = useTheme();
+  const t = useT();
   const params = useLocalSearchParams<ResetLinkParams>();
   const token = extractPasswordResetToken(params.token, params['#']);
   const [password, setPassword] = useState('');
@@ -39,19 +41,19 @@ export default function ResetPasswordScreen() {
   const submit = async () => {
     setError(null);
     if (!token) {
-      setError('This reset link is missing or invalid');
+      setError(t('auth.linkMissingOrInvalid'));
       return;
     }
     if (password.length < 8 || password.length > 128) {
-      setError('Password must contain 8 to 128 characters');
+      setError(t('auth.passwordLength'));
       return;
     }
     if (!/[A-Za-z]/.test(password) || !/\d/.test(password)) {
-      setError('Password must contain at least one letter and one number');
+      setError(t('auth.passwordNeedsLetterNumber'));
       return;
     }
     if (password !== confirmation) {
-      setError('Passwords do not match');
+      setError(t('auth.passwordsMismatch'));
       return;
     }
 
@@ -66,7 +68,7 @@ export default function ResetPasswordScreen() {
       setConfirmation('');
       setComplete(true);
     } catch (submitError) {
-      setError(getErrorMessage(submitError, 'Could not reset your password'));
+      setError(getErrorMessage(submitError, t('auth.resetFailed')));
     } finally {
       setPending(false);
     }
@@ -95,16 +97,16 @@ export default function ResetPasswordScreen() {
             )}
           </View>
           <AppText variant="title">
-            {complete ? 'Password updated' : 'Choose a new password'}
+            {complete ? t('auth.passwordUpdated') : t('auth.chooseNewPassword')}
           </AppText>
 
           {complete ? (
             <>
               <AppText muted>
-                Your sessions were signed out. Continue with the new password.
+                {t('auth.sessionsSignedOut')}
               </AppText>
               <AppButton
-                label="Continue to sign in"
+                label={t('auth.continueToSignIn')}
                 onPress={() => router.replace('/(auth)/login')}
               />
             </>
@@ -112,18 +114,18 @@ export default function ResetPasswordScreen() {
             <>
               <View style={[styles.error, { backgroundColor: theme.dangerSoft }]}>
                 <AppText variant="caption" style={{ color: theme.danger }}>
-                  This reset link is missing, malformed, or no longer complete.
+                  {t('auth.linkMissing')}
                 </AppText>
               </View>
               <AppButton
-                label="Request a new link"
+                label={t('auth.requestNewLink')}
                 onPress={() => router.replace('/(auth)/forgot-password')}
               />
             </>
           ) : (
             <View style={styles.form}>
               <PasswordField
-                label="New password"
+                label={t('auth.newPassword')}
                 value={password}
                 showPassword={showPassword}
                 onChangeText={(value) => {
@@ -133,7 +135,7 @@ export default function ResetPasswordScreen() {
                 onToggleVisibility={() => setShowPassword((visible) => !visible)}
               />
               <PasswordField
-                label="Confirm new password"
+                label={t('auth.confirmNewPassword')}
                 value={confirmation}
                 showPassword={showPassword}
                 onChangeText={(value) => {
@@ -153,7 +155,7 @@ export default function ResetPasswordScreen() {
               ) : null}
 
               <AppButton
-                label="Set new password"
+                label={t('auth.setNewPassword')}
                 loading={pending}
                 onPress={() => void submit()}
               />
@@ -181,6 +183,7 @@ function PasswordField({
   onSubmit?: () => void;
 }) {
   const theme = useTheme();
+  const t = useT();
   return (
     <View style={styles.field}>
       <AppText variant="label">{label}</AppText>
@@ -199,14 +202,14 @@ function PasswordField({
           autoComplete="new-password"
           textContentType="newPassword"
           maxLength={128}
-          placeholder="8 or more characters"
+          placeholder={t('auth.newPasswordPlaceholder')}
           placeholderTextColor={theme.mutedText}
           style={[styles.passwordInput, { color: theme.text }]}
           onSubmitEditing={onSubmit}
         />
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={showPassword ? 'Hide passwords' : 'Show passwords'}
+          accessibilityLabel={showPassword ? t('auth.hidePasswords') : t('auth.showPasswords')}
           hitSlop={8}
           onPress={onToggleVisibility}
           style={styles.iconButton}

@@ -14,11 +14,13 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { AppButton } from '@/components/app-button';
 import { AppText } from '@/components/app-text';
 import { radius, spacing } from '@/constants/theme';
+import { useT } from '@/hooks/use-t';
 import { useTheme } from '@/hooks/use-theme';
 import { getErrorMessage, rawRequest } from '@/lib/http';
 
 export default function ForgotPasswordScreen() {
   const theme = useTheme();
+  const t = useT();
   const [email, setEmail] = useState('');
   const [pending, setPending] = useState(false);
   const [sent, setSent] = useState(false);
@@ -28,7 +30,7 @@ export default function ForgotPasswordScreen() {
     const normalizedEmail = email.trim();
     setError(null);
     if (!normalizedEmail.includes('@')) {
-      setError('Enter a valid email address');
+      setError(t('auth.invalidEmail'));
       return;
     }
     setPending(true);
@@ -39,7 +41,7 @@ export default function ForgotPasswordScreen() {
       });
       setSent(true);
     } catch (submitError) {
-      setError(getErrorMessage(submitError, 'The reset request could not be sent'));
+      setError(getErrorMessage(submitError, t('auth.resetRequestFailed')));
     } finally {
       setPending(false);
     }
@@ -54,32 +56,32 @@ export default function ForgotPasswordScreen() {
         <View style={[styles.icon, { backgroundColor: theme.infoSoft }]}>
           <MailCheck color={theme.info} size={30} />
         </View>
-        <AppText variant="title">Reset password</AppText>
+        <AppText variant="title">{t('auth.resetPassword')}</AppText>
 
         {sent ? (
           <>
             <AppText muted>
-              Check your inbox. The reset link is valid for a limited time.
+              {t('auth.resetSent')}
             </AppText>
             <AppButton
-              label="Back to sign in"
+              label={t('auth.backToSignIn')}
               onPress={() => router.replace('/(auth)/login')}
             />
           </>
         ) : (
           <>
             <View style={styles.field}>
-              <AppText variant="label">Email</AppText>
+              <AppText variant="label">{t('auth.email')}</AppText>
               <TextInput
                 testID="forgot-password-email"
-                accessibilityLabel="Email"
+                accessibilityLabel={t('auth.email')}
                 value={email}
                 onChangeText={setEmail}
                 autoCapitalize="none"
                 autoCorrect={false}
                 keyboardType="email-address"
                 textContentType="emailAddress"
-                placeholder="you@example.com"
+                placeholder={t('auth.emailPlaceholder')}
                 placeholderTextColor={theme.mutedText}
                 onSubmitEditing={() => void submit()}
                 style={[
@@ -100,7 +102,7 @@ export default function ForgotPasswordScreen() {
               </View>
             ) : null}
             <AppButton
-              label="Send reset link"
+              label={t('auth.sendResetLink')}
               loading={pending}
               onPress={() => void submit()}
             />
@@ -110,7 +112,7 @@ export default function ForgotPasswordScreen() {
               style={styles.back}
             >
               <AppText variant="label" style={{ color: theme.primary }}>
-                Back to sign in
+                {t('auth.backToSignIn')}
               </AppText>
             </Pressable>
           </>
