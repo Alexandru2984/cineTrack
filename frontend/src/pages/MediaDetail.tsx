@@ -11,6 +11,7 @@ import {
 import { LoadingSpinner } from '@/components/LoadingSpinner';
 import { AddToListDialog } from '@/components/AddToListDialog';
 import { WatchProviders } from '@/components/WatchProviders';
+import { CommunityRating } from '@/components/CommunityRating';
 import { usePageTitle } from '@/hooks/usePageTitle';
 import { getPosterUrl, getBackdropUrl, formatDate, formatRuntime } from '@/lib/utils';
 import { getApiErrorMessage } from '@/lib/api';
@@ -279,6 +280,9 @@ export default function MediaDetail() {
             )}
           </div>
         </div>
+
+        {/* Community rating (Văzute members' own scores, aggregated) */}
+        <CommunityRating mediaId={id!} mediaType={media.media_type || type} />
 
         {/* Where to watch (JustWatch via TMDB) */}
         <WatchProviders tmdbId={media.tmdb_id} mediaType={media.media_type || type} />

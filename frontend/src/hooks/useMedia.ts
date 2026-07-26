@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import api from '@/lib/api';
 import type {
+  CommunityRating,
   DiscoveryResponse,
   Episode,
   EpisodeDetail,
@@ -65,6 +66,20 @@ export function useWatchProviders(id: string, type: string, region?: string) {
     },
     enabled: !!id,
     staleTime: 60 * 60 * 1000,
+  });
+}
+
+export function useCommunityRating(id: string, type: string) {
+  return useQuery<CommunityRating>({
+    queryKey: ['community-rating', id, type],
+    queryFn: async () => {
+      const res = await api.get(`/media/${id}/community-rating`, { params: { type } });
+      return res.data;
+    },
+    enabled: !!id,
+    // Aggregates move slowly; a member rating a title does not need to reflect
+    // on every other viewer's page immediately.
+    staleTime: 10 * 60 * 1000,
   });
 }
 
