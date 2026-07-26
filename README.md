@@ -220,16 +220,16 @@ Native simulator/device builds require Android Studio or Xcode. See
 
 ### Testing
 
-The project has **415 passing unit & integration tests** (212 backend unit + 93 PostgreSQL integration + 110 frontend) plus **24 Playwright E2E tests** across three browser suites, and **64 mobile tests**. The native client additionally has lint, strict TypeScript, Expo Doctor, dependency-audit, prebuild, and Android-export gates. One credential-gated R2 test is ignored by default:
+The project has a broad automated test suite: **262 backend unit tests** and **109 PostgreSQL-backed integration tests** in Rust, a Vitest component/logic suite plus Playwright E2E (mocked, PWA, and real-stack) for the web, and a Jest suite for the mobile client. The native client additionally has lint, strict TypeScript, Expo Doctor, dependency-audit, prebuild, and Android-export gates. One credential-gated R2 test is ignored by default. Exact counts are whatever the suites report — they are deliberately not duplicated here, so run the commands below rather than trusting a hardcoded total:
 
 ```bash
-# Backend unit tests (201 passing) — no external dependencies
+# Backend unit tests — no external dependencies
 cd backend && cargo test --lib
 
-# Frontend tests (97 passing) — Vitest + jsdom
+# Frontend tests — Vitest + jsdom
 cd frontend && npm test -- --run
 
-# Backend integration tests (88 passing) — needs a test DB
+# Backend integration tests — needs a test DB
 docker compose -p cinetrack-test -f docker-compose.test.yml up -d --wait
 cd backend && TEST_DATABASE_URL="postgres://test_user:test_pass@127.0.0.1:55433/cinetrack_test" \
   cargo test --test api_tests -- --ignored --test-threads=1
