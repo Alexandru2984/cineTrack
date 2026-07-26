@@ -214,6 +214,19 @@ export const en = {
     monthlyActivity: 'Monthly Activity',
     genreDistribution: 'Genre Distribution',
   },
+  profile: {
+    notFound: 'User not found',
+    cancelRequest: 'Cancel follow request',
+    unfollow: 'Unfollow',
+    requestSent: 'Request sent',
+    follow: 'Follow',
+    requestToFollow: 'Request to follow',
+    followError: 'Could not update follow status',
+    followers: 'followers',
+    following: 'following',
+    joined: 'Joined {date}',
+    activityPrivate: 'This activity is private. An accepted follow request is required.',
+  },
   calendarFeed: {
     title: 'Calendar feed',
     description:

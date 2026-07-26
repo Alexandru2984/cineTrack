@@ -216,6 +216,19 @@ export const ro: Dictionary = {
     monthlyActivity: 'Activitate lunară',
     genreDistribution: 'Distribuție pe genuri',
   },
+  profile: {
+    notFound: 'Utilizator negăsit',
+    cancelRequest: 'Anulează cererea de urmărire',
+    unfollow: 'Nu mai urmări',
+    requestSent: 'Cerere trimisă',
+    follow: 'Urmărește',
+    requestToFollow: 'Cere să urmărești',
+    followError: 'Starea de urmărire nu a putut fi actualizată',
+    followers: 'urmăritori',
+    following: 'urmărește',
+    joined: 'Membru din {date}',
+    activityPrivate: 'Această activitate este privată. Este necesară o cerere de urmărire acceptată.',
+  },
   calendarFeed: {
     title: 'Feed de calendar',
     description:
