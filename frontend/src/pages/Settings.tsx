@@ -50,8 +50,10 @@ import { InstallAppCard } from '@/components/InstallAppCard';
 import { CalendarFeedCard } from '@/components/CalendarFeedCard';
 import { LanguageCard } from '@/components/LanguageCard';
 import { useAuthStore } from '@/store/auth';
+import { useT } from '@/hooks/useT';
 
 function SignOutCard() {
+  const t = useT();
   const navigate = useNavigate();
   const logout = useLogout();
 
@@ -64,7 +66,7 @@ function SignOutCard() {
     >
       <span className="flex items-center gap-2">
         <LogOut className="h-5 w-5" aria-hidden="true" />
-        Sign out
+        {t('settings.signOut')}
       </span>
       <ChevronRight className="h-4 w-4" aria-hidden="true" />
     </button>
@@ -72,6 +74,7 @@ function SignOutCard() {
 }
 
 function PrivacyCard() {
+  const t = useT();
   const { data: me } = useMe();
   const updatePrivacy = useUpdatePrivacy();
   const isPrivate = me ? !me.is_public : false;
@@ -82,21 +85,21 @@ function PrivacyCard() {
       <div className="flex items-center justify-between gap-4">
         <div>
           <h2 className="flex items-center gap-2 text-lg font-semibold">
-            <LockKeyhole className="h-5 w-5 text-[hsl(var(--primary))]" /> Profile privacy
+            <LockKeyhole className="h-5 w-5 text-[hsl(var(--primary))]" /> {t('settings.privacyTitle')}
           </h2>
           <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">
             {isPrivate
               ? needsVerification
-                ? 'Confirm your email before making your profile public.'
-                : 'Only approved followers can see your profile details and activity.'
-              : 'Your profile details and activity are visible to everyone.'}
+                ? t('settings.privacyVerifyHint')
+                : t('settings.privacyPrivate')
+              : t('settings.privacyPublic')}
           </p>
         </div>
         <button
           type="button"
           role="switch"
           aria-checked={isPrivate}
-          aria-label="Private profile"
+          aria-label={t('settings.privateProfileAria')}
           disabled={!me || updatePrivacy.isPending || needsVerification}
           onClick={() => updatePrivacy.mutate(isPrivate)}
           className={`relative h-6 w-11 shrink-0 rounded-full transition-colors disabled:opacity-50 ${
@@ -112,7 +115,7 @@ function PrivacyCard() {
       </div>
       {updatePrivacy.error && (
         <p className="mt-3 text-sm text-[hsl(var(--destructive))]">
-          {getApiErrorMessage(updatePrivacy.error, 'Could not update profile privacy')}
+          {getApiErrorMessage(updatePrivacy.error, t('settings.privacyError'))}
         </p>
       )}
     </section>
@@ -120,6 +123,7 @@ function PrivacyCard() {
 }
 
 function FollowRequestsCard() {
+  const t = useT();
   const { data: requests, isLoading } = useFollowRequests();
   const accept = useAcceptFollowRequest();
   const reject = useRejectFollowRequest();
@@ -131,12 +135,12 @@ function FollowRequestsCard() {
       className="scroll-mt-24 rounded-lg border border-[hsl(var(--border))] p-6 focus:outline-none"
     >
       <h2 className="flex items-center gap-2 text-lg font-semibold">
-        <UserRoundCheck className="h-5 w-5 text-[hsl(var(--primary))]" /> Follow requests
+        <UserRoundCheck className="h-5 w-5 text-[hsl(var(--primary))]" /> {t('settings.followRequests')}
       </h2>
       {isLoading ? (
         <Loader2 className="mt-4 h-5 w-5 animate-spin text-[hsl(var(--muted-foreground))]" />
       ) : !requests?.length ? (
-        <p className="mt-3 text-sm text-[hsl(var(--muted-foreground))]">No pending requests.</p>
+        <p className="mt-3 text-sm text-[hsl(var(--muted-foreground))]">{t('settings.noPendingRequests')}</p>
       ) : (
         <div className="mt-3 divide-y divide-[hsl(var(--border))]">
           {requests.map((request) => (
@@ -155,8 +159,8 @@ function FollowRequestsCard() {
               </span>
               <button
                 type="button"
-                title="Accept request"
-                aria-label={`Accept follow request from ${request.username}`}
+                title={t('settings.acceptRequest')}
+                aria-label={t('settings.acceptRequestFrom', { username: request.username })}
                 disabled={accept.isPending || reject.isPending}
                 onClick={() => accept.mutate(request.user_id)}
                 className="rounded-md bg-[hsl(var(--primary))] p-2 text-white disabled:opacity-50"
@@ -165,8 +169,8 @@ function FollowRequestsCard() {
               </button>
               <button
                 type="button"
-                title="Reject request"
-                aria-label={`Reject follow request from ${request.username}`}
+                title={t('settings.rejectRequest')}
+                aria-label={t('settings.rejectRequestFrom', { username: request.username })}
                 disabled={accept.isPending || reject.isPending}
                 onClick={() => reject.mutate(request.user_id)}
                 className="rounded-md border border-[hsl(var(--border))] p-2 hover:text-[hsl(var(--destructive))] disabled:opacity-50"
@@ -179,7 +183,7 @@ function FollowRequestsCard() {
       )}
       {(accept.error || reject.error) && (
         <p className="mt-3 text-sm text-[hsl(var(--destructive))]">
-          {getApiErrorMessage(accept.error ?? reject.error, 'Could not update follow request')}
+          {getApiErrorMessage(accept.error ?? reject.error, t('settings.followRequestError'))}
         </p>
       )}
     </section>
@@ -187,6 +191,7 @@ function FollowRequestsCard() {
 }
 
 function ProfilePictureCard() {
+  const t = useT();
   const { data: me } = useMe();
   const upload = useUploadAvatar();
   const remove = useDeleteAvatar();
@@ -202,17 +207,17 @@ function ProfilePictureCard() {
   return (
     <section className="rounded-lg border border-[hsl(var(--border))] p-6">
       <h2 className="flex items-center gap-2 text-lg font-semibold">
-        <UserCircle2 className="h-5 w-5 text-[hsl(var(--primary))]" /> Profile picture
+        <UserCircle2 className="h-5 w-5 text-[hsl(var(--primary))]" /> {t('settings.profilePicture')}
       </h2>
       <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">
-        Shown on your profile and next to your activity. PNG, JPEG, WebP or GIF, up to 3 MB.
+        {t('settings.profilePictureHint')}
       </p>
 
       <div className="mt-4 flex items-center gap-5">
         {avatarUrl ? (
           <img
             src={avatarUrl}
-            alt="Your avatar"
+            alt={t('settings.avatarAlt')}
             className="h-20 w-20 rounded-full object-cover border border-[hsl(var(--border))]"
           />
         ) : (
@@ -234,7 +239,7 @@ function ProfilePictureCard() {
             className="flex items-center gap-2 rounded-md bg-[hsl(var(--primary))] px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
           >
             {upload.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImageUp className="h-4 w-4" />}
-            {avatarUrl ? 'Change picture' : 'Upload picture'}
+            {avatarUrl ? t('settings.changePicture') : t('settings.uploadPicture')}
           </button>
           {avatarUrl && (
             <button
@@ -242,14 +247,14 @@ function ProfilePictureCard() {
               disabled={remove.isPending}
               className="flex items-center gap-2 rounded-md border border-[hsl(var(--border))] px-4 py-2 text-sm hover:bg-[hsl(var(--accent))] disabled:opacity-50"
             >
-              <Trash2 className="h-4 w-4" /> Remove
+              <Trash2 className="h-4 w-4" /> {t('settings.remove')}
             </button>
           )}
         </div>
       </div>
       {upload.error && (
         <p className="mt-3 text-sm text-[hsl(var(--destructive))]">
-          {getApiErrorMessage(upload.error, 'Could not upload image')}
+          {getApiErrorMessage(upload.error, t('settings.uploadError'))}
         </p>
       )}
     </section>
@@ -257,48 +262,54 @@ function ProfilePictureCard() {
 }
 
 function ImportSummary({ job }: { job: ImportJob }) {
+  const t = useT();
   if (job.status === 'failed') {
     return (
       <p className="mt-3 text-sm text-[hsl(var(--destructive))]">
-        Import failed: {job.error ?? 'unknown error'}. You can try again below.
+        {t('settings.importFailed', { error: job.error ?? t('settings.unknownError') })}
       </p>
     );
   }
   if (job.status === 'pending' || job.status === 'running') {
-    const t = job.totals;
+    const totals = job.totals;
     return (
       <div className="mt-3 flex items-center gap-2 text-sm text-[hsl(var(--muted-foreground))]">
         <Loader2 className="h-4 w-4 animate-spin" />
-        Importing…{' '}
-        {t && (
+        {t('settings.importing')}{' '}
+        {totals && (
           <span>
-            {t.shows} shows · {t.movies} movies · {t.episodes_linked} episodes so far
+            {t('settings.importProgress', {
+              shows: totals.shows,
+              movies: totals.movies,
+              episodes: totals.episodes_linked,
+            })}
           </span>
         )}
       </div>
     );
   }
   // completed
-  const t = job.totals;
+  const totals = job.totals;
   return (
     <div className="mt-3 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--accent))]/40 p-4">
       <p className="flex items-center gap-2 text-sm font-medium text-green-600">
-        <CheckCircle2 className="h-4 w-4" /> Import complete
+        <CheckCircle2 className="h-4 w-4" /> {t('settings.importComplete')}
       </p>
-      {t && (
+      {totals && (
         <ul className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-sm text-[hsl(var(--muted-foreground))] sm:grid-cols-3">
-          <li>{t.shows} shows</li>
-          <li>{t.movies} movies</li>
-          <li>{t.episodes_linked} episodes</li>
-          {t.rewatches > 0 && <li>{t.rewatches} rewatches</li>}
-          {t.episodes_date_only > 0 && <li>{t.episodes_date_only} date-only</li>}
-          {t.unresolved.length > 0 && <li>{t.unresolved.length} unresolved</li>}
+          <li>{t('settings.countShows', { count: totals.shows })}</li>
+          <li>{t('settings.countMovies', { count: totals.movies })}</li>
+          <li>{t('settings.countEpisodes', { count: totals.episodes_linked })}</li>
+          {totals.rewatches > 0 && <li>{t('settings.countRewatches', { count: totals.rewatches })}</li>}
+          {totals.episodes_date_only > 0 && <li>{t('settings.countDateOnly', { count: totals.episodes_date_only })}</li>}
+          {totals.unresolved.length > 0 && <li>{t('settings.countUnresolved', { count: totals.unresolved.length })}</li>}
         </ul>
       )}
-      {t && t.unresolved.length > 0 && (
+      {totals && totals.unresolved.length > 0 && (
         <p className="mt-2 text-xs text-[hsl(var(--muted-foreground))]">
-          Couldn't match: {t.unresolved.slice(0, 8).join(', ')}
-          {t.unresolved.length > 8 ? '…' : ''}
+          {t('settings.couldntMatch', {
+            list: totals.unresolved.slice(0, 8).join(', ') + (totals.unresolved.length > 8 ? '…' : ''),
+          })}
         </p>
       )}
     </div>
@@ -306,6 +317,7 @@ function ImportSummary({ job }: { job: ImportJob }) {
 }
 
 function ImportCard() {
+  const t = useT();
   const { data: jobs } = useImportJobs();
   const startImport = useStartImport();
   const [startedJobId, setStartedJobId] = useState<string | null>(null);
@@ -330,13 +342,11 @@ function ImportCard() {
   return (
     <section className="rounded-lg border border-[hsl(var(--border))] p-6">
       <h2 className="flex items-center gap-2 text-lg font-semibold">
-        <DownloadCloud className="h-5 w-5 text-[hsl(var(--primary))]" /> Import from TV Time
+        <DownloadCloud className="h-5 w-5 text-[hsl(var(--primary))]" /> {t('settings.importTitle')}
       </h2>
       <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">
-        Moving from TV Time? Upload your export and we'll bring over your shows, movies,
-        episode history and ratings. Get your data from the TV Time app under Settings →
-        Export, or the browser extension (produces <code>shows.json</code> and{' '}
-        <code>movies.json</code>).
+        {t('settings.importIntroPre')} <code>shows.json</code> {t('settings.andConnector')}{' '}
+        <code>movies.json</code>{t('settings.importIntroPost')}
       </p>
 
       {job && <ImportSummary job={job} />}
@@ -345,7 +355,7 @@ function ImportCard() {
         <form onSubmit={handleSubmit} className="mt-4 space-y-4 max-w-md">
           <div>
             <label htmlFor="import-shows" className="block text-sm font-medium mb-1">
-              shows.json <span className="text-[hsl(var(--muted-foreground))]">(required)</span>
+              shows.json <span className="text-[hsl(var(--muted-foreground))]">{t('settings.required')}</span>
             </label>
             <input
               id="import-shows"
@@ -357,7 +367,7 @@ function ImportCard() {
           </div>
           <div>
             <label htmlFor="import-movies" className="block text-sm font-medium mb-1">
-              movies.json <span className="text-[hsl(var(--muted-foreground))]">(optional)</span>
+              movies.json <span className="text-[hsl(var(--muted-foreground))]">{t('settings.optional')}</span>
             </label>
             <input
               id="import-movies"
@@ -370,7 +380,7 @@ function ImportCard() {
           <div>
             <label htmlFor="import-rewatches" className="block text-sm font-medium mb-1">
               rewatched_episode.csv{' '}
-              <span className="text-[hsl(var(--muted-foreground))]">(optional, from GDPR export)</span>
+              <span className="text-[hsl(var(--muted-foreground))]">{t('settings.rewatchesOptional')}</span>
             </label>
             <input
               id="import-rewatches"
@@ -383,11 +393,11 @@ function ImportCard() {
 
           {startImport.error && (
             <p className="text-sm text-[hsl(var(--destructive))]">
-              {getApiErrorMessage(startImport.error, 'Could not start import')}
+              {getApiErrorMessage(startImport.error, t('settings.importStartError'))}
             </p>
           )}
           <p className="text-xs text-[hsl(var(--muted-foreground))]">
-            The import runs in the background and can take a couple of minutes. You can leave this page.
+            {t('settings.importBackground')}
           </p>
 
           <button
@@ -400,7 +410,7 @@ function ImportCard() {
             ) : (
               <UploadCloud className="h-4 w-4" />
             )}
-            Start import
+            {t('settings.startImport')}
           </button>
         </form>
       )}
@@ -409,6 +419,7 @@ function ImportCard() {
 }
 
 function ChangeEmailCard() {
+  const t = useT();
   const user = useAuthStore((state) => state.user);
   const [password, setPassword] = useState('');
   const [nextEmail, setNextEmail] = useState('');
@@ -426,22 +437,19 @@ function ChangeEmailCard() {
   return (
     <section className="rounded-lg border border-[hsl(var(--border))] p-6">
       <h2 className="flex items-center gap-2 text-lg font-semibold">
-        <Mail className="h-5 w-5 text-[hsl(var(--primary))]" /> Change email
+        <Mail className="h-5 w-5 text-[hsl(var(--primary))]" /> {t('settings.changeEmail')}
       </h2>
       <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">
-        Signing in uses <span className="font-medium">{user?.email}</span>. A new address only
-        takes effect once you open the link sent to it, and we tell the current address that
-        the change was requested.
+        {t('settings.changeEmailIntroPre')} <span className="font-medium">{user?.email}</span>{t('settings.changeEmailIntroPost')}
       </p>
 
       {sent ? (
         <div className="mt-4 flex items-start gap-2 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--accent))] p-4 text-sm">
           <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-[hsl(var(--primary))]" />
           <div>
-            <p className="font-medium">Check {nextEmail}</p>
+            <p className="font-medium">{t('settings.checkEmail', { email: nextEmail })}</p>
             <p className="text-[hsl(var(--muted-foreground))]">
-              The link is valid for 24 hours. Until you open it, {user?.email} stays the address
-              on your account.
+              {t('settings.changeEmailSentHint', { email: user?.email ?? '' })}
             </p>
           </div>
         </div>
@@ -449,7 +457,7 @@ function ChangeEmailCard() {
         <form onSubmit={handleSubmit} className="mt-4 space-y-4 max-w-sm">
           <div>
             <label htmlFor="change-email-address" className="block text-sm font-medium mb-1">
-              New email
+              {t('settings.newEmail')}
             </label>
             <input
               id="change-email-address"
@@ -464,7 +472,7 @@ function ChangeEmailCard() {
           </div>
           <div>
             <label htmlFor="change-email-password" className="block text-sm font-medium mb-1">
-              Current password
+              {t('settings.currentPassword')}
             </label>
             <input
               id="change-email-password"
@@ -476,13 +484,13 @@ function ChangeEmailCard() {
               className="w-full rounded-md border border-[hsl(var(--input))] bg-transparent px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[hsl(var(--ring))]"
             />
             <p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">
-              Asked for because this address is what recovers your account.
+              {t('settings.changeEmailPasswordHint')}
             </p>
           </div>
 
           {changeEmail.error && (
             <p className="text-sm text-[hsl(var(--destructive))]">
-              {getApiErrorMessage(changeEmail.error, 'Could not start the email change')}
+              {getApiErrorMessage(changeEmail.error, t('settings.changeEmailError'))}
             </p>
           )}
           <button
@@ -491,7 +499,7 @@ function ChangeEmailCard() {
             className="rounded-md bg-[hsl(var(--primary))] px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-2"
           >
             {changeEmail.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
-            Send confirmation link
+            {t('settings.sendConfirmationLink')}
           </button>
         </form>
       )}
@@ -500,6 +508,7 @@ function ChangeEmailCard() {
 }
 
 function ChangePasswordCard() {
+  const t = useT();
   const navigate = useNavigate();
   const [current, setCurrent] = useState('');
   const [next, setNext] = useState('');
@@ -530,15 +539,15 @@ function ChangePasswordCard() {
   return (
     <section className="rounded-lg border border-[hsl(var(--border))] p-6">
       <h2 className="flex items-center gap-2 text-lg font-semibold">
-        <KeyRound className="h-5 w-5 text-[hsl(var(--primary))]" /> Change password
+        <KeyRound className="h-5 w-5 text-[hsl(var(--primary))]" /> {t('settings.changePassword')}
       </h2>
       <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">
-        Updating your password signs out every device, including this one.
+        {t('settings.changePasswordHint')}
       </p>
 
       <form onSubmit={handleSubmit} className="mt-4 space-y-4 max-w-sm">
         <div>
-          <label htmlFor="change-current-password" className="block text-sm font-medium mb-1">Current password</label>
+          <label htmlFor="change-current-password" className="block text-sm font-medium mb-1">{t('settings.currentPassword')}</label>
           <input
             id="change-current-password"
             type="password"
@@ -550,7 +559,7 @@ function ChangePasswordCard() {
           />
         </div>
         <div>
-          <label htmlFor="change-new-password" className="block text-sm font-medium mb-1">New password</label>
+          <label htmlFor="change-new-password" className="block text-sm font-medium mb-1">{t('settings.newPassword')}</label>
           <input
             id="change-new-password"
             type="password"
@@ -560,11 +569,11 @@ function ChangePasswordCard() {
             required
             minLength={8}
             className="w-full rounded-md border border-[hsl(var(--input))] bg-transparent px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[hsl(var(--ring))]"
-            placeholder="Min 8 characters"
+            placeholder={t('auth.passwordMinPlaceholder')}
           />
         </div>
         <div>
-          <label htmlFor="change-confirm-password" className="block text-sm font-medium mb-1">Confirm new password</label>
+          <label htmlFor="change-confirm-password" className="block text-sm font-medium mb-1">{t('settings.confirmNewPassword')}</label>
           <input
             id="change-confirm-password"
             type="password"
@@ -578,11 +587,11 @@ function ChangePasswordCard() {
         </div>
 
         {mismatch && (
-          <p className="text-sm text-[hsl(var(--destructive))]">New passwords do not match</p>
+          <p className="text-sm text-[hsl(var(--destructive))]">{t('settings.passwordsMismatch')}</p>
         )}
         {changePassword.error && (
           <p className="text-sm text-[hsl(var(--destructive))]">
-            {getApiErrorMessage(changePassword.error, 'Could not change password')}
+            {getApiErrorMessage(changePassword.error, t('settings.changePasswordError'))}
           </p>
         )}
         <button
@@ -591,7 +600,7 @@ function ChangePasswordCard() {
           className="rounded-md bg-[hsl(var(--primary))] px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-2"
         >
           {changePassword.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
-          Update password
+          {t('settings.updatePassword')}
         </button>
       </form>
     </section>
@@ -599,6 +608,7 @@ function ChangePasswordCard() {
 }
 
 function TwoFactorCard() {
+  const t = useT();
   const user = useAuthStore((state) => state.user);
   const enabled = user?.two_factor_enabled ?? false;
   const emailVerified = user?.email_verified ?? false;
@@ -642,10 +652,10 @@ function TwoFactorCard() {
   return (
     <section className="rounded-lg border border-[hsl(var(--border))] p-6">
       <h2 className="flex items-center gap-2 text-lg font-semibold">
-        <ShieldCheck className="h-5 w-5 text-[hsl(var(--primary))]" /> Two-factor authentication
+        <ShieldCheck className="h-5 w-5 text-[hsl(var(--primary))]" /> {t('settings.twoFactor')}
       </h2>
       <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">
-        Require a time-based code from an authenticator app when you sign in.
+        {t('settings.twoFactorHint')}
       </p>
 
       {/* One-time recovery codes shown right after activation. */}
@@ -653,8 +663,7 @@ function TwoFactorCard() {
         <div className="mt-4 max-w-md space-y-3">
           <div className="flex items-start gap-2 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--accent))] p-3 text-sm">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-[hsl(var(--primary))]" aria-hidden="true" />
-            Save these recovery codes somewhere safe. Each works once if you lose your
-            authenticator. They won't be shown again.
+            {t('settings.recoveryCodesWarning')}
           </div>
           <ul className="grid grid-cols-2 gap-2 rounded-md border border-[hsl(var(--border))] p-3 font-mono text-sm">
             {recoveryCodes.map((rc) => (
@@ -666,16 +675,16 @@ function TwoFactorCard() {
             onClick={() => setRecoveryCodes(null)}
             className="rounded-md bg-[hsl(var(--primary))] px-4 py-2 text-sm font-medium text-white hover:opacity-90"
           >
-            I've saved my codes
+            {t('settings.savedCodes')}
           </button>
         </div>
       ) : enabled ? (
         <form onSubmit={confirmDisable} className="mt-4 max-w-sm space-y-3">
           <p className="flex items-center gap-2 text-sm font-medium text-[hsl(var(--primary))]">
-            <ShieldCheck className="h-4 w-4" aria-hidden="true" /> Two-factor is on.
+            <ShieldCheck className="h-4 w-4" aria-hidden="true" /> {t('settings.twoFactorOn')}
           </p>
           <label htmlFor="twofa-disable-password" className="block text-sm font-medium">
-            Confirm your password to turn it off
+            {t('settings.disablePasswordLabel')}
           </label>
           <input
             id="twofa-disable-password"
@@ -688,7 +697,7 @@ function TwoFactorCard() {
           />
           {disable.error && (
             <p className="text-sm text-[hsl(var(--destructive))]">
-              {getApiErrorMessage(disable.error, 'Could not disable two-factor')}
+              {getApiErrorMessage(disable.error, t('settings.disableError'))}
             </p>
           )}
           <button
@@ -697,7 +706,7 @@ function TwoFactorCard() {
             className="flex items-center justify-center gap-2 rounded-md border border-[hsl(var(--destructive))] px-4 py-2 text-sm font-medium text-[hsl(var(--destructive))] hover:bg-[hsl(var(--destructive))] hover:text-white disabled:opacity-50"
           >
             {disable.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
-            Disable two-factor
+            {t('settings.disableTwoFactor')}
           </button>
         </form>
       ) : setup.data ? (
@@ -707,12 +716,12 @@ function TwoFactorCard() {
               <QRCodeSVG value={setup.data.otpauth_uri} size={168} marginSize={0} />
             </div>
             <div className="min-w-0 flex-1 space-y-2 text-sm">
-              <p>Scan this with your authenticator app, or enter the key manually:</p>
+              <p>{t('settings.scanInstructions')}</p>
               <code className="block break-all rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--muted))] px-2 py-1.5 font-mono text-xs">
                 {setup.data.secret}
               </code>
               <label htmlFor="twofa-enable-code" className="block pt-1 font-medium">
-                Enter the 6-digit code to confirm
+                {t('settings.enterCodeToConfirm')}
               </label>
               <input
                 id="twofa-enable-code"
@@ -729,7 +738,7 @@ function TwoFactorCard() {
           </div>
           {enable.error && (
             <p className="text-sm text-[hsl(var(--destructive))]">
-              {getApiErrorMessage(enable.error, 'Could not enable two-factor')}
+              {getApiErrorMessage(enable.error, t('settings.enableError'))}
             </p>
           )}
           <div className="flex flex-wrap gap-2">
@@ -739,21 +748,21 @@ function TwoFactorCard() {
               className="flex items-center justify-center gap-2 rounded-md bg-[hsl(var(--primary))] px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
             >
               {enable.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
-              Confirm &amp; enable
+              {t('settings.confirmEnable')}
             </button>
             <button
               type="button"
               onClick={cancelSetup}
               className="rounded-md border border-[hsl(var(--border))] px-4 py-2 text-sm hover:bg-[hsl(var(--accent))]"
             >
-              Cancel
+              {t('common.cancel')}
             </button>
           </div>
         </form>
       ) : (
         <form onSubmit={startSetup} className="mt-4 max-w-sm space-y-3">
           <label htmlFor="twofa-setup-password" className="block text-sm font-medium">
-            Confirm your password to set up two-factor
+            {t('settings.setupPasswordLabel')}
           </label>
           <input
             id="twofa-setup-password"
@@ -766,12 +775,12 @@ function TwoFactorCard() {
           />
           {setup.error && (
             <p className="text-sm text-[hsl(var(--destructive))]">
-              {getApiErrorMessage(setup.error, 'Could not start two-factor setup')}
+              {getApiErrorMessage(setup.error, t('settings.setupError'))}
             </p>
           )}
           {!emailVerified && (
             <p className="text-sm text-[hsl(var(--destructive))]">
-              Confirm your email before enabling two-factor authentication.
+              {t('settings.verifyEmailFirst')}
             </p>
           )}
           <button
@@ -780,7 +789,7 @@ function TwoFactorCard() {
             className="flex items-center justify-center gap-2 rounded-md bg-[hsl(var(--primary))] px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
           >
             {setup.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
-            Enable two-factor
+            {t('settings.enableTwoFactor')}
           </button>
         </form>
       )}
@@ -789,6 +798,7 @@ function TwoFactorCard() {
 }
 
 function SessionsCard() {
+  const t = useT();
   const navigate = useNavigate();
   const { data: sessions, isLoading, isError } = useSessions();
   const revoke = useRevokeSession();
@@ -801,23 +811,23 @@ function SessionsCard() {
   return (
     <section className="rounded-lg border border-[hsl(var(--border))] p-6">
       <h2 className="flex items-center gap-2 text-lg font-semibold">
-        <Monitor className="h-5 w-5 text-[hsl(var(--primary))]" /> Active sessions
+        <Monitor className="h-5 w-5 text-[hsl(var(--primary))]" /> {t('settings.sessions')}
       </h2>
       <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">
-        Devices currently signed in to your account.
+        {t('settings.sessionsHint')}
       </p>
 
       <div className="mt-4 space-y-3">
         {isLoading && (
           <p className="flex items-center gap-2 text-sm text-[hsl(var(--muted-foreground))]">
-            <Loader2 className="h-4 w-4 animate-spin" /> Loading sessions…
+            <Loader2 className="h-4 w-4 animate-spin" /> {t('settings.loadingSessions')}
           </p>
         )}
         {isError && (
-          <p className="text-sm text-[hsl(var(--destructive))]">Could not load sessions.</p>
+          <p className="text-sm text-[hsl(var(--destructive))]">{t('settings.sessionsError')}</p>
         )}
         {sessions?.length === 0 && (
-          <p className="text-sm text-[hsl(var(--muted-foreground))]">No active sessions.</p>
+          <p className="text-sm text-[hsl(var(--muted-foreground))]">{t('settings.noSessions')}</p>
         )}
 
         {sessions?.map((session) => (
@@ -827,16 +837,16 @@ function SessionsCard() {
           >
             <div className="min-w-0">
               <p className="truncate text-sm font-medium">
-                {session.user_agent || 'Unknown device'}
+                {session.user_agent || t('settings.unknownDevice')}
                 {session.current && (
                   <span className="ml-2 rounded-full bg-[hsl(var(--primary))] px-2 py-0.5 text-xs text-white">
-                    This device
+                    {t('settings.thisDevice')}
                   </span>
                 )}
               </p>
               <p className="mt-0.5 text-xs text-[hsl(var(--muted-foreground))]">
-                {session.ip_address || 'Unknown IP'} · last active{' '}
-                {formatDateTime(session.last_used_at)}
+                {session.ip_address || t('settings.unknownIp')} ·{' '}
+                {t('settings.lastActive', { when: formatDateTime(session.last_used_at) })}
               </p>
             </div>
             {!session.current && (
@@ -844,9 +854,9 @@ function SessionsCard() {
                 onClick={() => revoke.mutate(session.id)}
                 disabled={revoke.isPending}
                 className="flex items-center gap-1 rounded-md border border-[hsl(var(--border))] px-3 py-1.5 text-xs text-[hsl(var(--destructive))] hover:bg-[hsl(var(--accent))] disabled:opacity-50"
-                title="Revoke this session"
+                title={t('settings.revokeSession')}
               >
-                <Trash2 className="h-3.5 w-3.5" /> Revoke
+                <Trash2 className="h-3.5 w-3.5" /> {t('settings.revoke')}
               </button>
             )}
           </div>
@@ -859,13 +869,14 @@ function SessionsCard() {
         className="mt-4 flex items-center gap-2 rounded-md border border-[hsl(var(--border))] px-4 py-2 text-sm hover:bg-[hsl(var(--accent))] disabled:opacity-50"
       >
         {logoutAll.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogOut className="h-4 w-4" />}
-        Sign out of all devices
+        {t('settings.signOutAll')}
       </button>
     </section>
   );
 }
 
 function DangerZoneCard() {
+  const t = useT();
   const logout = useAuthStore((state) => state.logout);
   const [confirming, setConfirming] = useState(false);
   const [password, setPassword] = useState('');
@@ -889,10 +900,10 @@ function DangerZoneCard() {
       className="scroll-mt-20 rounded-lg border border-[hsl(var(--destructive))] p-6 focus:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--ring))]"
     >
       <h2 className="flex items-center gap-2 text-lg font-semibold text-[hsl(var(--destructive))]">
-        <AlertTriangle className="h-5 w-5" /> Delete account
+        <AlertTriangle className="h-5 w-5" /> {t('settings.deleteAccount')}
       </h2>
       <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">
-        Permanently deletes your account and all of your data. This cannot be undone.
+        {t('settings.deleteAccountHint')}
       </p>
 
       {!confirming ? (
@@ -900,13 +911,13 @@ function DangerZoneCard() {
           onClick={() => setConfirming(true)}
           className="mt-4 flex items-center gap-2 rounded-md bg-[hsl(var(--destructive))] px-4 py-2 text-sm font-medium text-white hover:opacity-90"
         >
-          <Trash2 className="h-4 w-4" /> Delete my account
+          <Trash2 className="h-4 w-4" /> {t('settings.deleteMyAccount')}
         </button>
       ) : (
         <form onSubmit={handleDelete} className="mt-4 space-y-4 max-w-sm">
           <div>
             <label htmlFor="delete-account-password" className="block text-sm font-medium mb-1">
-              Enter your password to confirm
+              {t('settings.deletePasswordLabel')}
             </label>
             <input
               id="delete-account-password"
@@ -922,7 +933,7 @@ function DangerZoneCard() {
 
           {deleteAccount.error && (
             <p className="text-sm text-[hsl(var(--destructive))]">
-              {getApiErrorMessage(deleteAccount.error, 'Could not delete account')}
+              {getApiErrorMessage(deleteAccount.error, t('settings.deleteError'))}
             </p>
           )}
 
@@ -933,7 +944,7 @@ function DangerZoneCard() {
               className="flex items-center gap-2 rounded-md bg-[hsl(var(--destructive))] px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
             >
               {deleteAccount.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
-              Permanently delete
+              {t('settings.permanentlyDelete')}
             </button>
             <button
               type="button"
@@ -943,7 +954,7 @@ function DangerZoneCard() {
               }}
               className="rounded-md border border-[hsl(var(--border))] px-4 py-2 text-sm hover:bg-[hsl(var(--accent))]"
             >
-              Cancel
+              {t('common.cancel')}
             </button>
           </div>
         </form>
@@ -953,6 +964,7 @@ function DangerZoneCard() {
 }
 
 export default function SettingsPage() {
+  const t = useT();
   const location = useLocation();
 
   useEffect(() => {
@@ -973,7 +985,7 @@ export default function SettingsPage() {
 
   return (
     <div className="mx-auto max-w-3xl space-y-6 px-4 py-6 sm:py-8">
-      <h1 className="text-2xl font-bold">Settings</h1>
+      <h1 className="text-2xl font-bold">{t('settings.title')}</h1>
       <LanguageCard />
       <ProfilePictureCard />
       <PrivacyCard />
@@ -992,7 +1004,7 @@ export default function SettingsPage() {
       >
         <span className="flex items-center gap-2">
           <Info className="h-5 w-5 text-[hsl(var(--muted-foreground))]" aria-hidden="true" />
-          About &amp; data sources
+          {t('settings.aboutLink')}
         </span>
         <ChevronRight className="h-4 w-4" aria-hidden="true" />
       </Link>
@@ -1002,7 +1014,7 @@ export default function SettingsPage() {
       >
         <span className="flex items-center gap-2">
           <ShieldCheck className="h-5 w-5 text-[hsl(var(--muted-foreground))]" aria-hidden="true" />
-          Privacy policy
+          {t('privacy.title')}
         </span>
         <ChevronRight className="h-4 w-4" aria-hidden="true" />
       </Link>
