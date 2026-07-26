@@ -57,6 +57,7 @@ export default function HomeScreen() {
     () => discovery.data?.recommendations.slice(0, 12) ?? [],
     [discovery.data],
   );
+  const becauseYouWatched = discovery.data?.because_you_watched ?? null;
   const upNextGroups = useMemo(
     () => groupUpNext(upNext.data?.items ?? []),
     [upNext.data],
@@ -215,6 +216,21 @@ export default function HomeScreen() {
             </AppText>
           ) : null}
         </View>
+
+        {becauseYouWatched && becauseYouWatched.results.length ? (
+          <View style={styles.section}>
+            <AppText variant="section">{`Because you watched ${becauseYouWatched.seed_title}`}</AppText>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.shelf}
+            >
+              {becauseYouWatched.results.map((item) => (
+                <MediaTile key={`byw-${item.id}-${item.media_type}`} item={item} width={132} />
+              ))}
+            </ScrollView>
+          </View>
+        ) : null}
 
         {recommendations.length ? (
           <View style={styles.section}>
