@@ -32,7 +32,10 @@ pub fn build_calendar(calendar_name: &str, events: &[FeedEvent], now: DateTime<U
         lines.push("BEGIN:VEVENT".to_string());
         lines.push(format!("UID:{}", escape_text(&event.uid)));
         lines.push(format!("DTSTAMP:{stamp}"));
-        lines.push(format!("DTSTART;VALUE=DATE:{}", event.date.format("%Y%m%d")));
+        lines.push(format!(
+            "DTSTART;VALUE=DATE:{}",
+            event.date.format("%Y%m%d")
+        ));
         lines.push(format!("DTEND;VALUE=DATE:{}", end.format("%Y%m%d")));
         lines.push(format!("SUMMARY:{}", escape_text(&event.summary)));
         if let Some(description) = event
@@ -125,7 +128,10 @@ mod tests {
                 segment.len()
             );
             if index > 0 {
-                assert!(segment.starts_with(' '), "continuation must start with a space");
+                assert!(
+                    segment.starts_with(' '),
+                    "continuation must start with a space"
+                );
             }
         }
         // Unfolding (strip CRLF + leading space) restores the original.

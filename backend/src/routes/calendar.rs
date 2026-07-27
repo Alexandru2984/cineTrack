@@ -512,10 +512,12 @@ async fn enable_feed(
 
 async fn disable_feed(pool: web::Data<PgPool>, req: HttpRequest) -> Result<HttpResponse, AppError> {
     let user_id = require_auth(&req).await?;
-    sqlx::query("UPDATE users SET calendar_feed_token_hash = NULL, updated_at = NOW() WHERE id = $1")
-        .bind(user_id)
-        .execute(pool.get_ref())
-        .await?;
+    sqlx::query(
+        "UPDATE users SET calendar_feed_token_hash = NULL, updated_at = NOW() WHERE id = $1",
+    )
+    .bind(user_id)
+    .execute(pool.get_ref())
+    .await?;
     Ok(HttpResponse::Ok().json(CalendarFeedStatus { enabled: false }))
 }
 

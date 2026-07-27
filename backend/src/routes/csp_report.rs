@@ -46,7 +46,10 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
     cfg.service(scope());
 }
 
-pub fn configure_rate_limited(cfg: &mut web::ServiceConfig, rate_limiter: &CspReportGovernorConfig) {
+pub fn configure_rate_limited(
+    cfg: &mut web::ServiceConfig,
+    rate_limiter: &CspReportGovernorConfig,
+) {
     cfg.service(scope().wrap(Governor::new(rate_limiter)));
 }
 

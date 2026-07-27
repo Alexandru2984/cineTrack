@@ -718,15 +718,15 @@ impl TmdbService {
         let cache_key =
             Self::provider_cache_key("recommendations", &[&language, kind, &tmdb_id.to_string()]);
 
-        let cached = match Self::load_provider_response::<TmdbSearchResponse>(pool, &cache_key).await
-        {
-            Ok(cached) => cached,
-            Err(error) => {
-                crate::metrics::record_tmdb_cache("recommendations", "read_error");
-                log::warn!("TMDB recommendations cache lookup failed: {error}");
-                None
-            }
-        };
+        let cached =
+            match Self::load_provider_response::<TmdbSearchResponse>(pool, &cache_key).await {
+                Ok(cached) => cached,
+                Err(error) => {
+                    crate::metrics::record_tmdb_cache("recommendations", "read_error");
+                    log::warn!("TMDB recommendations cache lookup failed: {error}");
+                    None
+                }
+            };
         if let Some(entry) = &cached {
             if entry.expires_at > Utc::now() {
                 crate::metrics::record_tmdb_cache("recommendations", "hit");
@@ -735,15 +735,15 @@ impl TmdbService {
         }
 
         let _refresh_guard = self.acquire_request_lock(&cache_key).await;
-        let cached = match Self::load_provider_response::<TmdbSearchResponse>(pool, &cache_key).await
-        {
-            Ok(cached) => cached,
-            Err(error) => {
-                crate::metrics::record_tmdb_cache("recommendations", "read_error");
-                log::warn!("TMDB recommendations cache recheck failed: {error}");
-                cached
-            }
-        };
+        let cached =
+            match Self::load_provider_response::<TmdbSearchResponse>(pool, &cache_key).await {
+                Ok(cached) => cached,
+                Err(error) => {
+                    crate::metrics::record_tmdb_cache("recommendations", "read_error");
+                    log::warn!("TMDB recommendations cache recheck failed: {error}");
+                    cached
+                }
+            };
         if let Some(entry) = &cached {
             if entry.expires_at > Utc::now() {
                 crate::metrics::record_tmdb_cache("recommendations", "hit");

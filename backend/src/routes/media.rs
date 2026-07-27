@@ -346,13 +346,15 @@ async fn get_community_rating(
     };
 
     let counts_by_score = match media_id {
-        Some(id) => sqlx::query_as::<_, (i16, i64)>(
-            "SELECT rating, COUNT(*) FROM user_media \
+        Some(id) => {
+            sqlx::query_as::<_, (i16, i64)>(
+                "SELECT rating, COUNT(*) FROM user_media \
              WHERE media_id = $1 AND rating IS NOT NULL GROUP BY rating",
-        )
-        .bind(id)
-        .fetch_all(pool.get_ref())
-        .await?,
+            )
+            .bind(id)
+            .fetch_all(pool.get_ref())
+            .await?
+        }
         None => Vec::new(),
     };
 

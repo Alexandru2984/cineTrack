@@ -572,11 +572,11 @@ mod tests {
     fn filter_recommendations_drops_seed_tracked_and_posterless() {
         let tracked = HashSet::from([200]);
         let results = vec![
-            result(100, Some("/seed.jpg")), // the seed itself
+            result(100, Some("/seed.jpg")),    // the seed itself
             result(200, Some("/tracked.jpg")), // already in the library
-            result(300, None),              // no poster
-            result(400, Some("/keep.jpg")), // kept
-            result(400, Some("/dupe.jpg")), // duplicate id
+            result(300, None),                 // no poster
+            result(400, Some("/keep.jpg")),    // kept
+            result(400, Some("/dupe.jpg")),    // duplicate id
         ];
 
         let filtered = filter_recommendations(results, 100, "movie", &tracked, 12);
@@ -593,7 +593,9 @@ mod tests {
         let results = (1..=20).map(|id| result(id, Some("/p.jpg"))).collect();
         let filtered = filter_recommendations(results, 999, "tv", &tracked, 5);
         assert_eq!(filtered.len(), 5);
-        assert!(filtered.iter().all(|r| r.media_type.as_deref() == Some("tv")));
+        assert!(filtered
+            .iter()
+            .all(|r| r.media_type.as_deref() == Some("tv")));
     }
 
     #[test]

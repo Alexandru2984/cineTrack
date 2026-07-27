@@ -395,7 +395,9 @@ mod tests {
         assert!(names
             .iter()
             .any(|name| name == "cinetrack_client_error_reports_total"));
-        assert!(names.iter().any(|name| name == "cinetrack_csp_reports_total"));
+        assert!(names
+            .iter()
+            .any(|name| name == "cinetrack_csp_reports_total"));
         assert!(names
             .iter()
             .any(|name| name == "cinetrack_product_actions_total"));

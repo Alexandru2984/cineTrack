@@ -556,7 +556,9 @@ mod tests {
         let result = build_community_rating(&[(6, 1), (8, 2), (10, 1)]);
         assert_eq!(result.count, 4);
         assert_eq!(result.average, Some(8.0));
-        let distribution = result.distribution.expect("distribution present at/above floor");
+        let distribution = result
+            .distribution
+            .expect("distribution present at/above floor");
         assert_eq!(distribution.len(), 10);
         assert_eq!(distribution[5], 1); // score 6
         assert_eq!(distribution[7], 2); // score 8
