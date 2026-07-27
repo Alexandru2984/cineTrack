@@ -40,13 +40,9 @@ import {
   useUpdateTracking,
   useWatchedEpisodes,
 } from '@/hooks/use-tracking';
+import { useT } from '@/hooks/use-t';
 import { useTheme } from '@/hooks/use-theme';
-import {
-  episodeCode,
-  formatDate,
-  formatRuntime,
-  trackingStatusLabels,
-} from '@/lib/format';
+import { episodeCode, formatDate, formatRuntime } from '@/lib/format';
 import { getErrorMessage } from '@/lib/http';
 import { mediaPath, publicUrl } from '@/lib/deep-links';
 import { hydrateSession } from '@/lib/session';
@@ -60,14 +56,6 @@ import type {
 } from '@/types';
 
 const MAX_TMDB_ID = 2_147_483_647;
-
-const statusOptions = [
-  { value: 'watching', label: 'Watching' },
-  { value: 'plan_to_watch', label: 'Plan to watch' },
-  { value: 'completed', label: 'Completed' },
-  { value: 'on_hold', label: 'On hold' },
-  { value: 'dropped', label: 'Dropped' },
-] as const;
 
 function localDateKey() {
   const date = new Date();
@@ -84,6 +72,14 @@ function normalizeTmdbId(value: string | undefined) {
 
 export default function MediaDetailScreen() {
   const theme = useTheme();
+  const t = useT();
+  const statusOptions = [
+    { value: 'watching', label: t('status.watching') },
+    { value: 'plan_to_watch', label: t('status.plan_to_watch') },
+    { value: 'completed', label: t('status.completed') },
+    { value: 'on_hold', label: t('status.on_hold') },
+    { value: 'dropped', label: t('status.dropped') },
+  ] as const;
   const params = useLocalSearchParams<{ id: string; type?: string }>();
   const rawId = Array.isArray(params.id) ? params.id[0] : params.id;
   const id = normalizeTmdbId(rawId);
@@ -170,16 +166,16 @@ export default function MediaDetailScreen() {
   if (!id) {
     return (
       <ErrorState
-        message="This title link is invalid"
+        message={t('media.invalidLink')}
         onRetry={() => router.replace('/')}
       />
     );
   }
-  if (status === 'loading') return <LoadingState label="Restoring session" />;
+  if (status === 'loading') return <LoadingState label={t('session.restoring')} />;
   if (status === 'restore_error') {
     return (
       <ErrorState
-        message="Your session is still saved. Check your connection and try again."
+        message={t('session.restoreError')}
         onRetry={() => void hydrateSession()}
       />
     );
@@ -194,11 +190,11 @@ export default function MediaDetailScreen() {
       />
     );
   }
-  if (media.isLoading) return <LoadingState label="Loading details" />;
+  if (media.isLoading) return <LoadingState label={t('media.loadingDetails')} />;
   if (media.isError || !media.data) {
     return (
       <ErrorState
-        message={getErrorMessage(media.error, 'This title could not be loaded')}
+        message={getErrorMessage(media.error, t('media.loadError'))}
         onRetry={() => void media.refetch()}
       />
     );
@@ -256,15 +252,17 @@ export default function MediaDetailScreen() {
     }
 
     Alert.alert(
-      `Mark ${episodeCode(selectedSeason, episode.episode_number)} watched?`,
-      `${previousCount} earlier unwatched ${
-        previousCount === 1 ? 'episode is' : 'episodes are'
-      } available.`,
+      t('media.markEpisodeConfirmTitle', {
+        code: episodeCode(selectedSeason, episode.episode_number),
+      }),
+      t(previousCount === 1 ? 'media.earlierUnwatchedOne' : 'media.earlierUnwatchedMany', {
+        count: previousCount,
+      }),
       [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Only this', onPress: () => markEpisode.mutate(variables) },
+        { text: t('common.cancel'), style: 'cancel' },
+        { text: t('media.onlyThis'), onPress: () => markEpisode.mutate(variables) },
         {
-          text: 'This and previous',
+          text: t('media.thisAndPrevious'),
           onPress: () => markThrough.mutate(variables),
         },
       ],
@@ -274,14 +272,14 @@ export default function MediaDetailScreen() {
   const confirmSeason = () => {
     if (selectedSeason === null || seasonUnwatched === 0) return;
     Alert.alert(
-      'Mark season watched?',
-      `${seasonUnwatched} available ${
-        seasonUnwatched === 1 ? 'episode will' : 'episodes will'
-      } be added to your history.`,
+      t('media.markSeasonConfirmTitle'),
+      t(seasonUnwatched === 1 ? 'media.seasonAddOne' : 'media.seasonAddMany', {
+        count: seasonUnwatched,
+      }),
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: t('common.cancel'), style: 'cancel' },
         {
-          text: 'Mark season',
+          text: t('media.markSeason'),
           onPress: () =>
             markSeason.mutate({
               tmdbId: item.tmdb_id,
@@ -354,7 +352,7 @@ export default function MediaDetailScreen() {
 
         <View style={styles.shareAction}>
           <AppButton
-            label="Share"
+            label={t('common.share')}
             variant="secondary"
             compact
             icon={<Share2 color={theme.mutedText} size={18} />}
@@ -369,7 +367,7 @@ export default function MediaDetailScreen() {
         </View>
 
         <View style={styles.section}>
-          <AppText variant="section">Tracking</AppText>
+          <AppText variant="section">{t('media.tracking')}</AppText>
           <SegmentedControl
             value={selectedStatus}
             options={statusOptions}
@@ -378,12 +376,12 @@ export default function MediaDetailScreen() {
           />
           {selectedStatus ? (
             <AppText variant="caption" muted>
-              Current status: {trackingStatusLabels[selectedStatus]}
+              {t('media.currentStatus', { status: t(`status.${selectedStatus}`) })}
             </AppText>
           ) : null}
           <View style={styles.listAction}>
             <AppButton
-              label="Custom list"
+              label={t('media.customList')}
               variant="secondary"
               compact
               icon={<ListPlus color={theme.mutedText} size={18} />}
@@ -404,7 +402,7 @@ export default function MediaDetailScreen() {
           <View style={styles.section}>
             <View style={styles.feedbackHeader}>
               <View style={styles.feedbackCopy}>
-                <AppText variant="section">Your take</AppText>
+                <AppText variant="section">{t('media.yourTake')}</AppText>
                 <View style={styles.feedbackRating}>
                   <Star
                     color={theme.warning}
@@ -412,12 +410,14 @@ export default function MediaDetailScreen() {
                     size={18}
                   />
                   <AppText variant="label">
-                    {existingTracking.rating ? `${existingTracking.rating}/10` : 'Not rated'}
+                    {existingTracking.rating
+                      ? t('library.rating', { value: existingTracking.rating })
+                      : t('media.notRated')}
                   </AppText>
                 </View>
               </View>
               <AppButton
-                label={existingTracking.rating || existingTracking.review ? 'Edit' : 'Add'}
+                label={existingTracking.rating || existingTracking.review ? t('common.edit') : t('media.add')}
                 variant="secondary"
                 compact
                 onPress={() => {
@@ -430,7 +430,7 @@ export default function MediaDetailScreen() {
               <AppText muted>{existingTracking.review}</AppText>
             ) : (
               <AppText variant="caption" muted>
-                Add a private note about this title.
+                {t('media.addNoteHint')}
               </AppText>
             )}
           </View>
@@ -438,7 +438,7 @@ export default function MediaDetailScreen() {
 
         {item.overview ? (
           <View style={styles.section}>
-            <AppText variant="section">Overview</AppText>
+            <AppText variant="section">{t('media.overview')}</AppText>
             <AppText muted>{item.overview}</AppText>
           </View>
         ) : null}
@@ -453,12 +453,12 @@ export default function MediaDetailScreen() {
 
         {type === 'tv' ? (
           <View style={styles.section}>
-            <AppText variant="section">Seasons</AppText>
+            <AppText variant="section">{t('media.seasons')}</AppText>
             {seasons.isLoading ? (
-              <LoadingState label="Loading seasons" />
+              <LoadingState label={t('media.loadingSeasons')} />
             ) : seasons.isError ? (
               <ErrorState
-                message={getErrorMessage(seasons.error, 'Seasons could not be loaded')}
+                message={getErrorMessage(seasons.error, t('media.seasonsLoadError'))}
                 onRetry={() => void seasons.refetch()}
               />
             ) : seasons.data?.length ? (
@@ -497,8 +497,8 @@ export default function MediaDetailScreen() {
                           style={{ color: selected ? '#FFFFFF' : theme.text }}
                         >
                           {season.season_number === 0
-                            ? 'Specials'
-                            : `Season ${season.season_number}`}
+                            ? t('media.specials')
+                            : t('episode.seasonN', { number: season.season_number })}
                         </AppText>
                         {total !== null && total !== undefined ? (
                           <AppText
@@ -509,7 +509,9 @@ export default function MediaDetailScreen() {
                           >
                             {seasonProgress
                               ? `${seasonProgress.watched_count}/${total}`
-                              : `${total} episodes`}
+                              : t(total === 1 ? 'media.episodeCountOne' : 'media.episodeCountMany', {
+                                  count: total,
+                                })}
                           </AppText>
                         ) : null}
                       </Pressable>
@@ -519,10 +521,13 @@ export default function MediaDetailScreen() {
 
                 <View style={[styles.seasonHeader, { borderColor: theme.border }]}>
                   <AppText variant="caption" muted>
-                    {watchedSet.size} of {episodes.data?.length ?? 0} watched
+                    {t('media.watchedOfTotal', {
+                      watched: watchedSet.size,
+                      total: episodes.data?.length ?? 0,
+                    })}
                   </AppText>
                   <AppButton
-                    label={seasonUnwatched === 0 ? 'Season watched' : 'Mark season watched'}
+                    label={seasonUnwatched === 0 ? t('media.seasonWatched') : t('media.markSeasonWatched')}
                     icon={
                       seasonUnwatched === 0 ? (
                         <Check color="#FFFFFF" size={17} />
@@ -539,10 +544,10 @@ export default function MediaDetailScreen() {
                 </View>
 
                 {episodes.isLoading ? (
-                  <LoadingState label="Loading episodes" />
+                  <LoadingState label={t('media.loadingEpisodes')} />
                 ) : episodes.isError ? (
                   <ErrorState
-                    message={getErrorMessage(episodes.error, 'Episodes could not be loaded')}
+                    message={getErrorMessage(episodes.error, t('media.episodesLoadError'))}
                     onRetry={() => void episodes.refetch()}
                   />
                 ) : episodes.data?.length ? (
@@ -568,11 +573,11 @@ export default function MediaDetailScreen() {
                               }
                             >
                               <AppText variant="label" numberOfLines={2}>
-                                {episode.name || `Episode ${episode.episode_number}`}
+                                {episode.name || t('common.episodeN', { number: episode.episode_number })}
                               </AppText>
                             </Pressable>
                             <AppText variant="caption" muted>
-                              {episode.air_date ? formatDate(episode.air_date) : 'Air date TBA'}
+                              {episode.air_date ? formatDate(episode.air_date) : t('episode.airDateTba')}
                               {episode.runtime_minutes
                                 ? ` · ${formatRuntime(episode.runtime_minutes)}`
                                 : ''}
@@ -586,7 +591,7 @@ export default function MediaDetailScreen() {
                           <Pressable
                             accessibilityRole="button"
                             accessibilityLabel={
-                              watched ? 'Episode watched' : 'Mark episode watched'
+                              watched ? t('media.episodeWatchedAria') : t('episodeRow.markWatched')
                             }
                             disabled={watched || markEpisode.isPending || bulkPending}
                             onPress={() => watchEpisode(episode)}
@@ -616,11 +621,11 @@ export default function MediaDetailScreen() {
                     })}
                   </View>
                 ) : (
-                  <AppText muted>No episodes are available for this season.</AppText>
+                  <AppText muted>{t('media.noEpisodes')}</AppText>
                 )}
               </>
             ) : (
-              <AppText muted>No seasons are available.</AppText>
+              <AppText muted>{t('media.noSeasons')}</AppText>
             )}
           </View>
         ) : null}
@@ -628,7 +633,7 @@ export default function MediaDetailScreen() {
         {mutationError ? (
           <View style={[styles.error, { backgroundColor: theme.dangerSoft }]}>
             <AppText variant="caption" style={{ color: theme.danger }}>
-              {getErrorMessage(mutationError, 'The title could not be updated')}
+              {getErrorMessage(mutationError, t('media.updateError'))}
             </AppText>
           </View>
         ) : null}
@@ -639,7 +644,7 @@ export default function MediaDetailScreen() {
           pending={updateTracking.isPending}
           error={
             updateTracking.error
-              ? getErrorMessage(updateTracking.error, 'Your rating could not be saved')
+              ? getErrorMessage(updateTracking.error, t('library.ratingSaveError'))
               : undefined
           }
           onClose={() => {
@@ -659,7 +664,7 @@ export default function MediaDetailScreen() {
           title={item.title}
           onClose={() => setListPickerOpen(false)}
           onAdded={(listName) => {
-            setListFeedback(`Added to ${listName}.`);
+            setListFeedback(t('media.addedToList', { name: listName }));
             setListPickerOpen(false);
           }}
         />

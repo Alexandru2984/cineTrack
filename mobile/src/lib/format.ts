@@ -1,13 +1,3 @@
-import type { TrackingStatus } from '@/types';
-
-export const trackingStatusLabels: Record<TrackingStatus, string> = {
-  watching: 'Watching',
-  completed: 'Completed',
-  plan_to_watch: 'Plan to watch',
-  on_hold: 'On hold',
-  dropped: 'Dropped',
-};
-
 // The active UI locale tag, kept in sync by the locale store (see
 // `store/locale.ts`). Keeping it here lets these stay plain functions the whole
 // codebase can import directly, while still following the user's chosen
