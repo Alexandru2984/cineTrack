@@ -6,6 +6,7 @@ import { Pressable, StyleSheet, View, type ViewStyle } from 'react-native';
 import { AppText } from '@/components/app-text';
 import { imageUrl } from '@/components/poster';
 import { radius, spacing } from '@/constants/theme';
+import { useT } from '@/hooks/use-t';
 import { useTheme } from '@/hooks/use-theme';
 import type { MediaType, TmdbSearchResult } from '@/types';
 
@@ -34,8 +35,9 @@ export function MediaTile({
   addPending?: boolean;
 }) {
   const theme = useTheme();
+  const t = useT();
   const type = mediaResultType(item, fallbackType);
-  const title = item.title || item.name || 'Unknown title';
+  const title = item.title || item.name || t('mediaCard.unknownTitle');
   const date = item.release_date || item.first_air_date;
   const uri = imageUrl(item.poster_path);
   const tileStyle: ViewStyle = width ? { width } : { flex: 1 };
@@ -44,7 +46,7 @@ export function MediaTile({
     <View style={[styles.tile, tileStyle]}>
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={`Open ${title}`}
+        accessibilityLabel={t('mediaCard.open', { title })}
         onPress={() =>
           router.push({
             pathname: '/media/[id]',
@@ -66,7 +68,7 @@ export function MediaTile({
           )}
           <View style={[styles.typeBadge, { backgroundColor: theme.info }]}>
             <AppText variant="caption" style={styles.badgeText}>
-              {type === 'tv' ? 'TV' : 'FILM'}
+              {type === 'tv' ? t('mediaType.tvBadge') : t('mediaType.movieBadge')}
             </AppText>
           </View>
         </View>
@@ -74,14 +76,16 @@ export function MediaTile({
           {title}
         </AppText>
         <AppText variant="caption" muted numberOfLines={1}>
-          {date ? new Date(`${date}T12:00:00`).getFullYear() : 'Release TBA'}
+          {date ? new Date(`${date}T12:00:00`).getFullYear() : t('mediaCard.releaseTba')}
         </AppText>
       </Pressable>
 
       {onAdd ? (
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={added ? `${title} is in your library` : `Add ${title} to your plan`}
+          accessibilityLabel={
+            added ? t('mediaCard.inLibrary', { title }) : t('mediaCard.addToPlan', { title })
+          }
           disabled={added || addPending}
           onPress={onAdd}
           style={({ pressed }) => [

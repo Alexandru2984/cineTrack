@@ -10,6 +10,7 @@ import { Pressable, StyleSheet, View } from 'react-native';
 import { AppText } from '@/components/app-text';
 import { Poster } from '@/components/poster';
 import { spacing } from '@/constants/theme';
+import { useT } from '@/hooks/use-t';
 import { useTheme } from '@/hooks/use-theme';
 import { episodeCode, formatDate, formatRuntime } from '@/lib/format';
 import type { CalendarEpisode } from '@/types';
@@ -32,6 +33,7 @@ export function EpisodeRow({
   watchedPending?: boolean;
 }) {
   const theme = useTheme();
+  const t = useT();
   const runtime = formatRuntime(item.runtime_minutes);
 
   return (
@@ -54,7 +56,7 @@ export function EpisodeRow({
             <AppText variant="caption" muted>
               {episodeCode(item.season_number, item.episode_number)}{' '}
             </AppText>
-            {item.episode_name || `Episode ${item.episode_number}`}
+            {item.episode_name || t('common.episodeN', { number: item.episode_number })}
           </AppText>
           <AppText variant="caption" muted numberOfLines={1}>
             {formatDate(item.air_date)}
@@ -67,7 +69,9 @@ export function EpisodeRow({
       <View style={styles.actions}>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={item.is_planned ? 'Remove from Watch next' : 'Add to Watch next'}
+          accessibilityLabel={
+            item.is_planned ? t('calendar.removeFromWatchNext') : t('calendar.addToWatchNext')
+          }
           disabled={planPending}
           onPress={onPlan}
           style={({ pressed }) => [
@@ -89,7 +93,7 @@ export function EpisodeRow({
         </Pressable>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="Mark episode watched"
+          accessibilityLabel={t('episodeRow.markWatched')}
           disabled={watchedPending}
           onPress={onWatched}
           style={({ pressed }) => [

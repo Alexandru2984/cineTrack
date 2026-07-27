@@ -5,6 +5,7 @@ import { StyleSheet, View } from 'react-native';
 import { AppButton } from '@/components/app-button';
 import { AppText } from '@/components/app-text';
 import { spacing } from '@/constants/theme';
+import { useT } from '@/hooks/use-t';
 import { useTheme } from '@/hooks/use-theme';
 import { captureClientError } from '@/lib/client-errors';
 
@@ -43,17 +44,18 @@ export class MobileErrorBoundary extends Component<
 
 export function MobileErrorFallback({ onRetry }: { onRetry: () => void }) {
   const theme = useTheme();
+  const t = useT();
   return (
     <View style={[styles.screen, { backgroundColor: theme.background }]}>
       <TriangleAlert color={theme.danger} size={32} />
       <AppText variant="section" style={styles.centered}>
-        Something went wrong
+        {t('errorBoundary.title')}
       </AppText>
       <AppText muted style={styles.centered}>
-        The app could not open this screen. Try loading it again.
+        {t('errorBoundary.message')}
       </AppText>
       <AppButton
-        label="Try again"
+        label={t('common.tryAgain')}
         icon={<RotateCcw color="#FFFFFF" size={18} />}
         onPress={onRetry}
         style={styles.button}

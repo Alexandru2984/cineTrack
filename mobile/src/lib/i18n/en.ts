@@ -121,8 +121,30 @@ export const en = {
     remove: 'Remove',
     save: 'Save',
     retry: 'Retry',
+    tryAgain: 'Try again',
+    loading: 'Loading',
     loadingMore: 'Loading more',
+    couldNotLoad: 'Could not load',
     all: 'All',
+    episodeN: 'Episode {number}',
+  },
+  episodeRow: {
+    markWatched: 'Mark episode watched',
+  },
+  mediaCard: {
+    unknownTitle: 'Unknown title',
+    open: 'Open {title}',
+    releaseTba: 'Release TBA',
+    inLibrary: '{title} is in your library',
+    addToPlan: 'Add {title} to your plan',
+  },
+  errorBoundary: {
+    title: 'Something went wrong',
+    message: 'The app could not open this screen. Try loading it again.',
+  },
+  offline: {
+    banner: 'Offline · showing saved data',
+    retry: 'Retry connection',
   },
   stats: {
     movies: 'Movies',

@@ -121,8 +121,30 @@ export const ro: Dictionary = {
     remove: 'Elimină',
     save: 'Salvează',
     retry: 'Reîncearcă',
+    tryAgain: 'Încearcă din nou',
+    loading: 'Se încarcă',
     loadingMore: 'Se încarcă mai multe',
+    couldNotLoad: 'Nu s-a putut încărca',
     all: 'Toate',
+    episodeN: 'Episodul {number}',
+  },
+  episodeRow: {
+    markWatched: 'Marchează episodul ca văzut',
+  },
+  mediaCard: {
+    unknownTitle: 'Titlu necunoscut',
+    open: 'Deschide {title}',
+    releaseTba: 'Lansare necunoscută',
+    inLibrary: '{title} este în biblioteca ta',
+    addToPlan: 'Adaugă {title} în lista ta',
+  },
+  errorBoundary: {
+    title: 'Ceva nu a mers bine',
+    message: 'Aplicația nu a putut deschide acest ecran. Încearcă să îl încarci din nou.',
+  },
+  offline: {
+    banner: 'Offline · se afișează datele salvate',
+    retry: 'Reîncearcă conexiunea',
   },
   stats: {
     movies: 'Filme',

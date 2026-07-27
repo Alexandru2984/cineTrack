@@ -6,12 +6,14 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { AppText } from '@/components/app-text';
 import { spacing } from '@/constants/theme';
+import { useT } from '@/hooks/use-t';
 import { useTheme } from '@/hooks/use-theme';
 import { resumeOfflineSession } from '@/lib/session';
 import { useAuthStore } from '@/store/auth';
 
 export function OfflineBanner() {
   const theme = useTheme();
+  const t = useT();
   const status = useAuthStore((state) => state.status);
   const [retrying, setRetrying] = useState(false);
   if (status !== 'offline') return null;
@@ -36,11 +38,11 @@ export function OfflineBanner() {
       <View style={styles.row}>
         <WifiOff color={theme.warning} size={16} />
         <AppText variant="caption" style={[styles.copy, { color: theme.warning }]}>
-          Offline · showing saved data
+          {t('offline.banner')}
         </AppText>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="Retry connection"
+          accessibilityLabel={t('offline.retry')}
           disabled={retrying}
           onPress={() => void retry()}
           style={({ pressed }) => [

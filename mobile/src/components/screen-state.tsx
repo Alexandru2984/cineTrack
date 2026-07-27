@@ -4,14 +4,16 @@ import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { AppButton } from '@/components/app-button';
 import { AppText } from '@/components/app-text';
 import { spacing } from '@/constants/theme';
+import { useT } from '@/hooks/use-t';
 import { useTheme } from '@/hooks/use-theme';
 
-export function LoadingState({ label = 'Loading' }: { label?: string }) {
+export function LoadingState({ label }: { label?: string }) {
   const theme = useTheme();
+  const t = useT();
   return (
     <View style={styles.container}>
       <ActivityIndicator color={theme.primary} />
-      <AppText muted>{label}</AppText>
+      <AppText muted>{label ?? t('common.loading')}</AppText>
     </View>
   );
 }
@@ -53,15 +55,16 @@ export function ErrorState({
   message: string;
   onRetry: () => void;
 }) {
+  const t = useT();
   return (
     <View style={styles.container}>
       <AppText variant="section" style={styles.center}>
-        Could not load
+        {t('common.couldNotLoad')}
       </AppText>
       <AppText muted style={styles.center}>
         {message}
       </AppText>
-      <AppButton label="Try again" variant="secondary" compact onPress={onRetry} />
+      <AppButton label={t('common.tryAgain')} variant="secondary" compact onPress={onRetry} />
     </View>
   );
 }
