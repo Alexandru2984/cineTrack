@@ -38,6 +38,7 @@ import {
   useDeleteHistory,
   useHistory,
 } from '@/hooks/use-history';
+import { useT } from '@/hooks/use-t';
 import { useTheme } from '@/hooks/use-theme';
 import { useTrackingInfinite } from '@/hooks/use-tracking';
 import { formatDate, formatDateTime } from '@/lib/format';
@@ -87,6 +88,7 @@ function targetFromHistory(item: HistoryItem): HistoryTarget {
 
 export default function HistoryScreen() {
   const theme = useTheme();
+  const t = useT();
   const status = useAuthStore((state) => state.status);
   const hasSession = hasLocalSession(status);
   const [pickerVisible, setPickerVisible] = useState(false);
@@ -148,7 +150,7 @@ export default function HistoryScreen() {
     if (!target) return;
     const watchedAt = watchedAtFromDateInput(dateInput.trim());
     if (!watchedAt) {
-      setDateError('Use a real date in YYYY-MM-DD format, no later than today.');
+      setDateError(t('history.dateError'));
       return;
     }
 
@@ -167,12 +169,12 @@ export default function HistoryScreen() {
 
   const confirmUndo = (item: HistoryItem) => {
     Alert.alert(
-      'Undo watch event?',
+      t('history.undoConfirmTitle'),
       `${item.media_title}${historyEpisodeLabel(item) ? ` · ${historyEpisodeLabel(item)}` : ''}`,
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: t('common.cancel'), style: 'cancel' },
         {
-          text: 'Undo',
+          text: t('history.undo'),
           style: 'destructive',
           onPress: () => remove.mutate(item.id),
         },
@@ -206,13 +208,13 @@ export default function HistoryScreen() {
         ListHeaderComponent={
           <View style={styles.header}>
             <ScreenHeader
-              title="Watch history"
-              subtitle={`${items.length}${history.hasNextPage ? '+' : ''} watch ${
-                items.length === 1 ? 'event' : 'events'
-              }`}
+              title={t('history.title')}
+              subtitle={t(items.length === 1 ? 'history.subtitleOne' : 'history.subtitleMany', {
+                count: `${items.length}${history.hasNextPage ? '+' : ''}`,
+              })}
               right={
                 <AppButton
-                  label="Log watch"
+                  label={t('history.logWatch')}
                   compact
                   icon={<Plus color="#FFFFFF" size={18} />}
                   onPress={() => {
@@ -224,31 +226,31 @@ export default function HistoryScreen() {
             />
             {remove.error ? (
               <AppText variant="caption" style={{ color: theme.danger }}>
-                {getErrorMessage(remove.error, 'The watch event could not be removed')}
+                {getErrorMessage(remove.error, t('history.removeError'))}
               </AppText>
             ) : null}
           </View>
         }
         ListEmptyComponent={
           history.isLoading ? (
-            <LoadingState label="Loading watch history" />
+            <LoadingState label={t('history.loading')} />
           ) : history.isError ? (
             <ErrorState
-              message={getErrorMessage(history.error, 'Watch history could not be loaded')}
+              message={getErrorMessage(history.error, t('history.loadError'))}
               onRetry={() => void history.refetch()}
             />
           ) : (
             <EmptyState
               icon={HistoryIcon}
-              title="No watch events"
-              message="Watched movies and episodes will appear here."
-              actionLabel="Log a watch"
+              title={t('history.emptyTitle')}
+              message={t('history.emptyMessage')}
+              actionLabel={t('history.emptyAction')}
               onAction={() => setPickerVisible(true)}
             />
           )
         }
         ListFooterComponent={
-          history.isFetchingNextPage ? <LoadingState label="Loading more" /> : null
+          history.isFetchingNextPage ? <LoadingState label={t('common.loadingMore')} /> : null
         }
         renderItem={({ item }) => {
           const episodeLabel = historyEpisodeLabel(item);
@@ -256,7 +258,7 @@ export default function HistoryScreen() {
             <View style={[styles.historyRow, { borderBottomColor: theme.border }]}>
               <Pressable
                 accessibilityRole="button"
-                accessibilityLabel={`Open ${item.media_title}`}
+                accessibilityLabel={t('mediaCard.open', { title: item.media_title })}
                 onPress={() =>
                   router.push({
                     pathname: '/media/[id]',
@@ -279,7 +281,7 @@ export default function HistoryScreen() {
                     </AppText>
                   ) : (
                     <AppText variant="caption" muted>
-                      {item.media_type === 'tv' ? 'TV show' : 'Movie'}
+                      {t(item.media_type === 'tv' ? 'mediaType.tv' : 'mediaType.movie')}
                     </AppText>
                   )}
                   <AppText variant="caption" muted>
@@ -290,7 +292,7 @@ export default function HistoryScreen() {
               <View style={styles.rowActions}>
                 <Pressable
                   accessibilityRole="button"
-                  accessibilityLabel={`Log another watch for ${item.media_title}`}
+                  accessibilityLabel={t('history.logAnotherAria', { title: item.media_title })}
                   onPress={() => openLog(targetFromHistory(item))}
                   style={({ pressed }) => [
                     styles.iconButton,
@@ -305,7 +307,7 @@ export default function HistoryScreen() {
                 </Pressable>
                 <Pressable
                   accessibilityRole="button"
-                  accessibilityLabel={`Undo watch event for ${item.media_title}`}
+                  accessibilityLabel={t('history.undoAria', { title: item.media_title })}
                   disabled={remove.isPending}
                   onPress={() => confirmUndo(item)}
                   style={({ pressed }) => [
@@ -333,14 +335,14 @@ export default function HistoryScreen() {
         <SafeAreaView style={[styles.modalPage, { backgroundColor: theme.background }]}>
           <View style={[styles.modalHeader, { borderBottomColor: theme.border }]}>
             <View style={styles.modalTitle}>
-              <AppText variant="section">Choose from library</AppText>
+              <AppText variant="section">{t('history.pickerTitle')}</AppText>
               <AppText variant="caption" muted>
-                Select the movie or show you watched.
+                {t('history.pickerSubtitle')}
               </AppText>
             </View>
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel="Close title picker"
+              accessibilityLabel={t('history.closePickerAria')}
               onPress={() => setPickerVisible(false)}
               style={[styles.iconButton, { borderColor: theme.border }]}
             >
@@ -355,10 +357,10 @@ export default function HistoryScreen() {
           >
             <Search color={theme.mutedText} size={18} />
             <TextInput
-              accessibilityLabel="Search loaded library titles"
+              accessibilityLabel={t('history.searchLibraryAria')}
               value={libraryQuery}
               onChangeText={setLibraryQuery}
-              placeholder="Search library"
+              placeholder={t('history.searchLibraryPlaceholder')}
               placeholderTextColor={theme.mutedText}
               autoCapitalize="none"
               returnKeyType="search"
@@ -378,27 +380,27 @@ export default function HistoryScreen() {
             onEndReachedThreshold={0.5}
             ListEmptyComponent={
               library.isLoading ? (
-                <LoadingState label="Loading library" />
+                <LoadingState label={t('history.loadingLibrary')} />
               ) : library.isError ? (
                 <ErrorState
-                  message={getErrorMessage(library.error, 'Your library could not be loaded')}
+                  message={getErrorMessage(library.error, t('library.loadError'))}
                   onRetry={() => void library.refetch()}
                 />
               ) : (
                 <EmptyState
                   icon={Search}
-                  title="No matching titles"
-                  message="Try another title or add it to your library first."
+                  title={t('history.noMatchTitle')}
+                  message={t('history.noMatchMessage')}
                 />
               )
             }
             ListFooterComponent={
-              library.isFetchingNextPage ? <LoadingState label="Loading more" /> : null
+              library.isFetchingNextPage ? <LoadingState label={t('common.loadingMore')} /> : null
             }
             renderItem={({ item }) => (
               <Pressable
                 accessibilityRole="button"
-                accessibilityLabel={`Select ${item.title}`}
+                accessibilityLabel={t('history.selectAria', { title: item.title })}
                 onPress={() => openLog(targetFromTracking(item))}
                 style={({ pressed }) => [
                   styles.pickerRow,
@@ -414,7 +416,7 @@ export default function HistoryScreen() {
                     {item.title}
                   </AppText>
                   <AppText variant="caption" muted>
-                    {item.media_type === 'tv' ? 'TV show' : 'Movie'}
+                    {t(item.media_type === 'tv' ? 'mediaType.tv' : 'mediaType.movie')}
                   </AppText>
                 </View>
                 <Check color={theme.primary} size={20} />
@@ -443,7 +445,7 @@ export default function HistoryScreen() {
                 <View style={styles.sheetHeader}>
                   <View style={styles.sheetTitle}>
                     <AppText variant="section">
-                      {target?.episodeId ? 'Log rewatch' : 'Log watch'}
+                      {target?.episodeId ? t('history.logRewatch') : t('history.logWatch')}
                     </AppText>
                     <AppText muted numberOfLines={2}>
                       {target?.title}
@@ -456,7 +458,7 @@ export default function HistoryScreen() {
                   </View>
                   <Pressable
                     accessibilityRole="button"
-                    accessibilityLabel="Close watch form"
+                    accessibilityLabel={t('history.closeFormAria')}
                     disabled={create.isPending}
                     onPress={closeLog}
                     style={[styles.iconButton, { borderColor: theme.border }]}
@@ -467,7 +469,7 @@ export default function HistoryScreen() {
 
                 <View style={styles.quickDates}>
                   <DateShortcut
-                    label="Today"
+                    label={t('history.today')}
                     selected={dateInput === localDateInput()}
                     onPress={() => {
                       setDateInput(localDateInput());
@@ -476,7 +478,7 @@ export default function HistoryScreen() {
                     }}
                   />
                   <DateShortcut
-                    label="Yesterday"
+                    label={t('history.yesterday')}
                     selected={dateInput === previousLocalDate()}
                     onPress={() => {
                       setDateInput(previousLocalDate());
@@ -487,10 +489,12 @@ export default function HistoryScreen() {
                 </View>
 
                 <View style={styles.fieldGroup}>
-                  <AppText variant="label">Watched date</AppText>
+                  <AppText variant="label">{t('history.watchedDate')}</AppText>
                   <Pressable
                     accessibilityRole="button"
-                    accessibilityLabel={`Watched date, ${formatDate(dateInput)}. Open date picker`}
+                    accessibilityLabel={t('history.watchedDateAria', {
+                      date: formatDate(dateInput),
+                    })}
                     disabled={create.isPending}
                     onPress={() => setDatePickerVisible((visible) => !visible)}
                     style={[
@@ -518,7 +522,7 @@ export default function HistoryScreen() {
                       />
                       {Platform.OS === 'ios' ? (
                         <AppButton
-                          label="Done choosing date"
+                          label={t('history.doneChoosingDate')}
                           variant="secondary"
                           compact
                           onPress={() => setDatePickerVisible(false)}
@@ -533,21 +537,21 @@ export default function HistoryScreen() {
                   ) : null}
                   {create.error ? (
                     <AppText variant="caption" style={{ color: theme.danger }}>
-                      {getErrorMessage(create.error, 'The watch event could not be saved')}
+                      {getErrorMessage(create.error, t('history.saveError'))}
                     </AppText>
                   ) : null}
                 </View>
 
                 <View style={styles.sheetActions}>
                   <AppButton
-                    label="Cancel"
+                    label={t('common.cancel')}
                     variant="secondary"
                     disabled={create.isPending}
                     onPress={closeLog}
                     style={styles.sheetAction}
                   />
                   <AppButton
-                    label={target?.episodeId ? 'Log rewatch' : 'Log watch'}
+                    label={target?.episodeId ? t('history.logRewatch') : t('history.logWatch')}
                     loading={create.isPending}
                     onPress={() => void submitLog()}
                     style={styles.sheetAction}
