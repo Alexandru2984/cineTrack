@@ -21,6 +21,7 @@ import {
   useNotificationSummary,
   useNotifications,
 } from '@/hooks/use-notifications';
+import { useT } from '@/hooks/use-t';
 import { useTheme } from '@/hooks/use-theme';
 import { formatDateTime } from '@/lib/format';
 import { getErrorMessage } from '@/lib/http';
@@ -29,6 +30,7 @@ import { useAuthStore } from '@/store/auth';
 
 export default function NotificationsScreen() {
   const theme = useTheme();
+  const t = useT();
   const status = useAuthStore((state) => state.status);
   const authenticated = status === 'authenticated';
   const summary = useNotificationSummary(authenticated);
@@ -86,18 +88,20 @@ export default function NotificationsScreen() {
             <View style={styles.headerCopy}>
               <AppText muted>
                 {unreadCount === 0
-                  ? 'You are all caught up.'
-                  : `${unreadCount} unread notification${unreadCount === 1 ? '' : 's'}`}
+                  ? t('notifications.allCaughtUp')
+                  : unreadCount === 1
+                    ? t('notifications.unreadOne')
+                    : t('notifications.unreadMany', { count: unreadCount })}
               </AppText>
               {mutationError ? (
                 <AppText variant="caption" style={{ color: theme.danger }}>
-                  {getErrorMessage(mutationError, 'Notifications could not be updated')}
+                  {getErrorMessage(mutationError, t('notifications.updateError'))}
                 </AppText>
               ) : null}
             </View>
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel="Mark all notifications as read"
+              accessibilityLabel={t('notifications.markAllAria')}
               disabled={unreadCount === 0 || markAll.isPending}
               onPress={() => markAll.mutate()}
               style={({ pressed }) => [
@@ -118,30 +122,32 @@ export default function NotificationsScreen() {
         }
         ListEmptyComponent={
           loading ? (
-            <LoadingState label="Loading notifications" />
+            <LoadingState label={t('notifications.loading')} />
           ) : error ? (
             <ErrorState
-              message="Notifications could not be loaded"
+              message={t('notifications.loadError')}
               onRetry={() => void Promise.all([summary.refetch(), notifications.refetch()])}
             />
           ) : (
             <EmptyState
               icon={Bell}
-              title="No notifications"
-              message="Social updates will appear here."
+              title={t('notifications.emptyTitle')}
+              message={t('notifications.emptyMessage')}
             />
           )
         }
         ListFooterComponent={
-          notifications.isFetchingNextPage ? <LoadingState label="Loading older notifications" /> : null
+          notifications.isFetchingNextPage ? (
+            <LoadingState label={t('notifications.loadingOlder')} />
+          ) : null
         }
         renderItem={({ item }) => {
           const unread = item.read_at === null;
           return (
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel={`${item.actor_username} ${notificationAction(item.kind)}${
-                unread ? ', unread' : ''
+              accessibilityLabel={`${item.actor_username} ${notificationAction(t, item.kind)}${
+                unread ? t('notifications.unreadSuffix') : ''
               }`}
               onPress={() => {
                 if (unread) markRead.mutate(item.id);
@@ -174,7 +180,7 @@ export default function NotificationsScreen() {
               <View style={styles.rowCopy}>
                 <AppText>
                   <AppText variant="label">{item.actor_username}</AppText>{' '}
-                  <AppText muted>{notificationAction(item.kind)}</AppText>
+                  <AppText muted>{notificationAction(t, item.kind)}</AppText>
                 </AppText>
                 <AppText variant="caption" muted>
                   {formatDateTime(item.created_at)}
@@ -182,7 +188,7 @@ export default function NotificationsScreen() {
               </View>
               {unread ? (
                 <View
-                  accessibilityLabel="Unread"
+                  accessibilityLabel={t('notifications.unread')}
                   style={[styles.unread, { backgroundColor: theme.primary }]}
                 />
               ) : null}

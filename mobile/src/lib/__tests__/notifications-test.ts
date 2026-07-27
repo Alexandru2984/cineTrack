@@ -5,7 +5,10 @@ import {
   notificationAction,
   uniqueNotifications,
 } from '@/lib/notifications';
+import { translate } from '@/lib/i18n';
 import type { NotificationListResponse, SocialNotification } from '@/types';
+
+const t = (key: string, params?: Record<string, string | number>) => translate('en', key, params);
 
 const first: SocialNotification = {
   id: 'notification-1',
@@ -27,9 +30,9 @@ function response(
 
 describe('mobile notifications', () => {
   it('formats every supported social event', () => {
-    expect(notificationAction('follow_request')).toBe('requested to follow you');
-    expect(notificationAction('follow_accepted')).toBe('accepted your follow request');
-    expect(notificationAction('new_follower')).toBe('started following you');
+    expect(notificationAction(t, 'follow_request')).toBe('requested to follow you');
+    expect(notificationAction(t, 'follow_accepted')).toBe('accepted your follow request');
+    expect(notificationAction(t, 'new_follower')).toBe('started following you');
   });
 
   it('uses the backend composite cursor and stops at the last page', () => {

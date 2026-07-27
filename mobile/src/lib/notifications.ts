@@ -9,14 +9,16 @@ export interface NotificationCursor {
   beforeId: string;
 }
 
-export function notificationAction(kind: NotificationKind) {
+type Translate = (key: string, params?: Record<string, string | number>) => string;
+
+export function notificationAction(t: Translate, kind: NotificationKind) {
   switch (kind) {
     case 'follow_request':
-      return 'requested to follow you';
+      return t('notifications.actionFollowRequest');
     case 'follow_accepted':
-      return 'accepted your follow request';
+      return t('notifications.actionFollowAccepted');
     case 'new_follower':
-      return 'started following you';
+      return t('notifications.actionNewFollower');
   }
 }
 
