@@ -22,6 +22,7 @@ import {
   useSetEpisodePlanned,
 } from '@/hooks/use-calendar';
 import { useEpisodeDetail, useSetEpisodeReaction } from '@/hooks/use-media';
+import { useT } from '@/hooks/use-t';
 import { useTheme } from '@/hooks/use-theme';
 import { EpisodeReactions } from '@/components/episode-reactions';
 import { episodePath, publicUrl } from '@/lib/deep-links';
@@ -34,6 +35,7 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3
 
 export default function EpisodeDetailScreen() {
   const theme = useTheme();
+  const t = useT();
   const params = useLocalSearchParams<{ id: string }>();
   const rawId = Array.isArray(params.id) ? params.id[0] : params.id;
   const id = rawId && UUID_PATTERN.test(rawId) ? rawId : '';
@@ -48,16 +50,16 @@ export default function EpisodeDetailScreen() {
   if (!id) {
     return (
       <ErrorState
-        message="This episode link is invalid"
+        message={t('episode.invalidLink')}
         onRetry={() => router.replace('/')}
       />
     );
   }
-  if (status === 'loading') return <LoadingState label="Restoring session" />;
+  if (status === 'loading') return <LoadingState label={t('session.restoring')} />;
   if (status === 'restore_error') {
     return (
       <ErrorState
-        message="Your session is still saved. Check your connection and try again."
+        message={t('session.restoreError')}
         onRetry={() => void hydrateSession()}
       />
     );
@@ -72,18 +74,18 @@ export default function EpisodeDetailScreen() {
       />
     );
   }
-  if (episode.isLoading) return <LoadingState label="Loading episode" />;
+  if (episode.isLoading) return <LoadingState label={t('episode.loading')} />;
   if (episode.isError || !item) {
     return (
       <ErrorState
-        message={getErrorMessage(episode.error, 'This episode could not be loaded')}
+        message={getErrorMessage(episode.error, t('episode.loadError'))}
         onRetry={() => void episode.refetch()}
       />
     );
   }
 
   const code = episodeCode(item.season_number, item.episode_number);
-  const name = item.episode_name || `Episode ${item.episode_number}`;
+  const name = item.episode_name || t('common.episodeN', { number: item.episode_number });
   const runtime = formatRuntime(item.runtime_minutes);
   const artwork = imageUrl(item.still_path ?? item.poster_path, item.still_path ? 'w780' : 'w342');
   const canManage = item.tracking_status !== null && item.tracking_status !== 'dropped';
@@ -131,10 +133,10 @@ export default function EpisodeDetailScreen() {
           <AppText variant="title">{name}</AppText>
           <View style={styles.metadata}>
             <AppText variant="caption" muted>
-              {item.season_name || `Season ${item.season_number}`}
+              {item.season_name || t('episode.seasonN', { number: item.season_number })}
             </AppText>
             <AppText variant="caption" muted>
-              {item.air_date ? formatDate(item.air_date) : 'Air date TBA'}
+              {item.air_date ? formatDate(item.air_date) : t('episode.airDateTba')}
             </AppText>
             {runtime ? (
               <View style={styles.inlineMeta}>
@@ -147,7 +149,7 @@ export default function EpisodeDetailScreen() {
 
         <View style={styles.actions}>
           <AppButton
-            label={item.is_planned ? 'Remove from Watch next' : 'Watch next'}
+            label={item.is_planned ? t('calendar.removeFromWatchNext') : t('episode.watchNext')}
             icon={
               item.is_planned ? (
                 <BookmarkCheck color={theme.text} size={18} />
@@ -164,7 +166,7 @@ export default function EpisodeDetailScreen() {
           />
           {item.is_available ? (
             <AppButton
-              label={item.is_watched ? 'Watched' : 'Mark watched'}
+              label={item.is_watched ? t('episode.watched') : t('episode.markWatched')}
               icon={
                 item.is_watched ? (
                   <CheckCircle2 color="#FFFFFF" size={18} />
@@ -179,7 +181,7 @@ export default function EpisodeDetailScreen() {
             />
           ) : null}
           <AppButton
-            label="Share"
+            label={t('common.share')}
             icon={<Share2 color={theme.text} size={18} />}
             variant="secondary"
             onPress={() =>
@@ -194,29 +196,31 @@ export default function EpisodeDetailScreen() {
 
         {!canManage ? (
           <AppText variant="caption" muted>
-            Add the series to your library to manage this episode.
+            {t('episode.addToLibraryHint')}
           </AppText>
         ) : null}
         {!item.is_available ? (
           <AppText variant="caption" muted>
-            This episode can be marked watched after its release date.
+            {t('episode.notAvailableHint')}
           </AppText>
         ) : null}
         {actionError ? (
           <AppText variant="caption" style={{ color: theme.danger }}>
-            {getErrorMessage(actionError, 'This episode could not be updated')}
+            {getErrorMessage(actionError, t('episode.updateError'))}
           </AppText>
         ) : null}
 
-        <View style={[styles.overview, { borderTopColor: theme.border }]}> 
-          <AppText variant="section">Overview</AppText>
+        <View style={[styles.overview, { borderTopColor: theme.border }]}>
+          <AppText variant="section">{t('episode.overview')}</AppText>
           <AppText muted>
-            {item.overview || 'No overview is available for this episode.'}
+            {item.overview || t('episode.noOverview')}
           </AppText>
           {item.last_watched_at ? (
             <AppText variant="caption" muted>
-              Watched {item.watch_count} {item.watch_count === 1 ? 'time' : 'times'} · Last on{' '}
-              {formatDateTime(item.last_watched_at)}
+              {t(item.watch_count === 1 ? 'episode.watchedOnce' : 'episode.watchedMany', {
+                count: item.watch_count,
+                date: formatDateTime(item.last_watched_at),
+              })}
             </AppText>
           ) : null}
         </View>
