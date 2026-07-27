@@ -17,6 +17,7 @@ import { AppText } from '@/components/app-text';
 import { ErrorState, LoadingState } from '@/components/screen-state';
 import { radius, spacing } from '@/constants/theme';
 import { useImportJob, useImportJobs, useStartImport } from '@/hooks/use-import';
+import { useT } from '@/hooks/use-t';
 import { useTheme } from '@/hooks/use-theme';
 import { getErrorMessage } from '@/lib/http';
 import {
@@ -28,29 +29,32 @@ import {
 import { hasLocalSession, useAuthStore } from '@/store/auth';
 import type { ImportJob } from '@/types';
 
+// File names stay verbatim (they must match the TV Time export); only the
+// descriptions are localized, via the i18n key referenced here.
 const fileCopy: Record<
   ImportFileKind,
-  { label: string; detail: string; icon: typeof FileJson }
+  { label: string; detailKey: string; icon: typeof FileJson }
 > = {
   shows: {
     label: 'shows.json',
-    detail: 'Shows and episode watch history',
+    detailKey: 'importTvtime.detailShows',
     icon: FileJson,
   },
   movies: {
     label: 'movies.json',
-    detail: 'Movies and ratings',
+    detailKey: 'importTvtime.detailMovies',
     icon: FileJson,
   },
   rewatches: {
     label: 'rewatched_episode.csv',
-    detail: 'Optional GDPR rewatch history',
+    detailKey: 'importTvtime.detailRewatches',
     icon: FileSpreadsheet,
   },
 };
 
 export default function ImportTVTimeScreen() {
   const theme = useTheme();
+  const t = useT();
   const queryClient = useQueryClient();
   const status = useAuthStore((state) => state.status);
   const online = status === 'authenticated';
@@ -92,7 +96,7 @@ export default function ImportTVTimeScreen() {
       const selected = await pickTVTimeImportFile(kind);
       if (selected) setFiles((current) => ({ ...current, [kind]: selected }));
     } catch (error) {
-      setSelectionError(getErrorMessage(error, 'The file could not be selected'));
+      setSelectionError(getErrorMessage(error, t('importTvtime.selectError')));
     }
   };
 
@@ -116,24 +120,21 @@ export default function ImportTVTimeScreen() {
           <View style={[styles.heroIcon, { backgroundColor: theme.primarySoft }]}>
             <UploadCloud color={theme.primary} size={30} />
           </View>
-          <AppText variant="title">Import from TV Time</AppText>
-          <AppText muted>
-            Export your data from TV Time, then choose the files below. Parsing happens
-            on Văzute and raw uploads are not retained after the job is accepted.
-          </AppText>
+          <AppText variant="title">{t('importTvtime.title')}</AppText>
+          <AppText muted>{t('importTvtime.intro')}</AppText>
         </View>
 
         {!online ? (
           <View style={[styles.notice, { borderColor: theme.warning }]}>
             <AppText variant="label" style={{ color: theme.warning }}>
-              Connect to the internet to import data.
+              {t('importTvtime.offline')}
             </AppText>
           </View>
         ) : jobs.isLoading ? (
-          <LoadingState label="Checking previous imports" />
+          <LoadingState label={t('importTvtime.checkingPrevious')} />
         ) : jobs.isError ? (
           <ErrorState
-            message={getErrorMessage(jobs.error, 'Previous imports could not be loaded')}
+            message={getErrorMessage(jobs.error, t('importTvtime.previousLoadError'))}
             onRetry={() => void jobs.refetch()}
           />
         ) : job && job.status !== 'failed' ? (
@@ -143,10 +144,10 @@ export default function ImportTVTimeScreen() {
             {job?.status === 'failed' ? (
               <View style={[styles.notice, { borderColor: theme.danger }]}>
                 <AppText variant="label" style={{ color: theme.danger }}>
-                  The previous import failed
+                  {t('importTvtime.previousFailed')}
                 </AppText>
                 <AppText variant="caption" muted>
-                  {job.error ?? 'You can choose the files and try again.'}
+                  {job.error ?? t('importTvtime.previousFailedHint')}
                 </AppText>
               </View>
             ) : null}
@@ -164,17 +165,16 @@ export default function ImportTVTimeScreen() {
             ))}
 
             <AppText variant="caption" muted>
-              Select at least shows.json or movies.json. Each file may be up to 16 MB
-              and the combined upload may be up to 24 MB.
+              {t('importTvtime.selectHint')}
             </AppText>
             {selectionError || startImport.error ? (
               <AppText variant="caption" style={{ color: theme.danger }}>
                 {selectionError ??
-                  getErrorMessage(startImport.error, 'The import could not be started')}
+                  getErrorMessage(startImport.error, t('importTvtime.startError'))}
               </AppText>
             ) : null}
             <AppButton
-              label="Start import"
+              label={t('importTvtime.start')}
               icon={<UploadCloud color="#FFFFFF" size={18} />}
               loading={startImport.isPending}
               disabled={!online || (!files.shows && !files.movies)}
@@ -199,6 +199,7 @@ function ImportFileRow({
   onRemove: () => void;
 }) {
   const theme = useTheme();
+  const t = useT();
   const copy = fileCopy[kind];
   const Icon = copy.icon;
   return (
@@ -211,19 +212,19 @@ function ImportFileRow({
       <Icon color={file ? theme.primary : theme.mutedText} size={22} />
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={`Choose ${copy.label}`}
+        accessibilityLabel={t('importTvtime.chooseAria', { file: copy.label })}
         onPress={onChoose}
         style={styles.fileCopy}
       >
         <AppText variant="label">{file?.name ?? copy.label}</AppText>
         <AppText variant="caption" muted numberOfLines={1}>
-          {file ? formatFileSize(file.size) : copy.detail}
+          {file ? formatFileSize(file.size, t('importTvtime.fileSelected')) : t(copy.detailKey)}
         </AppText>
       </Pressable>
       {file ? (
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={`Remove ${copy.label}`}
+          accessibilityLabel={t('importTvtime.removeAria', { file: copy.label })}
           hitSlop={8}
           onPress={onRemove}
           style={styles.removeButton}
@@ -237,6 +238,7 @@ function ImportFileRow({
 
 function ImportSummary({ job, refreshing }: { job: ImportJob; refreshing: boolean }) {
   const theme = useTheme();
+  const t = useT();
   const pending = job.status === 'pending' || job.status === 'running';
   const totals = job.totals;
   return (
@@ -249,12 +251,10 @@ function ImportSummary({ job, refreshing }: { job: ImportJob; refreshing: boolea
         )}
         <View style={styles.fileCopy}>
           <AppText variant="section">
-            {pending ? 'Import in progress' : 'Import complete'}
+            {pending ? t('importTvtime.inProgress') : t('importTvtime.complete')}
           </AppText>
           <AppText variant="caption" muted>
-            {pending
-              ? 'You can leave this screen; the job continues in the background.'
-              : 'Your library and statistics have been refreshed.'}
+            {pending ? t('importTvtime.inProgressHint') : t('importTvtime.completeHint')}
           </AppText>
         </View>
         {refreshing && pending ? <Loader2 color={theme.mutedText} size={18} /> : null}
@@ -262,17 +262,20 @@ function ImportSummary({ job, refreshing }: { job: ImportJob; refreshing: boolea
       {totals ? (
         <>
           <View style={styles.totals}>
-            <Total label="Shows" value={totals.shows} />
-            <Total label="Movies" value={totals.movies} />
-            <Total label="Episodes" value={totals.episodes_linked} />
-            <Total label="Rewatches" value={totals.rewatches} />
-            <Total label="Date-only" value={totals.episodes_date_only} />
-            <Total label="Unresolved" value={totals.unresolved.length} />
+            <Total label={t('importTvtime.totalShows')} value={totals.shows} />
+            <Total label={t('importTvtime.totalMovies')} value={totals.movies} />
+            <Total label={t('importTvtime.totalEpisodes')} value={totals.episodes_linked} />
+            <Total label={t('importTvtime.totalRewatches')} value={totals.rewatches} />
+            <Total label={t('importTvtime.totalDateOnly')} value={totals.episodes_date_only} />
+            <Total label={t('importTvtime.totalUnresolved')} value={totals.unresolved.length} />
           </View>
           {totals.unresolved.length ? (
             <AppText variant="caption" muted>
-              Could not match: {totals.unresolved.slice(0, 8).join(', ')}
-              {totals.unresolved.length > 8 ? '…' : ''}
+              {t('importTvtime.couldNotMatch', {
+                items: `${totals.unresolved.slice(0, 8).join(', ')}${
+                  totals.unresolved.length > 8 ? '…' : ''
+                }`,
+              })}
             </AppText>
           ) : null}
         </>
@@ -290,8 +293,8 @@ function Total({ label, value }: { label: string; value: number }) {
   );
 }
 
-function formatFileSize(size: number | null) {
-  if (size === null) return 'Selected';
+function formatFileSize(size: number | null, selectedLabel: string) {
+  if (size === null) return selectedLabel;
   if (size < 1024) return `${size} B`;
   if (size < 1024 * 1024) return `${Math.ceil(size / 1024)} KB`;
   return `${(size / (1024 * 1024)).toFixed(1)} MB`;
