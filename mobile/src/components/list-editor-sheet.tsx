@@ -16,12 +16,14 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { AppButton } from '@/components/app-button';
 import { AppText } from '@/components/app-text';
 import { radius, spacing } from '@/constants/theme';
+import { useT } from '@/hooks/use-t';
 import { useTheme } from '@/hooks/use-theme';
 import { getErrorMessage } from '@/lib/http';
 import {
   LIST_DESCRIPTION_MAX_LENGTH,
   LIST_NAME_MAX_LENGTH,
   listInputFromDraft,
+  type ListDraftError,
   type ListInput,
 } from '@/lib/lists';
 
@@ -29,6 +31,20 @@ interface EditableList {
   name: string;
   description: string | null;
   is_public: boolean;
+}
+
+type Translate = ReturnType<typeof useT>;
+
+/** Resolves a validation failure to a localized message. */
+function describeDraftError(t: Translate, error: ListDraftError): string {
+  switch (error.code) {
+    case 'nameBlank':
+      return t('listEditor.errorNameBlank');
+    case 'nameTooLong':
+      return t('listEditor.errorNameTooLong', { max: error.max });
+    case 'descriptionTooLong':
+      return t('listEditor.errorDescriptionTooLong', { max: error.max });
+  }
 }
 
 export function ListEditorSheet({
@@ -45,10 +61,11 @@ export function ListEditorSheet({
   onSave: (input: ListInput) => void;
 }) {
   const theme = useTheme();
+  const t = useT();
   const [name, setName] = useState(list?.name ?? '');
   const [description, setDescription] = useState(list?.description ?? '');
   const [isPublic, setIsPublic] = useState(list?.is_public ?? false);
-  const [validationError, setValidationError] = useState<string | null>(null);
+  const [validationError, setValidationError] = useState<ListDraftError | null>(null);
 
   const submit = () => {
     const result = listInputFromDraft(name, description, isPublic);
@@ -90,14 +107,16 @@ export function ListEditorSheet({
               <Pressable onPress={(event) => event.stopPropagation()}>
               <View style={styles.header}>
                 <View style={styles.headerCopy}>
-                  <AppText variant="section">{list ? 'Edit list' : 'Create list'}</AppText>
+                  <AppText variant="section">
+                    {list ? t('listEditor.editTitle') : t('listEditor.createTitle')}
+                  </AppText>
                   <AppText variant="caption" muted>
-                    Organize titles independently from tracking status.
+                    {t('listEditor.subtitle')}
                   </AppText>
                 </View>
                 <Pressable
                   accessibilityRole="button"
-                  accessibilityLabel="Close list editor"
+                  accessibilityLabel={t('listEditor.closeAria')}
                   disabled={pending}
                   onPress={onClose}
                   style={[styles.iconButton, { borderColor: theme.border }]}
@@ -108,9 +127,9 @@ export function ListEditorSheet({
 
               <View style={styles.form}>
                 <View style={styles.fieldGroup}>
-                  <AppText variant="label">Name</AppText>
+                  <AppText variant="label">{t('listEditor.name')}</AppText>
                   <TextInput
-                    accessibilityLabel="List name"
+                    accessibilityLabel={t('listEditor.name')}
                     autoFocus
                     value={name}
                     onChangeText={(value) => {
@@ -118,7 +137,7 @@ export function ListEditorSheet({
                       setValidationError(null);
                     }}
                     maxLength={LIST_NAME_MAX_LENGTH}
-                    placeholder="Weekend movies"
+                    placeholder={t('listEditor.namePlaceholder')}
                     placeholderTextColor={theme.mutedText}
                     returnKeyType="next"
                     style={[
@@ -133,14 +152,14 @@ export function ListEditorSheet({
                 </View>
 
                 <View style={styles.fieldGroup}>
-                  <AppText variant="label">Description</AppText>
+                  <AppText variant="label">{t('listEditor.description')}</AppText>
                   <TextInput
-                    accessibilityLabel="List description"
+                    accessibilityLabel={t('listEditor.description')}
                     multiline
                     value={description}
                     onChangeText={setDescription}
                     maxLength={LIST_DESCRIPTION_MAX_LENGTH}
-                    placeholder="Optional context for this collection"
+                    placeholder={t('listEditor.descriptionPlaceholder')}
                     placeholderTextColor={theme.mutedText}
                     textAlignVertical="top"
                     style={[
@@ -165,13 +184,13 @@ export function ListEditorSheet({
                   ]}
                 >
                   <View style={styles.privacyCopy}>
-                    <AppText variant="label">Public list</AppText>
+                    <AppText variant="label">{t('listEditor.publicList')}</AppText>
                     <AppText variant="caption" muted>
-                      Anyone with its link can view it.
+                      {t('listEditor.publicHint')}
                     </AppText>
                   </View>
                   <Switch
-                    accessibilityLabel="Public list"
+                    accessibilityLabel={t('listEditor.publicList')}
                     value={isPublic}
                     onValueChange={setIsPublic}
                     trackColor={{ false: theme.border, true: theme.primarySoft }}
@@ -181,21 +200,23 @@ export function ListEditorSheet({
 
                 {validationError || error ? (
                   <AppText variant="caption" style={{ color: theme.danger }}>
-                    {validationError ?? getErrorMessage(error, 'The list could not be saved')}
+                    {validationError
+                      ? describeDraftError(t, validationError)
+                      : getErrorMessage(error, t('listEditor.saveError'))}
                   </AppText>
                 ) : null}
               </View>
 
               <View style={styles.actions}>
                 <AppButton
-                  label="Cancel"
+                  label={t('common.cancel')}
                   variant="secondary"
                   disabled={pending}
                   onPress={onClose}
                   style={styles.action}
                 />
                 <AppButton
-                  label={list ? 'Save changes' : 'Create list'}
+                  label={list ? t('listEditor.saveChanges') : t('listEditor.createTitle')}
                   loading={pending}
                   onPress={submit}
                   style={styles.action}

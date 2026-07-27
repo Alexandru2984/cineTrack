@@ -15,6 +15,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { AppButton } from '@/components/app-button';
 import { AppText } from '@/components/app-text';
 import { radius, spacing } from '@/constants/theme';
+import { useT } from '@/hooks/use-t';
 import { useTheme } from '@/hooks/use-theme';
 import {
   buildTrackingFeedbackPayload,
@@ -37,6 +38,7 @@ export function TrackingFeedbackSheet({
   onSave: (payload: TrackingFeedbackPayload) => void;
 }) {
   const theme = useTheme();
+  const t = useT();
   const [rating, setRating] = useState<number | null>(item.rating);
   const [review, setReview] = useState(item.review ?? '');
 
@@ -77,14 +79,14 @@ export function TrackingFeedbackSheet({
               >
                 <View style={styles.header}>
                   <View style={styles.headerCopy}>
-                    <AppText variant="section">Your rating and review</AppText>
+                    <AppText variant="section">{t('feedback.title')}</AppText>
                     <AppText muted numberOfLines={2}>
                       {item.title}
                     </AppText>
                   </View>
                   <Pressable
                     accessibilityRole="button"
-                    accessibilityLabel="Close rating editor"
+                    accessibilityLabel={t('feedback.closeAria')}
                     disabled={pending}
                     hitSlop={8}
                     onPress={onClose}
@@ -95,11 +97,11 @@ export function TrackingFeedbackSheet({
                 </View>
 
                 <View style={styles.field}>
-                  <AppText variant="label">Rating</AppText>
+                  <AppText variant="label">{t('feedback.rating')}</AppText>
                   <View style={styles.stepper}>
                     <Pressable
                       accessibilityRole="button"
-                      accessibilityLabel="Decrease rating"
+                      accessibilityLabel={t('feedback.decrease')}
                       disabled={pending || rating === null || rating <= 1}
                       onPress={() => changeRating(-1)}
                       style={[
@@ -129,7 +131,7 @@ export function TrackingFeedbackSheet({
                     </View>
                     <Pressable
                       accessibilityRole="button"
-                      accessibilityLabel="Increase rating"
+                      accessibilityLabel={t('feedback.increase')}
                       disabled={pending || rating === 10}
                       onPress={() => changeRating(1)}
                       style={[
@@ -143,7 +145,7 @@ export function TrackingFeedbackSheet({
                       <Plus color={theme.text} size={20} />
                     </Pressable>
                     <AppButton
-                      label="Clear"
+                      label={t('feedback.clearRating')}
                       variant="secondary"
                       compact
                       disabled={rating === null || pending}
@@ -154,18 +156,18 @@ export function TrackingFeedbackSheet({
 
                 <View style={styles.field}>
                   <View style={styles.labelRow}>
-                    <AppText variant="label">Review</AppText>
+                    <AppText variant="label">{t('feedback.review')}</AppText>
                     <AppText variant="caption" muted>
                       {review.length}/{MAX_REVIEW_LENGTH}
                     </AppText>
                   </View>
                   <TextInput
-                    accessibilityLabel="Review"
+                    accessibilityLabel={t('feedback.review')}
                     value={review}
                     editable={!pending}
                     multiline
                     maxLength={MAX_REVIEW_LENGTH}
-                    placeholder="What did you think?"
+                    placeholder={t('feedback.reviewPlaceholder')}
                     placeholderTextColor={theme.mutedText}
                     onChangeText={setReview}
                     style={[
@@ -190,14 +192,14 @@ export function TrackingFeedbackSheet({
 
                 <View style={styles.actions}>
                   <AppButton
-                    label="Cancel"
+                    label={t('common.cancel')}
                     variant="secondary"
                     disabled={pending}
                     onPress={onClose}
                     style={styles.action}
                   />
                   <AppButton
-                    label="Save"
+                    label={t('common.save')}
                     loading={pending}
                     onPress={() => onSave(buildTrackingFeedbackPayload(rating, review))}
                     style={styles.action}

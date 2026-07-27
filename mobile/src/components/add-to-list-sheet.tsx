@@ -15,6 +15,7 @@ import { AppText } from '@/components/app-text';
 import { LoadingState } from '@/components/screen-state';
 import { radius, spacing } from '@/constants/theme';
 import { useAddListItem, useMyLists } from '@/hooks/use-lists';
+import { useT } from '@/hooks/use-t';
 import { useTheme } from '@/hooks/use-theme';
 import { getErrorMessage } from '@/lib/http';
 
@@ -30,6 +31,7 @@ export function AddToListSheet({
   onAdded: (listName: string) => void;
 }) {
   const theme = useTheme();
+  const t = useT();
   const lists = useMyLists();
   const addItem = useAddListItem();
 
@@ -48,14 +50,14 @@ export function AddToListSheet({
           <Pressable onPress={(event) => event.stopPropagation()}>
             <View style={[styles.header, { borderBottomColor: theme.border }]}>
               <View style={styles.headerCopy}>
-                <AppText variant="section">Add to custom list</AppText>
+                <AppText variant="section">{t('addToList.title')}</AppText>
                 <AppText variant="caption" muted numberOfLines={1}>
                   {title}
                 </AppText>
               </View>
               <Pressable
                 accessibilityRole="button"
-                accessibilityLabel="Close list picker"
+                accessibilityLabel={t('addToList.closeAria')}
                 disabled={addItem.isPending}
                 onPress={onClose}
                 style={[styles.iconButton, { borderColor: theme.border }]}
@@ -65,14 +67,14 @@ export function AddToListSheet({
             </View>
 
             <ScrollView style={styles.list} contentContainerStyle={styles.listContent}>
-              {lists.isLoading ? <LoadingState label="Loading lists" /> : null}
+              {lists.isLoading ? <LoadingState label={t('addToList.loading')} /> : null}
               {lists.isError ? (
                 <View style={styles.state}>
                   <AppText variant="caption" style={{ color: theme.danger }}>
-                    {getErrorMessage(lists.error, 'Your lists could not be loaded')}
+                    {getErrorMessage(lists.error, t('addToList.loadError'))}
                   </AppText>
                   <AppButton
-                    label="Try again"
+                    label={t('common.tryAgain')}
                     variant="secondary"
                     compact
                     onPress={() => void lists.refetch()}
@@ -85,7 +87,7 @@ export function AddToListSheet({
                   <Pressable
                     key={list.id}
                     accessibilityRole="button"
-                    accessibilityLabel={`Add to ${list.name}`}
+                    accessibilityLabel={t('addToList.addTo', { name: list.name })}
                     disabled={addItem.isPending}
                     onPress={() =>
                       addItem.mutate(
@@ -109,7 +111,10 @@ export function AddToListSheet({
                       <View style={styles.meta}>
                         {!list.is_public ? <Lock color={theme.mutedText} size={13} /> : null}
                         <AppText variant="caption" muted>
-                          {list.item_count} {list.item_count === 1 ? 'title' : 'titles'}
+                          {t(
+                            list.item_count === 1 ? 'library.titleCount' : 'library.titleCountPlural',
+                            { count: list.item_count },
+                          )}
                         </AppText>
                       </View>
                     </View>
@@ -124,12 +129,12 @@ export function AddToListSheet({
               {!lists.isLoading && !lists.isError && !lists.data?.length ? (
                 <View style={styles.state}>
                   <ListPlus color={theme.mutedText} size={30} />
-                  <AppText variant="label">No custom lists yet</AppText>
+                  <AppText variant="label">{t('addToList.empty')}</AppText>
                   <AppText variant="caption" muted style={styles.center}>
-                    Create one before adding this title.
+                    {t('addToList.emptyHint')}
                   </AppText>
                   <AppButton
-                    label="Create a list"
+                    label={t('addToList.createList')}
                     compact
                     onPress={() => {
                       onClose();
@@ -140,7 +145,7 @@ export function AddToListSheet({
               ) : null}
               {addItem.error ? (
                 <AppText variant="caption" style={{ color: theme.danger }}>
-                  {getErrorMessage(addItem.error, 'This title could not be added')}
+                  {getErrorMessage(addItem.error, t('addToList.addError'))}
                 </AppText>
               ) : null}
             </ScrollView>
