@@ -66,6 +66,7 @@ import {
   useUpdateCalendarPreferences,
 } from '@/hooks/use-calendar';
 import { useReleaseNotifications } from '@/hooks/use-release-notifications';
+import { useT } from '@/hooks/use-t';
 import { useTheme } from '@/hooks/use-theme';
 import {
   deleteAccountSession,
@@ -74,32 +75,42 @@ import {
   validateProfileDraft,
 } from '@/lib/account';
 import { exportAndShareAccountData } from '@/lib/data-export';
-import { formatDateTime } from '@/lib/format';
+import { formatDateTime, getFormatLocaleTag } from '@/lib/format';
 import { getErrorMessage } from '@/lib/http';
 import { clearOfflineQueryCache } from '@/lib/query-persistence';
 import { validateSecondFactorInput } from '@/lib/two-factor';
 import { useAuthStore } from '@/store/auth';
 import type { AccountSession } from '@/types';
 
-const COUNTRY_OPTIONS: readonly { value: string; label: string; name: string }[] = [
-  { value: 'RO', label: 'RO', name: 'Romania' },
-  { value: 'US', label: 'US', name: 'United States' },
-  { value: 'GB', label: 'GB', name: 'United Kingdom' },
-  { value: 'DE', label: 'DE', name: 'Germany' },
-  { value: 'FR', label: 'FR', name: 'France' },
-  { value: 'IT', label: 'IT', name: 'Italy' },
-  { value: 'ES', label: 'ES', name: 'Spain' },
-  { value: 'NL', label: 'NL', name: 'Netherlands' },
-  { value: 'SE', label: 'SE', name: 'Sweden' },
-  { value: 'PL', label: 'PL', name: 'Poland' },
-  { value: 'CA', label: 'CA', name: 'Canada' },
-  { value: 'AU', label: 'AU', name: 'Australia' },
-  { value: 'JP', label: 'JP', name: 'Japan' },
-  { value: 'KR', label: 'KR', name: 'South Korea' },
+const COUNTRY_OPTIONS: readonly { value: string; label: string }[] = [
+  { value: 'RO', label: 'RO' },
+  { value: 'US', label: 'US' },
+  { value: 'GB', label: 'GB' },
+  { value: 'DE', label: 'DE' },
+  { value: 'FR', label: 'FR' },
+  { value: 'IT', label: 'IT' },
+  { value: 'ES', label: 'ES' },
+  { value: 'NL', label: 'NL' },
+  { value: 'SE', label: 'SE' },
+  { value: 'PL', label: 'PL' },
+  { value: 'CA', label: 'CA' },
+  { value: 'AU', label: 'AU' },
+  { value: 'JP', label: 'JP' },
+  { value: 'KR', label: 'KR' },
 ];
+
+/** Localized country name for the active UI language, falling back to the code. */
+function regionName(code: string): string {
+  try {
+    return new Intl.DisplayNames([getFormatLocaleTag()], { type: 'region' }).of(code) ?? code;
+  } catch {
+    return code;
+  }
+}
 
 export default function SettingsScreen() {
   const theme = useTheme();
+  const t = useT();
   const queryClient = useQueryClient();
   const status = useAuthStore((state) => state.status);
   const user = useAuthStore((state) => state.user);
@@ -176,11 +187,10 @@ export default function SettingsScreen() {
     (updatePreferences.isPending ? updatePreferences.variables : undefined) ??
     preferences.data?.country_code ??
     'RO';
-  const countryName =
-    COUNTRY_OPTIONS.find((country) => country.value === countryCode)?.name ?? countryCode;
+  const countryName = regionName(countryCode);
 
   const saveProfile = async () => {
-    const validationError = validateProfileDraft(username, bio);
+    const validationError = validateProfileDraft(t, username, bio);
     if (validationError) {
       setProfileError(validationError);
       return;
@@ -194,7 +204,7 @@ export default function SettingsScreen() {
       setIsPublic(updated.is_public);
       setProfileSaved(true);
     } catch (error) {
-      setProfileError(getErrorMessage(error, 'Could not update your profile'));
+      setProfileError(getErrorMessage(error, t('settings.profileUpdateError')));
     }
   };
 
@@ -203,20 +213,20 @@ export default function SettingsScreen() {
     try {
       await uploadAvatar.mutateAsync();
     } catch (error) {
-      setAvatarError(getErrorMessage(error, 'Could not update your profile picture'));
+      setAvatarError(getErrorMessage(error, t('settings.avatarUpdateError')));
     }
   };
 
   const confirmAvatarDeletion = () => {
     setAvatarError(null);
-    Alert.alert('Remove profile picture?', 'Your default profile icon will be restored.', [
-      { text: 'Cancel', style: 'cancel' },
+    Alert.alert(t('settings.removeAvatarConfirmTitle'), t('settings.removeAvatarConfirmMessage'), [
+      { text: t('common.cancel'), style: 'cancel' },
       {
-        text: 'Remove',
+        text: t('common.remove'),
         style: 'destructive',
         onPress: () => {
           void deleteAvatar.mutateAsync().catch((error) => {
-            setAvatarError(getErrorMessage(error, 'Could not remove your profile picture'));
+            setAvatarError(getErrorMessage(error, t('settings.avatarRemoveError')));
           });
         },
       },
@@ -226,11 +236,11 @@ export default function SettingsScreen() {
   const submitEmailChange = async () => {
     const address = newEmail.trim();
     if (!address.includes('@') || address.length > 254) {
-      setEmailError('Enter a valid email address');
+      setEmailError(t('auth.invalidEmail'));
       return;
     }
     if (!emailPassword) {
-      setEmailError('Enter your current password');
+      setEmailError(t('settings.enterCurrentPassword'));
       return;
     }
     setEmailError(null);
@@ -244,12 +254,13 @@ export default function SettingsScreen() {
       setEmailPassword('');
       setNewEmail('');
     } catch (error) {
-      setEmailError(getErrorMessage(error, 'Could not start the email change'));
+      setEmailError(getErrorMessage(error, t('settings.emailChangeError')));
     }
   };
 
   const submitPasswordChange = async () => {
     const validationError = validatePasswordChange(
+      t,
       currentPassword,
       newPassword,
       passwordConfirmation,
@@ -262,28 +273,28 @@ export default function SettingsScreen() {
     try {
       await changePassword.mutateAsync({ currentPassword, newPassword });
       router.replace('/');
-      Alert.alert('Password updated', 'Sign in again with your new password.');
+      Alert.alert(t('settings.passwordUpdatedTitle'), t('settings.passwordUpdatedMessage'));
     } catch (error) {
-      setPasswordError(getErrorMessage(error, 'Could not change your password'));
+      setPasswordError(getErrorMessage(error, t('settings.passwordChangeError')));
     }
   };
 
   const confirmLogoutAll = () => {
     setSessionsError(null);
     Alert.alert(
-      'Sign out everywhere?',
-      'Every active session, including this device, will need to sign in again.',
+      t('settings.signOutConfirmTitle'),
+      t('settings.signOutConfirmMessage'),
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: t('common.cancel'), style: 'cancel' },
         {
-          text: 'Sign out everywhere',
+          text: t('settings.signOutEverywhere'),
           style: 'destructive',
           onPress: () => {
             void logoutAllSessions
               .mutateAsync()
               .then(() => router.replace('/'))
               .catch((error) => {
-                setSessionsError(getErrorMessage(error, 'Could not close all sessions'));
+                setSessionsError(getErrorMessage(error, t('settings.signOutAllError')));
               });
           },
         },
@@ -298,7 +309,7 @@ export default function SettingsScreen() {
       await deleteAccountSession(deletionPassword);
       router.replace('/');
     } catch (error) {
-      setDeletionError(getErrorMessage(error, 'Could not delete your account'));
+      setDeletionError(getErrorMessage(error, t('settings.deleteAccountError')));
     } finally {
       setDeletionPending(false);
     }
@@ -307,20 +318,20 @@ export default function SettingsScreen() {
   const confirmDeletion = () => {
     setDeletionError(null);
     if (!deletionPassword) {
-      setDeletionError('Enter your current password');
+      setDeletionError(t('settings.enterCurrentPassword'));
       return;
     }
     if (deletionPassword.length > 128) {
-      setDeletionError('Password must contain at most 128 characters');
+      setDeletionError(t('settings.passwordMaxLength'));
       return;
     }
     Alert.alert(
-      'Permanently delete account?',
-      'Your profile, library, watch history, lists, social data, and sessions will be deleted. This cannot be undone.',
+      t('settings.deleteConfirmTitle'),
+      t('settings.deleteConfirmMessage'),
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: t('common.cancel'), style: 'cancel' },
         {
-          text: 'Delete account',
+          text: t('settings.deleteAccount'),
           style: 'destructive',
           onPress: () => void deleteAccount(),
         },
@@ -336,10 +347,10 @@ export default function SettingsScreen() {
   };
 
   const confirmCacheClear = () => {
-    Alert.alert('Clear offline data?', 'Cached library and release data will be downloaded again.', [
-      { text: 'Cancel', style: 'cancel' },
+    Alert.alert(t('settings.clearOfflineConfirmTitle'), t('settings.clearOfflineConfirmMessage'), [
+      { text: t('common.cancel'), style: 'cancel' },
       {
-        text: 'Clear data',
+        text: t('settings.clearData'),
         style: 'destructive',
         onPress: () => {
           setCacheClearing(true);
@@ -347,7 +358,7 @@ export default function SettingsScreen() {
           void clearOfflineQueryCache(queryClient)
             .then(() => setCacheCleared(true))
             .catch(() =>
-              Alert.alert('Could not clear data', 'Try again after restarting the app.'),
+              Alert.alert(t('settings.clearDataErrorTitle'), t('settings.clearDataErrorMessage')),
             )
             .finally(() => setCacheClearing(false));
         },
@@ -357,7 +368,7 @@ export default function SettingsScreen() {
 
   const exportData = async () => {
     if (!exportPassword || exportPassword.length > 128) {
-      setExportError('Enter your current password');
+      setExportError(t('settings.enterCurrentPassword'));
       return;
     }
     setExportPending(true);
@@ -370,7 +381,7 @@ export default function SettingsScreen() {
       setExportConfirming(false);
       setExportShared(true);
     } catch (error) {
-      setExportError(getErrorMessage(error, 'Could not export your account data'));
+      setExportError(getErrorMessage(error, t('settings.exportError')));
     } finally {
       setExportPending(false);
     }
@@ -388,11 +399,11 @@ export default function SettingsScreen() {
     setTwoFactorError(null);
     setRecoveryCodes(null);
     if (user.email_verified === false) {
-      setTwoFactorError('Confirm your email before enabling two-factor authentication');
+      setTwoFactorError(t('settings.twoFactorEmailHint'));
       return;
     }
     if (!twoFactorSetupPassword || twoFactorSetupPassword.length > 128) {
-      setTwoFactorError('Enter your current password');
+      setTwoFactorError(t('settings.enterCurrentPassword'));
       return;
     }
     try {
@@ -400,12 +411,12 @@ export default function SettingsScreen() {
       setTwoFactorSetupPassword('');
       setTwoFactorCode('');
     } catch (error) {
-      setTwoFactorError(getErrorMessage(error, 'Could not start two-factor setup'));
+      setTwoFactorError(getErrorMessage(error, t('settings.twoFactorStartError')));
     }
   };
 
   const confirmTwoFactorSetup = async () => {
-    const validationError = validateSecondFactorInput('authenticator', twoFactorCode);
+    const validationError = validateSecondFactorInput(t, 'authenticator', twoFactorCode);
     if (validationError) {
       setTwoFactorError(validationError);
       return;
@@ -417,7 +428,7 @@ export default function SettingsScreen() {
       setTwoFactorCode('');
       setupTwoFactor.reset();
     } catch (error) {
-      setTwoFactorError(getErrorMessage(error, 'Could not enable two-factor authentication'));
+      setTwoFactorError(getErrorMessage(error, t('settings.twoFactorEnableError')));
     }
   };
 
@@ -433,14 +444,14 @@ export default function SettingsScreen() {
     try {
       await Linking.openURL(setupTwoFactor.data.otpauth_uri);
     } catch {
-      setTwoFactorError('No authenticator app could open the setup link. Enter the key manually.');
+      setTwoFactorError(t('settings.noAuthenticatorApp'));
     }
   };
 
   const confirmDisableTwoFactor = async () => {
     setTwoFactorError(null);
     if (!twoFactorDisablePassword || twoFactorDisablePassword.length > 128) {
-      setTwoFactorError('Enter your current password');
+      setTwoFactorError(t('settings.enterCurrentPassword'));
       return;
     }
     try {
@@ -448,7 +459,7 @@ export default function SettingsScreen() {
       setTwoFactorDisablePassword('');
       setRecoveryCodes(null);
     } catch (error) {
-      setTwoFactorError(getErrorMessage(error, 'Could not disable two-factor authentication'));
+      setTwoFactorError(getErrorMessage(error, t('settings.twoFactorDisableError')));
     }
   };
 
@@ -469,7 +480,7 @@ export default function SettingsScreen() {
             <View style={styles.sectionHeading}>
               <UserRound color={theme.primary} size={20} />
               <View style={styles.headingCopy}>
-                <AppText variant="section">Profile & privacy</AppText>
+                <AppText variant="section">{t('settings.profilePrivacy')}</AppText>
                 <AppText variant="caption" muted numberOfLines={2}>
                   {user.email}
                 </AppText>
@@ -480,7 +491,7 @@ export default function SettingsScreen() {
               <UserAvatar uri={user.avatar_url} size={80} />
               <View style={styles.avatarActions}>
                 <AppButton
-                  label={user.avatar_url ? 'Change picture' : 'Choose picture'}
+                  label={user.avatar_url ? t('settings.changePicture') : t('settings.choosePicture')}
                   variant="secondary"
                   compact
                   loading={uploadAvatar.isPending}
@@ -489,7 +500,7 @@ export default function SettingsScreen() {
                 />
                 {user.avatar_url ? (
                   <AppButton
-                    label="Remove picture"
+                    label={t('settings.removePicture')}
                     variant="danger"
                     compact
                     loading={deleteAvatar.isPending}
@@ -498,14 +509,14 @@ export default function SettingsScreen() {
                   />
                 ) : null}
                 <AppText variant="caption" muted>
-                  One photo you choose is resized and stripped of metadata before upload.
+                  {t('settings.avatarHint')}
                 </AppText>
               </View>
             </View>
             {avatarError ? <FormMessage message={avatarError} /> : null}
 
             <View style={styles.field}>
-              <AppText variant="label">Username</AppText>
+              <AppText variant="label">{t('auth.username')}</AppText>
               <TextInput
                 value={username}
                 onChangeText={(value) => {
@@ -516,7 +527,7 @@ export default function SettingsScreen() {
                 autoCapitalize="none"
                 autoCorrect={false}
                 maxLength={50}
-                placeholder="Username"
+                placeholder={t('auth.username')}
                 placeholderTextColor={theme.mutedText}
                 style={[
                   styles.textInput,
@@ -527,7 +538,7 @@ export default function SettingsScreen() {
 
             <View style={styles.field}>
               <View style={styles.fieldLabelRow}>
-                <AppText variant="label">Bio</AppText>
+                <AppText variant="label">{t('settings.bio')}</AppText>
                 <AppText variant="caption" muted>
                   {Array.from(bio).length}/{MAX_PROFILE_BIO_LENGTH}
                 </AppText>
@@ -541,7 +552,7 @@ export default function SettingsScreen() {
                 }}
                 multiline
                 maxLength={MAX_PROFILE_BIO_LENGTH}
-                placeholder="A short introduction"
+                placeholder={t('settings.bioPlaceholder')}
                 placeholderTextColor={theme.mutedText}
                 textAlignVertical="top"
                 style={[
@@ -554,15 +565,15 @@ export default function SettingsScreen() {
 
             <View style={[styles.switchRow, { borderColor: theme.border }]}>
               <View style={styles.switchCopy}>
-                <AppText variant="label">Public profile</AppText>
+                <AppText variant="label">{t('settings.publicProfile')}</AppText>
                 <AppText variant="caption" muted>
                   {user.email_verified === false && !isPublic
-                    ? 'Confirm your email before making your profile public.'
-                    : 'Allow other people to discover your profile and activity.'}
+                    ? t('settings.publicEmailHint')
+                    : t('settings.publicHint')}
                 </AppText>
               </View>
               <Switch
-                accessibilityLabel="Public profile"
+                accessibilityLabel={t('settings.publicProfile')}
                 value={isPublic}
                 disabled={
                   updateProfile.isPending || (user.email_verified === false && !isPublic)
@@ -578,9 +589,9 @@ export default function SettingsScreen() {
             </View>
 
             {profileError ? <FormMessage message={profileError} /> : null}
-            {profileSaved ? <FormMessage message="Profile updated" success /> : null}
+            {profileSaved ? <FormMessage message={t('settings.profileUpdated')} success /> : null}
             <AppButton
-              label="Save profile"
+              label={t('settings.saveProfile')}
               icon={<Save color="#FFFFFF" size={18} />}
               loading={updateProfile.isPending}
               disabled={!profileDirty}
@@ -592,15 +603,13 @@ export default function SettingsScreen() {
             <View style={styles.sectionHeading}>
               <Globe2 color={theme.info} size={20} />
               <View style={styles.headingCopy}>
-                <AppText variant="section">Release region</AppText>
+                <AppText variant="section">{t('settings.releaseRegion')}</AppText>
                 <AppText variant="caption" muted>
-                  {countryName} ({countryCode})
+                  {t('settings.regionValue', { name: countryName, code: countryCode })}
                 </AppText>
               </View>
             </View>
-            <AppText muted>
-              Used for regional movie dates and streaming availability.
-            </AppText>
+            <AppText muted>{t('settings.regionHint')}</AppText>
             {preferences.isLoading ? (
               <ActivityIndicator color={theme.primary} />
             ) : (
@@ -612,11 +621,11 @@ export default function SettingsScreen() {
               />
             )}
             {preferences.isError ? (
-              <FormMessage message="Could not load your release region" />
+              <FormMessage message={t('settings.regionLoadError')} />
             ) : null}
             {updatePreferences.error ? (
               <FormMessage
-                message={getErrorMessage(updatePreferences.error, 'Could not update the region')}
+                message={getErrorMessage(updatePreferences.error, t('settings.regionUpdateError'))}
               />
             ) : null}
           </View>
@@ -629,33 +638,33 @@ export default function SettingsScreen() {
             <View style={styles.sectionHeading}>
               <Bell color={theme.primary} size={20} />
               <View style={styles.headingCopy}>
-                <AppText variant="section">Release alerts</AppText>
+                <AppText variant="section">{t('settings.releaseAlerts')}</AppText>
                 <AppText variant="caption" muted>
-                  Episodes and planned movie releases.
+                  {t('settings.releaseAlertsHint')}
                 </AppText>
               </View>
             </View>
             <View style={[styles.switchRow, { borderColor: theme.border }]}>
               <View style={styles.switchCopy}>
                 <AppText variant="label">
-                  {releaseAlerts.state.enabled ? 'On' : 'Off'}
+                  {releaseAlerts.state.enabled ? t('settings.on') : t('settings.off')}
                 </AppText>
                 <AppText variant="caption" muted>
                   {releaseAlerts.state.permission === 'denied'
-                    ? 'Blocked in system settings.'
+                    ? t('settings.permBlocked')
                     : releaseAlerts.state.permission === 'unavailable' ||
                         releaseAlerts.state.permission === 'unsupported'
-                      ? 'Unavailable in this build.'
+                      ? t('settings.permUnavailable')
                       : releaseAlerts.state.pending
-                        ? 'Waiting to finish registration.'
-                        : 'New releases from your library.'}
+                        ? t('settings.permPending')
+                        : t('settings.permReady')}
                 </AppText>
               </View>
               {releaseAlerts.isLoading ? (
                 <ActivityIndicator color={theme.primary} />
               ) : (
                 <Switch
-                  accessibilityLabel="Release alerts"
+                  accessibilityLabel={t('settings.releaseAlerts')}
                   value={releaseAlerts.state.enabled}
                   disabled={
                     releaseAlerts.isUpdating ||
@@ -686,7 +695,7 @@ export default function SettingsScreen() {
             ) : null}
             {releaseAlerts.state.permission === 'denied' ? (
               <AppButton
-                label="Open system settings"
+                label={t('settings.openSystemSettings')}
                 icon={<ExternalLink color={theme.text} size={18} />}
                 variant="secondary"
                 onPress={() => void Linking.openSettings()}
@@ -699,22 +708,22 @@ export default function SettingsScreen() {
               <View style={styles.sectionHeading}>
                 <MailWarning color={theme.warning} size={20} />
                 <View style={styles.headingCopy}>
-                  <AppText variant="section">Confirm your email</AppText>
+                  <AppText variant="section">{t('settings.confirmEmail')}</AppText>
                   <AppText variant="caption" muted numberOfLines={2}>
-                    Secures your account and password recovery for {user.email}.
+                    {t('settings.confirmEmailHint', { email: user.email })}
                   </AppText>
                 </View>
               </View>
               {resendVerification.isSuccess ? (
-                <FormMessage message="Confirmation link sent. Check your inbox." success />
+                <FormMessage message={t('settings.confirmationLinkSent')} success />
               ) : null}
               {resendVerification.isError ? (
                 <FormMessage
-                  message={getErrorMessage(resendVerification.error, 'Could not send the link')}
+                  message={getErrorMessage(resendVerification.error, t('settings.linkSendError'))}
                 />
               ) : null}
               <AppButton
-                label={resendVerification.isSuccess ? 'Link sent' : 'Resend confirmation email'}
+                label={resendVerification.isSuccess ? t('settings.linkSent') : t('settings.resendConfirmation')}
                 icon={<MailWarning color="#FFFFFF" size={18} />}
                 loading={resendVerification.isPending}
                 disabled={resendVerification.isSuccess}
@@ -727,9 +736,9 @@ export default function SettingsScreen() {
             <View style={styles.sectionHeading}>
               <ShieldCheck color={theme.primary} size={20} />
               <View style={styles.headingCopy}>
-                <AppText variant="section">Two-factor authentication</AppText>
+                <AppText variant="section">{t('settings.twoFactor')}</AppText>
                 <AppText variant="caption" muted>
-                  Require a code from an authenticator app when you sign in.
+                  {t('settings.twoFactorHint')}
                 </AppText>
               </View>
             </View>
@@ -739,11 +748,11 @@ export default function SettingsScreen() {
                 <View style={[styles.notice, { borderColor: theme.warning }]}>
                   <AlertTriangle color={theme.warning} size={18} />
                   <AppText variant="caption" style={styles.noticeCopy}>
-                    Save these one-time recovery codes now. They will not be shown again.
+                    {t('settings.recoveryCodesWarning')}
                   </AppText>
                 </View>
                 <View
-                  accessibilityLabel="Two-factor recovery codes"
+                  accessibilityLabel={t('settings.recoveryCodesAria')}
                   style={[
                     styles.recoveryCodeList,
                     { borderColor: theme.border, backgroundColor: theme.elevated },
@@ -751,7 +760,7 @@ export default function SettingsScreen() {
                 >
                   {secretsConcealed ? (
                     <AppText muted style={styles.monospace}>
-                      Hidden while the app is in the background.
+                      {t('settings.hiddenBackground')}
                     </AppText>
                   ) : (
                     recoveryCodes.map((code) => (
@@ -762,16 +771,16 @@ export default function SettingsScreen() {
                   )}
                 </View>
                 <AppButton
-                  label="I've saved my codes"
+                  label={t('settings.savedCodes')}
                   icon={<ShieldCheck color="#FFFFFF" size={18} />}
                   onPress={() => setRecoveryCodes(null)}
                 />
               </View>
             ) : user.two_factor_enabled ? (
               <View style={styles.confirmation}>
-                <FormMessage message="Two-factor authentication is on." success />
+                <FormMessage message={t('settings.twoFactorOn')} success />
                 <PasswordField
-                  label="Password to turn it off"
+                  label={t('settings.passwordToDisable')}
                   value={twoFactorDisablePassword}
                   visible={twoFactorPasswordVisible}
                   autoComplete="current-password"
@@ -786,7 +795,7 @@ export default function SettingsScreen() {
                 />
                 {twoFactorError ? <FormMessage message={twoFactorError} /> : null}
                 <AppButton
-                  label="Disable two-factor"
+                  label={t('settings.disableTwoFactor')}
                   variant="danger"
                   loading={disableTwoFactor.isPending}
                   onPress={() => void confirmDisableTwoFactor()}
@@ -795,13 +804,13 @@ export default function SettingsScreen() {
             ) : setupTwoFactor.data ? (
               <View style={styles.confirmation}>
                 <AppButton
-                  label="Open authenticator app"
+                  label={t('settings.openAuthenticator')}
                   icon={<ExternalLink color={theme.text} size={18} />}
                   variant="secondary"
                   onPress={() => void openAuthenticator()}
                 />
                 <View style={styles.field}>
-                  <AppText variant="label">Manual setup key</AppText>
+                  <AppText variant="label">{t('settings.manualKey')}</AppText>
                   <View
                     style={[
                       styles.secretBox,
@@ -820,7 +829,7 @@ export default function SettingsScreen() {
                   </View>
                 </View>
                 <View style={styles.field}>
-                  <AppText variant="label">6-digit confirmation code</AppText>
+                  <AppText variant="label">{t('settings.sixDigitCode')}</AppText>
                   <TextInput
                     value={twoFactorCode}
                     onChangeText={(value) => {
@@ -833,7 +842,7 @@ export default function SettingsScreen() {
                     textContentType="oneTimeCode"
                     keyboardType="number-pad"
                     maxLength={6}
-                    placeholder="123456"
+                    placeholder={t('auth.authCodePlaceholder')}
                     placeholderTextColor={theme.mutedText}
                     onSubmitEditing={() => void confirmTwoFactorSetup()}
                     style={[
@@ -850,14 +859,14 @@ export default function SettingsScreen() {
                 <View style={styles.actions}>
                   <View style={styles.action}>
                     <AppButton
-                      label="Confirm and enable"
+                      label={t('settings.confirmEnable')}
                       loading={enableTwoFactor.isPending}
                       onPress={() => void confirmTwoFactorSetup()}
                     />
                   </View>
                   <View style={styles.action}>
                     <AppButton
-                      label="Cancel"
+                      label={t('common.cancel')}
                       variant="secondary"
                       disabled={enableTwoFactor.isPending}
                       onPress={cancelTwoFactorSetup}
@@ -868,7 +877,7 @@ export default function SettingsScreen() {
             ) : (
               <View style={styles.confirmation}>
                 <PasswordField
-                  label="Password to start setup"
+                  label={t('settings.passwordToSetup')}
                   value={twoFactorSetupPassword}
                   visible={twoFactorPasswordVisible}
                   autoComplete="current-password"
@@ -882,12 +891,12 @@ export default function SettingsScreen() {
                   onSubmit={() => void startTwoFactorSetup()}
                 />
                 {user.email_verified === false ? (
-                  <FormMessage message="Confirm your email before enabling two-factor authentication" />
+                  <FormMessage message={t('settings.twoFactorEmailHint')} />
                 ) : twoFactorError ? (
                   <FormMessage message={twoFactorError} />
                 ) : null}
                 <AppButton
-                  label="Set up two-factor"
+                  label={t('settings.setupTwoFactor')}
                   icon={<ShieldCheck color="#FFFFFF" size={18} />}
                   loading={setupTwoFactor.isPending}
                   disabled={user.email_verified === false}
@@ -901,21 +910,24 @@ export default function SettingsScreen() {
             <View style={styles.sectionHeading}>
               <Mail color={theme.info} size={20} />
               <View style={styles.headingCopy}>
-                <AppText variant="section">Change email</AppText>
+                <AppText variant="section">{t('settings.changeEmail')}</AppText>
                 <AppText variant="caption" muted>
-                  {user.email} signs you in today.
+                  {t('settings.emailSignsIn', { email: user.email })}
                 </AppText>
               </View>
             </View>
             {emailSentTo ? (
               <FormMessage
                 success
-                message={`Open the link sent to ${emailSentTo} to finish. Until you do, ${user.email} stays your address.`}
+                message={t('settings.emailChangeSent', {
+                  address: emailSentTo,
+                  email: user.email,
+                })}
               />
             ) : (
               <>
                 <View style={styles.field}>
-                  <AppText variant="label">New email</AppText>
+                  <AppText variant="label">{t('settings.newEmail')}</AppText>
                   <TextInput
                     value={newEmail}
                     onChangeText={(value) => {
@@ -926,7 +938,7 @@ export default function SettingsScreen() {
                     autoCorrect={false}
                     keyboardType="email-address"
                     maxLength={254}
-                    placeholder="you@example.com"
+                    placeholder={t('auth.emailPlaceholder')}
                     placeholderTextColor={theme.mutedText}
                     style={[
                       styles.textInput,
@@ -935,7 +947,7 @@ export default function SettingsScreen() {
                   />
                 </View>
                 <PasswordField
-                  label="Current password"
+                  label={t('settings.currentPassword')}
                   value={emailPassword}
                   visible={showPasswords}
                   autoComplete="current-password"
@@ -948,7 +960,7 @@ export default function SettingsScreen() {
                 />
                 {emailError ? <FormMessage message={emailError} /> : null}
                 <AppButton
-                  label="Send confirmation link"
+                  label={t('settings.sendConfirmationLink')}
                   icon={<Mail color="#FFFFFF" size={18} />}
                   loading={requestEmailChange.isPending}
                   onPress={() => void submitEmailChange()}
@@ -961,14 +973,14 @@ export default function SettingsScreen() {
             <View style={styles.sectionHeading}>
               <KeyRound color={theme.warning} size={20} />
               <View style={styles.headingCopy}>
-                <AppText variant="section">Change password</AppText>
+                <AppText variant="section">{t('settings.changePassword')}</AppText>
                 <AppText variant="caption" muted>
-                  Updating it signs out every device.
+                  {t('settings.changePasswordHint')}
                 </AppText>
               </View>
             </View>
             <PasswordField
-              label="Current password"
+              label={t('settings.currentPassword')}
               value={currentPassword}
               visible={showPasswords}
               autoComplete="current-password"
@@ -979,7 +991,7 @@ export default function SettingsScreen() {
               onToggleVisibility={() => setShowPasswords((visible) => !visible)}
             />
             <PasswordField
-              label="New password"
+              label={t('auth.newPassword')}
               value={newPassword}
               visible={showPasswords}
               autoComplete="new-password"
@@ -990,7 +1002,7 @@ export default function SettingsScreen() {
               onToggleVisibility={() => setShowPasswords((visible) => !visible)}
             />
             <PasswordField
-              label="Confirm new password"
+              label={t('auth.confirmNewPassword')}
               value={passwordConfirmation}
               visible={showPasswords}
               autoComplete="new-password"
@@ -1003,7 +1015,7 @@ export default function SettingsScreen() {
             />
             {passwordError ? <FormMessage message={passwordError} /> : null}
             <AppButton
-              label="Update password"
+              label={t('settings.updatePassword')}
               icon={<KeyRound color="#FFFFFF" size={18} />}
               loading={changePassword.isPending}
               onPress={() => void submitPasswordChange()}
@@ -1015,15 +1027,15 @@ export default function SettingsScreen() {
               <View style={styles.sectionHeading}>
                 <Laptop2 color={theme.success} size={20} />
                 <View style={styles.headingCopy}>
-                  <AppText variant="section">Active sessions</AppText>
+                  <AppText variant="section">{t('settings.activeSessions')}</AppText>
                   <AppText variant="caption" muted>
-                    Devices that can access your account.
+                    {t('settings.activeSessionsHint')}
                   </AppText>
                 </View>
               </View>
               <Pressable
                 accessibilityRole="button"
-                accessibilityLabel="Refresh active sessions"
+                accessibilityLabel={t('settings.refreshSessions')}
                 disabled={sessions.isFetching}
                 onPress={() => void sessions.refetch()}
                 style={({ pressed }) => [
@@ -1039,10 +1051,10 @@ export default function SettingsScreen() {
               <ActivityIndicator color={theme.primary} />
             ) : sessions.isError ? (
               <FormMessage
-                message={getErrorMessage(sessions.error, 'Could not load active sessions')}
+                message={getErrorMessage(sessions.error, t('settings.sessionsLoadError'))}
               />
             ) : sessions.data?.length === 0 ? (
-              <AppText muted>No active sessions found.</AppText>
+              <AppText muted>{t('settings.noSessions')}</AppText>
             ) : (
               <View style={[styles.sessionList, { borderTopColor: theme.border }]}>
                 {sessions.data?.map((session) => (
@@ -1055,7 +1067,7 @@ export default function SettingsScreen() {
                       revokeSession.mutate(session.id, {
                         onError: (error) => {
                           setSessionsError(
-                            getErrorMessage(error, 'Could not revoke this session'),
+                            getErrorMessage(error, t('settings.sessionRevokeError')),
                           );
                         },
                       });
@@ -1066,7 +1078,7 @@ export default function SettingsScreen() {
             )}
             {sessionsError ? <FormMessage message={sessionsError} /> : null}
             <AppButton
-              label="Sign out everywhere"
+              label={t('settings.signOutEverywhere')}
               icon={<LogOut color="#FFFFFF" size={18} />}
               variant="danger"
               loading={logoutAllSessions.isPending}
@@ -1077,11 +1089,11 @@ export default function SettingsScreen() {
           <View style={[styles.section, { borderBottomColor: theme.border }]}>
             <View style={styles.sectionHeading}>
               <ShieldCheck color={theme.info} size={20} />
-              <AppText variant="section">Privacy & data</AppText>
+              <AppText variant="section">{t('settings.privacyData')}</AppText>
             </View>
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel="Import from TV Time"
+              accessibilityLabel={t('importTvtime.title')}
               onPress={() => router.push('/import-tvtime')}
               style={({ pressed }) => [
                 styles.linkRow,
@@ -1091,9 +1103,9 @@ export default function SettingsScreen() {
               <View style={styles.linkCopy}>
                 <UploadCloud color={theme.primary} size={18} />
                 <View style={styles.headingCopy}>
-                  <AppText variant="label">Import from TV Time</AppText>
+                  <AppText variant="label">{t('importTvtime.title')}</AppText>
                   <AppText variant="caption" muted>
-                    Move your library and watch history
+                    {t('settings.importHint')}
                   </AppText>
                 </View>
               </View>
@@ -1101,7 +1113,7 @@ export default function SettingsScreen() {
             </Pressable>
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel="Export my account data"
+              accessibilityLabel={t('settings.exportAria')}
               onPress={() => {
                 setExportShared(false);
                 setExportError(null);
@@ -1115,9 +1127,9 @@ export default function SettingsScreen() {
               <View style={styles.linkCopy}>
                 <Download color={theme.success} size={18} />
                 <View style={styles.headingCopy}>
-                  <AppText variant="label">Export my data</AppText>
+                  <AppText variant="label">{t('settings.exportData')}</AppText>
                   <AppText variant="caption" muted>
-                    Save a portable JSON copy
+                    {t('settings.exportHint')}
                   </AppText>
                 </View>
               </View>
@@ -1126,7 +1138,7 @@ export default function SettingsScreen() {
             {exportConfirming ? (
               <View style={styles.confirmation}>
                 <PasswordField
-                  label="Password to export private data"
+                  label={t('settings.passwordToExport')}
                   value={exportPassword}
                   visible={exportPasswordVisible}
                   autoComplete="current-password"
@@ -1140,13 +1152,13 @@ export default function SettingsScreen() {
                   onSubmit={() => void exportData()}
                 />
                 <AppText variant="caption" muted>
-                  The temporary file is deleted from Văzute after the share sheet closes.
+                  {t('settings.exportFileHint')}
                 </AppText>
                 {exportError ? <FormMessage message={exportError} /> : null}
                 <View style={styles.actions}>
                   <View style={styles.action}>
                     <AppButton
-                      label="Create export"
+                      label={t('settings.createExport')}
                       icon={<Download color="#FFFFFF" size={18} />}
                       loading={exportPending}
                       onPress={() => void exportData()}
@@ -1154,7 +1166,7 @@ export default function SettingsScreen() {
                   </View>
                   <View style={styles.action}>
                     <AppButton
-                      label="Cancel"
+                      label={t('common.cancel')}
                       variant="secondary"
                       disabled={exportPending}
                       onPress={cancelExport}
@@ -1163,22 +1175,22 @@ export default function SettingsScreen() {
                 </View>
               </View>
             ) : null}
-            {exportShared ? <FormMessage message="Account export ready to save" success /> : null}
+            {exportShared ? <FormMessage message={t('settings.exportReady')} success /> : null}
             <Pressable
               accessibilityRole="link"
-              accessibilityLabel="Open Văzute privacy policy"
+              accessibilityLabel={t('settings.privacyPolicyAria')}
               onPress={() => void Linking.openURL('https://vazute.micutu.com/privacy')}
               style={({ pressed }) => [
                 styles.linkRow,
                 { borderColor: theme.border, opacity: pressed ? 0.72 : 1 },
               ]}
             >
-              <AppText variant="label">Privacy policy</AppText>
+              <AppText variant="label">{t('settings.privacyPolicy')}</AppText>
               <ExternalLink color={theme.mutedText} size={18} />
             </Pressable>
             <Pressable
               accessibilityRole="link"
-              accessibilityLabel="Email Văzute support"
+              accessibilityLabel={t('settings.supportAria')}
               onPress={() =>
                 void Linking.openURL(
                   'mailto:postmaster@micutu.com?subject=Vazute%20mobile%20support',
@@ -1192,7 +1204,7 @@ export default function SettingsScreen() {
               <View style={styles.linkCopy}>
                 <HelpCircle color={theme.info} size={18} />
                 <View style={styles.headingCopy}>
-                  <AppText variant="label">Help & support</AppText>
+                  <AppText variant="label">{t('settings.helpSupport')}</AppText>
                   <AppText variant="caption" muted>
                     postmaster@micutu.com
                   </AppText>
@@ -1200,9 +1212,9 @@ export default function SettingsScreen() {
               </View>
               <ExternalLink color={theme.mutedText} size={18} />
             </Pressable>
-            {cacheCleared ? <FormMessage message="Offline data cleared" success /> : null}
+            {cacheCleared ? <FormMessage message={t('settings.offlineCleared')} success /> : null}
             <AppButton
-              label="Clear offline data"
+              label={t('settings.clearOffline')}
               icon={<Trash2 color={theme.text} size={18} />}
               variant="secondary"
               loading={cacheClearing}
@@ -1214,17 +1226,14 @@ export default function SettingsScreen() {
             <View style={styles.sectionHeading}>
               <AlertTriangle color={theme.danger} size={20} />
               <AppText variant="section" style={{ color: theme.danger }}>
-                Delete account
+                {t('settings.deleteAccount')}
               </AppText>
             </View>
-            <AppText muted>
-              Permanently deletes your Văzute account and all associated data.
-              This action cannot be undone.
-            </AppText>
+            <AppText muted>{t('settings.deleteAccountHint')}</AppText>
 
             {!confirmingDeletion ? (
               <AppButton
-                label="Delete my account"
+                label={t('settings.deleteMyAccount')}
                 icon={<Trash2 color="#FFFFFF" size={18} />}
                 variant="danger"
                 onPress={() => setConfirmingDeletion(true)}
@@ -1232,7 +1241,7 @@ export default function SettingsScreen() {
             ) : (
               <View style={styles.confirmation}>
                 <PasswordField
-                  label="Current password"
+                  label={t('settings.currentPassword')}
                   value={deletionPassword}
                   visible={showDeletionPassword}
                   autoComplete="current-password"
@@ -1247,7 +1256,7 @@ export default function SettingsScreen() {
                 <View style={styles.actions}>
                   <View style={styles.action}>
                     <AppButton
-                      label="Permanently delete"
+                      label={t('settings.permanentlyDelete')}
                       icon={<Trash2 color="#FFFFFF" size={18} />}
                       variant="danger"
                       loading={deletionPending}
@@ -1256,7 +1265,7 @@ export default function SettingsScreen() {
                   </View>
                   <View style={styles.action}>
                     <AppButton
-                      label="Cancel"
+                      label={t('common.cancel')}
                       variant="secondary"
                       disabled={deletionPending}
                       onPress={cancelDeletion}
@@ -1290,6 +1299,7 @@ function PasswordField({
   onSubmit?: () => void;
 }) {
   const theme = useTheme();
+  const t = useT();
   return (
     <View style={styles.field}>
       <AppText variant="label">{label}</AppText>
@@ -1308,14 +1318,14 @@ function PasswordField({
           autoComplete={autoComplete}
           textContentType={autoComplete === 'current-password' ? 'password' : 'newPassword'}
           maxLength={128}
-          placeholder="Password"
+          placeholder={t('auth.passwordPlaceholder')}
           placeholderTextColor={theme.mutedText}
           style={[styles.passwordInput, { color: theme.text }]}
           onSubmitEditing={onSubmit}
         />
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={visible ? 'Hide passwords' : 'Show passwords'}
+          accessibilityLabel={visible ? t('auth.hidePasswords') : t('auth.showPasswords')}
           hitSlop={8}
           onPress={onToggleVisibility}
           style={styles.iconButton}
@@ -1341,8 +1351,10 @@ function SessionRow({
   onRevoke: () => void;
 }) {
   const theme = useTheme();
+  const t = useT();
   const looksMobile = /android|ios|mobile|okhttp/i.test(session.user_agent ?? '');
   const DeviceIcon = looksMobile ? Smartphone : Laptop2;
+  const deviceName = session.user_agent || t('settings.unknownDevice');
   return (
     <View style={[styles.sessionRow, { borderBottomColor: theme.border }]}>
       <View style={[styles.deviceIcon, { backgroundColor: theme.surface }]}>
@@ -1351,25 +1363,27 @@ function SessionRow({
       <View style={styles.sessionCopy}>
         <View style={styles.sessionTitle}>
           <AppText variant="label" numberOfLines={2} style={styles.sessionAgent}>
-            {session.user_agent || 'Unknown device'}
+            {deviceName}
           </AppText>
           {session.current ? (
             <View style={[styles.currentBadge, { backgroundColor: theme.successSoft }]}>
               <AppText variant="caption" style={{ color: theme.success }}>
-                This device
+                {t('settings.thisDevice')}
               </AppText>
             </View>
           ) : null}
         </View>
         <AppText variant="caption" muted numberOfLines={2}>
-          {session.ip_address || 'Unknown IP'} · active{' '}
-          {formatDateTime(session.last_used_at ?? session.created_at)}
+          {t('settings.sessionMeta', {
+            ip: session.ip_address || t('settings.unknownIp'),
+            when: formatDateTime(session.last_used_at ?? session.created_at),
+          })}
         </AppText>
       </View>
       {!session.current ? (
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={`Revoke session ${session.user_agent || 'Unknown device'}`}
+          accessibilityLabel={t('settings.revokeSessionAria', { agent: deviceName })}
           disabled={pending}
           onPress={onRevoke}
           style={({ pressed }) => [

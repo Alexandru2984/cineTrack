@@ -6,6 +6,8 @@ import type { AccountSession, User } from '@/types';
 
 export const MAX_PROFILE_BIO_LENGTH = 500;
 
+type Translate = (key: string, params?: Record<string, string | number>) => string;
+
 export interface ProfileDraft {
   username: string;
   bio: string;
@@ -21,36 +23,37 @@ export interface TwoFactorEnabled {
   recovery_codes: string[];
 }
 
-export function validateProfileDraft(username: string, bio: string) {
+export function validateProfileDraft(t: Translate, username: string, bio: string) {
   const normalizedUsername = username.trim();
   if (normalizedUsername.length < 3 || normalizedUsername.length > 50) {
-    return 'Username must contain 3 to 50 characters';
+    return t('settings.usernameLength');
   }
   if (!/^[A-Za-z0-9](?:[A-Za-z0-9_-]*[A-Za-z0-9])?$/.test(normalizedUsername)) {
-    return 'Use letters, numbers, underscores, or hyphens, starting and ending with a letter or number';
+    return t('settings.usernameFormat');
   }
   if (Array.from(bio).length > MAX_PROFILE_BIO_LENGTH) {
-    return `Bio must contain at most ${MAX_PROFILE_BIO_LENGTH} characters`;
+    return t('settings.bioLength', { max: MAX_PROFILE_BIO_LENGTH });
   }
   return null;
 }
 
 export function validatePasswordChange(
+  t: Translate,
   currentPassword: string,
   newPassword: string,
   confirmation: string,
 ) {
-  if (!currentPassword) return 'Enter your current password';
+  if (!currentPassword) return t('settings.enterCurrentPassword');
   if (currentPassword.length > 128) {
-    return 'Current password must contain at most 128 characters';
+    return t('settings.currentPasswordMaxLength');
   }
   if (newPassword.length < 8 || newPassword.length > 128) {
-    return 'New password must contain 8 to 128 characters';
+    return t('settings.newPasswordLength');
   }
   if (!/[A-Za-z]/.test(newPassword) || !/\d/.test(newPassword)) {
-    return 'New password must contain at least one letter and one number';
+    return t('settings.newPasswordFormat');
   }
-  if (newPassword !== confirmation) return 'New passwords do not match';
+  if (newPassword !== confirmation) return t('settings.newPasswordsMismatch');
   return null;
 }
 

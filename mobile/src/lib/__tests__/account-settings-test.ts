@@ -10,8 +10,11 @@ import {
 } from '@/lib/account';
 import { apiRequest } from '@/lib/api';
 import { ApiError, rawRequest } from '@/lib/http';
+import { translate } from '@/lib/i18n';
 import { readRefreshToken } from '@/lib/secure-session';
 import { clearLocalSession } from '@/lib/session';
+
+const t = (key: string, params?: Record<string, string | number>) => translate('en', key, params);
 
 jest.mock('@/lib/api', () => ({ apiRequest: jest.fn() }));
 jest.mock('@/lib/secure-session', () => ({ readRefreshToken: jest.fn() }));
@@ -35,7 +38,7 @@ describe('mobile account settings', () => {
     const updatedUser = { id: 'user-1' };
     mockApiRequest.mockResolvedValueOnce(updatedUser);
 
-    expect(validateProfileDraft('  film-buff  ', 'About me')).toBeNull();
+    expect(validateProfileDraft(t, '  film-buff  ', 'About me')).toBeNull();
     await expect(updateAccountProfile({
       username: '  film-buff  ',
       bio: '  About me  ',
@@ -48,13 +51,13 @@ describe('mobile account settings', () => {
   });
 
   it('matches profile and password limits enforced by the API', () => {
-    expect(validateProfileDraft('_unsafe', '')).toMatch(/starting and ending/);
-    expect(validateProfileDraft('film_buff', 'x'.repeat(MAX_PROFILE_BIO_LENGTH + 1)))
+    expect(validateProfileDraft(t, '_unsafe', '')).toMatch(/starting and ending/);
+    expect(validateProfileDraft(t, 'film_buff', 'x'.repeat(MAX_PROFILE_BIO_LENGTH + 1)))
       .toMatch(/at most 500/);
-    expect(validatePasswordChange('', 'Password1', 'Password1')).toMatch(/current/);
-    expect(validatePasswordChange('OldPass1', 'password', 'password')).toMatch(/number/);
-    expect(validatePasswordChange('OldPass1', 'Password1', 'Password2')).toMatch(/match/);
-    expect(validatePasswordChange('OldPass1', 'Password1', 'Password1')).toBeNull();
+    expect(validatePasswordChange(t, '', 'Password1', 'Password1')).toMatch(/current/);
+    expect(validatePasswordChange(t, 'OldPass1', 'password', 'password')).toMatch(/number/);
+    expect(validatePasswordChange(t, 'OldPass1', 'Password1', 'Password2')).toMatch(/match/);
+    expect(validatePasswordChange(t, 'OldPass1', 'Password1', 'Password1')).toBeNull();
   });
 
   it('lists sessions with the refresh token without placing it in the URL', async () => {

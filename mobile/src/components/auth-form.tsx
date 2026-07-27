@@ -68,7 +68,7 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
     }
 
     if (!isRegister && mfaRequired) {
-      const validationError = validateSecondFactorInput(secondFactorMode, secondFactorCode);
+      const validationError = validateSecondFactorInput(t, secondFactorMode, secondFactorCode);
       if (validationError) {
         setError(validationError);
         return;
