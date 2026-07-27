@@ -2,12 +2,14 @@ import { Pressable, StyleSheet, View } from 'react-native';
 
 import { AppText } from '@/components/app-text';
 import { radius, spacing } from '@/constants/theme';
+import { useT } from '@/hooks/use-t';
 import { useTheme } from '@/hooks/use-theme';
 import {
-  REACTION_LABELS,
+  REACTION_EMOJI,
   reactionAccessibilityLabel,
   reactionCaption,
   reactionCounts,
+  reactionLabel,
 } from '@/lib/episode-reactions';
 import { EPISODE_REACTIONS } from '@/types';
 import type { EpisodeReaction, ReactionCount } from '@/types';
@@ -40,19 +42,21 @@ export function EpisodeReactions({
   onSelect,
 }: EpisodeReactionsProps) {
   const theme = useTheme();
+  const t = useT();
   const counts = reactionCounts(reactions);
-  const caption = reactionCaption(reactions, canReact);
+  const caption = reactionCaption(t, reactions, canReact);
 
   return (
     <View style={[styles.section, { borderTopColor: theme.border }]}>
-      <AppText variant="section">How it landed</AppText>
+      <AppText variant="section">{t('reactions.title')}</AppText>
       <AppText muted variant="caption" style={styles.caption}>
         {caption}
       </AppText>
 
       <View style={styles.row}>
         {EPISODE_REACTIONS.map((reaction) => {
-          const { emoji, label } = REACTION_LABELS[reaction];
+          const emoji = REACTION_EMOJI[reaction];
+          const label = reactionLabel(t, reaction);
           const count = counts.get(reaction) ?? 0;
           const mine = myReaction === reaction;
           return (
@@ -63,7 +67,7 @@ export function EpisodeReactions({
               disabled={!canReact || pending}
               accessibilityRole="button"
               accessibilityState={{ selected: mine, disabled: !canReact || pending }}
-              accessibilityLabel={reactionAccessibilityLabel(reaction, count)}
+              accessibilityLabel={reactionAccessibilityLabel(t, reaction, count)}
               style={[
                 styles.chip,
                 {

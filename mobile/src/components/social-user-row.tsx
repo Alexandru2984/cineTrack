@@ -5,6 +5,7 @@ import { Pressable, StyleSheet, View } from 'react-native';
 import { AppText } from '@/components/app-text';
 import { UserAvatar } from '@/components/user-avatar';
 import { spacing } from '@/constants/theme';
+import { useT } from '@/hooks/use-t';
 import { useTheme } from '@/hooks/use-theme';
 
 export function SocialUserRow({
@@ -21,11 +22,12 @@ export function SocialUserRow({
   action?: ReactNode;
 }) {
   const theme = useTheme();
+  const t = useT();
   return (
     <View style={[styles.row, { borderBottomColor: theme.border }]}>
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={`Open ${username}'s profile`}
+        accessibilityLabel={t('social.openProfileAria', { username })}
         onPress={() =>
           router.push({ pathname: '/profile/[username]', params: { username } })
         }

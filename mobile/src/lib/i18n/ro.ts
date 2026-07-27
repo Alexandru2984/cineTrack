@@ -146,6 +146,47 @@ export const ro: Dictionary = {
     banner: 'Offline · se afișează datele salvate',
     retry: 'Reîncearcă conexiunea',
   },
+  communityRating: {
+    title: 'Comunitatea Văzute',
+    averageAriaOne: 'Medie {average} din 10 dintr-o evaluare.',
+    averageAriaMany: 'Medie {average} din 10 din {count} evaluări.',
+    basedOnOne: 'Pe baza unei evaluări de la un membru. Evaluările individuale rămân private.',
+    basedOnMany:
+      'Pe baza a {count} evaluări de la membri. Evaluările individuale rămân private.',
+    ratedByOne:
+      'Evaluat de un membru. Media comunității apare după ce câțiva membri l-au evaluat.',
+    ratedByMany:
+      'Evaluat de {count} membri. Media comunității apare după ce câțiva membri l-au evaluat.',
+  },
+  watchProviders: {
+    title: 'Unde vezi',
+    stream: 'Streaming',
+    rent: 'Închiriere',
+    buy: 'Cumpărare',
+    none: 'Nicio opțiune de streaming, închiriere sau cumpărare listată pentru {region}.',
+    attributionPre: 'Date despre disponibilitate oferite de',
+    changeRegionAria: 'Schimbă regiunea de disponibilitate, momentan {region}',
+    regionChange: '{region} · Schimbă',
+    openErrorTitle: 'Nu s-a putut deschide JustWatch',
+    openErrorMessage: 'Încearcă din nou după ce verifici conexiunea.',
+  },
+  reactions: {
+    title: 'Cum a picat',
+    markToReact: 'Marchează episodul ca vizionat pentru a adăuga reacția ta.',
+    beFirst: 'Fii primul care reacționează.',
+    countOne: 'o reacție',
+    countMany: '{count} reacții',
+    loved: 'Mi-a plăcut',
+    funny: 'Amuzant',
+    shocked: 'Șocant',
+    sad: 'Trist',
+    tense: 'Tensionat',
+    bored: 'Plictisitor',
+    labelWithCount: '{label}, {count}',
+  },
+  social: {
+    openProfileAria: 'Deschide profilul lui {username}',
+  },
   stats: {
     movies: 'Filme',
     shows: 'Seriale',

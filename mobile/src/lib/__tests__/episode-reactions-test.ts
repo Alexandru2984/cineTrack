@@ -5,22 +5,28 @@ import {
   reactionCounts,
   totalReactions,
 } from '@/lib/episode-reactions';
+import { translate } from '@/lib/i18n';
+
+// Using the real English resolver keeps these assertions readable while also
+// asserting the `reactions.*` keys exist in the dictionary.
+const t = (key: string, params?: Record<string, string | number>) => translate('en', key, params);
 
 describe('episode reactions', () => {
   it('tells the viewer to watch first when they cannot react', () => {
-    expect(reactionCaption([], false)).toMatch(/mark the episode watched/i);
+    expect(reactionCaption(t, [], false)).toMatch(/mark the episode watched/i);
     // Even with existing reactions, the instruction wins: it explains why the
     // buttons are disabled.
-    expect(reactionCaption([{ reaction: 'loved', count: 3 }], false)).toMatch(
+    expect(reactionCaption(t, [{ reaction: 'loved', count: 3 }], false)).toMatch(
       /mark the episode watched/i,
     );
   });
 
   it('invites the first reaction and then counts them', () => {
-    expect(reactionCaption([], true)).toBe('Be the first to react.');
-    expect(reactionCaption([{ reaction: 'loved', count: 1 }], true)).toBe('1 reaction');
+    expect(reactionCaption(t, [], true)).toBe('Be the first to react.');
+    expect(reactionCaption(t, [{ reaction: 'loved', count: 1 }], true)).toBe('1 reaction');
     expect(
       reactionCaption(
+        t,
         [
           { reaction: 'loved', count: 2 },
           { reaction: 'sad', count: 4 },
@@ -47,7 +53,7 @@ describe('episode reactions', () => {
   });
 
   it('announces the count only when there is one', () => {
-    expect(reactionAccessibilityLabel('shocked', 4)).toBe('Shocked, 4');
-    expect(reactionAccessibilityLabel('shocked', 0)).toBe('Shocked');
+    expect(reactionAccessibilityLabel(t, 'shocked', 4)).toBe('Shocked, 4');
+    expect(reactionAccessibilityLabel(t, 'shocked', 0)).toBe('Shocked');
   });
 });

@@ -4,17 +4,25 @@ import type { EpisodeReaction, ReactionCount } from '@/types';
  * The decisions behind the reaction row, kept out of the component so they can
  * be tested without a renderer — the rest of this project's tests are logic
  * tests, and pulling in a render library for four branches is not worth the
- * dependency in an Expo app.
+ * dependency in an Expo app. The user-facing copy is resolved through a passed
+ * `t` so these stay pure and locale-agnostic (see the `reactions.*` keys).
  */
 
-export const REACTION_LABELS: Record<EpisodeReaction, { emoji: string; label: string }> = {
-  loved: { emoji: '❤️', label: 'Loved it' },
-  funny: { emoji: '😂', label: 'Funny' },
-  shocked: { emoji: '😱', label: 'Shocked' },
-  sad: { emoji: '😢', label: 'Sad' },
-  tense: { emoji: '😬', label: 'Tense' },
-  bored: { emoji: '🥱', label: 'Bored' },
+type Translate = (key: string, params?: Record<string, string | number>) => string;
+
+/** Emoji is language-neutral, so it stays here rather than in the dictionary. */
+export const REACTION_EMOJI: Record<EpisodeReaction, string> = {
+  loved: '❤️',
+  funny: '😂',
+  shocked: '😱',
+  sad: '😢',
+  tense: '😬',
+  bored: '🥱',
 };
+
+export function reactionLabel(t: Translate, reaction: EpisodeReaction): string {
+  return t(`reactions.${reaction}`);
+}
 
 export function totalReactions(reactions: ReactionCount[]): number {
   return reactions.reduce((sum, entry) => sum + entry.count, 0);
@@ -25,11 +33,15 @@ export function reactionCounts(reactions: ReactionCount[]): Map<EpisodeReaction,
 }
 
 /** What the line under the heading says, in each of its three states. */
-export function reactionCaption(reactions: ReactionCount[], canReact: boolean): string {
-  if (!canReact) return 'Mark the episode watched to add your reaction.';
+export function reactionCaption(
+  t: Translate,
+  reactions: ReactionCount[],
+  canReact: boolean,
+): string {
+  if (!canReact) return t('reactions.markToReact');
   const total = totalReactions(reactions);
-  if (total === 0) return 'Be the first to react.';
-  return `${total} ${total === 1 ? 'reaction' : 'reactions'}`;
+  if (total === 0) return t('reactions.beFirst');
+  return total === 1 ? t('reactions.countOne') : t('reactions.countMany', { count: total });
 }
 
 /**
@@ -45,9 +57,10 @@ export function nextReaction(
 
 /** The accessibility label, which is also what the count is announced through. */
 export function reactionAccessibilityLabel(
+  t: Translate,
   reaction: EpisodeReaction,
   count: number,
 ): string {
-  const { label } = REACTION_LABELS[reaction];
-  return count > 0 ? `${label}, ${count}` : label;
+  const label = reactionLabel(t, reaction);
+  return count > 0 ? t('reactions.labelWithCount', { label, count }) : label;
 }

@@ -4,6 +4,7 @@ import { StyleSheet, View } from 'react-native';
 import { AppText } from '@/components/app-text';
 import { radius, spacing } from '@/constants/theme';
 import { useCommunityRating } from '@/hooks/use-media';
+import { useT } from '@/hooks/use-t';
 import { useTheme } from '@/hooks/use-theme';
 import type { MediaType } from '@/types';
 
@@ -35,11 +36,11 @@ function DistributionRow({ score, bucket, max }: { score: number; bucket: number
  */
 export function CommunityRating({ tmdbId, mediaType }: { tmdbId: number; mediaType: MediaType }) {
   const theme = useTheme();
+  const t = useT();
   const { data } = useCommunityRating(String(tmdbId), mediaType);
   if (!data || data.count === 0) return null;
 
   const { count, average, distribution } = data;
-  const memberLabel = count === 1 ? 'member' : 'members';
   const max = distribution ? Math.max(...distribution, 1) : 1;
 
   return (
@@ -47,7 +48,7 @@ export function CommunityRating({ tmdbId, mediaType }: { tmdbId: number; mediaTy
       <View style={styles.heading}>
         <View style={styles.title}>
           <Users color={theme.primary} size={20} />
-          <AppText variant="section">Văzute community</AppText>
+          <AppText variant="section">{t('communityRating.title')}</AppText>
         </View>
         {average != null ? (
           <View style={styles.score}>
@@ -64,9 +65,11 @@ export function CommunityRating({ tmdbId, mediaType }: { tmdbId: number; mediaTy
         <>
           <View
             style={styles.distribution}
-            accessibilityLabel={`Average ${average.toFixed(1)} out of 10 from ${count} ${
-              count === 1 ? 'rating' : 'ratings'
-            }.`}
+            accessibilityLabel={
+              count === 1
+                ? t('communityRating.averageAriaOne', { average: average.toFixed(1) })
+                : t('communityRating.averageAriaMany', { average: average.toFixed(1), count })
+            }
           >
             {distribution
               .map((bucket, index) => ({ score: index + 1, bucket }))
@@ -76,14 +79,16 @@ export function CommunityRating({ tmdbId, mediaType }: { tmdbId: number; mediaTy
               ))}
           </View>
           <AppText variant="caption" muted>
-            Based on {count} member {count === 1 ? 'rating' : 'ratings'}. Individual ratings stay
-            private.
+            {count === 1
+              ? t('communityRating.basedOnOne')
+              : t('communityRating.basedOnMany', { count })}
           </AppText>
         </>
       ) : (
         <AppText muted>
-          Rated by {count} {memberLabel}. The community average appears once a few members have rated
-          it.
+          {count === 1
+            ? t('communityRating.ratedByOne')
+            : t('communityRating.ratedByMany', { count })}
         </AppText>
       )}
     </View>

@@ -7,6 +7,7 @@ import { AppText } from '@/components/app-text';
 import { imageUrl } from '@/components/poster';
 import { radius, spacing } from '@/constants/theme';
 import { useWatchProviders } from '@/hooks/use-media';
+import { useT } from '@/hooks/use-t';
 import { useTheme } from '@/hooks/use-theme';
 import { safeWatchProviderLink } from '@/lib/watch-providers';
 import type { WatchProviderEntry } from '@/types';
@@ -74,6 +75,7 @@ export function WatchProviders({
   mediaType: 'movie' | 'tv';
 }) {
   const theme = useTheme();
+  const t = useT();
   const providers = useWatchProviders(String(tmdbId), mediaType);
   if (!providers.data) return null;
 
@@ -84,7 +86,7 @@ export function WatchProviders({
     try {
       await Linking.openURL(safeWatchProviderLink(link));
     } catch {
-      Alert.alert('Could not open JustWatch', 'Try again after checking your connection.');
+      Alert.alert(t('watchProviders.openErrorTitle'), t('watchProviders.openErrorMessage'));
     }
   };
 
@@ -98,30 +100,28 @@ export function WatchProviders({
       <View style={styles.heading}>
         <View style={styles.title}>
           <Tv color={theme.primary} size={20} />
-          <AppText variant="section">Where to watch</AppText>
+          <AppText variant="section">{t('watchProviders.title')}</AppText>
         </View>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={`Change availability region, currently ${region}`}
+          accessibilityLabel={t('watchProviders.changeRegionAria', { region })}
           onPress={() => router.push('/settings')}
           style={({ pressed }) => ({ opacity: pressed ? 0.65 : 1 })}
         >
           <AppText variant="caption" style={{ color: theme.primary }}>
-            {region} · Change
+            {t('watchProviders.regionChange', { region })}
           </AppText>
         </Pressable>
       </View>
 
       {hasOffers ? (
         <View style={styles.groups}>
-          <ProviderGroup label="STREAM" providers={stream} />
-          <ProviderGroup label="RENT" providers={rent} />
-          <ProviderGroup label="BUY" providers={buy} />
+          <ProviderGroup label={t('watchProviders.stream').toUpperCase()} providers={stream} />
+          <ProviderGroup label={t('watchProviders.rent').toUpperCase()} providers={rent} />
+          <ProviderGroup label={t('watchProviders.buy').toUpperCase()} providers={buy} />
         </View>
       ) : (
-        <AppText muted>
-          No streaming, rental, or purchase options are listed for {region}.
-        </AppText>
+        <AppText muted>{t('watchProviders.none', { region })}</AppText>
       )}
 
       <Pressable
@@ -134,7 +134,7 @@ export function WatchProviders({
         ]}
       >
         <AppText variant="caption" muted style={styles.attributionCopy}>
-          Streaming availability data provided by{' '}
+          {t('watchProviders.attributionPre')}{' '}
           <AppText variant="caption" style={{ color: theme.primary }}>
             JustWatch
           </AppText>

@@ -5,12 +5,14 @@ import { AppText } from '@/components/app-text';
 import { Poster } from '@/components/poster';
 import { UserAvatar } from '@/components/user-avatar';
 import { spacing } from '@/constants/theme';
+import { useT } from '@/hooks/use-t';
 import { useTheme } from '@/hooks/use-theme';
 import { episodeCode, formatDateTime } from '@/lib/format';
 import type { ActivityItem } from '@/types';
 
 export function SocialActivityRow({ item, showUser = true }: { item: ActivityItem; showUser?: boolean }) {
   const theme = useTheme();
+  const t = useT();
   const episode = item.season_number !== null && item.episode_number !== null
     ? `${episodeCode(item.season_number, item.episode_number)}${item.episode_name ? ` · ${item.episode_name}` : ''}`
     : null;
@@ -18,7 +20,7 @@ export function SocialActivityRow({ item, showUser = true }: { item: ActivityIte
     <View style={[styles.row, { borderBottomColor: theme.border }]}>
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={`Open ${item.media_title}`}
+        accessibilityLabel={t('mediaCard.open', { title: item.media_title })}
         onPress={() =>
           router.push({
             pathname: '/media/[id]',
@@ -61,7 +63,7 @@ export function SocialActivityRow({ item, showUser = true }: { item: ActivityIte
           item.episode_id ? (
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel={`Open ${episode}`}
+              accessibilityLabel={t('mediaCard.open', { title: episode })}
               onPress={() =>
                 router.push({
                   pathname: '/episodes/[id]',
