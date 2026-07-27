@@ -30,6 +30,7 @@ import {
   useSocialFeed,
   useUnfollowUser,
 } from '@/hooks/use-social';
+import { useT } from '@/hooks/use-t';
 import { useTheme } from '@/hooks/use-theme';
 import { formatDateTime } from '@/lib/format';
 import { getErrorMessage } from '@/lib/http';
@@ -43,16 +44,16 @@ import type { FollowStatus } from '@/types';
 
 type SocialTab = 'feed' | 'people' | 'requests' | 'following' | 'followers';
 
-const tabs = [
-  { value: 'feed', label: 'Feed' },
-  { value: 'people', label: 'People' },
-  { value: 'requests', label: 'Requests' },
-  { value: 'following', label: 'Following' },
-  { value: 'followers', label: 'Followers' },
-] as const;
-
 export default function SocialScreen() {
   const theme = useTheme();
+  const t = useT();
+  const tabs = [
+    { value: 'feed', label: t('social.tabFeed') },
+    { value: 'people', label: t('social.tabPeople') },
+    { value: 'requests', label: t('social.tabRequests') },
+    { value: 'following', label: t('social.tabFollowing') },
+    { value: 'followers', label: t('social.tabFollowers') },
+  ] as const;
   const status = useAuthStore((state) => state.status);
   const currentUser = useAuthStore((state) => state.user);
   const [tab, setTab] = useState<SocialTab>('feed');
@@ -113,7 +114,7 @@ export default function SocialScreen() {
     return (
       <AppButton
         compact
-        label={relationshipLabel(followStatus, isPublic)}
+        label={relationshipLabel(t, followStatus, isPublic)}
         variant={remove ? 'secondary' : 'primary'}
         loading={pending}
         onPress={() => remove ? unfollow.mutate(username) : follow.mutate(username)}
@@ -124,12 +125,12 @@ export default function SocialScreen() {
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: theme.background }]} edges={['bottom']}>
       <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
-        <ScreenHeader title="Social" subtitle="People and recent activity" />
+        <ScreenHeader title={t('social.title')} subtitle={t('social.subtitle')} />
         <SegmentedControl value={tab} options={tabs} onChange={setTab} />
 
         {mutationError ? (
           <AppText variant="caption" style={{ color: theme.danger }}>
-            {getErrorMessage(mutationError, 'Could not update this relationship')}
+            {getErrorMessage(mutationError, t('social.relationshipError'))}
           </AppText>
         ) : null}
 
@@ -139,8 +140,8 @@ export default function SocialScreen() {
             error={feed.isError}
             empty={feedItems.length === 0}
             emptyIcon={Users}
-            emptyTitle="No activity yet"
-            emptyMessage="Your activity and posts from people you follow appear here."
+            emptyTitle={t('social.feedEmptyTitle')}
+            emptyMessage={t('social.feedEmptyMessage')}
             onRetry={() => void feed.refetch()}
           >
             {feedItems.map((item) => <SocialActivityRow key={item.id} item={item} />)}
@@ -159,7 +160,7 @@ export default function SocialScreen() {
               <TextInput
                 value={query}
                 onChangeText={setQuery}
-                placeholder="Search usernames"
+                placeholder={t('social.searchPlaceholder')}
                 placeholderTextColor={theme.mutedText}
                 autoCapitalize="none"
                 autoCorrect={false}
@@ -170,7 +171,7 @@ export default function SocialScreen() {
             </View>
             {debouncedQuery.length > 0 && !isValidPeopleSearch(debouncedQuery) ? (
               <AppText variant="caption" style={{ color: theme.danger }}>
-                Enter 2-50 letters, numbers, underscores, or hyphens.
+                {t('social.searchInvalid')}
               </AppText>
             ) : null}
             <SocialListState
@@ -178,8 +179,14 @@ export default function SocialScreen() {
               error={people.isError}
               empty={peopleItems.length === 0}
               emptyIcon={Search}
-              emptyTitle={debouncedQuery.length < 2 ? 'Find people' : 'No people found'}
-              emptyMessage={debouncedQuery.length < 2 ? 'Enter at least two username characters.' : 'Try another username.'}
+              emptyTitle={
+                debouncedQuery.length < 2 ? t('social.peopleFindTitle') : t('social.peopleNoneTitle')
+              }
+              emptyMessage={
+                debouncedQuery.length < 2
+                  ? t('social.peopleFindMessage')
+                  : t('social.peopleNoneMessage')
+              }
               onRetry={() => void people.refetch()}
             >
               {peopleItems.map((person) => (
@@ -190,14 +197,19 @@ export default function SocialScreen() {
                   bio={person.bio}
                   meta={[
                     person.followers_count !== null
-                      ? `${person.followers_count} follower${person.followers_count === 1 ? '' : 's'}`
+                      ? t(
+                          person.followers_count === 1
+                            ? 'social.followersCountOne'
+                            : 'social.followersCountMany',
+                          { count: person.followers_count },
+                        )
                       : null,
-                    person.is_public ? null : 'Private',
+                    person.is_public ? null : t('social.privateBadge'),
                   ]
                     .filter(Boolean)
                     .join(' · ')}
                   action={person.id === currentUser?.id
-                    ? <AppText variant="caption" muted>You</AppText>
+                    ? <AppText variant="caption" muted>{t('social.you')}</AppText>
                     : relationshipAction(person.username, person.follow_status, person.is_public)}
                 />
               ))}
@@ -216,8 +228,8 @@ export default function SocialScreen() {
             error={requests.isError}
             empty={requestItems.length === 0}
             emptyIcon={Inbox}
-            emptyTitle="No follow requests"
-            emptyMessage="New requests for your private profile appear here."
+            emptyTitle={t('social.requestsEmptyTitle')}
+            emptyMessage={t('social.requestsEmptyMessage')}
             onRetry={() => void requests.refetch()}
           >
             {requestItems.map((request) => (
@@ -225,18 +237,18 @@ export default function SocialScreen() {
                 key={request.user_id}
                 username={request.username}
                 avatarUrl={request.avatar_url}
-                meta={`Requested ${formatDateTime(request.requested_at)}`}
+                meta={t('social.requestedAt', { date: formatDateTime(request.requested_at) })}
                 action={
                   <View style={styles.requestActions}>
                     <IconAction
-                      label={`Accept ${request.username}`}
+                      label={t('social.acceptAria', { username: request.username })}
                       color={theme.success}
                       pending={accept.isPending && accept.variables === request.user_id}
                       onPress={() => accept.mutate(request.user_id)}
                       icon="accept"
                     />
                     <IconAction
-                      label={`Reject ${request.username}`}
+                      label={t('social.rejectAria', { username: request.username })}
                       color={theme.danger}
                       pending={reject.isPending && reject.variables === request.user_id}
                       onPress={() => reject.mutate(request.user_id)}
@@ -260,8 +272,8 @@ export default function SocialScreen() {
             error={following.isError}
             empty={followingItems.length === 0}
             emptyIcon={UserCheck}
-            emptyTitle="Not following anyone"
-            emptyMessage="Find people to build your activity feed."
+            emptyTitle={t('social.followingEmptyTitle')}
+            emptyMessage={t('social.followingEmptyMessage')}
             onRetry={() => void following.refetch()}
           >
             {followingItems.map((person) => (
@@ -273,7 +285,7 @@ export default function SocialScreen() {
                 action={
                   <AppButton
                     compact
-                    label="Unfollow"
+                    label={t('social.unfollow')}
                     variant="secondary"
                     loading={unfollow.isPending && unfollow.variables === person.username}
                     onPress={() => unfollow.mutate(person.username)}
@@ -295,8 +307,8 @@ export default function SocialScreen() {
             error={followers.isError}
             empty={followerItems.length === 0}
             emptyIcon={Users}
-            emptyTitle="No followers"
-            emptyMessage="Followers will appear here."
+            emptyTitle={t('social.followersEmptyTitle')}
+            emptyMessage={t('social.followersEmptyMessage')}
             onRetry={() => void followers.refetch()}
           >
             {followerItems.map((person) => (
@@ -338,15 +350,17 @@ function SocialListState({
   onRetry: () => void;
   children: ReactNode;
 }) {
-  if (loading) return <LoadingState label="Loading social activity" />;
-  if (error) return <ErrorState message="Social data could not be loaded" onRetry={onRetry} />;
+  const t = useT();
+  if (loading) return <LoadingState label={t('social.loading')} />;
+  if (error) return <ErrorState message={t('social.loadError')} onRetry={onRetry} />;
   if (empty) return <EmptyState icon={emptyIcon} title={emptyTitle} message={emptyMessage} />;
   return <View style={styles.list}>{children}</View>;
 }
 
 function LoadMore({ visible, pending, onPress }: { visible: boolean; pending: boolean; onPress: () => void }) {
+  const t = useT();
   if (!visible) return null;
-  return <AppButton label="Load more" variant="secondary" loading={pending} onPress={onPress} />;
+  return <AppButton label={t('common.loadMore')} variant="secondary" loading={pending} onPress={onPress} />;
 }
 
 function IconAction({

@@ -5,7 +5,10 @@ import {
   SOCIAL_PAGE_LIMIT,
   uniqueActivities,
 } from '@/lib/social';
+import { translate } from '@/lib/i18n';
 import type { ActivityItem } from '@/types';
+
+const t = (key: string, params?: Record<string, string | number>) => translate('en', key, params);
 
 function activity(id: string): ActivityItem {
   return {
@@ -48,8 +51,8 @@ describe('mobile social helpers', () => {
   });
 
   it('describes every relationship action', () => {
-    expect(relationshipLabel('accepted', true)).toBe('Unfollow');
-    expect(relationshipLabel('pending', false)).toBe('Cancel request');
-    expect(relationshipLabel(null, false)).toBe('Request');
+    expect(relationshipLabel(t, 'accepted', true)).toBe('Unfollow');
+    expect(relationshipLabel(t, 'pending', false)).toBe('Cancel request');
+    expect(relationshipLabel(t, null, false)).toBe('Request');
   });
 });

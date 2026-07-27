@@ -21,8 +21,10 @@ export function uniqueActivities(pages: ActivityItem[][]) {
   return Array.from(new Map(pages.flat().map((item) => [item.id, item])).values());
 }
 
-export function relationshipLabel(status: FollowStatus, isPublic: boolean) {
-  if (status === 'accepted') return 'Unfollow';
-  if (status === 'pending') return 'Cancel request';
-  return isPublic ? 'Follow' : 'Request';
+type Translate = (key: string, params?: Record<string, string | number>) => string;
+
+export function relationshipLabel(t: Translate, status: FollowStatus, isPublic: boolean) {
+  if (status === 'accepted') return t('social.unfollow');
+  if (status === 'pending') return t('social.cancelRequest');
+  return isPublic ? t('social.follow') : t('social.request');
 }

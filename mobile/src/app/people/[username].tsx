@@ -15,6 +15,7 @@ import {
   usePublicUserProfile,
   useUnfollowUser,
 } from '@/hooks/use-social';
+import { useT } from '@/hooks/use-t';
 import { useTheme } from '@/hooks/use-theme';
 import { profilePath, safePostAuthRedirect } from '@/lib/deep-links';
 import { formatDate } from '@/lib/format';
@@ -25,6 +26,7 @@ import { hasLocalSession, useAuthStore } from '@/store/auth';
 
 export default function PublicProfileScreen() {
   const theme = useTheme();
+  const t = useT();
   const status = useAuthStore((state) => state.status);
   const currentUser = useAuthStore((state) => state.user);
   const params = useLocalSearchParams<{ username: string }>();
@@ -43,16 +45,16 @@ export default function PublicProfileScreen() {
   if (!returnTo) {
     return (
       <ErrorState
-        message="This profile link is invalid"
+        message={t('profile.invalidLink')}
         onRetry={() => router.replace('/')}
       />
     );
   }
-  if (status === 'loading') return <LoadingState label="Restoring session" />;
+  if (status === 'loading') return <LoadingState label={t('session.restoring')} />;
   if (status === 'restore_error') {
     return (
       <ErrorState
-        message="Your session is still saved. Check your connection and try again."
+        message={t('session.restoreError')}
         onRetry={() => void hydrateSession()}
       />
     );
@@ -64,11 +66,11 @@ export default function PublicProfileScreen() {
       />
     );
   }
-  if (profile.isLoading) return <LoadingState label="Loading profile" />;
+  if (profile.isLoading) return <LoadingState label={t('profile.loading')} />;
   if (profile.isError || !profile.data) {
     return (
       <ErrorState
-        message={getErrorMessage(profile.error, 'Profile could not be loaded')}
+        message={getErrorMessage(profile.error, t('profile.loadError'))}
         onRetry={() => void profile.refetch()}
       />
     );
@@ -96,17 +98,23 @@ export default function PublicProfileScreen() {
             {person.followers_count !== null || person.following_count !== null ? (
               <View style={styles.counts}>
                 {person.followers_count !== null ? (
-                  <AppText><AppText variant="label">{person.followers_count}</AppText> followers</AppText>
+                  <AppText>
+                    <AppText variant="label">{person.followers_count}</AppText>{' '}
+                    {t('profile.followers')}
+                  </AppText>
                 ) : null}
                 {person.following_count !== null ? (
-                  <AppText><AppText variant="label">{person.following_count}</AppText> following</AppText>
+                  <AppText>
+                    <AppText variant="label">{person.following_count}</AppText>{' '}
+                    {t('profile.following')}
+                  </AppText>
                 ) : null}
               </View>
             ) : null}
             <View style={styles.joined}>
               <CalendarDays color={theme.mutedText} size={15} />
               <AppText variant="caption" muted>
-                Joined {formatDate(person.created_at.slice(0, 10))}
+                {t('profile.joined', { date: formatDate(person.created_at.slice(0, 10)) })}
               </AppText>
             </View>
           </View>
@@ -114,7 +122,7 @@ export default function PublicProfileScreen() {
 
         {!isSelf ? (
           <AppButton
-            label={relationshipLabel(person.follow_status, person.is_public)}
+            label={relationshipLabel(t, person.follow_status, person.is_public)}
             icon={remove
               ? <UserMinus color={theme.text} size={18} />
               : <UserPlus color="#FFFFFF" size={18} />}
@@ -127,30 +135,30 @@ export default function PublicProfileScreen() {
         ) : null}
         {relationshipError ? (
           <AppText variant="caption" style={{ color: theme.danger }}>
-            {getErrorMessage(relationshipError, 'Could not update follow status')}
+            {getErrorMessage(relationshipError, t('social.followError'))}
           </AppText>
         ) : null}
 
         <View style={styles.activitySection}>
-          <AppText variant="section">Recent activity</AppText>
+          <AppText variant="section">{t('profile.recentActivity')}</AppText>
           {!person.can_view_activity ? (
             <EmptyState
               icon={LockKeyhole}
-              title="Private activity"
-              message="An accepted follow request is required."
+              title={t('profile.privateActivityTitle')}
+              message={t('profile.privateActivityMessage')}
             />
           ) : activity.isLoading ? (
-            <LoadingState label="Loading activity" />
+            <LoadingState label={t('profile.loadingActivity')} />
           ) : activity.isError ? (
             <ErrorState
-              message="Activity could not be loaded"
+              message={t('profile.activityLoadError')}
               onRetry={() => void activity.refetch()}
             />
           ) : activityItems.length === 0 ? (
             <EmptyState
               icon={Clock3}
-              title="No recent activity"
-              message="Nothing has been watched recently."
+              title={t('profile.noActivityTitle')}
+              message={t('profile.noActivityMessage')}
             />
           ) : (
             <View style={styles.list}>
@@ -159,7 +167,7 @@ export default function PublicProfileScreen() {
               ))}
               {activity.hasNextPage ? (
                 <AppButton
-                  label="Load more"
+                  label={t('common.loadMore')}
                   variant="secondary"
                   loading={activity.isFetchingNextPage}
                   onPress={() => void activity.fetchNextPage()}
