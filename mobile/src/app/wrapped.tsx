@@ -25,16 +25,17 @@ import { Poster } from '@/components/poster';
 import { EmptyState, ErrorState, LoadingState } from '@/components/screen-state';
 import { radius, spacing } from '@/constants/theme';
 import { useWrapped } from '@/hooks/use-stats';
+import { useT } from '@/hooks/use-t';
 import { useTheme } from '@/hooks/use-theme';
 import { formatDate } from '@/lib/format';
 import { hasLocalSession, useAuthStore } from '@/store/auth';
 import type { WrappedStats } from '@/types';
 
-const MONTH_LABELS = ['J', 'F', 'M', 'A', 'M', 'J', 'J', 'A', 'S', 'O', 'N', 'D'];
 const MIN_YEAR = 1900;
 
 export default function WrappedScreen() {
   const theme = useTheme();
+  const t = useT();
   const status = useAuthStore((state) => state.status);
   const hasSession = hasLocalSession(status);
   const currentYear = new Date().getFullYear();
@@ -63,13 +64,13 @@ export default function WrappedScreen() {
           <View style={styles.heroTitle}>
             <Sparkles color="#FFFFFF" size={19} />
             <AppText variant="label" style={styles.heroCopy}>
-              Your year in review
+              {t('wrapped.yearInReview')}
             </AppText>
           </View>
           <View style={styles.yearRow}>
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel="Previous recap year"
+              accessibilityLabel={t('wrapped.prevYear')}
               disabled={year <= MIN_YEAR || recap.isFetching}
               onPress={() => setYear((value) => Math.max(MIN_YEAR, value - 1))}
               style={({ pressed }) => [
@@ -87,7 +88,7 @@ export default function WrappedScreen() {
             </AppText>
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel="Next recap year"
+              accessibilityLabel={t('wrapped.nextYear')}
               disabled={year >= currentYear || recap.isFetching}
               onPress={() => setYear((value) => Math.min(currentYear, value + 1))}
               style={({ pressed }) => [
@@ -104,18 +105,18 @@ export default function WrappedScreen() {
         </View>
 
         {recap.isLoading ? (
-          <LoadingState label="Building your recap" />
+          <LoadingState label={t('wrapped.building')} />
         ) : recap.isError || !recap.data ? (
           <ErrorState
-            message="Your annual recap could not be loaded"
+            message={t('wrapped.loadError')}
             onRetry={() => void recap.refetch()}
           />
         ) : recap.data.total_watches === 0 ? (
           <EmptyState
             icon={Clapperboard}
-            title={`No watch history for ${year}`}
-            message="Watch events from this year will appear here."
-            actionLabel="Open statistics"
+            title={t('wrapped.emptyTitle', { year })}
+            message={t('wrapped.emptyMessage')}
+            actionLabel={t('wrapped.openStatistics')}
             onAction={() => router.replace('/statistics')}
           />
         ) : (
@@ -128,32 +129,41 @@ export default function WrappedScreen() {
 
 function Recap({ data }: { data: WrappedStats }) {
   const theme = useTheme();
+  const t = useT();
+  const monthInitials = t('wrapped.monthInitials');
   const maxGenre = Math.max(1, ...data.top_genres.map((entry) => entry.count));
   const maxMonth = Math.max(1, ...data.monthly.map((entry) => entry.count));
 
   return (
     <>
       <View style={styles.statGrid}>
-        <StatTile icon={Sparkles} label="Titles" value={data.distinct_titles} />
-        <StatTile icon={Clock3} label="Hours" value={Math.round(data.total_hours)} />
-        <StatTile icon={Clapperboard} label="Total plays" value={data.total_watches} />
-        <StatTile icon={Film} label="Movies" value={data.movies_watched} />
-        <StatTile icon={Tv} label="Episodes" value={data.episodes_watched} />
-        <StatTile icon={Flame} label="Best streak" value={`${data.longest_streak}d`} />
+        <StatTile icon={Sparkles} label={t('wrapped.titles')} value={data.distinct_titles} />
+        <StatTile icon={Clock3} label={t('wrapped.hours')} value={Math.round(data.total_hours)} />
+        <StatTile icon={Clapperboard} label={t('wrapped.totalPlays')} value={data.total_watches} />
+        <StatTile icon={Film} label={t('wrapped.movies')} value={data.movies_watched} />
+        <StatTile icon={Tv} label={t('wrapped.episodes')} value={data.episodes_watched} />
+        <StatTile
+          icon={Flame}
+          label={t('wrapped.bestStreak')}
+          value={t('wrapped.streakValue', { days: data.longest_streak })}
+        />
       </View>
 
       {data.first_watch && data.last_watch ? (
         <View style={styles.dateRange}>
           <CalendarRange color={theme.mutedText} size={18} />
           <AppText muted style={styles.dateRangeCopy}>
-            From {formatDate(data.first_watch)} to {formatDate(data.last_watch)}
+            {t('wrapped.dateRange', {
+              from: formatDate(data.first_watch),
+              to: formatDate(data.last_watch),
+            })}
           </AppText>
         </View>
       ) : null}
 
       {data.top_shows.length > 0 ? (
         <View style={styles.section}>
-          <AppText variant="section">Most watched</AppText>
+          <AppText variant="section">{t('wrapped.mostWatched')}</AppText>
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
@@ -163,9 +173,12 @@ function Recap({ data }: { data: WrappedStats }) {
               <Pressable
                 key={`${title.media_type}:${title.tmdb_id}`}
                 accessibilityRole="button"
-                accessibilityLabel={`Open ${title.title}, ${title.count} ${
-                  title.count === 1 ? 'play' : 'plays'
-                }`}
+                accessibilityLabel={t('wrapped.openTitleAria', {
+                  title: title.title,
+                  plays: t(title.count === 1 ? 'wrapped.playsOne' : 'wrapped.playsMany', {
+                    count: title.count,
+                  }),
+                })}
                 onPress={() =>
                   router.push({
                     pathname: '/media/[id]',
@@ -185,7 +198,9 @@ function Recap({ data }: { data: WrappedStats }) {
                   {title.title}
                 </AppText>
                 <AppText variant="caption" muted>
-                  {title.count} {title.count === 1 ? 'play' : 'plays'}
+                  {t(title.count === 1 ? 'wrapped.playsOne' : 'wrapped.playsMany', {
+                    count: title.count,
+                  })}
                 </AppText>
               </Pressable>
             ))}
@@ -195,7 +210,7 @@ function Recap({ data }: { data: WrappedStats }) {
 
       {data.top_genres.length > 0 ? (
         <View style={styles.section}>
-          <AppText variant="section">Top genres</AppText>
+          <AppText variant="section">{t('wrapped.topGenres')}</AppText>
           <View style={styles.genreList}>
             {data.top_genres.map((genre) => (
               <View key={genre.genre} style={styles.genre}>
@@ -223,15 +238,16 @@ function Recap({ data }: { data: WrappedStats }) {
       ) : null}
 
       <View style={styles.section}>
-        <AppText variant="section">By month</AppText>
+        <AppText variant="section">{t('wrapped.byMonth')}</AppText>
         <View style={styles.months}>
           {data.monthly.map((month, index) => (
             <View
               key={month.month}
               accessible
-              accessibilityLabel={`${month.count} ${
-                month.count === 1 ? 'watch' : 'watches'
-              } in month ${month.month}`}
+              accessibilityLabel={t(
+                month.count === 1 ? 'wrapped.monthAriaOne' : 'wrapped.monthAriaMany',
+                { count: month.count, month: month.month },
+              )}
               style={styles.month}
             >
               <View style={styles.monthTrack}>
@@ -246,7 +262,7 @@ function Recap({ data }: { data: WrappedStats }) {
                 />
               </View>
               <AppText variant="caption" muted style={styles.monthLabel}>
-                {MONTH_LABELS[index]}
+                {monthInitials[index]}
               </AppText>
             </View>
           ))}
