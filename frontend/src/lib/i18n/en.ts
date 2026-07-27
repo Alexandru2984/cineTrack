@@ -606,6 +606,23 @@ export const en = {
     done: 'Done',
     addedAs: '✓ Added as {status}',
   },
+  communityRating: {
+    title: 'Văzute community',
+    averageAriaOne: 'Average {average} out of 10 from 1 rating.',
+    averageAriaMany: 'Average {average} out of 10 from {count} ratings.',
+    basedOnOne: 'Based on 1 member rating. Individual ratings stay private.',
+    basedOnMany: 'Based on {count} member ratings. Individual ratings stay private.',
+    ratedByOne: 'Rated by 1 member. The community average appears once a few members have rated it.',
+    ratedByMany:
+      'Rated by {count} members. The community average appears once a few members have rated it.',
+    barTitle: '{count} ({share}%)',
+  },
+  errorBoundary: {
+    title: 'Something went wrong',
+    body: 'This page hit an unexpected error. You can reload, or head back home.',
+    reload: 'Reload page',
+    goHome: 'Go home',
+  },
   watchProviders: {
     title: 'Where to watch',
     region: 'Region',

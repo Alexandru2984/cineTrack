@@ -1,5 +1,6 @@
 import { Star, Users } from 'lucide-react';
 import { useCommunityRating } from '@/hooks/useMedia';
+import { useT } from '@/hooks/useT';
 
 function RatingDistribution({
   distribution,
@@ -10,12 +11,14 @@ function RatingDistribution({
   count: number;
   average: number;
 }) {
+  const t = useT();
   // Scale bar length to the busiest bucket so the shape is readable even when
   // every rating clusters on one or two scores.
   const max = Math.max(...distribution, 1);
-  const summary = `Average ${average.toFixed(1)} out of 10 from ${count} ${
-    count === 1 ? 'rating' : 'ratings'
-  }.`;
+  const summary =
+    count === 1
+      ? t('communityRating.averageAriaOne', { average: average.toFixed(1) })
+      : t('communityRating.averageAriaMany', { average: average.toFixed(1), count });
 
   return (
     <div role="img" aria-label={summary} className="space-y-1.5">
@@ -34,7 +37,7 @@ function RatingDistribution({
                 <div
                   className="h-full rounded-full bg-[hsl(var(--primary))]"
                   style={{ width: `${barWidth}%` }}
-                  title={`${bucket} (${share}%)`}
+                  title={t('communityRating.barTitle', { count: bucket, share })}
                 />
               </div>
               <span className="w-8 shrink-0 tabular-nums text-[hsl(var(--muted-foreground))]">
@@ -55,19 +58,20 @@ function RatingDistribution({
  * private rating.
  */
 export function CommunityRating({ mediaId, mediaType }: { mediaId: string; mediaType: string }) {
+  const t = useT();
   const { data, isLoading } = useCommunityRating(mediaId, mediaType);
 
   if (isLoading && !data) return null;
   if (!data || data.count === 0) return null;
 
   const { count, average, distribution } = data;
-  const memberLabel = count === 1 ? 'member' : 'members';
 
   return (
     <section className="mt-8 rounded-lg border border-[hsl(var(--border))] p-4 sm:p-6">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <h2 className="flex items-center gap-2 text-lg font-semibold">
-          <Users className="h-5 w-5 text-[hsl(var(--primary))]" aria-hidden="true" /> Văzute community
+          <Users className="h-5 w-5 text-[hsl(var(--primary))]" aria-hidden="true" />{' '}
+          {t('communityRating.title')}
         </h2>
         {average != null && (
           <span className="flex items-baseline gap-1">
@@ -85,14 +89,16 @@ export function CommunityRating({ mediaId, mediaType }: { mediaId: string; media
         <>
           <RatingDistribution distribution={distribution} count={count} average={average} />
           <p className="mt-3 text-xs text-[hsl(var(--muted-foreground))]">
-            Based on {count} member {count === 1 ? 'rating' : 'ratings'}. Individual ratings stay
-            private.
+            {count === 1
+              ? t('communityRating.basedOnOne')
+              : t('communityRating.basedOnMany', { count })}
           </p>
         </>
       ) : (
         <p className="text-sm text-[hsl(var(--muted-foreground))]">
-          Rated by {count} {memberLabel}. The community average appears once a few members have
-          rated it.
+          {count === 1
+            ? t('communityRating.ratedByOne')
+            : t('communityRating.ratedByMany', { count })}
         </p>
       )}
     </section>

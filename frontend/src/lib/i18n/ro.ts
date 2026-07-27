@@ -609,6 +609,24 @@ export const ro: Dictionary = {
     done: 'Gata',
     addedAs: '✓ Adăugat ca {status}',
   },
+  communityRating: {
+    title: 'Comunitatea Văzute',
+    averageAriaOne: 'Medie {average} din 10 dintr-o evaluare.',
+    averageAriaMany: 'Medie {average} din 10 din {count} evaluări.',
+    basedOnOne: 'Pe baza unei evaluări de la un membru. Evaluările individuale rămân private.',
+    basedOnMany: 'Pe baza a {count} evaluări de la membri. Evaluările individuale rămân private.',
+    ratedByOne:
+      'Evaluat de un membru. Media comunității apare după ce câțiva membri l-au evaluat.',
+    ratedByMany:
+      'Evaluat de {count} membri. Media comunității apare după ce câțiva membri l-au evaluat.',
+    barTitle: '{count} ({share}%)',
+  },
+  errorBoundary: {
+    title: 'Ceva nu a mers bine',
+    body: 'Această pagină a întâmpinat o eroare neașteptată. Poți reîncărca sau te poți întoarce acasă.',
+    reload: 'Reîncarcă pagina',
+    goHome: 'Mergi acasă',
+  },
   watchProviders: {
     title: 'Unde vezi',
     region: 'Regiune',

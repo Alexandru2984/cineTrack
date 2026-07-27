@@ -1,5 +1,6 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react';
 import { AlertTriangle } from 'lucide-react';
+import { useT } from '@/hooks/useT';
 
 interface Props {
   children: ReactNode;
@@ -7,6 +8,33 @@ interface Props {
 
 interface State {
   hasError: boolean;
+}
+
+// A class boundary cannot call hooks, so the localized fallback lives in this
+// small function component the boundary renders on error.
+function ErrorFallback() {
+  const t = useT();
+  return (
+    <div className="mx-auto max-w-md px-4 py-16 text-center">
+      <AlertTriangle className="mx-auto h-12 w-12 text-[hsl(var(--destructive))]" />
+      <h1 className="mt-4 text-2xl font-bold">{t('errorBoundary.title')}</h1>
+      <p className="mt-2 text-[hsl(var(--muted-foreground))]">{t('errorBoundary.body')}</p>
+      <div className="mt-6 flex items-center justify-center gap-3">
+        <button
+          onClick={() => window.location.reload()}
+          className="rounded-md bg-[hsl(var(--primary))] px-4 py-2 text-sm font-medium text-white hover:opacity-90"
+        >
+          {t('errorBoundary.reload')}
+        </button>
+        <a
+          href="/"
+          className="rounded-md border border-[hsl(var(--border))] px-4 py-2 text-sm font-medium hover:bg-[hsl(var(--accent))]"
+        >
+          {t('errorBoundary.goHome')}
+        </a>
+      </div>
+    </div>
+  );
 }
 
 /**
@@ -32,28 +60,6 @@ export class ErrorBoundary extends Component<Props, State> {
       return this.props.children;
     }
 
-    return (
-      <div className="mx-auto max-w-md px-4 py-16 text-center">
-        <AlertTriangle className="mx-auto h-12 w-12 text-[hsl(var(--destructive))]" />
-        <h1 className="mt-4 text-2xl font-bold">Something went wrong</h1>
-        <p className="mt-2 text-[hsl(var(--muted-foreground))]">
-          This page hit an unexpected error. You can reload, or head back home.
-        </p>
-        <div className="mt-6 flex items-center justify-center gap-3">
-          <button
-            onClick={() => window.location.reload()}
-            className="rounded-md bg-[hsl(var(--primary))] px-4 py-2 text-sm font-medium text-white hover:opacity-90"
-          >
-            Reload page
-          </button>
-          <a
-            href="/"
-            className="rounded-md border border-[hsl(var(--border))] px-4 py-2 text-sm font-medium hover:bg-[hsl(var(--accent))]"
-          >
-            Go home
-          </a>
-        </div>
-      </div>
-    );
+    return <ErrorFallback />;
   }
 }
