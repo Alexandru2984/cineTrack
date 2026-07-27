@@ -31,6 +31,7 @@ import {
   useMyLists,
   useUpdateList,
 } from '@/hooks/use-lists';
+import { useT } from '@/hooks/use-t';
 import { useTheme } from '@/hooks/use-theme';
 import { getErrorMessage } from '@/lib/http';
 import type { ListInput } from '@/lib/lists';
@@ -44,6 +45,7 @@ type EditorState =
 
 export default function ListsScreen() {
   const theme = useTheme();
+  const t = useT();
   const status = useAuthStore((state) => state.status);
   const hasSession = hasLocalSession(status);
   const lists = useMyLists(hasSession);
@@ -68,12 +70,12 @@ export default function ListsScreen() {
 
   const confirmDelete = (list: CustomListSummary) => {
     Alert.alert(
-      'Delete list?',
-      `${list.name}\n\nThe titles inside will not be deleted.`,
+      t('lists.confirmDeleteTitle'),
+      t('lists.confirmDeleteMessage', { name: list.name }),
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: t('common.cancel'), style: 'cancel' },
         {
-          text: 'Delete',
+          text: t('common.delete'),
           style: 'destructive',
           onPress: () => deleteList.mutate(list.id),
         },
@@ -101,11 +103,11 @@ export default function ListsScreen() {
         ListHeaderComponent={
           <View style={styles.header}>
             <ScreenHeader
-              title="Custom lists"
-              subtitle="Collections independent from tracking status"
+              title={t('lists.title')}
+              subtitle={t('lists.subtitle')}
               right={
                 <AppButton
-                  label="Create"
+                  label={t('common.create')}
                   compact
                   icon={<Plus color="#FFFFFF" size={18} />}
                   onPress={() => {
@@ -117,25 +119,25 @@ export default function ListsScreen() {
             />
             {deleteList.error ? (
               <AppText variant="caption" style={{ color: theme.danger }}>
-                {getErrorMessage(deleteList.error, 'The list could not be deleted')}
+                {getErrorMessage(deleteList.error, t('lists.deleteError'))}
               </AppText>
             ) : null}
           </View>
         }
         ListEmptyComponent={
           lists.isLoading ? (
-            <LoadingState label="Loading lists" />
+            <LoadingState label={t('lists.loading')} />
           ) : lists.isError ? (
             <ErrorState
-              message={getErrorMessage(lists.error, 'Your lists could not be loaded')}
+              message={getErrorMessage(lists.error, t('lists.loadError'))}
               onRetry={() => void lists.refetch()}
             />
           ) : (
             <EmptyState
               icon={ListPlus}
-              title="No custom lists"
-              message="Create a collection, then add titles from their detail pages."
-              actionLabel="Create your first list"
+              title={t('lists.emptyTitle')}
+              message={t('lists.emptyMessage')}
+              actionLabel={t('lists.emptyAction')}
               onAction={() => setEditor({ mode: 'create' })}
             />
           )
@@ -144,7 +146,7 @@ export default function ListsScreen() {
           <View style={[styles.row, { borderBottomColor: theme.border }]}>
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel={`Open ${item.name}`}
+              accessibilityLabel={t('lists.openAria', { name: item.name })}
               onPress={() =>
                 router.push({ pathname: '/lists/[id]', params: { id: item.id } })
               }
@@ -170,8 +172,10 @@ export default function ListsScreen() {
                   </AppText>
                 ) : null}
                 <AppText variant="caption" muted>
-                  {item.item_count} {item.item_count === 1 ? 'title' : 'titles'} ·{' '}
-                  {item.is_public ? 'Public' : 'Private'}
+                  {t(item.item_count === 1 ? 'library.titleCount' : 'library.titleCountPlural', {
+                    count: item.item_count,
+                  })}{' '}
+                  · {item.is_public ? t('lists.public') : t('lists.private')}
                 </AppText>
               </View>
               <ChevronRight color={theme.mutedText} size={18} />
@@ -179,7 +183,7 @@ export default function ListsScreen() {
             <View style={styles.actions}>
               <Pressable
                 accessibilityRole="button"
-                accessibilityLabel={`Edit ${item.name}`}
+                accessibilityLabel={t('lists.editAria', { name: item.name })}
                 onPress={() => {
                   updateList.reset();
                   setEditor({ mode: 'edit', list: item });
@@ -190,7 +194,7 @@ export default function ListsScreen() {
               </Pressable>
               <Pressable
                 accessibilityRole="button"
-                accessibilityLabel={`Delete ${item.name}`}
+                accessibilityLabel={t('lists.deleteAria', { name: item.name })}
                 disabled={deleteList.isPending}
                 onPress={() => confirmDelete(item)}
                 style={[

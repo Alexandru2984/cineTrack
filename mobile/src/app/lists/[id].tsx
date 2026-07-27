@@ -30,6 +30,7 @@ import {
   useRemoveListItem,
   useUpdateList,
 } from '@/hooks/use-lists';
+import { useT } from '@/hooks/use-t';
 import { useTheme } from '@/hooks/use-theme';
 import { API_ORIGIN } from '@/lib/config';
 import { getErrorMessage } from '@/lib/http';
@@ -39,6 +40,7 @@ import type { Media } from '@/types';
 
 export default function ListDetailScreen() {
   const theme = useTheme();
+  const t = useT();
   const params = useLocalSearchParams<{ id: string }>();
   const rawId = Array.isArray(params.id) ? params.id[0] : params.id;
   const id = rawId?.trim() || undefined;
@@ -49,14 +51,11 @@ export default function ListDetailScreen() {
   const removeItem = useRemoveListItem();
   const [editing, setEditing] = useState(false);
 
-  if (detail.isLoading) return <LoadingState label="Loading list" />;
+  if (detail.isLoading) return <LoadingState label={t('listDetail.loading')} />;
   if (detail.isError || !detail.data) {
     return (
       <ErrorState
-        message={getErrorMessage(
-          detail.error,
-          'This list is private, missing, or could not be loaded',
-        )}
+        message={getErrorMessage(detail.error, t('listDetail.loadError'))}
         onRetry={() => void detail.refetch()}
       />
     );
@@ -66,24 +65,28 @@ export default function ListDetailScreen() {
   const isOwner = user?.id === list.user_id;
 
   const confirmDelete = () => {
-    Alert.alert('Delete list?', `${list.name}\n\nThe titles inside will not be deleted.`, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: () =>
-          deleteList.mutate(list.id, {
-            onSuccess: () => router.replace('/lists'),
-          }),
-      },
-    ]);
+    Alert.alert(
+      t('lists.confirmDeleteTitle'),
+      t('lists.confirmDeleteMessage', { name: list.name }),
+      [
+        { text: t('common.cancel'), style: 'cancel' },
+        {
+          text: t('common.delete'),
+          style: 'destructive',
+          onPress: () =>
+            deleteList.mutate(list.id, {
+              onSuccess: () => router.replace('/lists'),
+            }),
+        },
+      ],
+    );
   };
 
   const confirmRemove = (item: Media) => {
-    Alert.alert('Remove from list?', item.title, [
-      { text: 'Cancel', style: 'cancel' },
+    Alert.alert(t('listDetail.removeConfirmTitle'), item.title, [
+      { text: t('common.cancel'), style: 'cancel' },
       {
-        text: 'Remove',
+        text: t('common.remove'),
         style: 'destructive',
         onPress: () => removeItem.mutate({ listId: list.id, mediaId: item.id }),
       },
@@ -133,18 +136,20 @@ export default function ListDetailScreen() {
                 <Lock color={theme.mutedText} size={16} />
               )}
               <AppText variant="caption" muted>
-                {list.is_public ? 'Public list' : 'Private list'}
+                {list.is_public ? t('listDetail.publicList') : t('listDetail.privateList')}
               </AppText>
             </View>
             <AppText variant="title">{list.name}</AppText>
             {list.description ? <AppText muted>{list.description}</AppText> : null}
             <AppText variant="caption" muted>
-              {items.length} {items.length === 1 ? 'title' : 'titles'}
+              {t(items.length === 1 ? 'library.titleCount' : 'library.titleCountPlural', {
+                count: items.length,
+              })}
             </AppText>
             <View style={styles.headerActions}>
               {list.is_public ? (
                 <AppButton
-                  label="Share"
+                  label={t('common.share')}
                   variant="secondary"
                   compact
                   icon={<Share2 color={theme.mutedText} size={18} />}
@@ -154,7 +159,7 @@ export default function ListDetailScreen() {
               {isOwner ? (
                 <>
                   <AppButton
-                    label="Edit"
+                    label={t('common.edit')}
                     variant="secondary"
                     compact
                     icon={<Pencil color={theme.mutedText} size={18} />}
@@ -165,7 +170,7 @@ export default function ListDetailScreen() {
                   />
                   <Pressable
                     accessibilityRole="button"
-                    accessibilityLabel={`Delete ${list.name}`}
+                    accessibilityLabel={t('lists.deleteAria', { name: list.name })}
                     disabled={deleteList.isPending}
                     onPress={confirmDelete}
                     style={[
@@ -185,7 +190,7 @@ export default function ListDetailScreen() {
               <AppText variant="caption" style={{ color: theme.danger }}>
                 {getErrorMessage(
                   removeItem.error || deleteList.error,
-                  'The list could not be updated',
+                  t('listDetail.updateError'),
                 )}
               </AppText>
             ) : null}
@@ -194,19 +199,15 @@ export default function ListDetailScreen() {
         ListEmptyComponent={
           <EmptyState
             icon={Globe2}
-            title="This list is empty"
-            message={
-              isOwner
-                ? 'Open a movie or show and use Custom list to add it here.'
-                : 'The owner has not added any titles yet.'
-            }
+            title={t('listDetail.emptyTitle')}
+            message={isOwner ? t('listDetail.emptyOwner') : t('listDetail.emptyVisitor')}
           />
         }
         renderItem={({ item }) => (
           <View style={[styles.row, { borderBottomColor: theme.border }]}>
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel={`Open ${item.title}`}
+              accessibilityLabel={t('mediaCard.open', { title: item.title })}
               onPress={() =>
                 router.push({
                   pathname: '/media/[id]',
@@ -224,14 +225,17 @@ export default function ListDetailScreen() {
                   {item.title}
                 </AppText>
                 <AppText variant="caption" muted>
-                  {item.media_type === 'tv' ? 'TV show' : 'Movie'}
+                  {t(item.media_type === 'tv' ? 'mediaType.tv' : 'mediaType.movie')}
                 </AppText>
               </View>
             </Pressable>
             {isOwner ? (
               <Pressable
                 accessibilityRole="button"
-                accessibilityLabel={`Remove ${item.title} from ${list.name}`}
+                accessibilityLabel={t('listDetail.removeFromListAria', {
+                  title: item.title,
+                  name: list.name,
+                })}
                 disabled={removeItem.isPending}
                 onPress={() => confirmRemove(item)}
                 style={[
