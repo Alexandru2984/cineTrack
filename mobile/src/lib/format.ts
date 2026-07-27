@@ -18,6 +18,10 @@ export function setFormatLocaleTag(tag: string) {
   activeLocaleTag = tag;
 }
 
+export function getFormatLocaleTag() {
+  return activeLocaleTag;
+}
+
 export function episodeCode(season: number, episode: number) {
   return `S${String(season).padStart(2, '0')}E${String(episode).padStart(2, '0')}`;
 }

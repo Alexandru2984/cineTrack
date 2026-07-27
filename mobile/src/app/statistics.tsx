@@ -30,6 +30,7 @@ import {
   useMonthlyActivity,
   useMyStats,
 } from '@/hooks/use-stats';
+import { useT } from '@/hooks/use-t';
 import { useTheme } from '@/hooks/use-theme';
 import { formatDate } from '@/lib/format';
 import {
@@ -45,6 +46,7 @@ const MIN_HEATMAP_YEAR = 1900;
 
 export default function StatisticsScreen() {
   const theme = useTheme();
+  const t = useT();
   const status = useAuthStore((state) => state.status);
   const currentYear = new Date().getFullYear();
   const [year, setYear] = useState(currentYear);
@@ -80,11 +82,11 @@ export default function StatisticsScreen() {
     }
   };
 
-  if (stats.isLoading) return <LoadingState label="Loading statistics" />;
+  if (stats.isLoading) return <LoadingState label={t('statistics.loading')} />;
   if (!stats.data) {
     return (
       <ErrorState
-        message="Statistics could not be loaded"
+        message={t('statistics.loadError')}
         onRetry={() => void stats.refetch()}
       />
     );
@@ -123,44 +125,44 @@ export default function StatisticsScreen() {
           <View style={styles.recapCopy}>
             <Sparkles color={theme.primary} size={21} />
             <View style={styles.sectionCopy}>
-              <AppText variant="section">Your year in review</AppText>
+              <AppText variant="section">{t('statistics.recapTitle')}</AppText>
               <AppText variant="caption" muted>
-                Top titles, genres, streaks, and monthly activity.
+                {t('statistics.recapSubtitle')}
               </AppText>
             </View>
           </View>
           <AppButton
-            label="Open recap"
+            label={t('statistics.openRecap')}
             compact
             onPress={() => router.push('/wrapped')}
           />
         </View>
 
         <View style={styles.statGrid}>
-          <Stat icon={Film} label="Movies" value={stats.data.total_movies} color={theme.primary} />
-          <Stat icon={Tv} label="Shows" value={stats.data.total_shows} color={theme.info} />
+          <Stat icon={Film} label={t('stats.movies')} value={stats.data.total_movies} color={theme.primary} />
+          <Stat icon={Tv} label={t('stats.shows')} value={stats.data.total_shows} color={theme.info} />
           <Stat
             icon={ListVideo}
-            label="Episodes"
+            label={t('stats.episodes')}
             value={stats.data.total_episodes}
             color={theme.success}
           />
           <Stat
             icon={Clock3}
-            label="Hours"
+            label={t('stats.hours')}
             value={Math.round(stats.data.total_hours)}
             color={theme.warning}
           />
           <Stat
             icon={Flame}
-            label="Current streak"
-            value={`${stats.data.current_streak}d`}
+            label={t('statistics.currentStreak')}
+            value={t('statistics.streakValue', { days: stats.data.current_streak })}
             color={theme.danger}
           />
           <Stat
             icon={Trophy}
-            label="Best streak"
-            value={`${stats.data.longest_streak}d`}
+            label={t('statistics.bestStreak')}
+            value={t('statistics.streakValue', { days: stats.data.longest_streak })}
             color={theme.warning}
           />
         </View>
@@ -168,12 +170,12 @@ export default function StatisticsScreen() {
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <AppText variant="section" style={styles.sectionCopy}>
-              Watch activity
+              {t('statistics.watchActivity')}
             </AppText>
             <View style={styles.yearControl}>
               <Pressable
                 accessibilityRole="button"
-                accessibilityLabel="Previous year"
+                accessibilityLabel={t('statistics.prevYear')}
                 disabled={year <= MIN_HEATMAP_YEAR || heatmap.isFetching}
                 onPress={() => {
                   setSelectedDay(null);
@@ -195,7 +197,7 @@ export default function StatisticsScreen() {
               </AppText>
               <Pressable
                 accessibilityRole="button"
-                accessibilityLabel="Next year"
+                accessibilityLabel={t('statistics.nextYear')}
                 disabled={year >= currentYear || heatmap.isFetching}
                 onPress={() => {
                   setSelectedDay(null);
@@ -215,10 +217,10 @@ export default function StatisticsScreen() {
           </View>
 
           {heatmap.isLoading ? (
-            <LoadingState label="Loading activity" />
+            <LoadingState label={t('statistics.loadingActivity')} />
           ) : heatmap.isError ? (
             <ErrorState
-              message="Watch activity could not be loaded"
+              message={t('statistics.activityLoadError')}
               onRetry={() => void heatmap.refetch()}
             />
           ) : (
@@ -229,16 +231,18 @@ export default function StatisticsScreen() {
                 contentContainerStyle={styles.heatmapScroll}
               >
                 <View style={styles.weekdayLabels}>
-                  {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((label, index) => (
-                    <AppText
-                      key={`${label}-${index}`}
-                      variant="caption"
-                      muted
-                      style={styles.weekdayLabel}
-                    >
-                      {index % 2 === 1 ? label : ''}
-                    </AppText>
-                  ))}
+                  {t('statistics.weekdayInitials')
+                    .split('')
+                    .map((label, index) => (
+                      <AppText
+                        key={`${label}-${index}`}
+                        variant="caption"
+                        muted
+                        style={styles.weekdayLabel}
+                      >
+                        {index % 2 === 1 ? label : ''}
+                      </AppText>
+                    ))}
                 </View>
                 <View style={styles.heatmap}>
                   {weeks.map((week, weekIndex) => (
@@ -248,9 +252,12 @@ export default function StatisticsScreen() {
                           <Pressable
                             key={cell.date}
                             accessibilityRole="button"
-                            accessibilityLabel={`${formatDate(cell.date)}, ${cell.count} watch ${
-                              cell.count === 1 ? 'event' : 'events'
-                            }`}
+                            accessibilityLabel={t(
+                              cell.count === 1
+                                ? 'statistics.cellAriaOne'
+                                : 'statistics.cellAriaMany',
+                              { date: formatDate(cell.date), count: cell.count },
+                            )}
                             hitSlop={2}
                             onPress={() => setSelectedDay(cell)}
                             style={[
@@ -278,20 +285,32 @@ export default function StatisticsScreen() {
               <View style={styles.heatmapFooter}>
                 <AppText variant="caption" muted>
                   {selectedDay?.date
-                    ? `${formatDate(selectedDay.date)}: ${selectedDay.count} watch ${
-                        selectedDay.count === 1 ? 'event' : 'events'
-                      }`
-                    : `${(heatmap.data ?? []).reduce((sum, day) => sum + day.count, 0)} watch events in ${year}`}
+                    ? t(
+                        selectedDay.count === 1
+                          ? 'statistics.dayDetailOne'
+                          : 'statistics.dayDetailMany',
+                        { date: formatDate(selectedDay.date), count: selectedDay.count },
+                      )
+                    : (() => {
+                        const total = (heatmap.data ?? []).reduce(
+                          (sum, day) => sum + day.count,
+                          0,
+                        );
+                        return t(
+                          total === 1 ? 'statistics.yearTotalOne' : 'statistics.yearTotalMany',
+                          { count: total, year },
+                        );
+                      })()}
                 </AppText>
                 <View style={styles.legend}>
-                  <AppText variant="caption" muted>Low</AppText>
+                  <AppText variant="caption" muted>{t('statistics.legendLow')}</AppText>
                   {heatmapColors.slice(1).map((color, index) => (
                     <View
                       key={index}
                       style={[styles.legendCell, { backgroundColor: color }]}
                     />
                   ))}
-                  <AppText variant="caption" muted>High</AppText>
+                  <AppText variant="caption" muted>{t('statistics.legendHigh')}</AppText>
                 </View>
               </View>
             </>
@@ -299,9 +318,9 @@ export default function StatisticsScreen() {
         </View>
 
         <View style={styles.section}>
-          <AppText variant="section">Monthly activity</AppText>
+          <AppText variant="section">{t('statistics.monthlyActivity')}</AppText>
           {monthly.isLoading ? (
-            <LoadingState label="Loading monthly activity" />
+            <LoadingState label={t('statistics.loadingMonthly')} />
           ) : monthly.data?.length ? (
             <View style={styles.bars}>
               {monthly.data.map((entry) => (
@@ -310,23 +329,26 @@ export default function StatisticsScreen() {
                   label={formatActivityMonth(entry.month)}
                   ratio={entry.hours / maxMonthlyHours}
                   color={theme.info}
-                  value={`${entry.hours.toFixed(1)}h · ${entry.count} events`}
+                  value={t('statistics.monthlyValue', {
+                    hours: entry.hours.toFixed(1),
+                    count: entry.count,
+                  })}
                 />
               ))}
             </View>
           ) : (
             <EmptyState
               icon={Clock3}
-              title="No monthly activity"
-              message="Watched titles will build this timeline."
+              title={t('statistics.noMonthlyTitle')}
+              message={t('statistics.noMonthlyMessage')}
             />
           )}
         </View>
 
         <View style={styles.section}>
-          <AppText variant="section">Top genres</AppText>
+          <AppText variant="section">{t('statistics.topGenres')}</AppText>
           {genres.isLoading ? (
-            <LoadingState label="Loading genres" />
+            <LoadingState label={t('statistics.loadingGenres')} />
           ) : visibleGenres.length ? (
             <View style={styles.bars}>
               {visibleGenres.map((entry, index) => (
@@ -342,15 +364,15 @@ export default function StatisticsScreen() {
           ) : (
             <EmptyState
               icon={Film}
-              title="No genre data"
-              message="Track watched titles to reveal your preferences."
+              title={t('statistics.noGenresTitle')}
+              message={t('statistics.noGenresMessage')}
             />
           )}
         </View>
 
         {hasError ? (
           <AppText variant="caption" style={{ color: theme.danger }}>
-            Some statistics could not be refreshed.
+            {t('statistics.refreshError')}
           </AppText>
         ) : null}
       </ScrollView>

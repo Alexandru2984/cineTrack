@@ -1,3 +1,4 @@
+import { getFormatLocaleTag } from '@/lib/format';
 import type { HeatmapDay } from '@/types';
 
 export interface HeatmapCell {
@@ -55,7 +56,7 @@ export function buildHeatmapWeeks(
 export function formatActivityMonth(value: string) {
   const [year, month] = value.split('-').map(Number);
   if (!year || !month || month < 1 || month > 12) return value;
-  return new Intl.DateTimeFormat(undefined, {
+  return new Intl.DateTimeFormat(getFormatLocaleTag(), {
     month: 'short',
     year: 'numeric',
     timeZone: 'UTC',
