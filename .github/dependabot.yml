@@ -95,6 +95,15 @@ updates:
       interval: weekly
     cooldown:
       default-days: 7
+    groups:
+      # CodeQL refuses to run when init and analyze load different action
+      # versions. Keep the two entry points on one immutable release SHA.
+      codeql-action:
+        patterns:
+          - "github/codeql-action/*"
+        update-types:
+          - minor
+          - patch
 
   # Base images for the container builds
   - package-ecosystem: docker
