@@ -1,4 +1,4 @@
-FROM rust:1.96-slim-bookworm@sha256:e18a79fc84dfcfc3ab5ba72290398a644c135c97eaa881447fddc354ee4701a3 AS builder
+FROM rust:1.97.1-slim-bookworm@sha256:99e09cb2284e2ddbb73a995deee3e91783fd04d177602ccf6eab326d778ee777 AS builder
 WORKDIR /app
 COPY Cargo.toml Cargo.lock ./
 # Cargo.toml declares the benches target explicitly, so its source has to exist
