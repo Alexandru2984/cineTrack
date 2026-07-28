@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use futures_util::StreamExt;
 use sha1::{Digest, Sha1};
 
 use crate::config::Config;
@@ -9,6 +10,10 @@ use crate::errors::AppError;
 /// five hex characters of the password's SHA-1 hash ever leave this process, so
 /// the plaintext and full hash are never disclosed to the upstream service.
 const HIBP_RANGE_BASE_URL: &str = "https://api.pwnedpasswords.com/range";
+/// Padded range responses are normally tens of KiB. This leaves ample protocol
+/// headroom while preventing a faulty upstream from being buffered without a
+/// bound in an authentication request.
+const HIBP_MAX_RESPONSE_BYTES: usize = 128 * 1024;
 
 /// Checks a candidate password against the public breach corpus using the
 /// k-anonymity model. The check is best-effort: any network/parse failure is
@@ -69,8 +74,12 @@ impl BreachChecker {
             }
         };
 
-        let body = match response.text().await {
-            Ok(body) => body,
+        let body = match read_bounded_body(response).await {
+            Ok(Some(body)) => body,
+            Ok(None) => {
+                log::warn!("breach check response exceeded the body limit (fail-open)");
+                return Ok(());
+            }
             Err(error) => {
                 log::warn!("breach check body read failed (fail-open): {error}");
                 return Ok(());
@@ -85,6 +94,40 @@ impl BreachChecker {
             _ => Ok(()),
         }
     }
+}
+
+async fn read_bounded_body(response: reqwest::Response) -> Result<Option<String>, String> {
+    if response
+        .content_length()
+        .is_some_and(|length| length > HIBP_MAX_RESPONSE_BYTES as u64)
+    {
+        return Ok(None);
+    }
+
+    let mut bytes = Vec::with_capacity(
+        response
+            .content_length()
+            .unwrap_or_default()
+            .min(HIBP_MAX_RESPONSE_BYTES as u64) as usize,
+    );
+    let mut stream = response.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|error| error.to_string())?;
+        if !extend_bounded(&mut bytes, &chunk, HIBP_MAX_RESPONSE_BYTES) {
+            return Ok(None);
+        }
+    }
+    String::from_utf8(bytes)
+        .map(Some)
+        .map_err(|error| error.to_string())
+}
+
+fn extend_bounded(destination: &mut Vec<u8>, chunk: &[u8], limit: usize) -> bool {
+    if chunk.len() > limit.saturating_sub(destination.len()) {
+        return false;
+    }
+    destination.extend_from_slice(chunk);
+    true
 }
 
 /// Split a password's uppercase SHA-1 hex digest into the 5-char range prefix
@@ -149,5 +192,14 @@ mod tests {
             breach_count(body, "1E4C9B93F3F0682250B6CF8331B7EE68FD8"),
             Some(0)
         );
+    }
+
+    #[test]
+    fn body_limit_accepts_exact_size_and_rejects_overflow() {
+        let mut body = vec![b'a'; 3];
+        assert!(extend_bounded(&mut body, b"bc", 5));
+        assert_eq!(body, b"aaabc");
+        assert!(!extend_bounded(&mut body, b"x", 5));
+        assert_eq!(body, b"aaabc");
     }
 }
