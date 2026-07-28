@@ -18,6 +18,8 @@ services:
       POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    networks:
+      - database
     restart: unless-stopped
     logging: *default-logging
     healthcheck:
@@ -103,6 +105,12 @@ services:
         condition: service_healthy
     ports:
       - "127.0.0.1:8090:8080"
+    networks:
+      # Database traffic never shares an egress-capable network. Metrics are
+      # scraped over a separate internal network that does not expose Postgres.
+      - database
+      - backend_egress
+      - metrics
     healthcheck:
       test: ["CMD", "/usr/local/bin/cinetrack", "--healthcheck"]
       interval: 30s
@@ -137,6 +145,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    networks:
+      - database
 
   frontend:
     build:
@@ -165,7 +175,10 @@ services:
     ports:
       - "127.0.0.1:8091:8080"
     networks:
-      - frontend
+      # Isolated from every application/data network. This network remains
+      # bridge-routable because Docker does not publish the loopback port from
+      # an `internal: true` network on this host.
+      - frontend_isolated
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/"]
       interval: 30s
@@ -180,7 +193,14 @@ services:
           pids: 128
 
 networks:
-  frontend:
+  database:
+    internal: true
+  backend_egress:
+  # Shared only with Prometheus from docker-compose.monitoring.yml.
+  metrics:
+    name: cinetrack_metrics
+    internal: true
+  frontend_isolated:
 
 volumes:
   postgres_data:

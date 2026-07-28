@@ -6,32 +6,55 @@
 # unbounded — a failed backup or a dead backend would have been noticed by a
 # user, not by us.
 #
-# Joins the app's existing network so the backend is scraped directly rather
-# than through the public origin. Nothing is published to the host: these
-# services are reachable only from inside the network, so the metrics endpoint
-# and the alert history are not exposed to the internet.
+# Prometheus joins the app's internal, scrape-only metrics network, so it can
+# reach the backend but not Postgres. Nothing is published to the host: these
+# services are reachable only from inside their networks, so the metrics
+# endpoint and alert history are not exposed to the internet.
 #
 #   docker compose -f docker-compose.monitoring.yml --env-file .env.prod up -d
 
 name: cinetrack-monitoring
 
+x-logging: &monitoring-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   prometheus:
-    image: prom/prometheus:v3.7.3
+    image: prom/prometheus:v3.7.3@sha256:49214755b6153f90a597adcbff0252cc61069f8ab69ce8411285cd4a560e8038
     restart: unless-stopped
+    user: nobody
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.path=/prometheus
       - --storage.tsdb.retention.time=30d
-    networks: [app, monitoring]
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,noexec,nosuid,nodev
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 256
+    init: true
+    logging: *monitoring-logging
+    networks: [metrics, monitoring]
     volumes:
       - ./ops/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./ops/prometheus/cinetrack-alerts.yml:/etc/prometheus/rules/cinetrack-alerts.yml:ro
       - prometheus_data:/prometheus
     depends_on: [alertmanager]
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "0.5"
+          pids: 256
 
   alertmanager:
-    image: prom/alertmanager:v0.28.1
+    image: prom/alertmanager:v0.28.1@sha256:27c475db5fb156cab31d5c18a4251ac7ed567746a2483ff264516437a39b15ba
     restart: unless-stopped
     # Keep the image's unprivileged user so it owns the image-initialized data
     # volume. Its primary group is the host group that owns the rendered config,
@@ -45,31 +68,62 @@ services:
     command:
       - --config.file=/etc/alertmanager/alertmanager.yml
       - --storage.path=/alertmanager
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,noexec,nosuid,nodev
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 128
+    init: true
+    logging: *monitoring-logging
     networks: [monitoring]
     volumes:
       # Both files are created by scripts/render_alertmanager_config.sh.
       - ./ops/alertmanager/alertmanager.generated.yml:/etc/alertmanager/alertmanager.yml:ro
       - ./ops/alertmanager/smtp_password.generated:/etc/alertmanager/secrets/smtp_password:ro
       - alertmanager_data:/alertmanager
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: "0.25"
+          pids: 128
 
   # Publishes backup and release-worker textfile metrics. Without this the
   # operational alerts have no series to evaluate and stay silently green.
   node-exporter:
-    image: prom/node-exporter:v1.10.1
+    image: prom/node-exporter:v1.10.1@sha256:b01f6d5e6945d5001894165cce46a80fd8d0cfee68c35c8b251c50d8d446ba75
     restart: unless-stopped
     # Runs as the maintenance scripts' owner. The state directory is mode 700
     # by design, so the default `nobody` cannot traverse it.
     user: "${METRICS_UID:-1001}:${METRICS_GID:-1001}"
     command:
       - --collector.textfile.directory=/var/lib/node_exporter/textfile
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 128
+    init: true
+    logging: *monitoring-logging
     networks: [monitoring]
     volumes:
       - ${BACKUP_STATE_DIR:-/home/micu/.local/state/cinetrack}:/var/lib/node_exporter/textfile:ro
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+          cpus: "0.25"
+          pids: 128
 
 networks:
-  # The app stack's network, created by docker-compose.prod.yml.
-  app:
-    name: cinetrack_default
+  # Internal scrape-only network created by docker-compose.prod.yml. It reaches
+  # the backend but not Postgres or the backend's egress network.
+  metrics:
+    name: cinetrack_metrics
     external: true
   monitoring:
 

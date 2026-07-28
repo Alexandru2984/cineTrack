@@ -326,7 +326,8 @@ jobs:
       - name: Validate embedded Python
         run: |
           python3 scripts/tests/check_embedded_python.py \
-            scripts/backup_to_r2.sh scripts/restore_from_r2.sh
+            scripts/backup_to_r2.sh scripts/restore_from_r2.sh \
+            scripts/tests/deployment_hardening_test.sh
 
       - name: Backup and restore safety tests
         run: scripts/tests/backup_restore_test.sh
@@ -342,6 +343,9 @@ jobs:
 
       - name: Validate edge security contact
         run: scripts/tests/edge_security_config_test.sh
+
+      - name: Validate deployment isolation
+        run: scripts/tests/deployment_hardening_test.sh
 
       - name: Validate Prometheus alert rules
         run: |
