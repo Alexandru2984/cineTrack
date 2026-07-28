@@ -23,6 +23,10 @@ use cinetrack::{
 /// Access-log format including the per-request correlation id (set by the
 /// request_id middleware and echoed in the X-Request-Id response header).
 const LOG_FORMAT: &str = r#"%a "%r" %s %b "%{User-Agent}i" %T req-id=%{x-request-id}o"#;
+// The calendar feed token is a bearer credential embedded in the path because
+// calendar clients cannot send an Authorization header. Never copy it into the
+// backend access log. Operational health remains visible through HTTP metrics.
+const CALENDAR_FEED_LOG_EXCLUDE_REGEX: &str = r"^/api/calendar/feed/";
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
 
 #[derive(Clone, Copy)]
@@ -397,7 +401,10 @@ async fn main() -> std::io::Result<()> {
             .wrap(cors)
             .wrap(security_headers)
             .wrap(actix_middleware::from_fn(request_id))
-            .wrap(actix_middleware::Logger::new(LOG_FORMAT))
+            .wrap(
+                actix_middleware::Logger::new(LOG_FORMAT)
+                    .exclude_regex(CALENDAR_FEED_LOG_EXCLUDE_REGEX),
+            )
             .wrap(prometheus.clone())
             .app_data(json_cfg)
             .app_data(web::Data::new(pool.clone()))

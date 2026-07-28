@@ -337,6 +337,9 @@ jobs:
       - name: Validate Alertmanager config permissions
         run: scripts/tests/alertmanager_config_test.sh
 
+      - name: Validate calendar feed log redaction
+        run: scripts/tests/calendar_feed_log_safety_test.sh
+
       - name: Validate Prometheus alert rules
         run: |
           docker run --rm --volume "$PWD:/repo:ro" --entrypoint promtool \
