@@ -40,6 +40,19 @@ pub fn configure_rate_limited(
     cfg.service(scope().wrap(Governor::new(rate_limiter)));
 }
 
+fn strip_url_secrets_from_word(value: &str) -> Option<String> {
+    let lower = value.to_ascii_lowercase();
+    let url_start = ["https://", "http://"]
+        .into_iter()
+        .filter_map(|scheme| lower.find(scheme))
+        .min()?;
+    let secret_start = value[url_start..]
+        .char_indices()
+        .find_map(|(index, character)| matches!(character, '?' | '#').then_some(url_start + index));
+
+    Some(secret_start.map_or_else(|| value.to_string(), |index| value[..index].to_string()))
+}
+
 fn sanitized_log_text(value: &str, max_chars: usize) -> String {
     let mut output = Vec::new();
     let mut output_chars = 0;
@@ -72,13 +85,8 @@ fn sanitized_log_text(value: &str, max_chars: usize) -> String {
             "Bearer [redacted]".to_string()
         } else if raw_word.contains('@') && raw_word.contains('.') {
             "[redacted-email]".to_string()
-        } else if lower.starts_with("http://") || lower.starts_with("https://") {
-            let secret_start = raw_word
-                .char_indices()
-                .find_map(|(index, character)| matches!(character, '?' | '#').then_some(index));
-            secret_start
-                .map_or(raw_word, |index| &raw_word[..index])
-                .to_string()
+        } else if let Some(sanitized_url) = strip_url_secrets_from_word(raw_word) {
+            sanitized_url
         } else {
             let token_candidate = raw_word.trim_matches(|character: char| {
                 !character.is_ascii_alphanumeric() && !matches!(character, '_' | '-' | '.')
@@ -179,6 +187,19 @@ mod tests {
             sanitized_log_text(value, 1000),
             "Authorization: Bearer [redacted] Bearer [redacted] https://example.com/"
         );
+    }
+
+    #[test]
+    fn log_sanitizer_removes_secrets_from_decorated_stack_urls() {
+        let value = "at render (https://example.com/app.js?token=secret:12:4) \
+                     source=https://example.com/reset#access_token=private";
+        let sanitized = sanitized_log_text(value, 1000);
+        assert_eq!(
+            sanitized,
+            "at render (https://example.com/app.js source=https://example.com/reset"
+        );
+        assert!(!sanitized.contains("secret"));
+        assert!(!sanitized.contains("private"));
     }
 
     #[actix_web::test]
