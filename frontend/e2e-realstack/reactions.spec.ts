@@ -1,6 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import { execFileSync } from 'child_process';
-import { randomUUID } from 'crypto';
+import { randomInt, randomUUID } from 'crypto';
 import { DATABASE_URL } from '../playwright.realstack.config';
 
 /**
@@ -27,7 +27,7 @@ function sql(statement: string): string {
 }
 
 function uniqueAccount() {
-  const id = `${Date.now()}${Math.floor(Math.random() * 1000)}`;
+  const id = randomUUID().replaceAll('-', '').slice(0, 20);
   return { username: `rx${id}`, email: `rx${id}@example.com`, password: PASSWORD };
 }
 
@@ -43,7 +43,7 @@ async function registerAndVerify(page: Page, acct: ReturnType<typeof uniqueAccou
 /** Seed one aired episode of one show, mark it watched by the user, return its id. */
 function seedWatchedEpisode(email: string): string {
   const userId = sql(`SELECT id FROM users WHERE email = '${email}'`);
-  const tmdbId = 9500000 + Math.floor(Math.random() * 90000);
+  const tmdbId = 9500000 + randomInt(90000);
 
   const mediaId = randomUUID();
   const seasonId = randomUUID();

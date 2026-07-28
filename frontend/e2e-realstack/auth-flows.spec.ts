@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
+import { randomUUID } from 'crypto';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
 import { BACKEND_LOG, FRONTEND_ORIGIN } from '../playwright.realstack.config';
@@ -17,7 +18,7 @@ function escapeRegex(value: string) {
 }
 
 function uniqueAccount() {
-  const id = `${Date.now()}${Math.floor(Math.random() * 1000)}`;
+  const id = randomUUID().replaceAll('-', '').slice(0, 20);
   return { username: `e2e${id}`, email: `e2e${id}@example.com`, password: PASSWORD };
 }
 
