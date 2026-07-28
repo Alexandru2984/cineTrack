@@ -28,6 +28,7 @@ if [[ "$1" == "exec" && "$2" == "fake-backend" ]]; then
 fi
 
 if [[ "$1" == "exec" && "$2" == "fake-db" ]]; then
+  printf '%s\n' "${!#}" >"$DOCKER_QUERY_LOG"
   printf '%s\n' "${FAKE_DB_METRICS:-2,3,4,5}"
   exit 0
 fi
@@ -40,6 +41,7 @@ run_sync() {
   PATH="$TEST_DIR/bin:$PATH" \
     BACKEND_CONTAINER=fake-backend \
     DB_CONTAINER=fake-db \
+    DOCKER_QUERY_LOG="$TEST_DIR/state/db-query.sql" \
     XDG_RUNTIME_DIR="$TEST_DIR/runtime" \
     RELEASE_SCHEDULE_STATE_DIR="$TEST_DIR/state" \
     "$ROOT_DIR/scripts/sync_release_schedules.sh"
@@ -53,6 +55,7 @@ grep -qx 'cinetrack_release_schedule_stale_active_titles 2' "$METRICS_FILE"
 grep -qx 'cinetrack_release_schedule_repeated_failures 3' "$METRICS_FILE"
 grep -qx 'cinetrack_release_push_failed_last_run 4' "$METRICS_FILE"
 grep -qx 'cinetrack_release_push_overdue_deliveries 5' "$METRICS_FILE"
+grep -Fq "state.outcome <> 'not_found'" "$TEST_DIR/state/db-query.sql"
 first_success="$(awk '/^cinetrack_release_worker_last_success_timestamp_seconds / { print $2 }' "$METRICS_FILE")"
 [[ "$first_success" =~ ^[0-9]+$ ]] && (( first_success > 0 ))
 

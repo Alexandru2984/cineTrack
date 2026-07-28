@@ -57,7 +57,12 @@ collect_database_metrics() {
             OR state.last_success_at < NOW() - INTERVAL '12 hours'
           )
       ),
-      COUNT(*) FILTER (WHERE state.consecutive_failures >= 3),
+      COUNT(*) FILTER (
+        WHERE state.consecutive_failures >= 3
+          -- A confirmed 404 is intentionally retried with multi-day backoff;
+          -- it is catalog state, not an active provider failure.
+          AND state.outcome <> 'not_found'
+      ),
       (
         SELECT COUNT(*) FROM release_push_deliveries
         WHERE status = 'failed' AND updated_at >= TO_TIMESTAMP(${STARTED_AT})
