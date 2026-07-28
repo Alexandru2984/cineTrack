@@ -32,3 +32,8 @@ per-action timestamp, or arbitrary event labels. Prometheus samples the
 aggregate counter over time and retains those samples for 30 days; do not add
 identifying or free-form labels, and treat a request to do so as a
 privacy-review change rather than a dashboard edit.
+
+Alertmanager's rendered YAML deliberately contains no SMTP password. Run
+`scripts/render_alertmanager_config.sh` after changing mail settings; it writes
+the non-secret YAML and a separate mode-640 password file. Both outputs are
+git-ignored and mounted read-only by `docker-compose.monitoring.yml`.

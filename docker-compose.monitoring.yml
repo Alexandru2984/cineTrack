@@ -39,25 +39,17 @@ services:
     # credential world-readable.
     user: "nobody:${METRICS_GID:-1001}"
     # Alertmanager does not expand environment variables in its config, so the
-    # template is rendered before it starts. Without this the SMTP settings
-    # arrive as literal ${...} and every alert fails to deliver — silently,
-    # which is the exact failure this stack exists to prevent.
+    # non-secret settings are rendered before it starts. The SMTP password is a
+    # separate read-only file, keeping it out of both the rendered YAML and the
+    # container environment.
     command:
       - --config.file=/etc/alertmanager/alertmanager.yml
       - --storage.path=/alertmanager
     networks: [monitoring]
-    environment:
-      ALERT_SMTP_HOST: "${SMTP_HOST:?SMTP_HOST must be set}"
-      ALERT_SMTP_PORT: "${SMTP_PORT:-465}"
-      ALERT_SMTP_FROM: "${ALERT_SMTP_FROM:-alerts@micutu.com}"
-      ALERT_SMTP_USERNAME: "${SMTP_USERNAME:?SMTP_USERNAME must be set}"
-      ALERT_SMTP_PASSWORD: "${SMTP_PASSWORD:?SMTP_PASSWORD must be set}"
-      ALERT_EMAIL_TO: "${ALERT_EMAIL_TO:?ALERT_EMAIL_TO must be set}"
     volumes:
-      # Rendered from alertmanager.yml.tmpl by scripts/render_alertmanager_config.sh:
-      # Alertmanager does not expand environment variables, and doing it in the
-      # entrypoint fails because compose interpolates ${...} first.
+      # Both files are created by scripts/render_alertmanager_config.sh.
       - ./ops/alertmanager/alertmanager.generated.yml:/etc/alertmanager/alertmanager.yml:ro
+      - ./ops/alertmanager/smtp_password.generated:/etc/alertmanager/secrets/smtp_password:ro
       - alertmanager_data:/alertmanager
 
   # Publishes backup and release-worker textfile metrics. Without this the

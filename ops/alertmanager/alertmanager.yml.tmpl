@@ -14,7 +14,7 @@ global:
   smtp_smarthost: "${ALERT_SMTP_HOST}:${ALERT_SMTP_PORT}"
   smtp_from: "${ALERT_SMTP_FROM}"
   smtp_auth_username: "${ALERT_SMTP_USERNAME}"
-  smtp_auth_password: "${ALERT_SMTP_PASSWORD}"
+  smtp_auth_password_file: "/etc/alertmanager/secrets/smtp_password"
   smtp_require_tls: false # port 465 is implicit TLS, not STARTTLS
 
 route:

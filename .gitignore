@@ -33,3 +33,4 @@ tvtime_data/
 bench/results/
 bench-summary.json
 ops/alertmanager/alertmanager.generated.yml
+ops/alertmanager/smtp_password.generated
