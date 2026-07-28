@@ -63,20 +63,31 @@ SH
 #!/usr/bin/env bash
 cat >/dev/null
 SH
-  chmod +x "$fake_bin/docker" "$fake_bin/age" "$fake_bin/python3"
+  cat >"$fake_bin/rclone" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >>"$RCLONE_LOG"
+SH
+  chmod +x "$fake_bin/docker" "$fake_bin/age" "$fake_bin/python3" \
+    "$fake_bin/rclone"
 }
 
 test_encrypted_backup_uses_dedicated_credentials() {
-  local fake_bin state
+  local fake_bin rclone_config state
   fake_bin="$TMP_ROOT/backup-bin"
   state="$TMP_ROOT/success-state"
+  rclone_config="$TMP_ROOT/rclone.conf"
   install_backup_fakes "$fake_bin"
   mkdir -p "$state"
+  printf '[offsite]\ntype = drive\n' >"$rclone_config"
+  chmod 0600 "$rclone_config"
 
   PATH="$fake_bin:$PATH" ENV_FILE=/dev/null BACKUP_STATE_DIR="$state" \
     BACKUP_R2_S3_API=https://r2.invalid BACKUP_R2_ACCESS_KEY_ID=test \
     BACKUP_R2_SECRET_ACCESS_KEY=test BACKUP_R2_BUCKET=test-backups \
     BACKUP_AGE_RECIPIENT=age1test POSTGRES_USER=test POSTGRES_DB=cinetrack \
+    BACKUP_GDRIVE_REMOTE=offsite:cinetrack BACKUP_RCLONE_CONFIG="$rclone_config" \
+    RCLONE_LOG="$state/rclone.log" \
     REQUIRE_ENCRYPTED_BACKUPS=true REQUIRE_DEDICATED_BACKUP_CREDENTIALS=true \
     "$ROOT_DIR/scripts/backup_to_r2.sh" >"$state/output" 2>&1
 
@@ -86,6 +97,10 @@ test_encrypted_backup_uses_dedicated_credentials() {
     || fail "encrypted metric was not written"
   grep -q 'cinetrack_backup_dedicated_credentials 1' "$state/backup.prom" \
     || fail "dedicated credential metric was not written"
+  grep -q 'cinetrack_backup_offsite_mirrored 1' "$state/backup.prom" \
+    || fail "successful off-site mirror was not recorded"
+  grep -Fq -- "--config $rclone_config copyto" "$state/rclone.log" \
+    || fail "rclone was not given the explicit config file"
   [[ -s "$state/backup.last_success" ]] || fail "last-success timestamp is missing"
 }
 

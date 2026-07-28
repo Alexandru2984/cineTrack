@@ -22,6 +22,7 @@ LOCK_FILE="${LOCK_FILE:-$STATE_DIR/backup.lock}"
 METRICS_FILE="${BACKUP_METRICS_FILE:-$STATE_DIR/backup.prom}"
 REQUIRE_ENCRYPTION="${REQUIRE_ENCRYPTED_BACKUPS:-false}"
 REQUIRE_DEDICATED_CREDENTIALS="${REQUIRE_DEDICATED_BACKUP_CREDENTIALS:-false}"
+RCLONE_CONFIG_FILE="${BACKUP_RCLONE_CONFIG:-${RCLONE_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/rclone/rclone.conf}}"
 
 umask 077
 mkdir -p "$STATE_DIR"
@@ -270,13 +271,18 @@ if [[ -n "${BACKUP_GDRIVE_REMOTE:-}" ]]; then
   OFFSITE_WANTED=1
   if ! command -v rclone >/dev/null; then
     echo "[$(date -u +%FT%TZ)] warning: BACKUP_GDRIVE_REMOTE set but rclone is missing; no off-site copy." >&2
-  elif rclone copyto "$UPLOAD_FILE" "${BACKUP_GDRIVE_REMOTE}/$(basename "$KEY")" 2>&1 \
-    && rclone lsf "${BACKUP_GDRIVE_REMOTE}/$(basename "$KEY")" >/dev/null 2>&1; then
+  elif [[ ! -r "$RCLONE_CONFIG_FILE" ]]; then
+    echo "[$(date -u +%FT%TZ)] warning: rclone config is not readable at ${RCLONE_CONFIG_FILE}; no off-site copy." >&2
+  elif rclone --config "$RCLONE_CONFIG_FILE" \
+    copyto "$UPLOAD_FILE" "${BACKUP_GDRIVE_REMOTE}/$(basename "$KEY")" 2>&1 \
+    && rclone --config "$RCLONE_CONFIG_FILE" \
+      lsf "${BACKUP_GDRIVE_REMOTE}/$(basename "$KEY")" >/dev/null 2>&1; then
     OFFSITE_MIRRORED=1
     echo "  mirrored off-site to ${BACKUP_GDRIVE_REMOTE}"
     # Same retention as R2. Restricted to our own filenames so a shared folder
     # never has unrelated files pruned out from under it.
-    rclone delete "$BACKUP_GDRIVE_REMOTE" --min-age "${RETENTION_DAYS}d" \
+    rclone --config "$RCLONE_CONFIG_FILE" \
+      delete "$BACKUP_GDRIVE_REMOTE" --min-age "${RETENTION_DAYS}d" \
       --include "${POSTGRES_DB}_*.dump*" 2>/dev/null \
       && echo "  applied ${RETENTION_DAYS}-day retention off-site" \
       || echo "[$(date -u +%FT%TZ)] warning: off-site retention pass failed." >&2

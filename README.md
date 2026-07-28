@@ -403,6 +403,12 @@ R2 is used for:
   transactional email failures, and fatal mobile crashes. Prometheus scrape and
   alerting configuration lives under `ops/prometheus/`.
 
+  When `BACKUP_GDRIVE_REMOTE` is set, the script also mirrors the encrypted
+  archive through rclone. Keep its config readable only by the backup user
+  (`600` when user-owned, or `640` with a trusted backup group). Override the
+  default path with `BACKUP_RCLONE_CONFIG`; the script passes that path
+  explicitly and records a failed off-site metric when it is unreadable.
+
 Apply the cache lifecycle rules once, then schedule the catalog sync after TMDB's daily exports are available. A second bounded job hydrates details for popular entries without scraping the entire catalog. The focused release job refreshes only distinct titles tracked by users and can run more often:
 
 ```bash
