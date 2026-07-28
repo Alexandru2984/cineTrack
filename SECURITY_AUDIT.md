@@ -1,6 +1,6 @@
 # CineTrack Security Audit
 
-Date: 2026-07-17 (earlier rounds 2026-06-13 through 2026-07-16)
+Date: 2026-07-28 (earlier rounds 2026-06-13 through 2026-07-27)
 
 ## Summary
 
@@ -11,6 +11,18 @@ We fixed the issues carrying immediate risk: the refresh token is no longer expo
 In the second round we closed the remaining gaps on the account and operations side: email normalization, password change/reset, active-session management, account deletion, CSP in Nginx, request-id plus Prometheus metrics, and supply-chain scanning (Dependabot, CodeQL, gitleaks). All new endpoints have integration tests that run against Postgres in CI.
 
 In the third round we reviewed the repo directly on the VPS/prod host and closed three concrete risks: the npm high-severity vulnerability in `form-data` (via the lockfile), logging of the password-reset URL when SMTP is missing in production, and runtime hardening for the containers and Nginx. We also confirmed that `.env.prod` is untracked and `chmod 600`, and that the ports published in Compose are bound to `127.0.0.1`.
+
+## Review update (2026-07-28)
+
+- Re-audited authentication, session rotation, TOTP/recovery codes, resource ownership, SQL construction, input validation, CSP reporting, production containers, network boundaries, backups, monitoring, and dependency automation. No HIGH or CRITICAL application vulnerability was confirmed.
+- Fixed a defense-in-depth leak in the authenticated mobile-diagnostics sink: backend redaction previously removed query strings and fragments only when a whitespace-delimited token started with `http`. Decorated JavaScript stack URLs such as `(https://host/app.js?token=...)` could therefore retain the query in server logs. The backend now finds embedded HTTP(S) URLs before stripping query/fragment data, with a regression test covering stack and `source=` forms.
+- Validation for that fix passed `cargo fmt --check`, Clippy with warnings denied, and all 280 runnable backend tests; the credential-gated R2 round-trip remains intentionally ignored. GitHub Actions run `30363687355` also completed all nine jobs successfully, including PostgreSQL integration, real-stack browser E2E, container scanning, Rust audit, and the Android release smoke test.
+- Production application services remain healthy and isolated: backend/frontend host ports bind only to loopback, PostgreSQL publishes no host port, application containers run non-root/read-only with all capabilities dropped, and the dedicated monitoring stack publishes no host ports. Its Prometheus targets, 23 alert rules, and Alertmanager configuration are healthy; two email notifications were submitted with zero recorded failures.
+- The latest R2 database object, `backups/cinetrack_20260728_114757.dump.age`, passed remote-size and SHA-256 verification, Age decryption, and `pg_restore --list`. Backups are encrypted and mirrored off-site. The local restore configuration now names the mode-600 Age identity, so `scripts/restore_from_r2.sh verify latest` succeeds without an ad-hoc environment override.
+- `CineTrackBackupUsesSharedCredentials` remains a real firing alert: backup writes still fall back to the application's R2 token. Client-side encryption and the independent off-site mirror limit confidentiality and deletion impact, but the final fix requires a separate Cloudflare bucket/token and `REQUIRE_DEDICATED_BACKUP_CREDENTIALS=true`.
+- Seven ignored, mode-600 `.env.prod.bak.*` files remain on the host. The checked-in retention script identifies four older copies for deletion while retaining the newest three; deletion is intentionally pending explicit operator confirmation because these are material secret-bearing rollback files.
+- The host-level Prometheus (shared by other projects, not the isolated CineTrack stack) listens on all interfaces, but UFW denies inbound port 9090. Host node-exporter port 9100 is allowed only from `81.181.166.237`. Binding the shared Prometheus service to loopback would reduce reliance on firewall policy but must be coordinated with its other consumers.
+- Deployment remains manual. The GitHub workflows perform CI, CodeQL, and secret scanning only; no workflow has production credentials or a deploy job.
 
 ## Changes applied
 
@@ -241,8 +253,8 @@ Audited everything added since the previous round: the Wrapped endpoint, social-
 - `cargo audit` also reports transitive `spin` 0.9.8/0.10.0 releases as yanked (through Prometheus/SQLx metadata and AWS S3 dependencies). They have no RustSec advisory, but should be replaced when their upstream crates update.
 - The SMTP mailbox uses a long-lived credential stored in the git-ignored `.env.prod` file. Keep the file at mode `0600`, rotate the mailbox password periodically, and recreate the backend atomically after each rotation.
 - Direct delivery from the VPS IP is currently rejected by Gmail as likely unsolicited mail despite aligned SPF, DKIM, DMARC, forward DNS, and reverse DNS. Do not resume repeated Gmail tests; complete Google Postmaster verification, establish a reputable transactional SMTP relay, and then perform one controlled test after a quiet period.
-- CineTrack exposes its metrics only on the loopback-bound backend port, but neither Prometheus instance on this host currently scrapes that target. The metrics are safe from public access, but retention, dashboards, and alerts remain pending a deliberate shared-monitoring design.
-- The backup code supports client-side age encryption and a dedicated backup bucket/token, but production must remain in compatibility mode until an offline recovery identity and restricted R2 credentials are provisioned and tested. The emitted `encrypted` and `dedicated_credentials` metrics stay at zero meanwhile.
+- CineTrack metrics are now retained by an isolated Prometheus stack with Alertmanager email delivery. Keep its scrape-only Docker network and no-host-port design intact during image updates.
+- Production backups are encrypted and mirrored off-site, but the R2 writer still shares the application's bucket credentials. Provision a dedicated bucket/token, then make `REQUIRE_DEDICATED_BACKUP_CREDENTIALS=true` fail closed. The Age identity is still stored on this VPS; an off-host recovery copy has not been verified.
 - Browser E2E tests now exist at three levels: mocked (auth, mobile navigation, discovery/social UI, Up Next, error boundary, and episode backfill confirmation), production-build PWA (manifest, service worker, API-cache exclusion, offline launch), and real-stack (HttpOnly cookie, refresh rotation, private follows, sessions, account deletion, reset with token). Lists and general tracking edits remain covered only below the browser layer.
 - The secrets in `.env.prod` must be rotated if they were shown in a terminal, logs, or an audit transcript. In particular, avoid `docker compose config` without `--no-env-resolution` on machines or sessions that can persist the output.
 
@@ -254,9 +266,9 @@ Audited everything added since the previous round: the Wrapped endpoint, social-
 - Produce a fresh Android internal EAS build from `76ca89d` or later plus the first iOS internal build, test each on at least one current and one older device class, then add Maestro or Detox coverage for login/rotation, Calendar pagination, watched-through confirmation, and logout.
 - Add Android FCM v1 credentials, enable optional Expo access-token security, build runtime `1.1.0`, and validate opt-in, foreground/background receipt, deep linking, permission withdrawal, token rotation, and offline logout on a physical device before rollout. Keep iOS disabled until the Apple team and APNs credentials exist.
 - Extend observability: propagate the request-id into the audit/error lines too (it currently appears only in the access log), and wire up alerts on `security: refresh token reuse` plus dashboards over the Prometheus metrics.
-- Install the checked-in `ops/prometheus` scrape/rule snippets in the shared Prometheus and expose the backup textfile metric to node exporter. SMTP, backup, availability, and elevated-5xx rules are already defined; refresh-token reuse and stale schedule synchronization still need first-class counters.
+- Provision the dedicated backup R2 bucket/token, verify a new encrypted object through the restore script, and confirm `CineTrackBackupUsesSharedCredentials` clears.
+- Store the Age recovery identity outside the VPS and perform a documented restore drill from that copy.
 - After Google Postmaster verification, configure a transactional relay through the existing `SMTP_*` contract, run `--check-smtp`, wait through the sender-reputation quiet period, and send one real Gmail test. Tighten DMARC only after aggregate reports confirm every legitimate sender is aligned.
-- Decide on the privacy policy for follower/following counts on private profiles; right now bio/avatar and activity are hidden, but the counters are not.
 - Run the gitleaks/CodeQL report periodically and treat Dependabot PRs as part of maintenance.
 - Rotate the JWT secret, the DB password, and the TMDB key after audit sessions where the values were accidentally shown. The DB password rotation must be done atomically: `ALTER USER`, update `.env.prod`, then recreate/restart the backend.
 
