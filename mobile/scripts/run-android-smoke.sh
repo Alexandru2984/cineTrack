@@ -15,7 +15,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-for command_name in adb curl java node sha256sum unzip; do
+for command_name in adb curl grep java node sha256sum sleep tee unzip; do
   command -v "$command_name" >/dev/null || {
     echo "${command_name} is required for the Android smoke test" >&2
     exit 1
@@ -38,26 +38,78 @@ if [[ "$connected_devices" != 1 ]]; then
   exit 1
 fi
 
+DEVICE_SERIAL="$(
+  adb devices | awk 'NR > 1 && $2 == "device" { print $1; exit }'
+)"
+
+wait_for_android_device() {
+  local timeout_seconds="${1:-60}"
+  local deadline=$((SECONDS + timeout_seconds))
+  local boot_completed
+
+  while ((SECONDS < deadline)); do
+    if [[ "$(adb -s "$DEVICE_SERIAL" get-state 2>/dev/null || true)" == "device" ]]; then
+      boot_completed="$(
+        adb -s "$DEVICE_SERIAL" shell getprop sys.boot_completed 2>/dev/null \
+          | tr -d '\r' \
+          || true
+      )"
+      if [[ "$boot_completed" == "1" ]]; then
+        return 0
+      fi
+    fi
+    sleep 2
+  done
+
+  echo "Android device ${DEVICE_SERIAL} did not become ready within ${timeout_seconds}s" >&2
+  adb devices -l >&2 || true
+  return 1
+}
+
 curl --fail --silent --show-error --location --retry 3 \
   --output "$TEMP_DIR/maestro.zip" "$MAESTRO_URL"
 printf '%s  %s\n' "$MAESTRO_SHA256" "$TEMP_DIR/maestro.zip" | sha256sum --check
 unzip -q "$TEMP_DIR/maestro.zip" -d "$TEMP_DIR"
 
 mkdir -p "$ARTIFACT_DIR"
-adb install -r "$APK_PATH"
+wait_for_android_device 60
+adb -s "$DEVICE_SERIAL" install -r "$APK_PATH"
+wait_for_android_device 60
 
 export MAESTRO_CLI_NO_ANALYTICS=1
 export MAESTRO_CLI_ANALYSIS_NOTIFICATION_DISABLED=true
-"$TEMP_DIR/maestro/bin/maestro" test \
-  --platform android \
-  --env "APP_ID=$APP_ID" \
-  --format JUNIT \
-  --output "$ARTIFACT_DIR/junit.xml" \
-  --test-output-dir "$ARTIFACT_DIR/output" \
-  "$ROOT_DIR/maestro"
+export ANDROID_SERIAL="$DEVICE_SERIAL"
+
+run_maestro() {
+  local attempt="$1"
+  local output_dir="$ARTIFACT_DIR/output/run-$$/$attempt"
+
+  mkdir -p "$output_dir"
+  "$TEMP_DIR/maestro/bin/maestro" test \
+    --platform android \
+    --env "APP_ID=$APP_ID" \
+    --format JUNIT \
+    --output "$ARTIFACT_DIR/junit.xml" \
+    --test-output-dir "$output_dir" \
+    "$ROOT_DIR/maestro" \
+    2>&1 | tee "$TEMP_DIR/maestro-${attempt}.log"
+}
+
+first_attempt_output="$ARTIFACT_DIR/output/run-$$/attempt-1"
+if ! run_maestro "attempt-1"; then
+  if grep --recursive --extended-regexp --quiet \
+    "device offline|Device server died" "$first_attempt_output" 2>/dev/null; then
+    echo "Maestro lost the Android device; waiting for ADB and retrying once" >&2
+    adb reconnect offline >/dev/null 2>&1 || true
+    wait_for_android_device 60
+    run_maestro "attempt-2"
+  else
+    exit 1
+  fi
+fi
 
 installed_version="$(
-  adb shell dumpsys package "$APP_ID" \
+  adb -s "$DEVICE_SERIAL" shell dumpsys package "$APP_ID" \
     | awk -F= '/versionName=/{ print $2; exit }' \
     | tr -d '\r'
 )"
