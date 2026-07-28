@@ -33,6 +33,11 @@ aggregate counter over time and retains those samples for 30 days; do not add
 identifying or free-form labels, and treat a request to do so as a
 privacy-review change rather than a dashboard edit.
 
+`cinetrack_security_events_total` follows the same rule: its event label comes
+from a source-controlled enum, never request data. Security alerts identify a
+time window; the protected backend audit log provides account-level context
+only during incident triage.
+
 Alertmanager's rendered YAML deliberately contains no SMTP password. Run
 `scripts/render_alertmanager_config.sh` after changing mail settings; it writes
 the non-secret YAML and a separate mode-640 password file. Both outputs are

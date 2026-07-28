@@ -110,8 +110,11 @@ pub async fn login(
         .and_then(|candidate| candidate.password_hash.as_deref());
 
     if !password::verify_password_or_dummy(&req.password, password_hash).await? {
+        crate::metrics::record_security_event(crate::metrics::SecurityEvent::LoginRejected);
         if let Some(user) = &user {
-            record_login_failure(pool, user.id).await?;
+            if record_login_failure(pool, user.id).await? {
+                crate::metrics::record_security_event(crate::metrics::SecurityEvent::AccountLocked);
+            }
         }
         return Err(AppError::Unauthorized(
             "Invalid email or password".to_string(),
@@ -141,7 +144,14 @@ pub async fn login(
             None => return Err(AppError::TwoFactorRequired),
             Some(code) => {
                 if !verify_second_factor(pool, config, &user, code).await? {
-                    record_login_failure(pool, user.id).await?;
+                    crate::metrics::record_security_event(
+                        crate::metrics::SecurityEvent::LoginRejected,
+                    );
+                    if record_login_failure(pool, user.id).await? {
+                        crate::metrics::record_security_event(
+                            crate::metrics::SecurityEvent::AccountLocked,
+                        );
+                    }
                     return Err(AppError::Unauthorized(
                         "Invalid two-factor code".to_string(),
                     ));
@@ -216,6 +226,7 @@ pub async fn refresh_token(
             .execute(&mut *tx)
             .await?;
         tx.commit().await?;
+        crate::metrics::record_security_event(crate::metrics::SecurityEvent::RefreshTokenReuse);
         return Err(AppError::Unauthorized(
             "Refresh token reuse detected".to_string(),
         ));
@@ -353,6 +364,7 @@ pub async fn change_password(
     tx.commit().await?;
 
     log::info!("audit: password changed user_id={user_id}");
+    crate::metrics::record_security_event(crate::metrics::SecurityEvent::CredentialChanged);
 
     Ok(())
 }
@@ -480,6 +492,7 @@ pub async fn reset_password(
     tx.commit().await?;
 
     log::info!("audit: password reset completed user_id={}", stored.user_id);
+    crate::metrics::record_security_event(crate::metrics::SecurityEvent::CredentialChanged);
 
     Ok(())
 }
@@ -748,6 +761,7 @@ pub async fn confirm_email_change(pool: &PgPool, token: &str) -> Result<(), AppE
     tx.commit().await?;
 
     log::info!("audit: email changed user_id={}", stored.user_id);
+    crate::metrics::record_security_event(crate::metrics::SecurityEvent::CredentialChanged);
 
     Ok(())
 }
@@ -794,8 +808,8 @@ pub async fn require_verified_email(pool: &PgPool, user_id: Uuid) -> Result<(), 
 const TOTP_ISSUER: &str = "Văzute";
 const RECOVERY_CODE_COUNT: usize = 10;
 
-async fn record_login_failure(pool: &PgPool, user_id: Uuid) -> Result<(), AppError> {
-    sqlx::query(
+async fn record_login_failure(pool: &PgPool, user_id: Uuid) -> Result<bool, AppError> {
+    let locked = sqlx::query_scalar::<_, bool>(
         "WITH next_attempt AS (
             SELECT id,
                 CASE
@@ -818,15 +832,20 @@ async fn record_login_failure(pool: &PgPool, user_id: Uuid) -> Result<(), AppErr
                 ELSE NULL
             END
         FROM next_attempt
-        WHERE target.id = next_attempt.id",
+        WHERE target.id = next_attempt.id
+        RETURNING target.login_locked_until IS NOT NULL",
     )
     .bind(user_id)
     .bind(LOGIN_FAILURE_WINDOW_SECONDS)
     .bind(LOGIN_FAILURE_LIMIT)
     .bind(LOGIN_LOCK_SECONDS)
-    .execute(pool)
-    .await?;
-    Ok(())
+    .fetch_optional(pool)
+    .await?
+    .unwrap_or(false);
+    if locked {
+        log::warn!("security: account locked after repeated sign-in failures user_id={user_id}");
+    }
+    Ok(locked)
 }
 
 async fn clear_login_failures(pool: &PgPool, user_id: Uuid) -> Result<(), AppError> {
@@ -930,6 +949,11 @@ async fn verify_second_factor(
                 .await?;
         }
         tx.commit().await?;
+        log::warn!(
+            "security: two-factor recovery code used user_id={}",
+            user.id
+        );
+        crate::metrics::record_security_event(crate::metrics::SecurityEvent::RecoveryCodeUsed);
     }
     Ok(consumed == 1)
 }
@@ -1080,6 +1104,7 @@ pub async fn enable_two_factor(
     tx.commit().await?;
 
     log::info!("audit: two-factor enabled user_id={user_id}");
+    crate::metrics::record_security_event(crate::metrics::SecurityEvent::CredentialChanged);
 
     Ok(codes)
 }
@@ -1124,6 +1149,7 @@ pub async fn disable_two_factor(
     tx.commit().await?;
 
     log::info!("audit: two-factor disabled user_id={user_id}");
+    crate::metrics::record_security_event(crate::metrics::SecurityEvent::CredentialChanged);
 
     Ok(())
 }

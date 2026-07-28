@@ -17,7 +17,29 @@ docker compose -f docker-compose.prod.yml ps      # what is actually up
 docker logs --tail 200 cinetrack-backend-1
 ```
 
-## 1. Suspected account takeover (single user)
+## 1. Security-alert triage
+
+Prometheus alerts carry no user, IP, or device labels by design. Correlate the
+alert with the protected backend audit log:
+
+```bash
+docker logs --since 30m cinetrack-backend-1 2>&1 | \
+  rg 'security: (refresh token reuse|account locked|two-factor recovery code)'
+```
+
+- `CineTrackRefreshTokenReuseDetected`: every session for the logged account
+  was already revoked automatically. Continue with the takeover procedure.
+- `CineTrackRecoveryCodeUsed`: confirm the recovery with the account owner; the
+  code was consumed atomically and cannot be reused.
+- `CineTrackAccountLocked` or `CineTrackLoginRejectionSpike`: check whether the
+  source is still active in Nginx/backend logs before changing rate limits.
+- `CineTrackSensitiveAccountActivitySpike`: correlate the same time window with
+  `audit:` events for credential changes, exports, and deletions.
+
+Target MTTD for refresh-token reuse and recovery-code use is under one minute:
+15-second scrape/evaluation plus Alertmanager's 30-second group wait.
+
+## 2. Suspected account takeover (single user)
 
 ```bash
 # Revoke every session for one account. They must sign in again; a stolen
@@ -36,10 +58,10 @@ docker exec cinetrack-db-1 psql -U cinetrack_user -d cinetrack -c \
 
 The app already defends the obvious paths: five failed sign-ins lock the
 account for 15 minutes, and reusing a rotated refresh token revokes that whole
-token family automatically. If you are here, assume the password itself leaked
+account's sessions automatically. If you are here, assume the password itself leaked
 and tell the user to change it.
 
-## 2. Suspected server compromise
+## 3. Suspected server compromise
 
 Assume every secret on the host is exposed.
 
@@ -58,13 +80,13 @@ key. **Do not rotate `TOTP_ENCRYPTION_KEY`** — it decrypts stored 2FA secrets,
 and changing it locks out every enrolled user.
 
 > **Rotating the SMTP password also breaks alerting until you re-render the
-> Alertmanager config.** It uses the same Resend credentials, rendered once into
-> a file. After changing `SMTP_PASSWORD` in `.env.prod`, run
+> Alertmanager files.** It uses the same Resend credentials, written once into
+> a separate mode-640 secret file. After changing `SMTP_PASSWORD` in `.env.prod`, run
 > `scripts/render_alertmanager_config.sh` and restart the alertmanager
 > container, or alerts will silently stop being delivered — during the exact
 > incident you most need them.
 
-## 3. Restore from backup
+## 4. Restore from backup
 
 Backups are age-encrypted, run daily at 03:30, and keep 14 days.
 
@@ -85,7 +107,7 @@ BACKUP_AGE_IDENTITY_FILE=$KEY \
 Without that private key no backup can be read. If it is not also stored off
 this host, fix that before you need it.
 
-## 4. GDPR notification — 72 hours
+## 5. GDPR notification — 72 hours
 
 Applies when personal data was likely exposed: email addresses, or watch
 history (behavioural data, and it is personal data here).
@@ -112,7 +134,7 @@ Romanian supervisory authority: ANSPDCP (dataprotection.ro).
 
 Plain and specific. No "we take security seriously."
 
-## 5. After
+## 6. After
 
 - Note the timeline in `SECURITY_AUDIT.md` while it is fresh.
 - If detection was slow, add the alert that would have caught it — that is what

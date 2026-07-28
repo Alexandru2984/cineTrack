@@ -617,6 +617,7 @@ async fn export_account_data(
     tx.commit().await?;
     log::info!("audit: account data exported user_id={user_id}");
     crate::metrics::record_product_action(crate::metrics::ProductAction::AccountDataExported);
+    crate::metrics::record_security_event(crate::metrics::SecurityEvent::AccountDataExported);
 
     Ok(HttpResponse::Ok()
         .insert_header(("Cache-Control", "no-store"))
@@ -697,6 +698,7 @@ async fn delete_account(
     tx.commit().await?;
 
     log::info!("audit: account deleted user_id={user_id}");
+    crate::metrics::record_security_event(crate::metrics::SecurityEvent::AccountDeleted);
 
     Ok(HttpResponse::Ok()
         .cookie(crate::routes::auth::clear_refresh_cookie(config.get_ref()))

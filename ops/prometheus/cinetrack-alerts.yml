@@ -103,6 +103,53 @@ groups:
           summary: Văzute received a fatal mobile crash report
           description: At least one authenticated Android or iOS client reported a fatal JavaScript crash in the last 15 minutes.
 
+  - name: cinetrack-security
+    rules:
+      - alert: CineTrackRefreshTokenReuseDetected
+        expr: increase(cinetrack_security_events_total{event="refresh_token_reuse"}[15m]) > 0
+        labels:
+          severity: critical
+        annotations:
+          summary: Văzute detected refresh-token reuse
+          description: A consumed refresh token was presented again. All sessions for the affected account were revoked automatically; follow the account-takeover runbook.
+
+      - alert: CineTrackRecoveryCodeUsed
+        expr: increase(cinetrack_security_events_total{event="recovery_code_used"}[15m]) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: A Văzute two-factor recovery code was used
+          description: Recovery-code use can be legitimate, but it is also a strong account-recovery signal that should be reviewed promptly.
+
+      - alert: CineTrackLoginRejectionSpike
+        expr: increase(cinetrack_security_events_total{event="login_rejected"}[5m]) > 20
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: Văzute is rejecting an unusual number of sign-ins
+          description: More than 20 password or two-factor sign-ins were rejected in five minutes, consistent with credential stuffing or brute force.
+
+      - alert: CineTrackAccountLocked
+        expr: increase(cinetrack_security_events_total{event="account_locked"}[15m]) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: A Văzute account was locked after failed sign-ins
+          description: The failed-sign-in threshold was reached. Review nearby authentication events for attempted account takeover.
+
+      - alert: CineTrackSensitiveAccountActivitySpike
+        expr: |
+          sum(increase(cinetrack_security_events_total{
+            event=~"account_data_exported|account_deleted|credential_changed"
+          }[15m])) > 5
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: Văzute has unusual sensitive account activity
+          description: More than five credential changes, account exports, or account deletions completed in fifteen minutes.
+
   - name: cinetrack-releases
     rules:
       - alert: CineTrackReleaseWorkerMetricsMissing

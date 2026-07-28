@@ -79,6 +79,11 @@ struct ProductMetrics {
     actions: IntCounterVec,
 }
 
+#[derive(Clone)]
+struct SecurityMetrics {
+    events: IntCounterVec,
+}
+
 #[derive(Clone, Copy)]
 pub(crate) enum ProductAction {
     AccountDataExported,
@@ -102,6 +107,27 @@ const PRODUCT_ACTIONS: [ProductAction; 8] = [
     ProductAction::WatchProvidersViewed,
 ];
 
+#[derive(Clone, Copy)]
+pub(crate) enum SecurityEvent {
+    AccountDataExported,
+    AccountDeleted,
+    AccountLocked,
+    CredentialChanged,
+    LoginRejected,
+    RecoveryCodeUsed,
+    RefreshTokenReuse,
+}
+
+const SECURITY_EVENTS: [SecurityEvent; 7] = [
+    SecurityEvent::AccountDataExported,
+    SecurityEvent::AccountDeleted,
+    SecurityEvent::AccountLocked,
+    SecurityEvent::CredentialChanged,
+    SecurityEvent::LoginRejected,
+    SecurityEvent::RecoveryCodeUsed,
+    SecurityEvent::RefreshTokenReuse,
+];
+
 impl ProductAction {
     const fn as_str(self) -> &'static str {
         match self {
@@ -113,6 +139,20 @@ impl ProductAction {
             Self::ReleaseAlertsEnabled => "release_alerts_enabled",
             Self::TvTimeImportStarted => "tv_time_import_started",
             Self::WatchProvidersViewed => "watch_providers_viewed",
+        }
+    }
+}
+
+impl SecurityEvent {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::AccountDataExported => "account_data_exported",
+            Self::AccountDeleted => "account_deleted",
+            Self::AccountLocked => "account_locked",
+            Self::CredentialChanged => "credential_changed",
+            Self::LoginRejected => "login_rejected",
+            Self::RecoveryCodeUsed => "recovery_code_used",
+            Self::RefreshTokenReuse => "refresh_token_reuse",
         }
     }
 }
@@ -132,6 +172,24 @@ impl ProductMetrics {
             actions.with_label_values(&[action.as_str()]);
         }
         Self { actions }
+    }
+}
+
+impl SecurityMetrics {
+    fn new() -> Self {
+        let events = IntCounterVec::new(
+            Opts::new(
+                "security_events_total",
+                "Security-relevant events without user, device, or network identifiers",
+            )
+            .namespace("cinetrack"),
+            &["event"],
+        )
+        .expect("Security event metric must be valid");
+        for event in SECURITY_EVENTS {
+            events.with_label_values(&[event.as_str()]);
+        }
+        Self { events }
     }
 }
 
@@ -257,6 +315,7 @@ static EMAIL_METRICS: LazyLock<EmailMetrics> = LazyLock::new(EmailMetrics::new);
 static CLIENT_ERROR_METRICS: LazyLock<ClientErrorMetrics> = LazyLock::new(ClientErrorMetrics::new);
 static CSP_REPORT_METRICS: LazyLock<CspReportMetrics> = LazyLock::new(CspReportMetrics::new);
 static PRODUCT_METRICS: LazyLock<ProductMetrics> = LazyLock::new(ProductMetrics::new);
+static SECURITY_METRICS: LazyLock<SecurityMetrics> = LazyLock::new(SecurityMetrics::new);
 
 pub fn record_tmdb_request(endpoint: &'static str, outcome: &'static str, duration: Duration) {
     TMDB_METRICS
@@ -311,6 +370,13 @@ pub(crate) fn record_product_action(action: ProductAction) {
         .inc();
 }
 
+pub(crate) fn record_security_event(event: SecurityEvent) {
+    SECURITY_METRICS
+        .events
+        .with_label_values(&[event.as_str()])
+        .inc();
+}
+
 /// Build the Prometheus metrics middleware. It records per-request count and
 /// latency and serves them at `/metrics`. That endpoint lives on the app's own
 /// port and is not proxied by nginx (which only forwards `/api/`), so it stays
@@ -354,6 +420,10 @@ pub fn build() -> PrometheusMetrics {
         .register(Box::new(PRODUCT_METRICS.actions.clone()))
         .expect("Failed to register product action metric");
     prometheus
+        .registry
+        .register(Box::new(SECURITY_METRICS.events.clone()))
+        .expect("Failed to register security event metric");
+    prometheus
 }
 
 #[cfg(test)]
@@ -369,6 +439,7 @@ mod tests {
         record_client_error("android", false);
         record_csp_report("script-src", "enforce");
         record_product_action(ProductAction::AnnualRecapViewed);
+        record_security_event(SecurityEvent::LoginRejected);
         let prometheus = build();
         let names = prometheus
             .registry
@@ -401,6 +472,9 @@ mod tests {
         assert!(names
             .iter()
             .any(|name| name == "cinetrack_product_actions_total"));
+        assert!(names
+            .iter()
+            .any(|name| name == "cinetrack_security_events_total"));
     }
 
     #[test]
@@ -456,5 +530,31 @@ mod tests {
             .collect::<Vec<_>>();
         expected.sort();
         assert_eq!(actions, expected);
+    }
+
+    #[test]
+    fn security_metrics_have_only_fixed_event_labels() {
+        let prometheus = build();
+        let family = prometheus
+            .registry
+            .gather()
+            .into_iter()
+            .find(|family| family.name() == "cinetrack_security_events_total")
+            .expect("security event metric is registered");
+        let mut events = family
+            .get_metric()
+            .iter()
+            .flat_map(|metric| metric.get_label())
+            .filter(|label| label.name() == "event")
+            .map(|label| label.value().to_string())
+            .collect::<Vec<_>>();
+        events.sort();
+
+        let mut expected = SECURITY_EVENTS
+            .into_iter()
+            .map(|event| event.as_str().to_string())
+            .collect::<Vec<_>>();
+        expected.sort();
+        assert_eq!(events, expected);
     }
 }
