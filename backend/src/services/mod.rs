@@ -12,5 +12,6 @@ pub mod password_breach;
 pub mod push;
 pub mod quota;
 pub mod release_schedule;
+pub mod retention;
 pub mod storage;
 pub mod tmdb;

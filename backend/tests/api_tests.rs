@@ -193,6 +193,119 @@ async fn clean_db(pool: &PgPool) {
     sqlx::query("DELETE FROM users").execute(pool).await.ok();
 }
 
+#[actix_web::test]
+#[ignore = "requires PostgreSQL"]
+async fn security_artifact_retention_preserves_active_refresh_families() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+
+    let user_id: Uuid = sqlx::query_scalar(
+        "INSERT INTO users (username, email, password_hash, email_verified)
+         VALUES ('retention_user', 'retention@example.com', 'unused', TRUE)
+         RETURNING id",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    let inactive_family = Uuid::new_v4();
+    let active_family = Uuid::new_v4();
+    let recent_family = Uuid::new_v4();
+
+    sqlx::query(
+        r#"INSERT INTO refresh_tokens
+            (user_id, token_hash, expires_at, consumed_at, family_id)
+        VALUES
+            ($1, 'retention-expired', NOW() - INTERVAL '1 hour', NULL, $2),
+            ($1, 'retention-old-consumed', NOW() + INTERVAL '1 day',
+                NOW() - INTERVAL '8 days', $2),
+            ($1, 'retention-active-parent', NOW() + INTERVAL '1 day',
+                NOW() - INTERVAL '8 days', $3),
+            ($1, 'retention-active-child', NOW() + INTERVAL '1 day', NULL, $3),
+            ($1, 'retention-recent-revoked', NOW() + INTERVAL '1 day', NULL, $4)"#,
+    )
+    .bind(user_id)
+    .bind(inactive_family)
+    .bind(active_family)
+    .bind(recent_family)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE refresh_tokens
+         SET revoked_at = NOW() - INTERVAL '1 day'
+         WHERE token_hash = 'retention-recent-revoked'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    sqlx::query(
+        r#"INSERT INTO password_reset_tokens
+            (user_id, token_hash, expires_at, consumed_at)
+        VALUES ($1, 'retention-reset', NOW() - INTERVAL '9 days', NULL)"#,
+    )
+    .bind(user_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO email_verification_tokens
+            (user_id, token_hash, expires_at, consumed_at)
+        VALUES ($1, 'retention-verification', NOW() + INTERVAL '1 day',
+                NOW() - INTERVAL '8 days')"#,
+    )
+    .bind(user_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO email_change_tokens
+            (user_id, new_email, token_hash, expires_at, consumed_at)
+        VALUES ($1, 'new-retention@example.com', 'retention-email-change',
+                NOW() - INTERVAL '1 day', NULL)"#,
+    )
+    .bind(user_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let summary = cinetrack::services::retention::prune_security_artifacts(&pool)
+        .await
+        .unwrap();
+
+    assert_eq!(summary.refresh_tokens, 2);
+    assert_eq!(summary.password_reset_tokens, 1);
+    assert_eq!(summary.email_verification_tokens, 1);
+    assert_eq!(summary.email_change_tokens, 0);
+
+    let remaining: Vec<String> = sqlx::query_scalar(
+        "SELECT token_hash FROM refresh_tokens WHERE user_id = $1 ORDER BY token_hash",
+    )
+    .bind(user_id)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        remaining,
+        vec![
+            "retention-active-child".to_string(),
+            "retention-active-parent".to_string(),
+            "retention-recent-revoked".to_string(),
+        ]
+    );
+
+    let email_change_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM email_change_tokens WHERE user_id = $1")
+            .bind(user_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(email_change_count, 1);
+
+    clean_db(&pool).await;
+}
+
 /// Register an unverified user and return (access_token, refresh_token, user_id).
 async fn register_unverified_user(
     app: &impl actix_web::dev::Service<

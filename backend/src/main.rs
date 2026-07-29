@@ -301,6 +301,19 @@ async fn main() -> std::io::Result<()> {
         Err(error) => log::error!("Failed to prune provider response cache at startup: {error}"),
     }
     cinetrack::services::media_cache::start_orphan_pruner(pool.clone());
+    match cinetrack::services::retention::prune_security_artifacts(&pool).await {
+        Ok(summary) if summary.total() > 0 => log::info!(
+            "Pruned security artifacts at startup: refresh_tokens={} password_reset_tokens={} \
+             email_verification_tokens={} email_change_tokens={}",
+            summary.refresh_tokens,
+            summary.password_reset_tokens,
+            summary.email_verification_tokens,
+            summary.email_change_tokens,
+        ),
+        Ok(_) => {}
+        Err(error) => log::error!("Failed to prune security artifacts at startup: {error}"),
+    }
+    cinetrack::services::retention::start_security_artifact_pruner(pool.clone());
 
     let tmdb_service = TmdbService::new(&config);
     let email_service = EmailService::new(&config);
