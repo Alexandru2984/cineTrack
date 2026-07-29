@@ -27,11 +27,11 @@ describe('account deletion', () => {
     mockApiRequest.mockResolvedValueOnce({ message: 'Account deleted' });
     mockClearLocalSession.mockResolvedValueOnce();
 
-    await deleteAccountSession('SecurePass1');
+    await deleteAccountSession('SecurePass1', ' 123456 ');
 
     expect(mockApiRequest).toHaveBeenCalledWith('/users/me', {
       method: 'DELETE',
-      body: { password: 'SecurePass1' },
+      body: { password: 'SecurePass1', totp_code: '123456' },
     });
     expect(mockClearLocalSession).toHaveBeenCalledTimes(1);
     expect(mockApiRequest.mock.invocationCallOrder[0]).toBeLessThan(
@@ -80,14 +80,17 @@ describe('two-factor account management', () => {
     });
   });
 
-  it('requires a password payload to disable two-factor', async () => {
+  it('requires password and second-factor payloads to disable two-factor', async () => {
     mockApiRequest.mockResolvedValueOnce({ message: 'Two-factor disabled' });
 
-    await disableTwoFactor('SecurePass1');
+    await disableTwoFactor('SecurePass1', ' aaaa-bbbb-cccc-dddd ');
 
     expect(mockApiRequest).toHaveBeenCalledWith('/auth/2fa/disable', {
       method: 'POST',
-      body: { password: 'SecurePass1' },
+      body: {
+        password: 'SecurePass1',
+        totp_code: 'aaaa-bbbb-cccc-dddd',
+      },
     });
   });
 });

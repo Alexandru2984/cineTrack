@@ -514,6 +514,9 @@ export const en = {
       'The link is valid for 24 hours. Until you open it, {email} stays the address on your account.',
     newEmail: 'New email',
     currentPassword: 'Current password',
+    sensitiveActionCode: 'Authenticator or recovery code',
+    sensitiveActionCodeHint:
+      'Required because two-factor authentication is enabled on your account.',
     changeEmailPasswordHint: 'Asked for because this address is what recovers your account.',
     changeEmailError: 'Could not start the email change',
     sendConfirmationLink: 'Send confirmation link',
@@ -531,6 +534,7 @@ export const en = {
     savedCodes: "I've saved my codes",
     twoFactorOn: 'Two-factor is on.',
     disablePasswordLabel: 'Confirm your password to turn it off',
+    disableCodeLabel: 'Confirm with your authenticator or a recovery code',
     disableError: 'Could not disable two-factor',
     disableTwoFactor: 'Disable two-factor',
     scanInstructions: 'Scan this with your authenticator app, or enter the key manually:',

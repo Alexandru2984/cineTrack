@@ -141,17 +141,20 @@ export default function SettingsScreen() {
   const [avatarError, setAvatarError] = useState<string | null>(null);
 
   const [emailPassword, setEmailPassword] = useState('');
+  const [emailTotpCode, setEmailTotpCode] = useState('');
   const [newEmail, setNewEmail] = useState('');
   const [emailError, setEmailError] = useState<string | null>(null);
   const [emailSentTo, setEmailSentTo] = useState<string | null>(null);
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [passwordConfirmation, setPasswordConfirmation] = useState('');
+  const [passwordTotpCode, setPasswordTotpCode] = useState('');
   const [showPasswords, setShowPasswords] = useState(false);
   const [passwordError, setPasswordError] = useState<string | null>(null);
 
   const [twoFactorSetupPassword, setTwoFactorSetupPassword] = useState('');
   const [twoFactorDisablePassword, setTwoFactorDisablePassword] = useState('');
+  const [twoFactorDisableCode, setTwoFactorDisableCode] = useState('');
   const [twoFactorPasswordVisible, setTwoFactorPasswordVisible] = useState(false);
   const [twoFactorCode, setTwoFactorCode] = useState('');
   const [twoFactorError, setTwoFactorError] = useState<string | null>(null);
@@ -165,6 +168,7 @@ export default function SettingsScreen() {
   const [sessionsError, setSessionsError] = useState<string | null>(null);
   const [confirmingDeletion, setConfirmingDeletion] = useState(false);
   const [deletionPassword, setDeletionPassword] = useState('');
+  const [deletionTotpCode, setDeletionTotpCode] = useState('');
   const [showDeletionPassword, setShowDeletionPassword] = useState(false);
   const [deletionPending, setDeletionPending] = useState(false);
   const [deletionError, setDeletionError] = useState<string | null>(null);
@@ -172,6 +176,7 @@ export default function SettingsScreen() {
   const [cacheCleared, setCacheCleared] = useState(false);
   const [exportConfirming, setExportConfirming] = useState(false);
   const [exportPassword, setExportPassword] = useState('');
+  const [exportTotpCode, setExportTotpCode] = useState('');
   const [exportPasswordVisible, setExportPasswordVisible] = useState(false);
   const [exportPending, setExportPending] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
@@ -243,15 +248,21 @@ export default function SettingsScreen() {
       setEmailError(t('settings.enterCurrentPassword'));
       return;
     }
+    if (user.two_factor_enabled && !emailTotpCode.trim()) {
+      setEmailError(t('settings.enterSensitiveActionCode'));
+      return;
+    }
     setEmailError(null);
     try {
       await requestEmailChange.mutateAsync({
         currentPassword: emailPassword,
         newEmail: address,
+        totpCode: user.two_factor_enabled ? emailTotpCode : undefined,
       });
       // The session is untouched on purpose — the address has not moved yet.
       setEmailSentTo(address);
       setEmailPassword('');
+      setEmailTotpCode('');
       setNewEmail('');
     } catch (error) {
       setEmailError(getErrorMessage(error, t('settings.emailChangeError')));
@@ -269,9 +280,17 @@ export default function SettingsScreen() {
       setPasswordError(validationError);
       return;
     }
+    if (user.two_factor_enabled && !passwordTotpCode.trim()) {
+      setPasswordError(t('settings.enterSensitiveActionCode'));
+      return;
+    }
     setPasswordError(null);
     try {
-      await changePassword.mutateAsync({ currentPassword, newPassword });
+      await changePassword.mutateAsync({
+        currentPassword,
+        newPassword,
+        totpCode: user.two_factor_enabled ? passwordTotpCode : undefined,
+      });
       router.replace('/');
       Alert.alert(t('settings.passwordUpdatedTitle'), t('settings.passwordUpdatedMessage'));
     } catch (error) {
@@ -306,7 +325,10 @@ export default function SettingsScreen() {
     setDeletionPending(true);
     setDeletionError(null);
     try {
-      await deleteAccountSession(deletionPassword);
+      await deleteAccountSession(
+        deletionPassword,
+        user.two_factor_enabled ? deletionTotpCode : undefined,
+      );
       router.replace('/');
     } catch (error) {
       setDeletionError(getErrorMessage(error, t('settings.deleteAccountError')));
@@ -323,6 +345,10 @@ export default function SettingsScreen() {
     }
     if (deletionPassword.length > 128) {
       setDeletionError(t('settings.passwordMaxLength'));
+      return;
+    }
+    if (user.two_factor_enabled && !deletionTotpCode.trim()) {
+      setDeletionError(t('settings.enterSensitiveActionCode'));
       return;
     }
     Alert.alert(
@@ -342,6 +368,7 @@ export default function SettingsScreen() {
   const cancelDeletion = () => {
     setConfirmingDeletion(false);
     setDeletionPassword('');
+    setDeletionTotpCode('');
     setShowDeletionPassword(false);
     setDeletionError(null);
   };
@@ -371,12 +398,20 @@ export default function SettingsScreen() {
       setExportError(t('settings.enterCurrentPassword'));
       return;
     }
+    if (user.two_factor_enabled && !exportTotpCode.trim()) {
+      setExportError(t('settings.enterSensitiveActionCode'));
+      return;
+    }
     setExportPending(true);
     setExportError(null);
     setExportShared(false);
     try {
-      await exportAndShareAccountData(exportPassword);
+      await exportAndShareAccountData(
+        exportPassword,
+        user.two_factor_enabled ? exportTotpCode : undefined,
+      );
       setExportPassword('');
+      setExportTotpCode('');
       setExportPasswordVisible(false);
       setExportConfirming(false);
       setExportShared(true);
@@ -391,6 +426,7 @@ export default function SettingsScreen() {
     if (exportPending) return;
     setExportConfirming(false);
     setExportPassword('');
+    setExportTotpCode('');
     setExportPasswordVisible(false);
     setExportError(null);
   };
@@ -454,9 +490,17 @@ export default function SettingsScreen() {
       setTwoFactorError(t('settings.enterCurrentPassword'));
       return;
     }
+    if (!twoFactorDisableCode.trim()) {
+      setTwoFactorError(t('settings.enterSensitiveActionCode'));
+      return;
+    }
     try {
-      await disableTwoFactor.mutateAsync(twoFactorDisablePassword);
+      await disableTwoFactor.mutateAsync({
+        password: twoFactorDisablePassword,
+        totpCode: twoFactorDisableCode,
+      });
       setTwoFactorDisablePassword('');
+      setTwoFactorDisableCode('');
       setRecoveryCodes(null);
     } catch (error) {
       setTwoFactorError(getErrorMessage(error, t('settings.twoFactorDisableError')));
@@ -793,6 +837,15 @@ export default function SettingsScreen() {
                   }
                   onSubmit={() => void confirmDisableTwoFactor()}
                 />
+                <SecondFactorField
+                  label={t('settings.codeToDisable')}
+                  value={twoFactorDisableCode}
+                  onChange={(value) => {
+                    setTwoFactorDisableCode(value);
+                    setTwoFactorError(null);
+                  }}
+                  onSubmit={() => void confirmDisableTwoFactor()}
+                />
                 {twoFactorError ? <FormMessage message={twoFactorError} /> : null}
                 <AppButton
                   label={t('settings.disableTwoFactor')}
@@ -958,6 +1011,16 @@ export default function SettingsScreen() {
                   onToggleVisibility={() => setShowPasswords((visible) => !visible)}
                   onSubmit={() => void submitEmailChange()}
                 />
+                {user.two_factor_enabled ? (
+                  <SecondFactorField
+                    value={emailTotpCode}
+                    onChange={(value) => {
+                      setEmailTotpCode(value);
+                      setEmailError(null);
+                    }}
+                    onSubmit={() => void submitEmailChange()}
+                  />
+                ) : null}
                 {emailError ? <FormMessage message={emailError} /> : null}
                 <AppButton
                   label={t('settings.sendConfirmationLink')}
@@ -1013,6 +1076,16 @@ export default function SettingsScreen() {
               onToggleVisibility={() => setShowPasswords((visible) => !visible)}
               onSubmit={submitPasswordChange}
             />
+            {user.two_factor_enabled ? (
+              <SecondFactorField
+                value={passwordTotpCode}
+                onChange={(value) => {
+                  setPasswordTotpCode(value);
+                  setPasswordError(null);
+                }}
+                onSubmit={submitPasswordChange}
+              />
+            ) : null}
             {passwordError ? <FormMessage message={passwordError} /> : null}
             <AppButton
               label={t('settings.updatePassword')}
@@ -1151,6 +1224,16 @@ export default function SettingsScreen() {
                   }
                   onSubmit={() => void exportData()}
                 />
+                {user.two_factor_enabled ? (
+                  <SecondFactorField
+                    value={exportTotpCode}
+                    onChange={(value) => {
+                      setExportTotpCode(value);
+                      setExportError(null);
+                    }}
+                    onSubmit={() => void exportData()}
+                  />
+                ) : null}
                 <AppText variant="caption" muted>
                   {t('settings.exportFileHint')}
                 </AppText>
@@ -1252,6 +1335,16 @@ export default function SettingsScreen() {
                   onToggleVisibility={() => setShowDeletionPassword((visible) => !visible)}
                   onSubmit={confirmDeletion}
                 />
+                {user.two_factor_enabled ? (
+                  <SecondFactorField
+                    value={deletionTotpCode}
+                    onChange={(value) => {
+                      setDeletionTotpCode(value);
+                      setDeletionError(null);
+                    }}
+                    onSubmit={confirmDeletion}
+                  />
+                ) : null}
                 {deletionError ? <FormMessage message={deletionError} /> : null}
                 <View style={styles.actions}>
                   <View style={styles.action}>
@@ -1337,6 +1430,49 @@ function PasswordField({
           )}
         </Pressable>
       </View>
+    </View>
+  );
+}
+
+function SecondFactorField({
+  label,
+  value,
+  onChange,
+  onSubmit,
+}: {
+  label?: string;
+  value: string;
+  onChange: (value: string) => void;
+  onSubmit?: () => void;
+}) {
+  const theme = useTheme();
+  const t = useT();
+  return (
+    <View style={styles.field}>
+      <AppText variant="label">{label ?? t('settings.sensitiveActionCode')}</AppText>
+      <TextInput
+        value={value}
+        onChangeText={onChange}
+        autoCapitalize="none"
+        autoCorrect={false}
+        autoComplete="one-time-code"
+        textContentType="oneTimeCode"
+        maxLength={64}
+        placeholder={t('settings.sensitiveActionCode')}
+        placeholderTextColor={theme.mutedText}
+        onSubmitEditing={onSubmit}
+        style={[
+          styles.textInput,
+          {
+            color: theme.text,
+            borderColor: theme.border,
+            backgroundColor: theme.elevated,
+          },
+        ]}
+      />
+      <AppText variant="caption" muted>
+        {t('settings.sensitiveActionCodeHint')}
+      </AppText>
     </View>
   );
 }

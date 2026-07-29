@@ -23,6 +23,8 @@ pub struct UpdateProfileRequest {
 pub struct DeleteAccountRequest {
     #[validate(length(min = 1, max = 128, message = "Password must be 1-128 characters"))]
     pub password: String,
+    #[validate(length(max = 64, message = "Two-factor code is too long"))]
+    pub totp_code: Option<String>,
 }
 
 /// Exporting an account exposes private notes, watch history, and relationship
@@ -32,6 +34,8 @@ pub struct DeleteAccountRequest {
 pub struct DataExportRequest {
     #[validate(length(min = 1, max = 128, message = "Password must be 1-128 characters"))]
     pub password: String,
+    #[validate(length(max = 64, message = "Two-factor code is too long"))]
+    pub totp_code: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -132,11 +136,13 @@ mod tests {
     fn test_delete_account_password_is_bounded() {
         assert!(DeleteAccountRequest {
             password: "x".repeat(128),
+            totp_code: None,
         }
         .validate()
         .is_ok());
         assert!(DeleteAccountRequest {
             password: "x".repeat(129),
+            totp_code: None,
         }
         .validate()
         .is_err());
@@ -157,11 +163,13 @@ mod tests {
     fn data_export_requires_a_bounded_password_and_rejects_extra_fields() {
         assert!(DataExportRequest {
             password: "x".repeat(128),
+            totp_code: None,
         }
         .validate()
         .is_ok());
         assert!(DataExportRequest {
             password: "x".repeat(129),
+            totp_code: None,
         }
         .validate()
         .is_err());

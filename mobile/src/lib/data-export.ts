@@ -39,19 +39,20 @@ const accountExportSchema = z.object({
 
 export type AccountDataExport = z.infer<typeof accountExportSchema>;
 
-export async function requestAccountDataExport(password: string) {
+export async function requestAccountDataExport(password: string, totpCode?: string) {
   if (!password || password.length > 128) {
     throw new ApiError('Enter your current password', 400);
   }
+  const code = totpCode?.trim();
   const payload = await apiRequest<unknown>('/users/me/export', {
     method: 'POST',
-    body: { password },
+    body: { password, ...(code ? { totp_code: code } : {}) },
     timeoutMs: 60_000,
   });
   return accountExportSchema.parse(payload);
 }
 
-export async function exportAndShareAccountData(password: string) {
+export async function exportAndShareAccountData(password: string, totpCode?: string) {
   if (!(await Sharing.isAvailableAsync())) {
     throw new ApiError('File sharing is not available on this device', 0);
   }
@@ -61,7 +62,7 @@ export async function exportAndShareAccountData(password: string) {
   // private snapshot.
   if (file.exists) file.delete();
 
-  const payload = await requestAccountDataExport(password);
+  const payload = await requestAccountDataExport(password, totpCode);
   const contents = JSON.stringify(payload, null, 2);
   if (contents.length > MAX_EXPORT_CHARACTERS) {
     throw new ApiError('The account export is too large for this device', 413);

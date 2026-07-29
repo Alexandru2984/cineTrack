@@ -25,7 +25,7 @@ operational rather than a React/Rust authorization bypass.
 | STRIDE scenario | Likelihood | Impact | Existing controls | Required next control |
 | --- | --- | --- | --- | --- |
 | Elevation of privilege after a shared-VPS service or SSH account compromise | Medium | High, host-wide | Key-only SSH, no root login, Fail2ban, UFW, unattended security updates, non-root/read-only CineTrack containers | Decide whether SSH agent/TCP forwarding is actually required; restrict it if not. Separate high-trust administration and reduce the number of unrelated public listeners on the same host. |
-| Spoofing/account takeover through a stolen password, refresh token, or recovery code | Medium | Medium | Argon2id, HIBP k-anonymity, optional encrypted TOTP, login lockout, refresh rotation/replay detection, session revocation, sub-minute alerts | Add second-factor-aware step-up authorization for export, email/password changes, 2FA removal, and account deletion; add passkeys and new-login alerts. At review time none of the three live accounts had enabled TOTP. |
+| Spoofing/account takeover through a stolen password, refresh token, or recovery code | Medium | Medium | Argon2id, HIBP k-anonymity, optional encrypted TOTP, second-factor-aware step-up for sensitive actions, login lockout, refresh rotation/replay detection, session revocation, sub-minute alerts | Add passkeys and new-login alerts. At review time none of the three live accounts had enabled TOTP. |
 | Tampering/deletion of disaster-recovery copies through the application's shared R2 credential | Low-to-medium | High for recovery | Client-side Age encryption, verified hashes/archive shape, 14-day retention, independent encrypted Google Drive mirror | Create a dedicated backup bucket/token, require it fail-closed, escrow the Age identity off-host, then run a scratch restore from that copy. |
 | Denial of service or data loss on the single VPS/PostgreSQL instance | Medium | Medium-to-high | Cloudflare edge, per-route rate and connection limits, health checks, alerts, daily backups | Add PostgreSQL WAL archiving/PITR and test recovery objectives; HA is not yet justified for three users but the single-host dependency must remain explicit. |
 
@@ -68,20 +68,26 @@ table therefore records likelihood/impact without inventing a currency value.
   email-change tokens. Active refresh families retain their consumed parents
   so token-reuse detection is not weakened. The regression test covers active,
   inactive, expired, consumed, and recently revoked cases.
+- Added password-plus-second-factor step-up authorization for account-data
+  export, email and password changes, TOTP removal, and account deletion. TOTP
+  replay protection and atomic recovery-code consumption are shared with the
+  login flow, and both web and mobile collect the extra proof only for accounts
+  that enabled two-factor authentication.
 - Corrected the privacy/subprocessor disclosures and the incident-notification
   decision tree in English and Romanian.
 - Validation passed strict formatting/Clippy, 280 backend unit tests, all 110
   PostgreSQL integration tests, frontend ESLint, all 151 frontend tests,
-  TypeScript, and the production PWA build.
+  TypeScript, the production PWA build, mobile lint and TypeScript, all 149
+  mobile tests, Expo dependency validation, and Expo Doctor 20/20.
 
 ### Prioritized security/product roadmap
 
 1. **Recovery independence:** dedicated R2 credentials, off-host Age-key escrow,
    and a documented scratch restore drill. Exit criterion: the shared-credential
    alert clears and a restore from the off-host identity passes.
-2. **Account security center:** second-factor-aware step-up authorization,
-   new-login/credential-change email alerts, an immutable bounded activity
-   timeline, and one-tap session revocation.
+2. **Account security center:** with second-factor-aware step-up authorization
+   complete, add new-login/credential-change email alerts, an immutable bounded
+   activity timeline, and one-tap session revocation.
 3. **Phishing resistance:** WebAuthn/passkeys with recovery and device-management
    flows on web and mobile; keep TOTP as a fallback.
 4. **Host blast-radius reduction:** decide SSH forwarding requirements, isolate

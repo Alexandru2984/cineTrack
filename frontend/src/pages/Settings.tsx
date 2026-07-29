@@ -52,6 +52,41 @@ import { LanguageCard } from '@/components/LanguageCard';
 import { useAuthStore } from '@/store/auth';
 import { useT } from '@/hooks/useT';
 
+function SensitiveActionCodeField({
+  id,
+  value,
+  onChange,
+  label,
+}: {
+  id: string;
+  value: string;
+  onChange: (value: string) => void;
+  label?: string;
+}) {
+  const t = useT();
+  return (
+    <div>
+      <label htmlFor={id} className="block text-sm font-medium mb-1">
+        {label ?? t('settings.sensitiveActionCode')}
+      </label>
+      <input
+        id={id}
+        type="text"
+        autoComplete="one-time-code"
+        autoCapitalize="none"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        required
+        maxLength={64}
+        className="w-full rounded-md border border-[hsl(var(--input))] bg-transparent px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[hsl(var(--ring))]"
+      />
+      <p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">
+        {t('settings.sensitiveActionCodeHint')}
+      </p>
+    </div>
+  );
+}
+
 function SignOutCard() {
   const t = useT();
   const navigate = useNavigate();
@@ -423,14 +458,24 @@ function ChangeEmailCard() {
   const user = useAuthStore((state) => state.user);
   const [password, setPassword] = useState('');
   const [nextEmail, setNextEmail] = useState('');
+  const [totpCode, setTotpCode] = useState('');
   const changeEmail = useChangeEmail();
   const sent = changeEmail.isSuccess;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     changeEmail.mutate(
-      { current_password: password, new_email: nextEmail },
-      { onSuccess: () => setPassword('') },
+      {
+        current_password: password,
+        new_email: nextEmail,
+        ...(user?.two_factor_enabled ? { totp_code: totpCode.trim() } : {}),
+      },
+      {
+        onSuccess: () => {
+          setPassword('');
+          setTotpCode('');
+        },
+      },
     );
   };
 
@@ -487,6 +532,13 @@ function ChangeEmailCard() {
               {t('settings.changeEmailPasswordHint')}
             </p>
           </div>
+          {user?.two_factor_enabled && (
+            <SensitiveActionCodeField
+              id="change-email-totp"
+              value={totpCode}
+              onChange={setTotpCode}
+            />
+          )}
 
           {changeEmail.error && (
             <p className="text-sm text-[hsl(var(--destructive))]">
@@ -510,9 +562,11 @@ function ChangeEmailCard() {
 function ChangePasswordCard() {
   const t = useT();
   const navigate = useNavigate();
+  const user = useAuthStore((state) => state.user);
   const [current, setCurrent] = useState('');
   const [next, setNext] = useState('');
   const [confirm, setConfirm] = useState('');
+  const [totpCode, setTotpCode] = useState('');
   const [mismatch, setMismatch] = useState(false);
   const changePassword = useChangePassword();
 
@@ -524,12 +578,17 @@ function ChangePasswordCard() {
     }
     setMismatch(false);
     changePassword.mutate(
-      { current_password: current, new_password: next },
+      {
+        current_password: current,
+        new_password: next,
+        ...(user?.two_factor_enabled ? { totp_code: totpCode.trim() } : {}),
+      },
       {
         onSuccess: () => {
           setCurrent('');
           setNext('');
           setConfirm('');
+          setTotpCode('');
           navigate('/login');
         },
       }
@@ -585,6 +644,13 @@ function ChangePasswordCard() {
             className="w-full rounded-md border border-[hsl(var(--input))] bg-transparent px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[hsl(var(--ring))]"
           />
         </div>
+        {user?.two_factor_enabled && (
+          <SensitiveActionCodeField
+            id="change-password-totp"
+            value={totpCode}
+            onChange={setTotpCode}
+          />
+        )}
 
         {mismatch && (
           <p className="text-sm text-[hsl(var(--destructive))]">{t('settings.passwordsMismatch')}</p>
@@ -618,6 +684,7 @@ function TwoFactorCard() {
   const [code, setCode] = useState('');
   const [setupPassword, setSetupPassword] = useState('');
   const [password, setPassword] = useState('');
+  const [disableCode, setDisableCode] = useState('');
   const [recoveryCodes, setRecoveryCodes] = useState<string[] | null>(null);
 
   const startSetup = (e: React.FormEvent) => {
@@ -646,7 +713,15 @@ function TwoFactorCard() {
 
   const confirmDisable = (e: React.FormEvent) => {
     e.preventDefault();
-    disable.mutate(password, { onSuccess: () => setPassword('') });
+    disable.mutate(
+      { password, totp_code: disableCode.trim() },
+      {
+        onSuccess: () => {
+          setPassword('');
+          setDisableCode('');
+        },
+      },
+    );
   };
 
   return (
@@ -694,6 +769,12 @@ function TwoFactorCard() {
             onChange={(e) => setPassword(e.target.value)}
             required
             className="w-full rounded-md border border-[hsl(var(--input))] bg-transparent px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[hsl(var(--ring))]"
+          />
+          <SensitiveActionCodeField
+            id="twofa-disable-code"
+            value={disableCode}
+            onChange={setDisableCode}
+            label={t('settings.disableCodeLabel')}
           />
           {disable.error && (
             <p className="text-sm text-[hsl(var(--destructive))]">
@@ -878,14 +959,19 @@ function SessionsCard() {
 function DangerZoneCard() {
   const t = useT();
   const logout = useAuthStore((state) => state.logout);
+  const user = useAuthStore((state) => state.user);
   const [confirming, setConfirming] = useState(false);
   const [password, setPassword] = useState('');
+  const [totpCode, setTotpCode] = useState('');
   const deleteAccount = useDeleteAccount();
 
   const handleDelete = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      await deleteAccount.mutateAsync({ password });
+      await deleteAccount.mutateAsync({
+        password,
+        ...(user?.two_factor_enabled ? { totp_code: totpCode.trim() } : {}),
+      });
       logout();
       window.location.replace('/login');
     } catch {
@@ -930,6 +1016,13 @@ function DangerZoneCard() {
               className="w-full rounded-md border border-[hsl(var(--input))] bg-transparent px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[hsl(var(--ring))]"
             />
           </div>
+          {user?.two_factor_enabled && (
+            <SensitiveActionCodeField
+              id="delete-account-totp"
+              value={totpCode}
+              onChange={setTotpCode}
+            />
+          )}
 
           {deleteAccount.error && (
             <p className="text-sm text-[hsl(var(--destructive))]">
@@ -951,6 +1044,7 @@ function DangerZoneCard() {
               onClick={() => {
                 setConfirming(false);
                 setPassword('');
+                setTotpCode('');
               }}
               className="rounded-md border border-[hsl(var(--border))] px-4 py-2 text-sm hover:bg-[hsl(var(--accent))]"
             >

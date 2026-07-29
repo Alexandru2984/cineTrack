@@ -246,9 +246,11 @@ async fn change_password(
     let data = body.into_inner();
     services::auth::change_password(
         pool.get_ref(),
+        config.get_ref(),
         user_id,
         &data.current_password,
         &data.new_password,
+        data.totp_code.as_deref(),
     )
     .await?;
 
@@ -321,6 +323,7 @@ async fn request_email_change(
         user_id,
         &data.current_password,
         &data.new_email,
+        data.totp_code.as_deref(),
     )
     .await?;
 
@@ -392,12 +395,20 @@ async fn enable_two_factor(
 
 async fn disable_two_factor(
     pool: web::Data<PgPool>,
+    config: web::Data<Config>,
     req: HttpRequest,
     body: web::Json<DisableTwoFactorRequest>,
 ) -> Result<HttpResponse, AppError> {
     let user_id = require_auth(&req).await?;
     body.validate()?;
-    services::auth::disable_two_factor(pool.get_ref(), user_id, &body.password).await?;
+    services::auth::disable_two_factor(
+        pool.get_ref(),
+        config.get_ref(),
+        user_id,
+        &body.password,
+        body.totp_code.as_deref(),
+    )
+    .await?;
     Ok(HttpResponse::Ok().json(serde_json::json!({"message": "Two-factor disabled"})))
 }
 

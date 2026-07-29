@@ -92,6 +92,21 @@ describe('mobile account data export', () => {
     });
   });
 
+  it('trims and sends a second factor when the account requires step-up', async () => {
+    mockApiRequest.mockResolvedValueOnce(exportPayload());
+
+    await requestAccountDataExport('Pass1234', ' aaaa-bbbb-cccc-dddd ');
+
+    expect(mockApiRequest).toHaveBeenCalledWith('/users/me/export', {
+      method: 'POST',
+      body: {
+        password: 'Pass1234',
+        totp_code: 'aaaa-bbbb-cccc-dddd',
+      },
+      timeoutMs: 60_000,
+    });
+  });
+
   it('writes only to cache, shares JSON, and deletes the plaintext file', async () => {
     mockIsAvailable.mockResolvedValueOnce(true);
     mockApiRequest.mockResolvedValueOnce(exportPayload());

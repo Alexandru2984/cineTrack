@@ -105,6 +105,8 @@ pub struct TwoFactorEnabledResponse {
 pub struct DisableTwoFactorRequest {
     #[validate(length(min = 1, max = 128, message = "Password must be 1-128 characters"))]
     pub password: String,
+    #[validate(length(max = 64, message = "Two-factor code is too long"))]
+    pub totp_code: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -194,6 +196,8 @@ pub struct ChangePasswordRequest {
         custom(function = "validate_password_strength")
     )]
     pub new_password: String,
+    #[validate(length(max = 64, message = "Two-factor code is too long"))]
+    pub totp_code: Option<String>,
 }
 
 /// The current password is required even though the caller is already
@@ -213,6 +217,8 @@ pub struct ChangeEmailRequest {
         email(message = "Invalid email address")
     )]
     pub new_email: String,
+    #[validate(length(max = 64, message = "Two-factor code is too long"))]
+    pub totp_code: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Validate)]
@@ -543,6 +549,7 @@ mod tests {
         let req = ChangePasswordRequest {
             current_password: "x".repeat(129),
             new_password: "SecurePass1".to_string(),
+            totp_code: None,
         };
         assert!(req.validate().is_err());
     }
@@ -552,6 +559,7 @@ mod tests {
         let valid = ChangeEmailRequest {
             current_password: "SecurePass1".to_string(),
             new_email: "new@example.com".to_string(),
+            totp_code: None,
         };
         assert!(valid.validate().is_ok());
 
@@ -559,18 +567,21 @@ mod tests {
         let no_password = ChangeEmailRequest {
             current_password: String::new(),
             new_email: "new@example.com".to_string(),
+            totp_code: None,
         };
         assert!(no_password.validate().is_err());
 
         let malformed = ChangeEmailRequest {
             current_password: "SecurePass1".to_string(),
             new_email: "not-an-address".to_string(),
+            totp_code: None,
         };
         assert!(malformed.validate().is_err());
 
         let too_long = ChangeEmailRequest {
             current_password: "SecurePass1".to_string(),
             new_email: format!("{}@example.com", "a".repeat(250)),
+            totp_code: None,
         };
         assert!(too_long.validate().is_err());
     }

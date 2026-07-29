@@ -74,12 +74,15 @@ export async function updateAccountProfile(draft: ProfileDraft) {
 export async function requestAccountEmailChange(
   currentPassword: string,
   newEmail: string,
+  totpCode?: string,
 ) {
+  const code = totpCode?.trim();
   await apiRequest<{ message: string }>('/auth/email/change', {
     method: 'POST',
     body: {
       current_password: currentPassword,
       new_email: newEmail,
+      ...(code ? { totp_code: code } : {}),
     },
   });
 }
@@ -87,12 +90,15 @@ export async function requestAccountEmailChange(
 export async function changeAccountPassword(
   currentPassword: string,
   newPassword: string,
+  totpCode?: string,
 ) {
+  const code = totpCode?.trim();
   await apiRequest<{ message: string }>('/auth/password', {
     method: 'PATCH',
     body: {
       current_password: currentPassword,
       new_password: newPassword,
+      ...(code ? { totp_code: code } : {}),
     },
   });
   await clearLocalSession();
@@ -151,17 +157,18 @@ export async function enableTwoFactor(code: string) {
   });
 }
 
-export async function disableTwoFactor(password: string) {
+export async function disableTwoFactor(password: string, totpCode: string) {
   await apiRequest<{ message?: string }>('/auth/2fa/disable', {
     method: 'POST',
-    body: { password },
+    body: { password, totp_code: totpCode.trim() },
   });
 }
 
-export async function deleteAccountSession(password: string) {
+export async function deleteAccountSession(password: string, totpCode?: string) {
+  const code = totpCode?.trim();
   await apiRequest<{ message: string }>('/users/me', {
     method: 'DELETE',
-    body: { password },
+    body: { password, ...(code ? { totp_code: code } : {}) },
   });
   await clearLocalSession();
 }

@@ -12,7 +12,6 @@ use crate::middleware::auth::require_auth;
 use crate::models::User;
 use crate::services::storage::StorageService;
 use crate::services::{notifications, quota};
-use crate::utils::password;
 
 #[derive(sqlx::FromRow)]
 struct ActivityRow {
@@ -336,22 +335,26 @@ async fn update_profile(
 /// push tokens, and unregister secrets) are deliberately never selected.
 async fn export_account_data(
     pool: web::Data<PgPool>,
+    config: web::Data<Config>,
     req: HttpRequest,
     body: web::Json<DataExportRequest>,
 ) -> Result<HttpResponse, AppError> {
     let user_id = require_auth(&req).await?;
     body.validate()?;
 
-    let password_hash =
-        sqlx::query_scalar::<_, Option<String>>("SELECT password_hash FROM users WHERE id = $1")
-            .bind(user_id)
-            .fetch_optional(pool.get_ref())
-            .await?
-            .flatten()
-            .ok_or_else(|| AppError::BadRequest("Password login is not enabled".to_string()))?;
-    if !password::verify_password(&body.password, &password_hash).await? {
-        return Err(AppError::Unauthorized("Password is incorrect".to_string()));
-    }
+    let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = $1")
+        .bind(user_id)
+        .fetch_optional(pool.get_ref())
+        .await?
+        .ok_or_else(|| AppError::NotFound("User not found".to_string()))?;
+    crate::services::auth::confirm_sensitive_action(
+        pool.get_ref(),
+        config.get_ref(),
+        &user,
+        &body.password,
+        body.totp_code.as_deref(),
+    )
+    .await?;
 
     let mut tx = pool.begin().await?;
     sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
@@ -659,21 +662,26 @@ async fn delete_account(
     let user_id = require_auth(&req).await?;
     body.validate()?;
 
+    let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = $1")
+        .bind(user_id)
+        .fetch_optional(pool.get_ref())
+        .await?
+        .ok_or_else(|| AppError::NotFound("User not found".to_string()))?;
+    crate::services::auth::confirm_sensitive_action(
+        pool.get_ref(),
+        config.get_ref(),
+        &user,
+        &body.password,
+        body.totp_code.as_deref(),
+    )
+    .await?;
+
     let mut tx = pool.begin().await?;
     let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = $1 FOR UPDATE")
         .bind(user_id)
         .fetch_optional(&mut *tx)
         .await?
         .ok_or_else(|| AppError::NotFound("User not found".to_string()))?;
-
-    let password_hash = user
-        .password_hash
-        .as_ref()
-        .ok_or_else(|| AppError::BadRequest("Password login is not enabled".to_string()))?;
-
-    if !password::verify_password(&body.password, password_hash).await? {
-        return Err(AppError::Unauthorized("Password is incorrect".to_string()));
-    }
 
     if let Some(store) = storage.get_ref() {
         store

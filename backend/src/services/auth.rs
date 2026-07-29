@@ -319,9 +319,11 @@ pub async fn logout(pool: &PgPool, refresh_token: &str) -> Result<(), AppError> 
 /// one, then revoke every refresh token so other sessions must re-authenticate.
 pub async fn change_password(
     pool: &PgPool,
+    config: &Config,
     user_id: Uuid,
     current_password: &str,
     new_password: &str,
+    totp_code: Option<&str>,
 ) -> Result<(), AppError> {
     let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = $1")
         .bind(user_id)
@@ -329,16 +331,7 @@ pub async fn change_password(
         .await?
         .ok_or_else(|| AppError::NotFound("User not found".to_string()))?;
 
-    let password_hash = user
-        .password_hash
-        .as_ref()
-        .ok_or_else(|| AppError::BadRequest("Password login is not enabled".to_string()))?;
-
-    if !password::verify_password(current_password, password_hash).await? {
-        return Err(AppError::Unauthorized(
-            "Current password is incorrect".to_string(),
-        ));
-    }
+    confirm_sensitive_action(pool, config, &user, current_password, totp_code).await?;
 
     let new_hash = password::hash_password(new_password).await?;
 
@@ -610,6 +603,7 @@ pub async fn request_email_change(
     user_id: Uuid,
     current_password: &str,
     new_email: &str,
+    totp_code: Option<&str>,
 ) -> Result<(), AppError> {
     let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = $1")
         .bind(user_id)
@@ -617,16 +611,7 @@ pub async fn request_email_change(
         .await?
         .ok_or_else(|| AppError::NotFound("User not found".to_string()))?;
 
-    let password_hash = user
-        .password_hash
-        .as_ref()
-        .ok_or_else(|| AppError::BadRequest("Password login is not enabled".to_string()))?;
-
-    if !password::verify_password(current_password, password_hash).await? {
-        return Err(AppError::Unauthorized(
-            "Current password is incorrect".to_string(),
-        ));
-    }
+    confirm_sensitive_action(pool, config, &user, current_password, totp_code).await?;
 
     let new_email = normalize_email(new_email);
     if new_email == user.email {
@@ -958,6 +943,41 @@ async fn verify_second_factor(
     Ok(consumed == 1)
 }
 
+/// Re-authenticate a sensitive account action. Password-only accounts keep the
+/// existing confirmation flow; accounts that opted into 2FA must also prove
+/// possession of a current TOTP code or consume a recovery code.
+pub async fn confirm_sensitive_action(
+    pool: &PgPool,
+    config: &Config,
+    user: &User,
+    password_input: &str,
+    second_factor: Option<&str>,
+) -> Result<(), AppError> {
+    let password_hash = user
+        .password_hash
+        .as_ref()
+        .ok_or_else(|| AppError::BadRequest("Password login is not enabled".to_string()))?;
+    if !password::verify_password(password_input, password_hash).await? {
+        return Err(AppError::Unauthorized(
+            "Current password is incorrect".to_string(),
+        ));
+    }
+
+    if user.totp_enabled {
+        let code = second_factor
+            .map(str::trim)
+            .filter(|code| !code.is_empty())
+            .ok_or(AppError::TwoFactorRequired)?;
+        if !verify_second_factor(pool, config, user, code).await? {
+            return Err(AppError::Unauthorized(
+                "Invalid two-factor code".to_string(),
+            ));
+        }
+    }
+
+    Ok(())
+}
+
 /// Begin TOTP enrollment: store a fresh pending secret and return the base32
 /// secret plus the otpauth URI for the authenticator app. Re-running before
 /// activation simply rotates the pending secret.
@@ -1113,8 +1133,10 @@ pub async fn enable_two_factor(
 /// and all recovery codes.
 pub async fn disable_two_factor(
     pool: &PgPool,
+    config: &Config,
     user_id: Uuid,
     password_input: &str,
+    totp_code: Option<&str>,
 ) -> Result<(), AppError> {
     let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = $1")
         .bind(user_id)
@@ -1122,13 +1144,7 @@ pub async fn disable_two_factor(
         .await?
         .ok_or_else(|| AppError::NotFound("User not found".to_string()))?;
 
-    let password_hash = user
-        .password_hash
-        .as_ref()
-        .ok_or_else(|| AppError::BadRequest("Password login is not enabled".to_string()))?;
-    if !password::verify_password(password_input, password_hash).await? {
-        return Err(AppError::Unauthorized("Password is incorrect".to_string()));
-    }
+    confirm_sensitive_action(pool, config, &user, password_input, totp_code).await?;
 
     let mut tx = pool.begin().await?;
     sqlx::query(

@@ -516,6 +516,9 @@ export const ro: Dictionary = {
       'Linkul este valabil 24 de ore. Până îl deschizi, {email} rămâne adresa contului tău.',
     newEmail: 'Email nou',
     currentPassword: 'Parola curentă',
+    sensitiveActionCode: 'Cod din aplicația de autentificare sau cod de recuperare',
+    sensitiveActionCodeHint:
+      'Necesar deoarece autentificarea în doi pași este activă pe contul tău.',
     changeEmailPasswordHint: 'Cerută pentru că această adresă îți recuperează contul.',
     changeEmailError: 'Schimbarea emailului nu a putut fi pornită',
     sendConfirmationLink: 'Trimite linkul de confirmare',
@@ -533,6 +536,7 @@ export const ro: Dictionary = {
     savedCodes: 'Mi-am salvat codurile',
     twoFactorOn: 'Autentificarea în doi pași este activă.',
     disablePasswordLabel: 'Confirmă-ți parola pentru a o dezactiva',
+    disableCodeLabel: 'Confirmă cu aplicația de autentificare sau un cod de recuperare',
     disableError: 'Autentificarea în doi pași nu a putut fi dezactivată',
     disableTwoFactor: 'Dezactivează autentificarea în doi pași',
     scanInstructions: 'Scanează cu aplicația de autentificare sau introdu cheia manual:',

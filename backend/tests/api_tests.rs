@@ -1477,11 +1477,82 @@ async fn test_two_factor_enable_login_and_recovery() {
     assert_eq!(status, 401);
     assert_eq!(body["two_factor_required"], Value::Null);
 
-    // Disabling requires the password and restores single-factor login.
+    // Every sensitive account action requires a second-factor-aware step-up.
+    // Missing codes return the same explicit challenge used by login and must
+    // not change account state.
+    for (method, uri, payload) in [
+        (
+            "POST",
+            "/api/users/me/export",
+            json!({ "password": "Pass1234" }),
+        ),
+        (
+            "POST",
+            "/api/auth/email/change",
+            json!({
+                "current_password": "Pass1234",
+                "new_email": "mfa-next@example.com"
+            }),
+        ),
+        (
+            "PATCH",
+            "/api/auth/password",
+            json!({
+                "current_password": "Pass1234",
+                "new_password": "Pass5678"
+            }),
+        ),
+        ("DELETE", "/api/users/me", json!({ "password": "Pass1234" })),
+        (
+            "POST",
+            "/api/auth/2fa/disable",
+            json!({ "password": "Pass1234" }),
+        ),
+    ] {
+        let req = actix_test::TestRequest::default()
+            .method(method.parse().unwrap())
+            .uri(uri)
+            .insert_header(("Authorization", format!("Bearer {access}")))
+            .set_json(payload)
+            .peer_addr(peer_addr())
+            .to_request();
+        let resp = actix_test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 401, "{method} {uri}");
+        let body: Value = actix_test::read_body_json(resp).await;
+        assert_eq!(body["two_factor_required"], true, "{method} {uri}");
+    }
+
+    // An invalid second factor cannot turn the protection off.
     let req = actix_test::TestRequest::post()
         .uri("/api/auth/2fa/disable")
         .insert_header(("Authorization", format!("Bearer {access}")))
-        .set_json(json!({ "password": "Pass1234" }))
+        .set_json(json!({
+            "password": "Pass1234",
+            "totp_code": wrong_totp_code(&secret)
+        }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 401);
+
+    // The earlier login intentionally consumed a future TOTP step to exercise
+    // replay protection. Reset only the test fixture's counter so a current
+    // authenticator code can prove the successful sensitive-action path.
+    sqlx::query("UPDATE users SET totp_last_used_step = NULL WHERE email = $1")
+        .bind("mfa@example.com")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    // Password + a valid second factor disables 2FA and restores
+    // single-factor login.
+    let req = actix_test::TestRequest::post()
+        .uri("/api/auth/2fa/disable")
+        .insert_header(("Authorization", format!("Bearer {access}")))
+        .set_json(json!({
+            "password": "Pass1234",
+            "totp_code": current_totp_code(&secret)
+        }))
         .peer_addr(peer_addr())
         .to_request();
     let resp = actix_test::call_service(&app, req).await;

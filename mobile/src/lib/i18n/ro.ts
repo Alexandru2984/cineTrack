@@ -678,6 +678,8 @@ export const ro: Dictionary = {
     savedCodes: 'Mi-am salvat codurile',
     twoFactorOn: 'Autentificarea în doi pași este activă.',
     passwordToDisable: 'Parola pentru dezactivare',
+    codeToDisable:
+      'Cod din aplicația de autentificare sau cod de recuperare pentru dezactivare',
     disableTwoFactor: 'Dezactivează doi pași',
     openAuthenticator: 'Deschide aplicația de autentificare',
     manualKey: 'Cheie de configurare manuală',
@@ -697,6 +699,11 @@ export const ro: Dictionary = {
       'Deschide linkul trimis la {address} pentru a finaliza. Până atunci, {email} rămâne adresa ta.',
     newEmail: 'Email nou',
     currentPassword: 'Parola curentă',
+    sensitiveActionCode: 'Cod din aplicația de autentificare sau cod de recuperare',
+    sensitiveActionCodeHint:
+      'Necesar deoarece autentificarea în doi pași este activă pe contul tău.',
+    enterSensitiveActionCode:
+      'Introdu codul din aplicația de autentificare sau codul de recuperare',
     sendConfirmationLink: 'Trimite linkul de confirmare',
     enterCurrentPassword: 'Introdu parola curentă',
     emailChangeError: 'Schimbarea emailului nu a putut fi pornită',

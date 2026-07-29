@@ -71,10 +71,12 @@ export function useRequestAccountEmailChange() {
     mutationFn: ({
       currentPassword,
       newEmail,
+      totpCode,
     }: {
       currentPassword: string;
       newEmail: string;
-    }) => requestAccountEmailChange(currentPassword, newEmail),
+      totpCode?: string;
+    }) => requestAccountEmailChange(currentPassword, newEmail, totpCode),
   });
 }
 
@@ -83,10 +85,12 @@ export function useChangeAccountPassword() {
     mutationFn: ({
       currentPassword,
       newPassword,
+      totpCode,
     }: {
       currentPassword: string;
       newPassword: string;
-    }) => changeAccountPassword(currentPassword, newPassword),
+      totpCode?: string;
+    }) => changeAccountPassword(currentPassword, newPassword, totpCode),
   });
 }
 
@@ -125,7 +129,8 @@ export function useDisableTwoFactor() {
   const user = useAuthStore((state) => state.user);
   const setUser = useAuthStore((state) => state.setUser);
   return useMutation({
-    mutationFn: disableTwoFactor,
+    mutationFn: ({ password, totpCode }: { password: string; totpCode: string }) =>
+      disableTwoFactor(password, totpCode),
     onSuccess: () => {
       if (user) setUser({ ...user, two_factor_enabled: false });
     },

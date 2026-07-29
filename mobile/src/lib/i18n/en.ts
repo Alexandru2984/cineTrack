@@ -673,6 +673,7 @@ export const en = {
     savedCodes: "I've saved my codes",
     twoFactorOn: 'Two-factor authentication is on.',
     passwordToDisable: 'Password to turn it off',
+    codeToDisable: 'Authenticator or recovery code to turn it off',
     disableTwoFactor: 'Disable two-factor',
     openAuthenticator: 'Open authenticator app',
     manualKey: 'Manual setup key',
@@ -691,6 +692,10 @@ export const en = {
       'Open the link sent to {address} to finish. Until you do, {email} stays your address.',
     newEmail: 'New email',
     currentPassword: 'Current password',
+    sensitiveActionCode: 'Authenticator or recovery code',
+    sensitiveActionCodeHint:
+      'Required because two-factor authentication is enabled on your account.',
+    enterSensitiveActionCode: 'Enter your authenticator or recovery code',
     sendConfirmationLink: 'Send confirmation link',
     enterCurrentPassword: 'Enter your current password',
     emailChangeError: 'Could not start the email change',

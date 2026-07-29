@@ -161,8 +161,8 @@ export function useDisableTwoFactor() {
   const setUser = useAuthStore((s) => s.setUser);
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (password: string) => {
-      await api.post('/auth/2fa/disable', { password });
+    mutationFn: async (data: { password: string; totp_code?: string }) => {
+      await api.post('/auth/2fa/disable', data);
     },
     onSuccess: async () => {
       try {
@@ -179,7 +179,11 @@ export function useDisableTwoFactor() {
 export function useChangePassword() {
   const logout = useAuthStore((s) => s.logout);
   return useMutation({
-    mutationFn: async (data: { current_password: string; new_password: string }) => {
+    mutationFn: async (data: {
+      current_password: string;
+      new_password: string;
+      totp_code?: string;
+    }) => {
       const res = await api.patch('/auth/password', data);
       return res.data as { message: string };
     },
@@ -190,7 +194,11 @@ export function useChangePassword() {
 
 export function useChangeEmail() {
   return useMutation({
-    mutationFn: async (data: { current_password: string; new_email: string }) => {
+    mutationFn: async (data: {
+      current_password: string;
+      new_email: string;
+      totp_code?: string;
+    }) => {
       const res = await api.post('/auth/email/change', data);
       return res.data as { message: string };
     },
@@ -261,7 +269,7 @@ export function useLogoutAllSessions() {
 
 export function useDeleteAccount() {
   return useMutation({
-    mutationFn: async (data: { password: string }) => {
+    mutationFn: async (data: { password: string; totp_code?: string }) => {
       await api.delete('/users/me', { data });
     },
   });
