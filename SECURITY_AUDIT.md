@@ -12,6 +12,88 @@ In the second round we closed the remaining gaps on the account and operations s
 
 In the third round we reviewed the repo directly on the VPS/prod host and closed three concrete risks: the npm high-severity vulnerability in `form-data` (via the lockfile), logging of the password-reset URL when SMTP is missing in production, and runtime hardening for the containers and Nginx. We also confirmed that `.env.prod` is untracked and `chmod 600`, and that the ports published in Compose are bound to `127.0.0.1`.
 
+## Extreme review update (2026-07-29)
+
+**CISO verdict:** the current small deployment can continue, but expand the user
+base or the sensitivity of stored data only after the backup-credential and
+host-blast-radius actions below. No exploitable HIGH or CRITICAL application
+vulnerability was confirmed. The remaining highest-impact scenarios are
+operational rather than a React/Rust authorization bypass.
+
+### Threat model and blast radius
+
+| STRIDE scenario | Likelihood | Impact | Existing controls | Required next control |
+| --- | --- | --- | --- | --- |
+| Elevation of privilege after a shared-VPS service or SSH account compromise | Medium | High, host-wide | Key-only SSH, no root login, Fail2ban, UFW, unattended security updates, non-root/read-only CineTrack containers | Decide whether SSH agent/TCP forwarding is actually required; restrict it if not. Separate high-trust administration and reduce the number of unrelated public listeners on the same host. |
+| Spoofing/account takeover through a stolen password, refresh token, or recovery code | Medium | Medium | Argon2id, HIBP k-anonymity, optional encrypted TOTP, login lockout, refresh rotation/replay detection, session revocation, sub-minute alerts | Add second-factor-aware step-up authorization for export, email/password changes, 2FA removal, and account deletion; add passkeys and new-login alerts. At review time none of the three live accounts had enabled TOTP. |
+| Tampering/deletion of disaster-recovery copies through the application's shared R2 credential | Low-to-medium | High for recovery | Client-side Age encryption, verified hashes/archive shape, 14-day retention, independent encrypted Google Drive mirror | Create a dedicated backup bucket/token, require it fail-closed, escrow the Age identity off-host, then run a scratch restore from that copy. |
+| Denial of service or data loss on the single VPS/PostgreSQL instance | Medium | Medium-to-high | Cloudflare edge, per-route rate and connection limits, health checks, alerts, daily backups | Add PostgreSQL WAL archiving/PITR and test recovery objectives; HA is not yet justified for three users but the single-host dependency must remain explicit. |
+
+The direct CineTrack data blast radius observed during the review was three
+accounts, roughly 34,000 watch events, and a database around 955 MB. A host-level
+compromise has a materially larger radius because the same VPS runs unrelated
+projects and the operator account belongs to both `sudo` and `docker`, either of
+which is effectively root. A credible FAIR annualized loss estimate cannot be
+produced from repository evidence alone: incident frequency, operator recovery
+time, contractual exposure, and monetary impact have not been supplied. The
+table therefore records likelihood/impact without inventing a currency value.
+
+### Detection, response, and compliance
+
+- Prometheus evaluates 23 alert rules. The security signals for refresh-token
+  replay and recovery-code use target an MTTD under one minute (15-second
+  scrape/evaluation plus Alertmanager's 30-second grouping delay). Email
+  alerting showed four deliveries and zero failures during this review.
+- The only firing CineTrack alert is
+  `CineTrackBackupUsesSharedCredentials`. The most recent successful backup
+  metric was `2026-07-29T03:30:38Z`; freshness was not the problem.
+- The incident runbook has copy-pasteable containment and restore commands.
+  Its GDPR decision section now distinguishes documentation of every breach,
+  supervisory notification within 72 hours when risk is likely, and
+  communication to affected people without undue delay when risk is high. A
+  dated human tabletop and a full scratch-database restore have not yet been
+  performed, so MTTR remains unmeasured.
+- Nginx rejects direct-to-origin HTTPS requests that bypass Cloudflare. The
+  generated Cloudflare IP allowlist is refreshed by an enabled weekly systemd
+  timer; the two most recent runs completed successfully.
+- The public privacy policy now discloses Cloudflare edge/Web Analytics, the
+  HIBP password-range check, and the Age-encrypted Google Drive backup copy. It
+  also documents security-artifact retention rather than claiming that every
+  security row remains for the life of the account.
+
+### Fixes completed in this review
+
+- Added a transactional startup and six-hour retention sweep for expired
+  refresh-token families and stale password-reset, verification, and
+  email-change tokens. Active refresh families retain their consumed parents
+  so token-reuse detection is not weakened. The regression test covers active,
+  inactive, expired, consumed, and recently revoked cases.
+- Corrected the privacy/subprocessor disclosures and the incident-notification
+  decision tree in English and Romanian.
+- Validation passed strict formatting/Clippy, 280 backend unit tests, all 110
+  PostgreSQL integration tests, frontend ESLint, all 151 frontend tests,
+  TypeScript, and the production PWA build.
+
+### Prioritized security/product roadmap
+
+1. **Recovery independence:** dedicated R2 credentials, off-host Age-key escrow,
+   and a documented scratch restore drill. Exit criterion: the shared-credential
+   alert clears and a restore from the off-host identity passes.
+2. **Account security center:** second-factor-aware step-up authorization,
+   new-login/credential-change email alerts, an immutable bounded activity
+   timeline, and one-tap session revocation.
+3. **Phishing resistance:** WebAuthn/passkeys with recovery and device-management
+   flows on web and mobile; keep TOTP as a fallback.
+4. **Host blast-radius reduction:** decide SSH forwarding requirements, isolate
+   administration from routine app access, bind shared monitoring to loopback
+   where consumers permit it, and progressively separate unrelated public
+   services.
+5. **Recovery objectives:** define RPO/RTO, add WAL archiving/PITR, run quarterly
+   restore and incident tabletop exercises, and alert on drill age.
+6. **Supply-chain provenance:** keep Dependabot updates reviewable instead of
+   accumulating closed PRs, emit SBOMs for release images, sign image/release
+   provenance, and verify signatures before manual production rollout.
+
 ## Review update (2026-07-28)
 
 - Re-audited authentication, session rotation, TOTP/recovery codes, resource ownership, SQL construction, input validation, CSP reporting, production containers, network boundaries, backups, monitoring, and dependency automation. No HIGH or CRITICAL application vulnerability was confirmed.
