@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   markEpisodeWatched: vi.fn(),
   markSeasonWatched: vi.fn(),
   markEpisodesWatchedThrough: vi.fn(),
+  useTrackingLookup: vi.fn(),
 }));
 
 vi.mock('react-router', async (importOriginal) => {
@@ -62,6 +63,7 @@ vi.mock('@/hooks/useTracking', () => ({
   }),
   useWatchedEpisodes: (...args: unknown[]) => mocks.useWatchedEpisodes(...args),
   useShowWatchProgress: (...args: unknown[]) => mocks.useShowWatchProgress(...args),
+  useTrackingLookup: (...args: unknown[]) => mocks.useTrackingLookup(...args),
   useMarkEpisodeWatched: () => ({
     mutate: mocks.markEpisodeWatched,
     isPending: false,
@@ -124,6 +126,20 @@ describe('MediaDetail episode tracking', () => {
         },
       ],
     });
+    mocks.useTrackingLookup.mockReturnValue({ data: null });
+  });
+
+  it('restores the saved tracking status from the server', () => {
+    mocks.useTrackingLookup.mockReturnValue({
+      data: { status: 'plan_to_watch' },
+    });
+    renderPage();
+
+    expect(mocks.useTrackingLookup).toHaveBeenCalledWith(1399, 'tv');
+    expect(screen.getByRole('button', { name: 'Plan to Watch' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
   });
 
   it('selects seasons and marks only unwatched episodes', async () => {

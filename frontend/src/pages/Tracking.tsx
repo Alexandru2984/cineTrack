@@ -104,7 +104,12 @@ export default function TrackingPage() {
               <select
                 aria-label={t('tracking.statusFor', { title: item.title })}
                 value={item.status}
-                onChange={(e) => updateTracking.mutate({ id: item.id, status: e.target.value })}
+                onChange={(event) => {
+                  const status = STATUSES.find(
+                    (candidate) => candidate === event.target.value,
+                  );
+                  if (status) updateTracking.mutate({ id: item.id, status });
+                }}
                 className="h-10 min-w-0 flex-1 rounded-md border border-[hsl(var(--input))] bg-transparent px-2 text-sm sm:w-36 sm:flex-none sm:text-xs"
               >
                 {STATUSES.map((k) => (

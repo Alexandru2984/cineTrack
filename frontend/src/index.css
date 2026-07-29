@@ -69,6 +69,19 @@ textarea {
   touch-action: manipulation;
 }
 
+/* Touchscreens have no reliable hover reveal. Keep media actions visible
+   there, and collapse them only for devices with a precise hovering pointer. */
+@media (hover: hover) and (pointer: fine) {
+  .media-card .media-card-actions {
+    opacity: 0;
+  }
+
+  .media-card:hover .media-card-actions,
+  .media-card:focus-within .media-card-actions {
+    opacity: 1;
+  }
+}
+
 .react-calendar-heatmap .color-empty {
   fill: hsl(var(--muted));
 }

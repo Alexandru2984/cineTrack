@@ -5,7 +5,20 @@ import type {
   HistoryItem,
   SeasonWatchProgress,
   TrackingItem,
+  TrackingStatus,
 } from '@/types';
+
+function invalidateTrackingState(
+  queryClient: ReturnType<typeof useQueryClient>,
+) {
+  void Promise.all([
+    queryClient.invalidateQueries({ queryKey: ['tracking'] }),
+    queryClient.invalidateQueries({ queryKey: ['stats'] }),
+    queryClient.invalidateQueries({ queryKey: ['activity'] }),
+    queryClient.invalidateQueries({ queryKey: ['discovery'] }),
+    queryClient.invalidateQueries({ queryKey: ['calendar'] }),
+  ]);
+}
 
 function invalidateEpisodeWatchState(
   queryClient: ReturnType<typeof useQueryClient>,
@@ -35,35 +48,48 @@ export function useTrackingInfinite(status?: string) {
   });
 }
 
+export function useTrackingLookup(
+  tmdbId: number | undefined,
+  mediaType: string | undefined,
+) {
+  return useQuery<TrackingItem | null>({
+    queryKey: ['tracking', 'lookup', mediaType, tmdbId],
+    queryFn: async () => {
+      const response = await api.post<TrackingItem[]>('/tracking/lookup', {
+        items: [{ tmdb_id: tmdbId, media_type: mediaType }],
+      });
+      return response.data[0] ?? null;
+    },
+    enabled:
+      typeof tmdbId === 'number'
+      && tmdbId > 0
+      && (mediaType === 'movie' || mediaType === 'tv'),
+  });
+}
+
 export function useCreateTracking() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (data: { tmdb_id: number; media_type: string; status: string }) => {
-      const res = await api.post('/tracking', data);
+    mutationFn: async (data: {
+      tmdb_id: number;
+      media_type: 'movie' | 'tv';
+      status: TrackingStatus;
+    }) => {
+      const res = await api.post<TrackingItem>('/tracking', data);
       return res.data;
     },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['tracking'] });
-      qc.invalidateQueries({ queryKey: ['stats'] });
-      qc.invalidateQueries({ queryKey: ['activity'] });
-      qc.invalidateQueries({ queryKey: ['discovery'] });
-    },
+    onSuccess: () => invalidateTrackingState(qc),
   });
 }
 
 export function useUpdateTracking() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async ({ id, ...data }: { id: string; status?: string; rating?: number | null; review?: string | null; is_favorite?: boolean }) => {
+    mutationFn: async ({ id, ...data }: { id: string; status?: TrackingStatus; rating?: number | null; review?: string | null; is_favorite?: boolean }) => {
       const res = await api.patch(`/tracking/${id}`, data);
       return res.data;
     },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['tracking'] });
-      qc.invalidateQueries({ queryKey: ['stats'] });
-      qc.invalidateQueries({ queryKey: ['activity'] });
-      qc.invalidateQueries({ queryKey: ['discovery'] });
-    },
+    onSuccess: () => invalidateTrackingState(qc),
   });
 }
 
@@ -73,10 +99,7 @@ export function useDeleteTracking() {
     mutationFn: async (id: string) => {
       await api.delete(`/tracking/${id}`);
     },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['tracking'] });
-      qc.invalidateQueries({ queryKey: ['discovery'] });
-    },
+    onSuccess: () => invalidateTrackingState(qc),
   });
 }
 

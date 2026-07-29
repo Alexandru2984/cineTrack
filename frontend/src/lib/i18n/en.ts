@@ -633,6 +633,9 @@ export const en = {
   mediaCard: {
     unknown: 'Unknown',
     done: 'Done',
+    open: 'Open {title}',
+    addAs: 'Add {title} as {status}',
+    addError: 'Could not update your library. Try again.',
     addedAs: '✓ Added as {status}',
   },
   communityRating: {

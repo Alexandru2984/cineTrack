@@ -636,6 +636,9 @@ export const ro: Dictionary = {
   mediaCard: {
     unknown: 'Necunoscut',
     done: 'Gata',
+    open: 'Deschide {title}',
+    addAs: 'Adaugă {title} ca {status}',
+    addError: 'Nu am putut actualiza biblioteca. Încearcă din nou.',
     addedAs: '✓ Adăugat ca {status}',
   },
   communityRating: {

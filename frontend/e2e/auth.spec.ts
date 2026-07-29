@@ -442,6 +442,60 @@ test('renders local discovery shelves without viewport overflow', async ({ page 
   ).toBe(true);
 });
 
+test('saves Plan to Watch from a touch-sized discovery card without navigating', async ({ page }) => {
+  await stubSession(page);
+  await stubAuthedReads(page, {
+    recommendations: [
+      {
+        id: 700100,
+        media_type: 'movie',
+        title: 'Touch Movie',
+        poster_path: null,
+        vote_average: 7.8,
+      },
+    ],
+    personalized: true,
+    recommendation_basis: ['Drama'],
+    popular_movies: [],
+    popular_shows: [],
+  });
+  let trackingPayload: unknown;
+  await page.route('**/api/tracking', async (route) => {
+    trackingPayload = route.request().postDataJSON();
+    return route.fulfill({
+      status: 201,
+      json: {
+        id: '00000000-0000-4000-8000-000000000130',
+        media_id: '00000000-0000-4000-8000-000000000131',
+        tmdb_id: 700100,
+        media_type: 'movie',
+        title: 'Touch Movie',
+        poster_path: null,
+        status: 'plan_to_watch',
+        rating: null,
+        review: null,
+        is_favorite: false,
+        started_at: null,
+        completed_at: null,
+      },
+    });
+  });
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/');
+  await page.getByRole('button', {
+    name: 'Add Touch Movie as Plan to Watch',
+  }).click();
+
+  await expect.poll(() => trackingPayload).toEqual({
+    tmdb_id: 700100,
+    media_type: 'movie',
+    status: 'plan_to_watch',
+  });
+  await expect(page.getByText('✓ Added as Plan to Watch')).toBeVisible();
+  await expect(page).toHaveURL(/\/$/);
+});
+
 test('uses a touch-safe primary tab bar on narrow authenticated screens', async ({ page }) => {
   await stubSession(page);
   await stubAuthedReads(page);

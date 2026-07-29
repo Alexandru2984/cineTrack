@@ -6,6 +6,7 @@ import {
   useMarkEpisodesWatchedThrough,
   useMarkSeasonWatched,
   useShowWatchProgress,
+  useTrackingLookup,
   useWatchedEpisodes,
 } from '@/hooks/useTracking';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
@@ -29,9 +30,16 @@ import {
   X,
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import type { Episode, Media, Season, SeasonWatchProgress } from '@/types';
+import type {
+  Episode,
+  Media,
+  Season,
+  SeasonWatchProgress,
+  TrackingStatus,
+} from '@/types';
 
 type Genre = NonNullable<Media['genres']>[number];
+const TRACKING_ACTIONS = ['watching', 'plan_to_watch', 'completed'] as const;
 type WatchConfirmation =
   | {
       kind: 'episode';
@@ -85,11 +93,16 @@ export default function MediaDetail() {
     selectedSeason
   );
   const { data: showWatchProgress = [] } = useShowWatchProgress(media?.tmdb_id);
+  const mediaType = media?.media_type ?? (type === 'tv' ? 'tv' : 'movie');
+  const tracking = useTrackingLookup(media?.tmdb_id, mediaType);
   const createTracking = useCreateTracking();
   const markEpisodeWatched = useMarkEpisodeWatched();
   const markSeasonWatched = useMarkSeasonWatched();
   const markEpisodesWatchedThrough = useMarkEpisodesWatchedThrough();
-  const [trackingStatus, setTrackingStatus] = useState('');
+  const [statusSelection, setStatusSelection] = useState<{
+    mediaKey: string;
+    status: TrackingStatus;
+  } | null>(null);
   const [watchConfirmation, setWatchConfirmation] = useState<WatchConfirmation | null>(null);
   const [listPickerOpen, setListPickerOpen] = useState(false);
   const [listFeedback, setListFeedback] = useState<string | null>(null);
@@ -97,6 +110,11 @@ export default function MediaDetail() {
   if (isLoading) return <LoadingSpinner />;
   if (!media) return <div className="text-center py-16">{t('media.notFound')}</div>;
 
+  const mediaKey = `${mediaType}:${media.tmdb_id}`;
+  const trackingStatus =
+    statusSelection?.mediaKey === mediaKey
+      ? statusSelection.status
+      : tracking.data?.status ?? null;
   const genres: Genre[] = Array.isArray(media.genres) ? media.genres : [];
   const watchedEpisodeSet = new Set(watchedEpisodes);
   const progressBySeason = new Map<number, SeasonWatchProgress>(
@@ -116,14 +134,16 @@ export default function MediaDetail() {
     ?? markSeasonWatched.error
     ?? markEpisodesWatchedThrough.error;
 
-  const handleAddToList = (status: string) => {
+  const handleAddToList = (status: TrackingStatus) => {
     createTracking.mutate(
       {
         tmdb_id: media.tmdb_id,
-        media_type: media.media_type || type,
+        media_type: mediaType,
         status,
       },
-      { onSuccess: () => setTrackingStatus(status) }
+      {
+        onSuccess: () => setStatusSelection({ mediaKey, status }),
+      },
     );
   };
 
@@ -235,11 +255,13 @@ export default function MediaDetail() {
 
             {/* Add to list */}
             <div className="flex flex-wrap gap-2 pt-2">
-              {['watching', 'plan_to_watch', 'completed'].map((status) => (
+              {TRACKING_ACTIONS.map((status) => (
                 <button
                   key={status}
+                  type="button"
                   onClick={() => handleAddToList(status)}
                   disabled={createTracking.isPending}
+                  aria-pressed={trackingStatus === status}
                   className={`flex items-center gap-1 rounded-md px-4 py-2 text-sm font-medium transition-colors ${
                     trackingStatus === status
                       ? 'bg-[hsl(var(--primary))] text-white'
