@@ -134,6 +134,62 @@ impl EmailService {
             .await;
     }
 
+    /// Alert the account owner after a successful password login. This mail is
+    /// informational only: it contains no bearer link or other credential.
+    pub async fn send_new_login_alert(
+        &self,
+        to: &str,
+        user_agent: Option<&str>,
+        ip_address: Option<&str>,
+    ) {
+        let subject = "New sign-in to your Văzute account";
+        let device = user_agent.unwrap_or("Unknown device");
+        let ip = ip_address.unwrap_or("Unknown IP address");
+        let body = format!(
+            "A new sign-in to your Văzute account succeeded.\n\n\
+             Device: {device}\n\
+             IP address: {ip}\n\n\
+             If this wasn't you, change your password and sign out all other \
+             sessions from Settings immediately."
+        );
+        self.deliver("security_new_login", to, subject, body, "")
+            .await;
+    }
+
+    pub async fn send_password_changed_alert(&self, to: &str, was_reset: bool) {
+        let (kind, subject, action) = if was_reset {
+            (
+                "security_password_reset",
+                "Your Văzute password was reset",
+                "reset",
+            )
+        } else {
+            (
+                "security_password_changed",
+                "Your Văzute password was changed",
+                "changed",
+            )
+        };
+        let body = format!(
+            "The password for your Văzute account was {action}.\n\n\
+             All existing sessions were revoked. If this wasn't you, secure \
+             your email account first, then reset your Văzute password."
+        );
+        self.deliver(kind, to, subject, body, "").await;
+    }
+
+    pub async fn send_two_factor_changed_alert(&self, to: &str, enabled: bool) {
+        let state = if enabled { "enabled" } else { "disabled" };
+        let subject = format!("Two-factor authentication was {state}");
+        let body = format!(
+            "Two-factor authentication was {state} on your Văzute account.\n\n\
+             If this wasn't you, change your password and review your active \
+             sessions immediately."
+        );
+        self.deliver("security_two_factor_changed", to, &subject, body, "")
+            .await;
+    }
+
     /// Build the message with an explicit `Message-ID` (`<uuid@sender-domain>`).
     /// lettre does not add one, and a missing Message-ID is a spam signal several
     /// providers (Gmail included) score against.

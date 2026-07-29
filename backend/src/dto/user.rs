@@ -55,6 +55,7 @@ pub struct AccountDataExport {
     pub import_jobs: Vec<Value>,
     pub calendar_preferences: Option<Value>,
     pub oauth_accounts: Vec<Value>,
+    pub security_activity: Vec<Value>,
 }
 
 #[cfg(test)]

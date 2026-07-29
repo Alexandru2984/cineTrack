@@ -10,6 +10,7 @@ pub struct RetentionSummary {
     pub password_reset_tokens: u64,
     pub email_verification_tokens: u64,
     pub email_change_tokens: u64,
+    pub security_activity: u64,
 }
 
 impl RetentionSummary {
@@ -18,6 +19,7 @@ impl RetentionSummary {
             + self.password_reset_tokens
             + self.email_verification_tokens
             + self.email_change_tokens
+            + self.security_activity
     }
 }
 
@@ -77,6 +79,14 @@ pub async fn prune_security_artifacts(pool: &PgPool) -> Result<RetentionSummary,
     .await?
     .rows_affected();
 
+    let security_activity = sqlx::query(
+        "DELETE FROM security_activity
+         WHERE created_at < NOW() - INTERVAL '90 days'",
+    )
+    .execute(&mut *tx)
+    .await?
+    .rows_affected();
+
     tx.commit().await?;
 
     Ok(RetentionSummary {
@@ -84,6 +94,7 @@ pub async fn prune_security_artifacts(pool: &PgPool) -> Result<RetentionSummary,
         password_reset_tokens,
         email_verification_tokens,
         email_change_tokens,
+        security_activity,
     })
 }
 
@@ -98,11 +109,12 @@ pub fn start_security_artifact_pruner(pool: PgPool) {
             match prune_security_artifacts(&pool).await {
                 Ok(summary) if summary.total() > 0 => log::info!(
                     "Pruned security artifacts: refresh_tokens={} password_reset_tokens={} \
-                     email_verification_tokens={} email_change_tokens={}",
+                     email_verification_tokens={} email_change_tokens={} security_activity={}",
                     summary.refresh_tokens,
                     summary.password_reset_tokens,
                     summary.email_verification_tokens,
                     summary.email_change_tokens,
+                    summary.security_activity,
                 ),
                 Ok(_) => {}
                 Err(error) => log::error!("Failed to prune security artifacts: {error}"),

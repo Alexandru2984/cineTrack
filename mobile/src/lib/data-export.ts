@@ -35,6 +35,7 @@ const accountExportSchema = z.object({
   import_jobs: z.array(z.unknown()).max(10_000),
   calendar_preferences: z.unknown().nullable(),
   oauth_accounts: z.array(z.unknown()).max(20),
+  security_activity: z.array(z.unknown()).max(200),
 });
 
 export type AccountDataExport = z.infer<typeof accountExportSchema>;

@@ -12,6 +12,7 @@ use crate::models::{
     EmailChangeToken, EmailVerificationToken, PasswordResetToken, RefreshToken, User,
 };
 use crate::services::email::EmailService;
+use crate::services::security_activity::{self, SecurityActivityKind};
 use crate::utils::{jwt, password, totp, totp_secret};
 
 const PASSWORD_RESET_RESPONSE_FLOOR: StdDuration = StdDuration::from_millis(250);
@@ -38,6 +39,11 @@ pub fn normalize_email(email: &str) -> String {
 pub struct ClientInfo {
     pub user_agent: Option<String>,
     pub ip_address: Option<String>,
+}
+
+pub struct SecurityContext<'a> {
+    pub email_service: &'a EmailService,
+    pub client: &'a ClientInfo,
 }
 
 pub async fn register(
@@ -82,7 +88,14 @@ pub async fn register(
         );
     }
 
-    let (access_token, refresh_token) = issue_token_pair(pool, config, client, &user).await?;
+    let (access_token, refresh_token) = issue_token_pair(
+        pool,
+        config,
+        client,
+        &user,
+        SecurityActivityKind::AccountRegistered,
+    )
+    .await?;
 
     let resp = AuthResponse {
         access_token,
@@ -97,6 +110,7 @@ pub async fn register(
 pub async fn login(
     pool: &PgPool,
     config: &Config,
+    email_service: &EmailService,
     client: &ClientInfo,
     req: LoginRequest,
 ) -> Result<(AuthResponse, String), AppError> {
@@ -182,7 +196,24 @@ pub async fn login(
     .execute(pool)
     .await?;
 
-    let (access_token, refresh_token) = issue_token_pair(pool, config, client, &user).await?;
+    let (access_token, refresh_token) = issue_token_pair(
+        pool,
+        config,
+        client,
+        &user,
+        SecurityActivityKind::LoginSucceeded,
+    )
+    .await?;
+
+    let email_service = email_service.clone();
+    let recipient = user.email.clone();
+    let user_agent = client.user_agent.clone();
+    let ip_address = client.ip_address.clone();
+    actix_web::rt::spawn(async move {
+        email_service
+            .send_new_login_alert(&recipient, user_agent.as_deref(), ip_address.as_deref())
+            .await;
+    });
 
     let resp = AuthResponse {
         access_token,
@@ -320,6 +351,7 @@ pub async fn logout(pool: &PgPool, refresh_token: &str) -> Result<(), AppError> 
 pub async fn change_password(
     pool: &PgPool,
     config: &Config,
+    security: &SecurityContext<'_>,
     user_id: Uuid,
     current_password: &str,
     new_password: &str,
@@ -354,7 +386,23 @@ pub async fn change_password(
     .bind(user_id)
     .execute(&mut *tx)
     .await?;
+    security_activity::record_in_transaction(
+        &mut tx,
+        user_id,
+        SecurityActivityKind::PasswordChanged,
+        security.client.user_agent.as_deref(),
+        security.client.ip_address.as_deref(),
+    )
+    .await?;
     tx.commit().await?;
+
+    let email_service = security.email_service.clone();
+    let recipient = user.email;
+    actix_web::rt::spawn(async move {
+        email_service
+            .send_password_changed_alert(&recipient, false)
+            .await;
+    });
 
     log::info!("audit: password changed user_id={user_id}");
     crate::metrics::record_security_event(crate::metrics::SecurityEvent::CredentialChanged);
@@ -439,6 +487,7 @@ pub async fn forgot_password(
 /// the new password and revokes all refresh tokens for the account.
 pub async fn reset_password(
     pool: &PgPool,
+    security: &SecurityContext<'_>,
     token: &str,
     new_password: &str,
 ) -> Result<(), AppError> {
@@ -465,6 +514,10 @@ pub async fn reset_password(
     }
 
     let new_hash = password::hash_password(new_password).await?;
+    let recipient = sqlx::query_scalar::<_, String>("SELECT email FROM users WHERE id = $1")
+        .bind(stored.user_id)
+        .fetch_one(&mut *tx)
+        .await?;
 
     sqlx::query("UPDATE password_reset_tokens SET consumed_at = NOW() WHERE id = $1")
         .bind(stored.id)
@@ -481,8 +534,23 @@ pub async fn reset_password(
     .bind(stored.user_id)
     .execute(&mut *tx)
     .await?;
+    security_activity::record_in_transaction(
+        &mut tx,
+        stored.user_id,
+        SecurityActivityKind::PasswordReset,
+        security.client.user_agent.as_deref(),
+        security.client.ip_address.as_deref(),
+    )
+    .await?;
 
     tx.commit().await?;
+
+    let email_service = security.email_service.clone();
+    actix_web::rt::spawn(async move {
+        email_service
+            .send_password_changed_alert(&recipient, true)
+            .await;
+    });
 
     log::info!("audit: password reset completed user_id={}", stored.user_id);
     crate::metrics::record_security_event(crate::metrics::SecurityEvent::CredentialChanged);
@@ -599,7 +667,7 @@ pub async fn verify_email(pool: &PgPool, token: &str) -> Result<(), AppError> {
 pub async fn request_email_change(
     pool: &PgPool,
     config: &Config,
-    email_service: &EmailService,
+    security: &SecurityContext<'_>,
     user_id: Uuid,
     current_password: &str,
     new_email: &str,
@@ -640,6 +708,7 @@ pub async fn request_email_change(
     let token_hash = jwt::hash_refresh_token(&token);
     let expires_at = Utc::now() + Duration::hours(EMAIL_CHANGE_TTL_HOURS);
 
+    let mut tx = pool.begin().await?;
     let issued = sqlx::query_as::<_, EmailChangeToken>(
         "INSERT INTO email_change_tokens (user_id, new_email, token_hash, expires_at)
          VALUES ($1, $2, $3, $4)
@@ -658,7 +727,7 @@ pub async fn request_email_change(
     .bind(&token_hash)
     .bind(expires_at)
     .bind(EMAIL_CHANGE_COOLDOWN_SECONDS)
-    .fetch_optional(pool)
+    .fetch_optional(&mut *tx)
     .await?;
 
     if issued.is_none() {
@@ -666,13 +735,22 @@ pub async fn request_email_change(
             "A change is already pending; check your inbox or try again shortly".to_string(),
         ));
     }
+    security_activity::record_in_transaction(
+        &mut tx,
+        user_id,
+        SecurityActivityKind::EmailChangeRequested,
+        security.client.user_agent.as_deref(),
+        security.client.ip_address.as_deref(),
+    )
+    .await?;
+    tx.commit().await?;
 
     let confirm_url = format!(
         "{}/confirm-email-change#token={}",
         config.frontend_url.trim_end_matches('/'),
         token
     );
-    let email_service = email_service.clone();
+    let email_service = security.email_service.clone();
     let old_address = user.email.clone();
     let new_address = new_email.clone();
     actix_web::rt::spawn(async move {
@@ -695,7 +773,11 @@ pub async fn request_email_change(
 ///
 /// Confirming also marks the account verified: the address just demonstrated the
 /// exact thing verification asks for.
-pub async fn confirm_email_change(pool: &PgPool, token: &str) -> Result<(), AppError> {
+pub async fn confirm_email_change(
+    pool: &PgPool,
+    client: &ClientInfo,
+    token: &str,
+) -> Result<(), AppError> {
     if !jwt::is_valid_refresh_token(token) {
         return Err(AppError::BadRequest(
             "Invalid or expired confirmation token".to_string(),
@@ -742,6 +824,14 @@ pub async fn confirm_email_change(pool: &PgPool, token: &str) -> Result<(), AppE
         }
         Err(error) => return Err(error.into()),
     }
+    security_activity::record_in_transaction(
+        &mut tx,
+        stored.user_id,
+        SecurityActivityKind::EmailChanged,
+        client.user_agent.as_deref(),
+        client.ip_address.as_deref(),
+    )
+    .await?;
 
     tx.commit().await?;
 
@@ -1047,6 +1137,7 @@ pub async fn setup_two_factor(
 pub async fn enable_two_factor(
     pool: &PgPool,
     config: &Config,
+    security: &SecurityContext<'_>,
     user_id: Uuid,
     code: &str,
 ) -> Result<Vec<String>, AppError> {
@@ -1121,7 +1212,23 @@ pub async fn enable_two_factor(
             .execute(&mut *tx)
             .await?;
     }
+    security_activity::record_in_transaction(
+        &mut tx,
+        user_id,
+        SecurityActivityKind::TwoFactorEnabled,
+        security.client.user_agent.as_deref(),
+        security.client.ip_address.as_deref(),
+    )
+    .await?;
     tx.commit().await?;
+
+    let email_service = security.email_service.clone();
+    let recipient = user.email;
+    actix_web::rt::spawn(async move {
+        email_service
+            .send_two_factor_changed_alert(&recipient, true)
+            .await;
+    });
 
     log::info!("audit: two-factor enabled user_id={user_id}");
     crate::metrics::record_security_event(crate::metrics::SecurityEvent::CredentialChanged);
@@ -1134,6 +1241,7 @@ pub async fn enable_two_factor(
 pub async fn disable_two_factor(
     pool: &PgPool,
     config: &Config,
+    security: &SecurityContext<'_>,
     user_id: Uuid,
     password_input: &str,
     totp_code: Option<&str>,
@@ -1162,7 +1270,23 @@ pub async fn disable_two_factor(
         .bind(user_id)
         .execute(&mut *tx)
         .await?;
+    security_activity::record_in_transaction(
+        &mut tx,
+        user_id,
+        SecurityActivityKind::TwoFactorDisabled,
+        security.client.user_agent.as_deref(),
+        security.client.ip_address.as_deref(),
+    )
+    .await?;
     tx.commit().await?;
+
+    let email_service = security.email_service.clone();
+    let recipient = user.email;
+    actix_web::rt::spawn(async move {
+        email_service
+            .send_two_factor_changed_alert(&recipient, false)
+            .await;
+    });
 
     log::info!("audit: two-factor disabled user_id={user_id}");
     crate::metrics::record_security_event(crate::metrics::SecurityEvent::CredentialChanged);
@@ -1205,6 +1329,7 @@ async fn issue_token_pair(
     config: &Config,
     client: &ClientInfo,
     user: &User,
+    activity_kind: SecurityActivityKind,
 ) -> Result<(String, String), AppError> {
     let access_token =
         jwt::generate_access_token(user.id, &config.jwt_secret, config.jwt_expiry_minutes)?;
@@ -1212,6 +1337,7 @@ async fn issue_token_pair(
     let token_hash = jwt::hash_refresh_token(&refresh_token);
     let expires_at = Utc::now() + Duration::days(config.jwt_refresh_expiry_days);
 
+    let mut tx = pool.begin().await?;
     sqlx::query(
         "INSERT INTO refresh_tokens (user_id, token_hash, expires_at, user_agent, ip_address, last_used_at)
          VALUES ($1, $2, $3, $4, $5, NOW())",
@@ -1221,10 +1347,19 @@ async fn issue_token_pair(
     .bind(expires_at)
     .bind(&client.user_agent)
     .bind(&client.ip_address)
-    .execute(pool)
+    .execute(&mut *tx)
     .await?;
 
-    cap_active_refresh_tokens(pool, user.id).await?;
+    cap_active_refresh_tokens(&mut *tx, user.id).await?;
+    security_activity::record_in_transaction(
+        &mut tx,
+        user.id,
+        activity_kind,
+        client.user_agent.as_deref(),
+        client.ip_address.as_deref(),
+    )
+    .await?;
+    tx.commit().await?;
 
     Ok((access_token, refresh_token))
 }
@@ -1297,21 +1432,32 @@ pub async fn list_sessions_for_refresh_token(
 /// another's session; a missing/foreign id yields NotFound (no enumeration).
 pub async fn revoke_session(
     pool: &PgPool,
+    client: &ClientInfo,
     user_id: Uuid,
     session_id: Uuid,
 ) -> Result<(), AppError> {
+    let mut tx = pool.begin().await?;
     let result = sqlx::query(
         "UPDATE refresh_tokens SET revoked_at = NOW()
          WHERE id = $1 AND user_id = $2 AND revoked_at IS NULL",
     )
     .bind(session_id)
     .bind(user_id)
-    .execute(pool)
+    .execute(&mut *tx)
     .await?;
 
     if result.rows_affected() == 0 {
         return Err(AppError::NotFound("Session not found".to_string()));
     }
+    security_activity::record_in_transaction(
+        &mut tx,
+        user_id,
+        SecurityActivityKind::SessionRevoked,
+        client.user_agent.as_deref(),
+        client.ip_address.as_deref(),
+    )
+    .await?;
+    tx.commit().await?;
 
     log::info!("audit: session revoked user_id={user_id} session_id={session_id}");
 
@@ -1319,13 +1465,27 @@ pub async fn revoke_session(
 }
 
 /// Revoke every active session for the user ("sign out everywhere").
-pub async fn logout_all_sessions(pool: &PgPool, user_id: Uuid) -> Result<(), AppError> {
+pub async fn logout_all_sessions(
+    pool: &PgPool,
+    client: &ClientInfo,
+    user_id: Uuid,
+) -> Result<(), AppError> {
+    let mut tx = pool.begin().await?;
     sqlx::query(
         "UPDATE refresh_tokens SET revoked_at = NOW() WHERE user_id = $1 AND revoked_at IS NULL",
     )
     .bind(user_id)
-    .execute(pool)
+    .execute(&mut *tx)
     .await?;
+    security_activity::record_in_transaction(
+        &mut tx,
+        user_id,
+        SecurityActivityKind::AllSessionsRevoked,
+        client.user_agent.as_deref(),
+        client.ip_address.as_deref(),
+    )
+    .await?;
+    tx.commit().await?;
 
     log::info!("audit: all sessions revoked user_id={user_id}");
 

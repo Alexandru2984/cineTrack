@@ -56,6 +56,7 @@ fn scope() -> actix_web::Scope {
         .route("/2fa/enable", web::post().to(enable_two_factor))
         .route("/2fa/disable", web::post().to(disable_two_factor))
         .route("/sessions", web::get().to(list_sessions))
+        .route("/security-activity", web::get().to(list_security_activity))
         .route("/sessions/logout-all", web::post().to(logout_all_sessions))
         .route("/sessions/{id}", web::delete().to(revoke_session))
         .route("/me", web::get().to(me))
@@ -96,13 +97,20 @@ async fn register(
 async fn login(
     pool: web::Data<PgPool>,
     config: web::Data<Config>,
+    email_service: web::Data<EmailService>,
     req: HttpRequest,
     body: web::Json<LoginRequest>,
 ) -> Result<HttpResponse, AppError> {
     body.validate()?;
     let client = client_info(&req);
-    let (resp, refresh_token) =
-        services::auth::login(pool.get_ref(), config.get_ref(), &client, body.into_inner()).await?;
+    let (resp, refresh_token) = services::auth::login(
+        pool.get_ref(),
+        config.get_ref(),
+        email_service.get_ref(),
+        &client,
+        body.into_inner(),
+    )
+    .await?;
     Ok(HttpResponse::Ok()
         .cookie(refresh_cookie(&refresh_token, config.get_ref()))
         .json(resp))
@@ -133,13 +141,20 @@ async fn mobile_register(
 async fn mobile_login(
     pool: web::Data<PgPool>,
     config: web::Data<Config>,
+    email_service: web::Data<EmailService>,
     req: HttpRequest,
     body: web::Json<LoginRequest>,
 ) -> Result<HttpResponse, AppError> {
     body.validate()?;
     let client = client_info(&req);
-    let (resp, refresh_token) =
-        services::auth::login(pool.get_ref(), config.get_ref(), &client, body.into_inner()).await?;
+    let (resp, refresh_token) = services::auth::login(
+        pool.get_ref(),
+        config.get_ref(),
+        email_service.get_ref(),
+        &client,
+        body.into_inner(),
+    )
+    .await?;
     Ok(no_store(HttpResponse::Ok()).json(MobileAuthResponse::new(resp, refresh_token)))
 }
 
@@ -236,6 +251,7 @@ async fn me(pool: web::Data<PgPool>, req: HttpRequest) -> Result<HttpResponse, A
 async fn change_password(
     pool: web::Data<PgPool>,
     config: web::Data<Config>,
+    email_service: web::Data<EmailService>,
     breach: web::Data<BreachChecker>,
     req: HttpRequest,
     body: web::Json<ChangePasswordRequest>,
@@ -243,10 +259,16 @@ async fn change_password(
     let user_id = require_auth(&req).await?;
     body.validate()?;
     breach.ensure_not_breached(&body.new_password).await?;
+    let client = client_info(&req);
+    let security = services::auth::SecurityContext {
+        email_service: email_service.get_ref(),
+        client: &client,
+    };
     let data = body.into_inner();
     services::auth::change_password(
         pool.get_ref(),
         config.get_ref(),
+        &security,
         user_id,
         &data.current_password,
         &data.new_password,
@@ -284,13 +306,21 @@ async fn forgot_password(
 async fn reset_password(
     pool: web::Data<PgPool>,
     config: web::Data<Config>,
+    email_service: web::Data<EmailService>,
     breach: web::Data<BreachChecker>,
+    req: HttpRequest,
     body: web::Json<ResetPasswordRequest>,
 ) -> Result<HttpResponse, AppError> {
     body.validate()?;
     breach.ensure_not_breached(&body.new_password).await?;
+    let client = client_info(&req);
+    let security = services::auth::SecurityContext {
+        email_service: email_service.get_ref(),
+        client: &client,
+    };
     let data = body.into_inner();
-    services::auth::reset_password(pool.get_ref(), &data.token, &data.new_password).await?;
+    services::auth::reset_password(pool.get_ref(), &security, &data.token, &data.new_password)
+        .await?;
 
     Ok(HttpResponse::Ok()
         .cookie(clear_refresh_cookie(config.get_ref()))
@@ -315,11 +345,16 @@ async fn request_email_change(
 ) -> Result<HttpResponse, AppError> {
     let user_id = require_auth(&req).await?;
     body.validate()?;
+    let client = client_info(&req);
+    let security = services::auth::SecurityContext {
+        email_service: email_service.get_ref(),
+        client: &client,
+    };
     let data = body.into_inner();
     services::auth::request_email_change(
         pool.get_ref(),
         config.get_ref(),
-        email_service.get_ref(),
+        &security,
         user_id,
         &data.current_password,
         &data.new_email,
@@ -334,10 +369,12 @@ async fn request_email_change(
 
 async fn confirm_email_change(
     pool: web::Data<PgPool>,
+    req: HttpRequest,
     body: web::Json<ConfirmEmailChangeRequest>,
 ) -> Result<HttpResponse, AppError> {
     body.validate()?;
-    services::auth::confirm_email_change(pool.get_ref(), &body.token).await?;
+    let client = client_info(&req);
+    services::auth::confirm_email_change(pool.get_ref(), &client, &body.token).await?;
     Ok(HttpResponse::Ok().json(serde_json::json!({"message": "Email address updated"})))
 }
 
@@ -378,14 +415,21 @@ async fn setup_two_factor(
 async fn enable_two_factor(
     pool: web::Data<PgPool>,
     config: web::Data<Config>,
+    email_service: web::Data<EmailService>,
     req: HttpRequest,
     body: web::Json<EnableTwoFactorRequest>,
 ) -> Result<HttpResponse, AppError> {
     let user_id = require_auth(&req).await?;
     body.validate()?;
+    let client = client_info(&req);
+    let security = services::auth::SecurityContext {
+        email_service: email_service.get_ref(),
+        client: &client,
+    };
     let recovery_codes = services::auth::enable_two_factor(
         pool.get_ref(),
         config.get_ref(),
+        &security,
         user_id,
         body.code.trim(),
     )
@@ -396,14 +440,21 @@ async fn enable_two_factor(
 async fn disable_two_factor(
     pool: web::Data<PgPool>,
     config: web::Data<Config>,
+    email_service: web::Data<EmailService>,
     req: HttpRequest,
     body: web::Json<DisableTwoFactorRequest>,
 ) -> Result<HttpResponse, AppError> {
     let user_id = require_auth(&req).await?;
     body.validate()?;
+    let client = client_info(&req);
+    let security = services::auth::SecurityContext {
+        email_service: email_service.get_ref(),
+        client: &client,
+    };
     services::auth::disable_two_factor(
         pool.get_ref(),
         config.get_ref(),
+        &security,
         user_id,
         &body.password,
         body.totp_code.as_deref(),
@@ -426,13 +477,23 @@ async fn list_sessions(
     Ok(no_store(HttpResponse::Ok()).json(sessions))
 }
 
+async fn list_security_activity(
+    pool: web::Data<PgPool>,
+    req: HttpRequest,
+) -> Result<HttpResponse, AppError> {
+    let user_id = require_auth(&req).await?;
+    let activity = services::security_activity::list_for_user(pool.get_ref(), user_id).await?;
+    Ok(no_store(HttpResponse::Ok()).json(activity))
+}
+
 async fn revoke_session(
     pool: web::Data<PgPool>,
     req: HttpRequest,
     path: web::Path<uuid::Uuid>,
 ) -> Result<HttpResponse, AppError> {
     let user_id = require_auth(&req).await?;
-    services::auth::revoke_session(pool.get_ref(), user_id, path.into_inner()).await?;
+    let client = client_info(&req);
+    services::auth::revoke_session(pool.get_ref(), &client, user_id, path.into_inner()).await?;
     Ok(HttpResponse::Ok().json(serde_json::json!({"message": "Session revoked"})))
 }
 
@@ -442,7 +503,8 @@ async fn logout_all_sessions(
     req: HttpRequest,
 ) -> Result<HttpResponse, AppError> {
     let user_id = require_auth(&req).await?;
-    services::auth::logout_all_sessions(pool.get_ref(), user_id).await?;
+    let client = client_info(&req);
+    services::auth::logout_all_sessions(pool.get_ref(), &client, user_id).await?;
     Ok(HttpResponse::Ok()
         .cookie(clear_refresh_cookie(config.get_ref()))
         .json(serde_json::json!({"message": "Signed out of all sessions"})))
@@ -450,12 +512,24 @@ async fn logout_all_sessions(
 
 /// Collect best-effort client metadata (User-Agent, real IP) for session
 /// tracking. User-Agent is bounded to the column width.
-fn client_info(req: &HttpRequest) -> services::auth::ClientInfo {
+pub(crate) fn client_info(req: &HttpRequest) -> services::auth::ClientInfo {
     let user_agent = req
         .headers()
         .get(actix_web::http::header::USER_AGENT)
         .and_then(|value| value.to_str().ok())
-        .map(|value| value.chars().take(512).collect::<String>());
+        .map(|value| {
+            value
+                .chars()
+                .map(|character| {
+                    if character.is_control() {
+                        ' '
+                    } else {
+                        character
+                    }
+                })
+                .take(512)
+                .collect::<String>()
+        });
     let ip_address = crate::middleware::rate_limit::client_ip(req).map(|ip| ip.to_string());
 
     services::auth::ClientInfo {

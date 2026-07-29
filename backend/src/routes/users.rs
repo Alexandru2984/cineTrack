@@ -617,7 +617,36 @@ async fn export_account_data(
     .fetch_all(&mut *tx)
     .await?;
 
+    let security_activity = sqlx::query_scalar::<_, serde_json::Value>(
+        r#"SELECT jsonb_build_object(
+            'id', id,
+            'event_type', event_type,
+            'user_agent', user_agent,
+            'ip_address', ip_address,
+            'created_at', created_at
+        )
+        FROM security_activity
+        WHERE user_id = $1
+        ORDER BY created_at, id"#,
+    )
+    .bind(user_id)
+    .fetch_all(&mut *tx)
+    .await?;
+
     tx.commit().await?;
+
+    let client = crate::routes::auth::client_info(&req);
+    let mut activity_tx = pool.begin().await?;
+    crate::services::security_activity::record_in_transaction(
+        &mut activity_tx,
+        user_id,
+        crate::services::security_activity::SecurityActivityKind::AccountDataExported,
+        client.user_agent.as_deref(),
+        client.ip_address.as_deref(),
+    )
+    .await?;
+    activity_tx.commit().await?;
+
     log::info!("audit: account data exported user_id={user_id}");
     crate::metrics::record_product_action(crate::metrics::ProductAction::AccountDataExported);
     crate::metrics::record_security_event(crate::metrics::SecurityEvent::AccountDataExported);
@@ -646,6 +675,7 @@ async fn export_account_data(
             import_jobs,
             calendar_preferences,
             oauth_accounts,
+            security_activity,
         }))
 }
 

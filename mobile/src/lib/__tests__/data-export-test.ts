@@ -64,6 +64,7 @@ function exportPayload() {
     import_jobs: [],
     calendar_preferences: { country_code: 'RO' },
     oauth_accounts: [],
+    security_activity: [],
   };
 }
 

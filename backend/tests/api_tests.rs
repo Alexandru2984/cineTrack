@@ -269,6 +269,16 @@ async fn security_artifact_retention_preserves_active_refresh_families() {
     .execute(&pool)
     .await
     .unwrap();
+    sqlx::query(
+        r#"INSERT INTO security_activity (user_id, event_type, created_at)
+        VALUES
+            ($1, 'login_succeeded', NOW() - INTERVAL '91 days'),
+            ($1, 'password_changed', NOW() - INTERVAL '89 days')"#,
+    )
+    .bind(user_id)
+    .execute(&pool)
+    .await
+    .unwrap();
 
     let summary = cinetrack::services::retention::prune_security_artifacts(&pool)
         .await
@@ -278,6 +288,7 @@ async fn security_artifact_retention_preserves_active_refresh_families() {
     assert_eq!(summary.password_reset_tokens, 1);
     assert_eq!(summary.email_verification_tokens, 1);
     assert_eq!(summary.email_change_tokens, 0);
+    assert_eq!(summary.security_activity, 1);
 
     let remaining: Vec<String> = sqlx::query_scalar(
         "SELECT token_hash FROM refresh_tokens WHERE user_id = $1 ORDER BY token_hash",
@@ -302,6 +313,13 @@ async fn security_artifact_retention_preserves_active_refresh_families() {
             .await
             .unwrap();
     assert_eq!(email_change_count, 1);
+    let security_activity_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM security_activity WHERE user_id = $1")
+            .bind(user_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(security_activity_count, 1);
 
     clean_db(&pool).await;
 }
@@ -967,6 +985,15 @@ async fn test_change_password_success() {
         .to_request();
     let resp = actix_test::call_service(&app, req).await;
     assert_eq!(resp.status(), 200);
+    let password_event_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM security_activity
+         WHERE user_id = (SELECT id FROM users WHERE email = 'pw@example.com')
+           AND event_type = 'password_changed'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(password_event_count, 1);
 
     // Old password no longer works
     let req = actix_test::TestRequest::post()
@@ -1557,6 +1584,22 @@ async fn test_two_factor_enable_login_and_recovery() {
         .to_request();
     let resp = actix_test::call_service(&app, req).await;
     assert_eq!(resp.status(), 200);
+    let credential_events: Vec<String> = sqlx::query_scalar(
+        "SELECT event_type FROM security_activity
+         WHERE user_id = (SELECT id FROM users WHERE email = 'mfa@example.com')
+           AND event_type IN ('two_factor_enabled', 'two_factor_disabled')
+         ORDER BY created_at",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        credential_events,
+        vec![
+            "two_factor_enabled".to_string(),
+            "two_factor_disabled".to_string(),
+        ]
+    );
 
     let (status, _) = login_json(
         &app,
@@ -1820,6 +1863,15 @@ async fn test_reset_password_success() {
         .to_request();
     let resp = actix_test::call_service(&app, req).await;
     assert_eq!(resp.status(), 200);
+    let reset_event_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM security_activity
+         WHERE user_id = (SELECT id FROM users WHERE email = 'reset@example.com')
+           AND event_type = 'password_reset'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(reset_event_count, 1);
 
     // Old password rejected
     let req = actix_test::TestRequest::post()
@@ -1901,6 +1953,104 @@ async fn test_reset_password_token_single_use() {
 }
 
 // ── Session Management Tests ──────────────────────────────────
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn test_security_activity_is_owner_scoped_no_store_and_bounded() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+
+    let (owner_access, _, owner_id) =
+        register_user(&app, "activity_owner", "activity@example.com", "Pass1234").await;
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/auth/login")
+        .insert_header((header::USER_AGENT, "VazuteSecurityTest/1.0"))
+        .set_json(json!({
+            "email": "activity@example.com",
+            "password": "Pass1234"
+        }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+
+    let req = actix_test::TestRequest::get()
+        .uri("/api/auth/security-activity")
+        .insert_header(("Authorization", format!("Bearer {owner_access}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    assert_eq!(
+        resp.headers()
+            .get(header::CACHE_CONTROL)
+            .and_then(|value| value.to_str().ok()),
+        Some("no-store")
+    );
+    let body: Value = actix_test::read_body_json(resp).await;
+    let events = body.as_array().unwrap();
+    assert_eq!(events.len(), 2);
+    assert_eq!(events[0]["event_type"], "login_succeeded");
+    assert_eq!(events[0]["user_agent"], "VazuteSecurityTest/1.0");
+    assert_eq!(events[0]["ip_address"], "127.0.0.1");
+    assert_eq!(events[1]["event_type"], "account_registered");
+    assert!(events
+        .iter()
+        .all(|event| event.get("user_id").is_none() && event.get("token_hash").is_none()));
+
+    let (other_access, _, _) = register_user(
+        &app,
+        "activity_other",
+        "activity-other@example.com",
+        "Pass1234",
+    )
+    .await;
+    let req = actix_test::TestRequest::get()
+        .uri("/api/auth/security-activity")
+        .insert_header(("Authorization", format!("Bearer {other_access}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let other_events: Value =
+        actix_test::read_body_json(actix_test::call_service(&app, req).await).await;
+    assert_eq!(other_events.as_array().unwrap().len(), 1);
+    assert_eq!(other_events[0]["event_type"], "account_registered");
+
+    let owner_id = Uuid::parse_str(&owner_id).unwrap();
+    sqlx::query(
+        "INSERT INTO security_activity (user_id, event_type, created_at)
+         SELECT $1, 'session_revoked', NOW() - (n * INTERVAL '1 second')
+         FROM generate_series(1, 205) AS n",
+    )
+    .bind(owner_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let _ = login_user(&app, "activity@example.com", "Pass1234").await;
+    let retained: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM security_activity WHERE user_id = $1")
+            .bind(owner_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(retained, 200);
+
+    let req = actix_test::TestRequest::get()
+        .uri("/api/auth/security-activity")
+        .insert_header(("Authorization", format!("Bearer {owner_access}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let limited: Value =
+        actix_test::read_body_json(actix_test::call_service(&app, req).await).await;
+    assert_eq!(limited.as_array().unwrap().len(), 100);
+
+    let req = actix_test::TestRequest::get()
+        .uri("/api/auth/security-activity")
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 401);
+}
 
 #[actix_web::test]
 #[ignore = "requires test DB"]
@@ -5639,6 +5789,21 @@ async fn test_account_export_requires_password_and_excludes_credentials() {
     assert!(body["library"].is_array());
     assert!(body["watch_history"].is_array());
     assert!(body["sessions"].is_array());
+    assert_eq!(body["security_activity"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        body["security_activity"][0]["event_type"],
+        "account_registered"
+    );
+
+    let export_event_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM security_activity
+         WHERE user_id = (SELECT id FROM users WHERE email = 'export@example.com')
+           AND event_type = 'account_data_exported'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(export_event_count, 1);
 
     let serialized = body.to_string();
     for forbidden in [

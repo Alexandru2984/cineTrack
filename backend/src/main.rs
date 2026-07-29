@@ -304,11 +304,12 @@ async fn main() -> std::io::Result<()> {
     match cinetrack::services::retention::prune_security_artifacts(&pool).await {
         Ok(summary) if summary.total() > 0 => log::info!(
             "Pruned security artifacts at startup: refresh_tokens={} password_reset_tokens={} \
-             email_verification_tokens={} email_change_tokens={}",
+             email_verification_tokens={} email_change_tokens={} security_activity={}",
             summary.refresh_tokens,
             summary.password_reset_tokens,
             summary.email_verification_tokens,
             summary.email_change_tokens,
+            summary.security_activity,
         ),
         Ok(_) => {}
         Err(error) => log::error!("Failed to prune security artifacts at startup: {error}"),

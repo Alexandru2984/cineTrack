@@ -256,7 +256,16 @@ impl EmailMetrics {
             sends,
             send_duration,
         };
-        for kind in ["password_reset", "email_verification"] {
+        for kind in [
+            "password_reset",
+            "email_verification",
+            "email_change_verification",
+            "email_change_notice",
+            "security_new_login",
+            "security_password_changed",
+            "security_password_reset",
+            "security_two_factor_changed",
+        ] {
             for outcome in [
                 "smtp_accepted",
                 "smtp_error",
