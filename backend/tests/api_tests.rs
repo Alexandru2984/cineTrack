@@ -4860,6 +4860,135 @@ async fn test_calendar_lists_new_and_regional_upcoming_releases() {
 
 #[actix_web::test]
 #[ignore = "requires test DB"]
+async fn test_up_next_orders_new_releases_before_old_backlog() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (token, _, user_id) =
+        register_user(&app, "upnextorder", "upnextorder@example.com", "Pass1234").await;
+    let user_id = Uuid::parse_str(&user_id).unwrap();
+    let today = chrono::Utc::now().date_naive();
+
+    let recent_show_id = sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO media (tmdb_id, media_type, title)
+        VALUES (780010, 'tv', 'Recently Released')
+        RETURNING id"#,
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let recent_season_id = sqlx::query_scalar::<_, Uuid>(
+        "INSERT INTO seasons (media_id, season_number) VALUES ($1, 1) RETURNING id",
+    )
+    .bind(recent_show_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let recent_watched_id = sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO episodes (season_id, episode_number, name, air_date)
+        VALUES ($1, 1, 'Recent Show Start', $2)
+        RETURNING id"#,
+    )
+    .bind(recent_season_id)
+    .bind(today - chrono::Duration::days(100))
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let recent_next_id = sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO episodes (season_id, episode_number, name, air_date)
+        VALUES ($1, 2, 'Fresh Episode', $2)
+        RETURNING id"#,
+    )
+    .bind(recent_season_id)
+    .bind(today - chrono::Duration::days(1))
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    let backlog_show_id = sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO media (tmdb_id, media_type, title)
+        VALUES (780011, 'tv', 'Older Backlog')
+        RETURNING id"#,
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let backlog_season_id = sqlx::query_scalar::<_, Uuid>(
+        "INSERT INTO seasons (media_id, season_number) VALUES ($1, 1) RETURNING id",
+    )
+    .bind(backlog_show_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let backlog_watched_id = sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO episodes (season_id, episode_number, name, air_date)
+        VALUES ($1, 1, 'Backlog Show Start', $2)
+        RETURNING id"#,
+    )
+    .bind(backlog_season_id)
+    .bind(today - chrono::Duration::days(60))
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let backlog_next_id = sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO episodes (season_id, episode_number, name, air_date)
+        VALUES ($1, 2, 'Old Episode', $2)
+        RETURNING id"#,
+    )
+    .bind(backlog_season_id)
+    .bind(today - chrono::Duration::days(30))
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    sqlx::query(
+        r#"INSERT INTO user_media (user_id, media_id, status)
+        VALUES ($1, $2, 'watching'), ($1, $3, 'watching')"#,
+    )
+    .bind(user_id)
+    .bind(recent_show_id)
+    .bind(backlog_show_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO watch_history
+            (user_id, media_id, episode_id, watched_at)
+        VALUES
+            ($1, $2, $3, NOW() - INTERVAL '90 days'),
+            ($1, $4, $5, NOW())"#,
+    )
+    .bind(user_id)
+    .bind(recent_show_id)
+    .bind(recent_watched_id)
+    .bind(backlog_show_id)
+    .bind(backlog_watched_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let req = actix_test::TestRequest::get()
+        .uri(&format!("/api/calendar/up-next?today={today}&limit=2"))
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let body: Value = actix_test::call_and_read_body_json(&app, req).await;
+    let items = body["items"].as_array().unwrap();
+
+    assert_eq!(items.len(), 2);
+    assert_eq!(items[0]["episode_id"], recent_next_id.to_string());
+    assert_eq!(items[0]["title"], "Recently Released");
+    assert_eq!(items[1]["episode_id"], backlog_next_id.to_string());
+    assert_eq!(items[1]["title"], "Older Backlog");
+    assert!(
+        items[0]["last_watched_at"].as_str().unwrap()
+            < items[1]["last_watched_at"].as_str().unwrap(),
+        "release date, not recent viewing activity, must determine the order"
+    );
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
 async fn test_calendar_episode_actions_are_idempotent_and_owner_scoped() {
     let pool = setup_pool().await;
     clean_db(&pool).await;

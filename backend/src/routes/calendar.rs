@@ -122,12 +122,10 @@ async fn up_next_episodes(
     let user_id = require_auth(&req).await?;
     let params = query.resolve()?;
     let items = sqlx::query_as::<_, UpNextEpisode>(
-        // Up next is about the user's own progress, so it is ordered by when
-        // they last watched the show and restricted to shows they have actually
-        // started. Ordering by air_date instead — which this did — turns the
-        // screen into a broadcast schedule: a show last touched three years ago
-        // outranks one watched this morning, because all that is compared is
-        // when the episode aired.
+        // Keep one sequential next episode per started show, then surface newly
+        // available episodes before older backlog. An explicit "Watch next"
+        // bookmark remains the strongest signal; last-watched time only breaks
+        // ties between episodes released on the same day.
         r#"WITH progress AS (
             SELECT media_id, MAX(watched_at) AS last_watched_at
             FROM watch_history
@@ -180,6 +178,7 @@ async fn up_next_episodes(
              AND plans.episode_id = next_ids.episode_id
             ORDER BY
                 plans.episode_id IS NOT NULL DESC,
+                next_ids.air_date DESC,
                 next_ids.last_watched_at DESC,
                 next_ids.episode_id DESC
             LIMIT $4
@@ -204,6 +203,7 @@ async fn up_next_episodes(
         JOIN episodes ON episodes.id = selected.episode_id
         ORDER BY
             selected.is_planned DESC,
+            selected.air_date DESC,
             selected.last_watched_at DESC,
             selected.episode_id DESC"#,
     )
