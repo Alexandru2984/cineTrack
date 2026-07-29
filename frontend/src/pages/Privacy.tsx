@@ -50,6 +50,8 @@ export default function PrivacyPage() {
             <li>{t('privacy.provider3')}</li>
             <li>{t('privacy.provider4')}</li>
             <li>{t('privacy.provider5')}</li>
+            <li>{t('privacy.provider6')}</li>
+            <li>{t('privacy.provider7')}</li>
           </ul>
           <p>{t('privacy.providerNote')}</p>
         </PolicySection>

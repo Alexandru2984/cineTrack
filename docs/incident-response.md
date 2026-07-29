@@ -107,17 +107,26 @@ BACKUP_AGE_IDENTITY_FILE=$KEY \
 Without that private key no backup can be read. If it is not also stored off
 this host, fix that before you need it.
 
-## 5. GDPR notification — 72 hours
+## 5. GDPR breach decision
 
-Applies when personal data was likely exposed: email addresses, or watch
-history (behavioural data, and it is personal data here).
+Document every personal-data breach, including its facts, effects, remediation,
+and the reason for the notification decision.
 
-The window starts at **awareness**, not at breach. Write down what you know:
-what happened, when, whose data, what you have done. If you cannot answer those
-in 72 hours, notify anyway with what you have — a partial notification on time
-beats a complete one late.
+- If a risk to people's rights and freedoms is unlikely, record that assessment;
+  notification to the authority is not required.
+- If the breach is likely to create such a risk, notify ANSPDCP without undue
+  delay and, where feasible, within 72 hours of becoming aware. If the initial
+  facts are incomplete, submit what is known and complete it in phases.
+- If the breach is likely to create a **high** risk, also tell the affected
+  people in clear language without undue delay.
 
-Romanian supervisory authority: ANSPDCP (dataprotection.ro).
+The clock starts at **awareness**, not at the suspected breach time. Write down
+what happened, when, the data and approximate number of people/records involved,
+likely consequences, and the measures already taken or proposed.
+
+Romanian supervisory authority: ANSPDCP. Use its current
+[online breach form](https://www.dataprotection.ro/formulare/formularBresaGdpr.do?action=view_action&newFormular=true)
+and obtain legal advice when the risk classification is uncertain.
 
 ### Draft to users
 
