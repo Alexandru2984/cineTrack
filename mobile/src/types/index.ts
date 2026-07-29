@@ -53,6 +53,14 @@ export interface AccountSession {
   current: boolean;
 }
 
+export interface SecurityActivity {
+  id: string;
+  event_type: string;
+  user_agent: string | null;
+  ip_address: string | null;
+  created_at: string;
+}
+
 export interface ImportTotals {
   shows: number;
   movies: number;

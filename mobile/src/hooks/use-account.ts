@@ -5,6 +5,7 @@ import {
   disableTwoFactor,
   enableTwoFactor,
   listAccountSessions,
+  listSecurityActivity,
   logoutAllAccountSessions,
   requestAccountEmailChange,
   resendEmailVerification,
@@ -23,12 +24,21 @@ import { useAuthStore } from '@/store/auth';
 export const accountKeys = {
   all: ['account'] as const,
   sessions: ['account', 'sessions'] as const,
+  securityActivity: ['account', 'security-activity'] as const,
 };
 
 export function useAccountSessions(enabled = true) {
   return useQuery({
     queryKey: accountKeys.sessions,
     queryFn: listAccountSessions,
+    enabled,
+  });
+}
+
+export function useSecurityActivity(enabled = true) {
+  return useQuery({
+    queryKey: accountKeys.securityActivity,
+    queryFn: listSecurityActivity,
     enabled,
   });
 }
@@ -67,6 +77,7 @@ export function useDeleteAccountAvatar() {
 }
 
 export function useRequestAccountEmailChange() {
+  const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({
       currentPassword,
@@ -77,6 +88,8 @@ export function useRequestAccountEmailChange() {
       newEmail: string;
       totpCode?: string;
     }) => requestAccountEmailChange(currentPassword, newEmail, totpCode),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: accountKeys.securityActivity }),
   });
 }
 
@@ -98,7 +111,12 @@ export function useRevokeAccountSession() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: revokeAccountSession,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: accountKeys.sessions }),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: accountKeys.sessions }),
+        queryClient.invalidateQueries({ queryKey: accountKeys.securityActivity }),
+      ]);
+    },
   });
 }
 
@@ -117,10 +135,12 @@ export function useSetupTwoFactor() {
 export function useEnableTwoFactor() {
   const user = useAuthStore((state) => state.user);
   const setUser = useAuthStore((state) => state.setUser);
+  const queryClient = useQueryClient();
   return useMutation({
     mutationFn: enableTwoFactor,
     onSuccess: () => {
       if (user) setUser({ ...user, two_factor_enabled: true });
+      void queryClient.invalidateQueries({ queryKey: accountKeys.securityActivity });
     },
   });
 }
@@ -128,11 +148,13 @@ export function useEnableTwoFactor() {
 export function useDisableTwoFactor() {
   const user = useAuthStore((state) => state.user);
   const setUser = useAuthStore((state) => state.setUser);
+  const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ password, totpCode }: { password: string; totpCode: string }) =>
       disableTwoFactor(password, totpCode),
     onSuccess: () => {
       if (user) setUser({ ...user, two_factor_enabled: false });
+      void queryClient.invalidateQueries({ queryKey: accountKeys.securityActivity });
     },
   });
 }

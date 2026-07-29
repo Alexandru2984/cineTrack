@@ -454,6 +454,14 @@ export interface Session {
   current: boolean;
 }
 
+export interface SecurityActivity {
+  id: string;
+  event_type: string;
+  user_agent: string | null;
+  ip_address: string | null;
+  created_at: string;
+}
+
 export type TrackingStatus = 'watching' | 'completed' | 'plan_to_watch' | 'dropped' | 'on_hold';
 
 export interface ImportTotals {

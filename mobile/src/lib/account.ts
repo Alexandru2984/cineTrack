@@ -2,7 +2,7 @@ import { apiRequest } from '@/lib/api';
 import { ApiError, rawRequest } from '@/lib/http';
 import { readRefreshToken } from '@/lib/secure-session';
 import { clearLocalSession } from '@/lib/session';
-import type { AccountSession, User } from '@/types';
+import type { AccountSession, SecurityActivity, User } from '@/types';
 
 export const MAX_PROFILE_BIO_LENGTH = 500;
 
@@ -123,6 +123,10 @@ export async function listAccountSessions() {
     if (!latestRefreshToken || latestRefreshToken === refreshToken) throw error;
     return requestAccountSessions(latestRefreshToken);
   }
+}
+
+export async function listSecurityActivity() {
+  return apiRequest<SecurityActivity[]>('/auth/security-activity');
 }
 
 export async function revokeAccountSession(id: string) {

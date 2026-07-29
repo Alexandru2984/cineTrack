@@ -1,6 +1,7 @@
 import {
   changeAccountPassword,
   listAccountSessions,
+  listSecurityActivity,
   logoutAllAccountSessions,
   resendEmailVerification,
   MAX_PROFILE_BIO_LENGTH,
@@ -71,6 +72,14 @@ describe('mobile account settings', () => {
       method: 'POST',
       body: { refresh_token: refreshToken },
     });
+  });
+
+  it('loads owner-scoped security activity through the authenticated API', async () => {
+    const activity = [{ id: 'event-1', event_type: 'login_succeeded' }];
+    mockApiRequest.mockResolvedValueOnce(activity);
+
+    await expect(listSecurityActivity()).resolves.toBe(activity);
+    expect(mockApiRequest).toHaveBeenCalledWith('/auth/security-activity');
   });
 
   it('retries session listing only when SecureStore contains a rotated token', async () => {

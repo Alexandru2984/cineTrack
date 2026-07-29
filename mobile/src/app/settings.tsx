@@ -11,6 +11,7 @@ import {
   EyeOff,
   Globe2,
   HelpCircle,
+  History,
   KeyRound,
   Laptop2,
   LogOut,
@@ -48,6 +49,7 @@ import { SegmentedControl } from '@/components/segmented-control';
 import { UserAvatar } from '@/components/user-avatar';
 import { radius, spacing } from '@/constants/theme';
 import {
+  accountKeys,
   useAccountSessions,
   useChangeAccountPassword,
   useDeleteAccountAvatar,
@@ -58,6 +60,7 @@ import {
   useResendEmailVerification,
   useRevokeAccountSession,
   useSetupTwoFactor,
+  useSecurityActivity,
   useUpdateAccountProfile,
   useUploadAccountAvatar,
 } from '@/hooks/use-account';
@@ -80,7 +83,7 @@ import { getErrorMessage } from '@/lib/http';
 import { clearOfflineQueryCache } from '@/lib/query-persistence';
 import { validateSecondFactorInput } from '@/lib/two-factor';
 import { useAuthStore } from '@/store/auth';
-import type { AccountSession } from '@/types';
+import type { AccountSession, SecurityActivity } from '@/types';
 
 const COUNTRY_OPTIONS: readonly { value: string; label: string }[] = [
   { value: 'RO', label: 'RO' },
@@ -108,6 +111,20 @@ function regionName(code: string): string {
   }
 }
 
+const SECURITY_ACTIVITY_LABEL_KEYS: Record<string, string> = {
+  account_registered: 'settings.securityEventAccountRegistered',
+  login_succeeded: 'settings.securityEventLoginSucceeded',
+  password_changed: 'settings.securityEventPasswordChanged',
+  password_reset: 'settings.securityEventPasswordReset',
+  email_change_requested: 'settings.securityEventEmailChangeRequested',
+  email_changed: 'settings.securityEventEmailChanged',
+  two_factor_enabled: 'settings.securityEventTwoFactorEnabled',
+  two_factor_disabled: 'settings.securityEventTwoFactorDisabled',
+  session_revoked: 'settings.securityEventSessionRevoked',
+  all_sessions_revoked: 'settings.securityEventAllSessionsRevoked',
+  account_data_exported: 'settings.securityEventAccountDataExported',
+};
+
 export default function SettingsScreen() {
   const theme = useTheme();
   const t = useT();
@@ -120,6 +137,7 @@ export default function SettingsScreen() {
   const preferences = useCalendarPreferences(status === 'authenticated');
   const updatePreferences = useUpdateCalendarPreferences();
   const sessions = useAccountSessions(status === 'authenticated');
+  const securityActivity = useSecurityActivity(status === 'authenticated');
   const revokeSession = useRevokeAccountSession();
   const logoutAllSessions = useLogoutAllAccountSessions();
   const changePassword = useChangeAccountPassword();
@@ -166,6 +184,7 @@ export default function SettingsScreen() {
   );
 
   const [sessionsError, setSessionsError] = useState<string | null>(null);
+  const [showAllSecurityActivity, setShowAllSecurityActivity] = useState(false);
   const [confirmingDeletion, setConfirmingDeletion] = useState(false);
   const [deletionPassword, setDeletionPassword] = useState('');
   const [deletionTotpCode, setDeletionTotpCode] = useState('');
@@ -193,6 +212,9 @@ export default function SettingsScreen() {
     preferences.data?.country_code ??
     'RO';
   const countryName = regionName(countryCode);
+  const visibleSecurityActivity = showAllSecurityActivity
+    ? securityActivity.data
+    : securityActivity.data?.slice(0, 10);
 
   const saveProfile = async () => {
     const validationError = validateProfileDraft(t, username, bio);
@@ -410,6 +432,7 @@ export default function SettingsScreen() {
         exportPassword,
         user.two_factor_enabled ? exportTotpCode : undefined,
       );
+      void queryClient.invalidateQueries({ queryKey: accountKeys.securityActivity });
       setExportPassword('');
       setExportTotpCode('');
       setExportPasswordVisible(false);
@@ -1160,6 +1183,70 @@ export default function SettingsScreen() {
           </View>
 
           <View style={[styles.section, { borderBottomColor: theme.border }]}>
+            <View style={styles.sectionTitleRow}>
+              <View style={styles.sectionHeading}>
+                <History color={theme.primary} size={20} />
+                <View style={styles.headingCopy}>
+                  <AppText variant="section">{t('settings.securityActivity')}</AppText>
+                  <AppText variant="caption" muted>
+                    {t('settings.securityActivityHint')}
+                  </AppText>
+                </View>
+              </View>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={t('settings.refreshSecurityActivity')}
+                disabled={securityActivity.isFetching}
+                onPress={() => void securityActivity.refetch()}
+                style={({ pressed }) => [
+                  styles.iconButton,
+                  {
+                    opacity: securityActivity.isFetching ? 0.45 : pressed ? 0.7 : 1,
+                  },
+                ]}
+              >
+                <RefreshCw color={theme.mutedText} size={20} />
+              </Pressable>
+            </View>
+            <AppText variant="caption" muted>
+              {t('settings.securityEmailAlertsHint')}
+            </AppText>
+
+            {securityActivity.isLoading ? (
+              <ActivityIndicator color={theme.primary} />
+            ) : securityActivity.isError ? (
+              <FormMessage
+                message={getErrorMessage(
+                  securityActivity.error,
+                  t('settings.securityActivityError'),
+                )}
+              />
+            ) : securityActivity.data?.length === 0 ? (
+              <AppText muted>{t('settings.noSecurityActivity')}</AppText>
+            ) : (
+              <View style={[styles.activityList, { borderTopColor: theme.border }]}>
+                {visibleSecurityActivity?.map((event) => (
+                  <SecurityActivityRow key={event.id} event={event} />
+                ))}
+              </View>
+            )}
+
+            {securityActivity.data && securityActivity.data.length > 10 ? (
+              <AppButton
+                label={
+                  showAllSecurityActivity
+                    ? t('settings.showRecentSecurityActivity')
+                    : t('settings.showAllSecurityActivity', {
+                        count: securityActivity.data.length,
+                      })
+                }
+                variant="secondary"
+                onPress={() => setShowAllSecurityActivity((current) => !current)}
+              />
+            ) : null}
+          </View>
+
+          <View style={[styles.section, { borderBottomColor: theme.border }]}>
             <View style={styles.sectionHeading}>
               <ShieldCheck color={theme.info} size={20} />
               <AppText variant="section">{t('settings.privacyData')}</AppText>
@@ -1477,6 +1564,35 @@ function SecondFactorField({
   );
 }
 
+function SecurityActivityRow({ event }: { event: SecurityActivity }) {
+  const theme = useTheme();
+  const t = useT();
+  return (
+    <View style={[styles.activityRow, { borderBottomColor: theme.border }]}>
+      <View style={[styles.activityIcon, { backgroundColor: theme.surface }]}>
+        <ShieldCheck color={theme.primary} size={18} />
+      </View>
+      <View style={styles.activityCopy}>
+        <AppText variant="label">
+          {t(
+            SECURITY_ACTIVITY_LABEL_KEYS[event.event_type] ??
+              'settings.securityEventUnknown',
+          )}
+        </AppText>
+        <AppText variant="caption" muted numberOfLines={2}>
+          {t('settings.securityActivityMeta', {
+            ip: event.ip_address || t('settings.unknownIp'),
+            when: formatDateTime(event.created_at),
+          })}
+        </AppText>
+        <AppText variant="caption" muted numberOfLines={2}>
+          {event.user_agent || t('settings.unknownDevice')}
+        </AppText>
+      </View>
+    </View>
+  );
+}
+
 function SessionRow({
   session,
   pending,
@@ -1694,6 +1810,29 @@ const styles = StyleSheet.create({
   },
   sessionList: {
     borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  activityList: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  activityRow: {
+    minHeight: 84,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.md,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    paddingVertical: spacing.md,
+  },
+  activityIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  activityCopy: {
+    flex: 1,
+    minWidth: 0,
+    gap: spacing.xs,
   },
   sessionRow: {
     minHeight: 76,

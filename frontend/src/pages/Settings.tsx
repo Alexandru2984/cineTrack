@@ -5,6 +5,7 @@ import {
   useChangeEmail,
   useLogout,
   useSessions,
+  useSecurityActivity,
   useRevokeSession,
   useLogoutAllSessions,
   useDeleteAccount,
@@ -33,6 +34,7 @@ import {
   DownloadCloud,
   ImageUp,
   Info,
+  History,
   LockKeyhole,
   KeyRound,
   Mail,
@@ -956,6 +958,108 @@ function SessionsCard() {
   );
 }
 
+const SECURITY_ACTIVITY_LABEL_KEYS: Record<string, string> = {
+  account_registered: 'settings.securityEventAccountRegistered',
+  login_succeeded: 'settings.securityEventLoginSucceeded',
+  password_changed: 'settings.securityEventPasswordChanged',
+  password_reset: 'settings.securityEventPasswordReset',
+  email_change_requested: 'settings.securityEventEmailChangeRequested',
+  email_changed: 'settings.securityEventEmailChanged',
+  two_factor_enabled: 'settings.securityEventTwoFactorEnabled',
+  two_factor_disabled: 'settings.securityEventTwoFactorDisabled',
+  session_revoked: 'settings.securityEventSessionRevoked',
+  all_sessions_revoked: 'settings.securityEventAllSessionsRevoked',
+  account_data_exported: 'settings.securityEventAccountDataExported',
+};
+
+function SecurityActivityCard() {
+  const t = useT();
+  const [showAll, setShowAll] = useState(false);
+  const { data: activity, isLoading, isError } = useSecurityActivity();
+  const visibleActivity = showAll ? activity : activity?.slice(0, 10);
+
+  return (
+    <section className="rounded-lg border border-[hsl(var(--border))] p-4 sm:p-6">
+      <h2 className="flex items-center gap-2 text-lg font-semibold">
+        <History className="h-5 w-5 text-[hsl(var(--primary))]" aria-hidden="true" />{' '}
+        {t('settings.securityActivity')}
+      </h2>
+      <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">
+        {t('settings.securityActivityHint')}
+      </p>
+      <p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">
+        {t('settings.securityEmailAlertsHint')}
+      </p>
+
+      <div className="mt-4">
+        {isLoading && (
+          <p className="flex items-center gap-2 text-sm text-[hsl(var(--muted-foreground))]">
+            <Loader2 className="h-4 w-4 animate-spin" />{' '}
+            {t('settings.loadingSecurityActivity')}
+          </p>
+        )}
+        {isError && (
+          <p className="text-sm text-[hsl(var(--destructive))]">
+            {t('settings.securityActivityError')}
+          </p>
+        )}
+        {activity?.length === 0 && (
+          <p className="text-sm text-[hsl(var(--muted-foreground))]">
+            {t('settings.noSecurityActivity')}
+          </p>
+        )}
+
+        {visibleActivity && visibleActivity.length > 0 && (
+          <ol className="divide-y divide-[hsl(var(--border))] border-y border-[hsl(var(--border))]">
+            {visibleActivity.map((event) => (
+              <li key={event.id} className="flex min-w-0 items-start gap-3 py-3">
+                <span
+                  className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[hsl(var(--accent))]"
+                  aria-hidden="true"
+                >
+                  <ShieldCheck className="h-4 w-4 text-[hsl(var(--primary))]" />
+                </span>
+                <div className="min-w-0">
+                  <p className="text-sm font-medium">
+                    {t(
+                      SECURITY_ACTIVITY_LABEL_KEYS[event.event_type] ??
+                        'settings.securityEventUnknown',
+                    )}
+                  </p>
+                  <p className="mt-0.5 text-xs text-[hsl(var(--muted-foreground))]">
+                    {t('settings.securityActivityMeta', {
+                      ip: event.ip_address || t('settings.unknownIp'),
+                      when: formatDateTime(event.created_at),
+                    })}
+                  </p>
+                  <p
+                    className="mt-0.5 truncate text-xs text-[hsl(var(--muted-foreground))]"
+                    title={event.user_agent || t('settings.unknownDevice')}
+                  >
+                    {event.user_agent || t('settings.unknownDevice')}
+                  </p>
+                </div>
+              </li>
+            ))}
+          </ol>
+        )}
+      </div>
+
+      {activity && activity.length > 10 && (
+        <button
+          type="button"
+          onClick={() => setShowAll((current) => !current)}
+          className="mt-4 rounded-md border border-[hsl(var(--border))] px-4 py-2 text-sm hover:bg-[hsl(var(--accent))]"
+        >
+          {showAll
+            ? t('settings.showRecentSecurityActivity')
+            : t('settings.showAllSecurityActivity', { count: activity.length })}
+        </button>
+      )}
+    </section>
+  );
+}
+
 function DangerZoneCard() {
   const t = useT();
   const logout = useAuthStore((state) => state.logout);
@@ -1091,6 +1195,7 @@ export default function SettingsPage() {
       <ChangePasswordCard />
       <TwoFactorCard />
       <SessionsCard />
+      <SecurityActivityCard />
       <SignOutCard />
       <Link
         to="/about"

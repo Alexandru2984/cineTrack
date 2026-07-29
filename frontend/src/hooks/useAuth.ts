@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import api from '@/lib/api';
 import { useAuthStore } from '@/store/auth';
-import type { AuthResponse, Session, User } from '@/types';
+import type { AuthResponse, SecurityActivity, Session, User } from '@/types';
 
 export function useRegister() {
   const setAuth = useAuthStore((s) => s.setAuth);
@@ -146,6 +146,7 @@ export function useEnableTwoFactor() {
       return res.data;
     },
     onSuccess: async () => {
+      void qc.invalidateQueries({ queryKey: ['security-activity'] });
       try {
         const res = await api.get<User>('/auth/me');
         setUser(res.data);
@@ -165,6 +166,7 @@ export function useDisableTwoFactor() {
       await api.post('/auth/2fa/disable', data);
     },
     onSuccess: async () => {
+      void qc.invalidateQueries({ queryKey: ['security-activity'] });
       try {
         const res = await api.get<User>('/auth/me');
         setUser(res.data);
@@ -193,6 +195,7 @@ export function useChangePassword() {
 }
 
 export function useChangeEmail() {
+  const qc = useQueryClient();
   return useMutation({
     mutationFn: async (data: {
       current_password: string;
@@ -201,6 +204,9 @@ export function useChangeEmail() {
     }) => {
       const res = await api.post('/auth/email/change', data);
       return res.data as { message: string };
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['security-activity'] });
     },
     // Nothing local changes yet: the address only moves once the link mailed to
     // it is opened, so there is no cached identity to refresh here.
@@ -245,13 +251,28 @@ export function useSessions() {
   });
 }
 
+export function useSecurityActivity() {
+  const token = useAuthStore((s) => s.token);
+  return useQuery<SecurityActivity[]>({
+    queryKey: ['security-activity'],
+    queryFn: async () => {
+      const res = await api.get('/auth/security-activity');
+      return res.data;
+    },
+    enabled: !!token,
+  });
+}
+
 export function useRevokeSession() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => {
       await api.delete(`/auth/sessions/${id}`);
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['sessions'] }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['sessions'] });
+      void qc.invalidateQueries({ queryKey: ['security-activity'] });
+    },
   });
 }
 
