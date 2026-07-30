@@ -187,9 +187,12 @@ mod tests {
         assert!(verify_password("SamePassword1", &h2).await.unwrap());
     }
 
-    #[tokio::test]
-    async fn test_verify_password_rejects_invalid_hash() {
-        let result = verify_password("test", "not_a_valid_hash").await;
+    #[test]
+    fn test_verify_password_rejects_invalid_hash() {
+        // Test hash parsing directly. Going through the shared asynchronous
+        // password queue makes this assertion race unrelated Argon2-heavy
+        // tests and can legitimately return the queue's busy response first.
+        let result = verify_password_sync("test", "not_a_valid_hash");
         assert!(matches!(result, Err(AppError::InternalError(_))));
     }
 
