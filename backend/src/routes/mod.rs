@@ -10,6 +10,7 @@ pub mod lists;
 pub mod media;
 pub mod notifications;
 pub mod push;
+pub mod reports;
 pub mod stats;
 pub mod tracking;
 pub mod users;
@@ -39,6 +40,7 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
             .configure(users::configure)
             .configure(notifications::configure)
             .configure(push::configure)
+            .configure(reports::configure)
             .configure(calendar::configure)
             .configure(client_errors::configure)
             .configure(csp_report::configure)
@@ -77,6 +79,7 @@ pub fn configure_with_rate_limits(
             .configure(users::configure)
             .configure(notifications::configure)
             .configure(|cfg| push::configure_rate_limited(cfg, push_rate_limiter))
+            .configure(reports::configure)
             .configure(calendar::configure)
             .configure(|cfg| client_errors::configure_rate_limited(cfg, client_error_rate_limiter))
             .configure(|cfg| csp_report::configure_rate_limited(cfg, csp_report_rate_limiter))

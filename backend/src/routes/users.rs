@@ -5,6 +5,7 @@ use validator::Validate;
 
 use crate::config::Config;
 use crate::dto::common::PaginationParams;
+use crate::dto::report::BlockedUserResponse;
 use crate::dto::social::*;
 use crate::dto::user::*;
 use crate::errors::AppError;
@@ -107,6 +108,7 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
             .route("/me/export", web::post().to(export_account_data))
             .route("/me/followers", web::get().to(my_followers))
             .route("/me/following", web::get().to(my_following))
+            .route("/me/blocks", web::get().to(my_blocks))
             .route("/me/feed", web::get().to(my_activity_feed))
             .route("/me/follow-requests", web::get().to(my_follow_requests))
             .route(
@@ -120,6 +122,8 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
             .route("/search", web::get().to(search_users))
             .route("/{username}", web::get().to(get_profile))
             .route("/{username}/activity", web::get().to(get_user_activity))
+            .route("/{username}/block", web::post().to(block_user))
+            .route("/{username}/block", web::delete().to(unblock_user))
             .route("/{username}/follow", web::post().to(follow_user))
             .route("/{username}/follow", web::delete().to(unfollow_user)),
     );
@@ -177,6 +181,14 @@ async fn search_users(
             WHERE follower.following_id = u.id AND follower.status = 'accepted'
         ) follower_count ON TRUE
         WHERE LOWER(u.username) LIKE $2 ESCAPE '\'
+          AND NOT EXISTS (
+              SELECT 1
+              FROM user_blocks block
+              WHERE
+                  (block.blocker_id = $1 AND block.blocked_id = u.id)
+                  OR
+                  (block.blocker_id = u.id AND block.blocked_id = $1)
+          )
         ORDER BY (LOWER(u.username) = $3) DESC, LOWER(u.username), u.id
         LIMIT $4 OFFSET $5"#,
     )
@@ -210,6 +222,18 @@ async fn get_profile(
         .fetch_optional(pool.get_ref())
         .await?
         .ok_or_else(|| AppError::NotFound("User not found".to_string()))?;
+
+    if let Some(viewer_id) = current_user_id.filter(|viewer_id| *viewer_id != user.id) {
+        if crate::services::community_safety::interaction_is_blocked(
+            pool.get_ref(),
+            viewer_id,
+            user.id,
+        )
+        .await?
+        {
+            return Err(AppError::NotFound("User not found".to_string()));
+        }
+    }
 
     let followers_count = sqlx::query_scalar::<_, i64>(
         "SELECT COUNT(*) FROM follows WHERE following_id = $1 AND status = 'accepted'",
@@ -649,6 +673,41 @@ async fn export_account_data(
     .fetch_all(&mut *tx)
     .await?;
 
+    let blocks = sqlx::query_scalar::<_, serde_json::Value>(
+        r#"SELECT jsonb_build_object(
+            'blocked_user_id', blocked.id,
+            'blocked_username', blocked.username,
+            'created_at', block.created_at
+        )
+        FROM user_blocks block
+        JOIN users blocked ON blocked.id = block.blocked_id
+        WHERE block.blocker_id = $1
+        ORDER BY block.created_at, block.blocked_id"#,
+    )
+    .bind(user_id)
+    .fetch_all(&mut *tx)
+    .await?;
+
+    let reports_submitted = sqlx::query_scalar::<_, serde_json::Value>(
+        r#"SELECT jsonb_build_object(
+            'id', id,
+            'target_type', target_type,
+            'target_id', target_id,
+            'reason', reason,
+            'details', details,
+            'status', status,
+            'resolved_at', resolved_at,
+            'created_at', created_at,
+            'updated_at', updated_at
+        )
+        FROM user_reports
+        WHERE reporter_id = $1
+        ORDER BY created_at, id"#,
+    )
+    .bind(user_id)
+    .fetch_all(&mut *tx)
+    .await?;
+
     tx.commit().await?;
 
     let client = crate::routes::auth::client_info(&req);
@@ -676,7 +735,7 @@ async fn export_account_data(
             "attachment; filename=\"vazute-account-export.json\"",
         ))
         .json(AccountDataExport {
-            format_version: 2,
+            format_version: 3,
             exported_at: chrono::Utc::now(),
             account,
             library,
@@ -693,6 +752,8 @@ async fn export_account_data(
             oauth_accounts,
             security_activity,
             terms_acceptances,
+            blocks,
+            reports_submitted,
         }))
 }
 
@@ -790,6 +851,11 @@ async fn follow_user(
         "pending"
     };
     quota::lock_social_relationship_writes(&mut tx, user_id, target.id).await?;
+    if crate::services::community_safety::interaction_is_blocked_in_tx(&mut tx, user_id, target.id)
+        .await?
+    {
+        return Err(AppError::NotFound("User not found".to_string()));
+    }
 
     let existing_status = sqlx::query_scalar::<_, String>(
         "SELECT status FROM follows WHERE follower_id = $1 AND following_id = $2",
@@ -935,6 +1001,156 @@ async fn my_follow_requests(
     Ok(HttpResponse::Ok().json(response))
 }
 
+async fn my_blocks(
+    pool: web::Data<PgPool>,
+    req: HttpRequest,
+    pagination: web::Query<PaginationParams>,
+) -> Result<HttpResponse, AppError> {
+    let user_id = require_auth(&req).await?;
+    let blocked = sqlx::query_as::<_, BlockedUserResponse>(
+        r#"SELECT blocked.id, blocked.username, blocked.avatar_url, block.created_at AS blocked_at
+        FROM user_blocks block
+        JOIN users blocked ON blocked.id = block.blocked_id
+        WHERE block.blocker_id = $1
+        ORDER BY block.created_at DESC, block.blocked_id
+        LIMIT $2 OFFSET $3"#,
+    )
+    .bind(user_id)
+    .bind(pagination.limit_val())
+    .bind(pagination.offset())
+    .fetch_all(pool.get_ref())
+    .await?;
+
+    Ok(HttpResponse::Ok()
+        .insert_header(("Cache-Control", "no-store"))
+        .insert_header(("Pragma", "no-cache"))
+        .json(blocked))
+}
+
+async fn block_user(
+    pool: web::Data<PgPool>,
+    req: HttpRequest,
+    path: web::Path<String>,
+) -> Result<HttpResponse, AppError> {
+    let user_id = require_auth(&req).await?;
+    let username = path.into_inner();
+    let mut tx = pool.begin().await?;
+    let target = sqlx::query_as::<_, User>(
+        "SELECT * FROM users WHERE LOWER(username) = LOWER($1) FOR SHARE",
+    )
+    .bind(&username)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(|| AppError::NotFound("User not found".to_string()))?;
+
+    if target.id == user_id {
+        return Err(AppError::BadRequest("Cannot block yourself".to_string()));
+    }
+
+    quota::lock_social_relationship_writes(&mut tx, user_id, target.id).await?;
+    let already_blocked = sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS(
+            SELECT 1 FROM user_blocks WHERE blocker_id = $1 AND blocked_id = $2
+        )",
+    )
+    .bind(user_id)
+    .bind(target.id)
+    .fetch_one(&mut *tx)
+    .await?;
+    if !already_blocked {
+        let block_count =
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM user_blocks WHERE blocker_id = $1")
+                .bind(user_id)
+                .fetch_one(&mut *tx)
+                .await?;
+        if block_count >= crate::services::community_safety::MAX_BLOCKS_PER_USER {
+            return Err(AppError::Conflict(
+                "Blocked-account limit reached".to_string(),
+            ));
+        }
+    }
+    let created = sqlx::query(
+        r#"INSERT INTO user_blocks (blocker_id, blocked_id)
+        VALUES ($1, $2)
+        ON CONFLICT DO NOTHING"#,
+    )
+    .bind(user_id)
+    .bind(target.id)
+    .execute(&mut *tx)
+    .await?
+    .rows_affected()
+        > 0;
+
+    sqlx::query(
+        r#"DELETE FROM follows
+        WHERE
+            (follower_id = $1 AND following_id = $2)
+            OR
+            (follower_id = $2 AND following_id = $1)"#,
+    )
+    .bind(user_id)
+    .bind(target.id)
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query(
+        r#"DELETE FROM notifications
+        WHERE
+            (user_id = $1 AND actor_id = $2)
+            OR
+            (user_id = $2 AND actor_id = $1)"#,
+    )
+    .bind(user_id)
+    .bind(target.id)
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+
+    log::warn!(
+        "audit: user blocked blocker_id={user_id} blocked_id={} created={created}",
+        target.id
+    );
+    let response = serde_json::json!({
+        "message": if created { "User blocked" } else { "User already blocked" },
+        "blocked": true,
+    });
+    if created {
+        Ok(HttpResponse::Created().json(response))
+    } else {
+        Ok(HttpResponse::Ok().json(response))
+    }
+}
+
+async fn unblock_user(
+    pool: web::Data<PgPool>,
+    req: HttpRequest,
+    path: web::Path<String>,
+) -> Result<HttpResponse, AppError> {
+    let user_id = require_auth(&req).await?;
+    let username = path.into_inner();
+    let mut tx = pool.begin().await?;
+    let target_id = sqlx::query_scalar::<_, Uuid>(
+        "SELECT id FROM users WHERE LOWER(username) = LOWER($1) FOR SHARE",
+    )
+    .bind(&username)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(|| AppError::NotFound("User not found".to_string()))?;
+    quota::lock_social_relationship_writes(&mut tx, user_id, target_id).await?;
+
+    sqlx::query("DELETE FROM user_blocks WHERE blocker_id = $1 AND blocked_id = $2")
+        .bind(user_id)
+        .bind(target_id)
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await?;
+
+    log::warn!("audit: user unblocked blocker_id={user_id} blocked_id={target_id}");
+    Ok(HttpResponse::Ok().json(serde_json::json!({
+        "message": "User unblocked",
+        "blocked": false,
+    })))
+}
+
 async fn accept_follow_request(
     pool: web::Data<PgPool>,
     req: HttpRequest,
@@ -946,6 +1162,15 @@ async fn accept_follow_request(
     crate::services::legal::require_current_terms(pool.get_ref(), user_id).await?;
     let mut tx = pool.begin().await?;
     quota::lock_social_relationship_writes(&mut tx, follower_id, user_id).await?;
+    if crate::services::community_safety::interaction_is_blocked_in_tx(
+        &mut tx,
+        follower_id,
+        user_id,
+    )
+    .await?
+    {
+        return Err(AppError::NotFound("Follow request not found".to_string()));
+    }
     let updated = sqlx::query(
         "UPDATE follows SET status = 'accepted', updated_at = NOW()
          WHERE follower_id = $1 AND following_id = $2 AND status = 'pending'",
@@ -1086,6 +1311,18 @@ async fn get_user_activity(
         .fetch_optional(pool.get_ref())
         .await?
         .ok_or_else(|| AppError::NotFound("User not found".to_string()))?;
+
+    if let Some(viewer_id) = current_user_id.filter(|viewer_id| *viewer_id != user.id) {
+        if crate::services::community_safety::interaction_is_blocked(
+            pool.get_ref(),
+            viewer_id,
+            user.id,
+        )
+        .await?
+        {
+            return Err(AppError::NotFound("User not found".to_string()));
+        }
+    }
 
     if !can_view_private_user(pool.get_ref(), current_user_id, &user).await? {
         return Err(AppError::Forbidden(

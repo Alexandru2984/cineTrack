@@ -38,7 +38,7 @@ const mockShare = jest.mocked(Sharing.shareAsync);
 
 function exportPayload() {
   return {
-    format_version: 2,
+    format_version: 3,
     exported_at: '2026-07-25T20:00:00Z',
     account: {
       id: '7d7acbc0-a064-4cb0-a3ea-6c41caa62bc3',
@@ -73,6 +73,8 @@ function exportPayload() {
         accepted_at: '2026-07-30T00:00:00Z',
       },
     ],
+    blocks: [],
+    reports_submitted: [],
   };
 }
 
@@ -91,7 +93,7 @@ describe('mobile account data export', () => {
 
     mockApiRequest.mockResolvedValueOnce(exportPayload());
     await expect(requestAccountDataExport('Pass1234')).resolves.toMatchObject({
-      format_version: 2,
+      format_version: 3,
       account: { email: 'viewer@example.com' },
     });
     expect(mockApiRequest).toHaveBeenCalledWith('/users/me/export', {
@@ -130,7 +132,7 @@ describe('mobile account data export', () => {
       'vazute-account-export.json',
     );
     expect(mockCreate).toHaveBeenCalledWith({ overwrite: true });
-    expect(mockWrite).toHaveBeenCalledWith(expect.stringContaining('"format_version": 2'));
+    expect(mockWrite).toHaveBeenCalledWith(expect.stringContaining('"format_version": 3'));
     expect(mockShare).toHaveBeenCalledWith(mockFile.uri, {
       dialogTitle: 'Save your Văzute account export',
       mimeType: 'application/json',

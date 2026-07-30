@@ -57,6 +57,8 @@ pub struct AccountDataExport {
     pub oauth_accounts: Vec<Value>,
     pub security_activity: Vec<Value>,
     pub terms_acceptances: Vec<Value>,
+    pub blocks: Vec<Value>,
+    pub reports_submitted: Vec<Value>,
 }
 
 #[cfg(test)]

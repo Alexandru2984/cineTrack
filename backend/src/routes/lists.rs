@@ -133,6 +133,18 @@ async fn get_list(
         .await?
         .ok_or_else(|| AppError::NotFound("List not found".to_string()))?;
 
+    if let Some(viewer_id) = current_user_id.filter(|viewer_id| *viewer_id != list.user_id) {
+        if crate::services::community_safety::interaction_is_blocked(
+            pool.get_ref(),
+            viewer_id,
+            list.user_id,
+        )
+        .await?
+        {
+            return Err(AppError::NotFound("List not found".to_string()));
+        }
+    }
+
     // Private lists are only visible to the owner
     if !list.is_public {
         match current_user_id {

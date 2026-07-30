@@ -6,6 +6,7 @@ pub mod import;
 pub mod media;
 pub mod notification;
 pub mod push;
+pub mod report;
 pub mod social;
 pub mod stats;
 pub mod tracking;

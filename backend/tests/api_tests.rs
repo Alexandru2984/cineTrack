@@ -133,6 +133,14 @@ fn create_app_with_config(
 }
 
 async fn clean_db(pool: &PgPool) {
+    sqlx::query("DELETE FROM user_reports")
+        .execute(pool)
+        .await
+        .ok();
+    sqlx::query("DELETE FROM user_blocks")
+        .execute(pool)
+        .await
+        .ok();
     sqlx::query("TRUNCATE catalog_external_ids_staging")
         .execute(pool)
         .await
@@ -549,6 +557,450 @@ async fn current_terms_gate_community_writes_until_acceptance() {
         .peer_addr(peer_addr())
         .to_request();
     assert_eq!(actix_test::call_service(&app, req).await.status(), 201);
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn blocking_severs_relationships_and_hides_both_users() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (blocker_token, _, blocker_id) =
+        register_unverified_user(&app, "blocker", "blocker@example.com", "Pass1234").await;
+    let (blocked_token, _, blocked_id) =
+        register_unverified_user(&app, "blocked", "blocked@example.com", "Pass1234").await;
+    let blocker_id = Uuid::parse_str(&blocker_id).unwrap();
+    let blocked_id = Uuid::parse_str(&blocked_id).unwrap();
+
+    sqlx::query("UPDATE users SET is_public = TRUE, email_verified = TRUE WHERE id = ANY($1)")
+        .bind(vec![blocker_id, blocked_id])
+        .execute(&pool)
+        .await
+        .unwrap();
+    let list_id: Uuid = sqlx::query_scalar(
+        "INSERT INTO lists (user_id, name, is_public)
+         VALUES ($1, 'Public target list', TRUE)
+         RETURNING id",
+    )
+    .bind(blocked_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    let follow = actix_test::TestRequest::post()
+        .uri("/api/users/blocked/follow")
+        .insert_header(("Authorization", format!("Bearer {blocker_token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, follow).await.status(), 200);
+    let notification_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM notifications WHERE user_id = $1 AND actor_id = $2",
+    )
+    .bind(blocked_id)
+    .bind(blocker_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(notification_count, 1);
+
+    // Blocking is a safety escape hatch and remains available even when an
+    // account has not verified email or accepted the current terms.
+    sqlx::query(
+        "UPDATE users
+         SET email_verified = FALSE, terms_accepted_version = NULL, terms_accepted_at = NULL
+         WHERE id = $1",
+    )
+    .bind(blocker_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let block = actix_test::TestRequest::post()
+        .uri("/api/users/blocked/block")
+        .insert_header(("Authorization", format!("Bearer {blocker_token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, block).await.status(), 201);
+
+    let relationship_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM follows
+         WHERE (follower_id = $1 AND following_id = $2)
+            OR (follower_id = $2 AND following_id = $1)",
+    )
+    .bind(blocker_id)
+    .bind(blocked_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(relationship_count, 0);
+    let notification_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM notifications
+         WHERE (user_id = $1 AND actor_id = $2)
+            OR (user_id = $2 AND actor_id = $1)",
+    )
+    .bind(blocker_id)
+    .bind(blocked_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(notification_count, 0);
+
+    for (token, uri) in [
+        (&blocker_token, "/api/users/blocked"),
+        (&blocked_token, "/api/users/blocker"),
+        (&blocker_token, "/api/users/blocked/activity"),
+    ] {
+        let request = actix_test::TestRequest::get()
+            .uri(uri)
+            .insert_header(("Authorization", format!("Bearer {token}")))
+            .peer_addr(peer_addr())
+            .to_request();
+        assert_eq!(actix_test::call_service(&app, request).await.status(), 404);
+    }
+
+    let search = actix_test::TestRequest::get()
+        .uri("/api/users/search?q=blocked")
+        .insert_header(("Authorization", format!("Bearer {blocker_token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let response = actix_test::call_service(&app, search).await;
+    assert_eq!(response.status(), 200);
+    let body: Value = actix_test::read_body_json(response).await;
+    assert!(body["results"].as_array().unwrap().is_empty());
+
+    let list = actix_test::TestRequest::get()
+        .uri(&format!("/api/lists/{list_id}"))
+        .insert_header(("Authorization", format!("Bearer {blocker_token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, list).await.status(), 404);
+
+    let blocked_list = actix_test::TestRequest::get()
+        .uri("/api/users/me/blocks")
+        .insert_header(("Authorization", format!("Bearer {blocker_token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let response = actix_test::call_service(&app, blocked_list).await;
+    assert_eq!(response.status(), 200);
+    assert_eq!(
+        response
+            .headers()
+            .get(header::CACHE_CONTROL)
+            .and_then(|value| value.to_str().ok()),
+        Some("no-store")
+    );
+    let body: Value = actix_test::read_body_json(response).await;
+    assert_eq!(body[0]["id"], blocked_id.to_string());
+
+    sqlx::query(
+        "UPDATE users
+         SET email_verified = TRUE, terms_accepted_version = $2, terms_accepted_at = NOW()
+         WHERE id = $1",
+    )
+    .bind(blocker_id)
+    .bind(cinetrack::services::legal::CURRENT_TERMS_VERSION)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let follow = actix_test::TestRequest::post()
+        .uri("/api/users/blocked/follow")
+        .insert_header(("Authorization", format!("Bearer {blocker_token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, follow).await.status(), 404);
+
+    let self_block = actix_test::TestRequest::post()
+        .uri("/api/users/blocker/block")
+        .insert_header(("Authorization", format!("Bearer {blocker_token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(
+        actix_test::call_service(&app, self_block).await.status(),
+        400
+    );
+
+    let unblock = actix_test::TestRequest::delete()
+        .uri("/api/users/blocked/block")
+        .insert_header(("Authorization", format!("Bearer {blocker_token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, unblock).await.status(), 200);
+    let profile = actix_test::TestRequest::get()
+        .uri("/api/users/blocked")
+        .insert_header(("Authorization", format!("Bearer {blocker_token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, profile).await.status(), 200);
+
+    // Database triggers preserve the invariant even outside the HTTP layer.
+    sqlx::query(
+        "INSERT INTO follows (follower_id, following_id, status)
+         VALUES ($1, $2, 'accepted')",
+    )
+    .bind(blocker_id)
+    .bind(blocked_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO notifications (user_id, actor_id, kind)
+         VALUES ($1, $2, 'new_follower')",
+    )
+    .bind(blocked_id)
+    .bind(blocker_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO user_blocks (blocker_id, blocked_id) VALUES ($1, $2)")
+        .bind(blocker_id)
+        .bind(blocked_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let remaining: i64 = sqlx::query_scalar(
+        "SELECT
+            (SELECT COUNT(*) FROM follows WHERE follower_id = $1 AND following_id = $2)
+            + (SELECT COUNT(*) FROM notifications WHERE user_id = $2 AND actor_id = $1)",
+    )
+    .bind(blocker_id)
+    .bind(blocked_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(remaining, 0);
+
+    let error = sqlx::query(
+        "INSERT INTO follows (follower_id, following_id, status)
+         VALUES ($1, $2, 'accepted')",
+    )
+    .bind(blocker_id)
+    .bind(blocked_id)
+    .execute(&pool)
+    .await
+    .unwrap_err();
+    assert!(matches!(
+        error,
+        sqlx::Error::Database(ref database_error)
+            if database_error.code().as_deref() == Some("23514")
+    ));
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn reports_are_validated_deduplicated_and_snapshot_server_content() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (reporter_token, _, reporter_id) =
+        register_unverified_user(&app, "reporter", "reporter@example.com", "Pass1234").await;
+    let (_, _, subject_id) =
+        register_unverified_user(&app, "subject", "subject@example.com", "Pass1234").await;
+    let reporter_id = Uuid::parse_str(&reporter_id).unwrap();
+    let subject_id = Uuid::parse_str(&subject_id).unwrap();
+    let list_id: Uuid = sqlx::query_scalar(
+        "INSERT INTO lists (user_id, name, description, is_public)
+         VALUES ($1, 'Evidence list', 'Original description', FALSE)
+         RETURNING id",
+    )
+    .bind(subject_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    let user_report = actix_test::TestRequest::post()
+        .uri("/api/reports")
+        .insert_header(("Authorization", format!("Bearer {reporter_token}")))
+        .set_json(json!({
+            "target_type": "user",
+            "target_id": subject_id,
+            "reason": "harassment",
+            "details": "  Repeated unwanted contact  "
+        }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let response = actix_test::call_service(&app, user_report).await;
+    assert_eq!(response.status(), 201);
+    let first_report: Value = actix_test::read_body_json(response).await;
+    assert_eq!(first_report["details"], "Repeated unwanted contact");
+    assert!(first_report.get("content_snapshot").is_none());
+
+    let duplicate = actix_test::TestRequest::post()
+        .uri("/api/reports")
+        .insert_header(("Authorization", format!("Bearer {reporter_token}")))
+        .set_json(json!({
+            "target_type": "user",
+            "target_id": subject_id,
+            "reason": "spam"
+        }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let response = actix_test::call_service(&app, duplicate).await;
+    assert_eq!(response.status(), 200);
+    let duplicate_report: Value = actix_test::read_body_json(response).await;
+    assert_eq!(duplicate_report["id"], first_report["id"]);
+    assert_eq!(duplicate_report["reason"], "harassment");
+
+    let self_report = actix_test::TestRequest::post()
+        .uri("/api/reports")
+        .insert_header(("Authorization", format!("Bearer {reporter_token}")))
+        .set_json(json!({
+            "target_type": "user",
+            "target_id": reporter_id,
+            "reason": "other"
+        }))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(
+        actix_test::call_service(&app, self_report).await.status(),
+        400
+    );
+
+    let private_list_report = actix_test::TestRequest::post()
+        .uri("/api/reports")
+        .insert_header(("Authorization", format!("Bearer {reporter_token}")))
+        .set_json(json!({
+            "target_type": "list",
+            "target_id": list_id,
+            "reason": "spam"
+        }))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(
+        actix_test::call_service(&app, private_list_report)
+            .await
+            .status(),
+        404
+    );
+    sqlx::query("UPDATE lists SET is_public = TRUE WHERE id = $1")
+        .bind(list_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let list_report = actix_test::TestRequest::post()
+        .uri("/api/reports")
+        .insert_header(("Authorization", format!("Bearer {reporter_token}")))
+        .set_json(json!({
+            "target_type": "list",
+            "target_id": list_id,
+            "reason": "spam"
+        }))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(
+        actix_test::call_service(&app, list_report).await.status(),
+        201
+    );
+
+    let invalid = actix_test::TestRequest::post()
+        .uri("/api/reports")
+        .insert_header(("Authorization", format!("Bearer {reporter_token}")))
+        .set_json(json!({
+            "target_type": "user",
+            "target_id": subject_id,
+            "reason": "instant_ban",
+            "status": "actioned"
+        }))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, invalid).await.status(), 400);
+
+    let reports = actix_test::TestRequest::get()
+        .uri("/api/reports/me")
+        .insert_header(("Authorization", format!("Bearer {reporter_token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let response = actix_test::call_service(&app, reports).await;
+    assert_eq!(response.status(), 200);
+    assert_eq!(
+        response
+            .headers()
+            .get(header::CACHE_CONTROL)
+            .and_then(|value| value.to_str().ok()),
+        Some("no-store")
+    );
+    let body: Value = actix_test::read_body_json(response).await;
+    assert_eq!(body.as_array().unwrap().len(), 2);
+
+    let snapshots: Vec<(String, Value)> = sqlx::query_as(
+        "SELECT target_type, content_snapshot FROM user_reports
+         WHERE reporter_id = $1 ORDER BY created_at, id",
+    )
+    .bind(reporter_id)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    let user_snapshot = &snapshots
+        .iter()
+        .find(|(target_type, _)| target_type == "user")
+        .unwrap()
+        .1;
+    let list_snapshot = &snapshots
+        .iter()
+        .find(|(target_type, _)| target_type == "list")
+        .unwrap()
+        .1;
+    assert_eq!(user_snapshot["username"], "subject");
+    assert_eq!(list_snapshot["name"], "Evidence list");
+    assert_eq!(list_snapshot["description"], "Original description");
+
+    sqlx::query("DELETE FROM users WHERE id = $1")
+        .bind(subject_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let preserved: (i64, i64) = sqlx::query_as(
+        "SELECT COUNT(*), COUNT(subject_user_id)
+         FROM user_reports WHERE reporter_id = $1",
+    )
+    .bind(reporter_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(preserved, (2, 0));
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn report_submission_has_a_database_backed_daily_limit() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (reporter_token, _, reporter_id) =
+        register_unverified_user(&app, "ratereporter", "ratereporter@example.com", "Pass1234")
+            .await;
+    let (_, _, subject_id) =
+        register_unverified_user(&app, "ratesubject", "ratesubject@example.com", "Pass1234").await;
+    let reporter_id = Uuid::parse_str(&reporter_id).unwrap();
+    let subject_id = Uuid::parse_str(&subject_id).unwrap();
+
+    sqlx::query(
+        r#"INSERT INTO user_reports (
+            reporter_id, subject_user_id, target_type, target_id,
+            reason, content_snapshot
+        )
+        SELECT $1, $2, 'user', gen_random_uuid(), 'spam', '{}'::jsonb
+        FROM generate_series(1, $3)"#,
+    )
+    .bind(reporter_id)
+    .bind(subject_id)
+    .bind(cinetrack::services::community_safety::MAX_REPORTS_PER_24_HOURS)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let report = actix_test::TestRequest::post()
+        .uri("/api/reports")
+        .insert_header(("Authorization", format!("Bearer {reporter_token}")))
+        .set_json(json!({
+            "target_type": "user",
+            "target_id": subject_id,
+            "reason": "spam"
+        }))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, report).await.status(), 429);
 }
 
 #[actix_web::test]
@@ -6032,7 +6484,7 @@ async fn test_account_export_requires_password_and_excludes_credentials() {
     );
 
     let body: Value = actix_test::read_body_json(response).await;
-    assert_eq!(body["format_version"], 2);
+    assert_eq!(body["format_version"], 3);
     assert_eq!(body["account"]["email"], "export@example.com");
     assert_eq!(body["account"]["two_factor_enabled"], false);
     assert_eq!(
@@ -6044,6 +6496,8 @@ async fn test_account_export_requires_password_and_excludes_credentials() {
     assert!(body["sessions"].is_array());
     assert_eq!(body["security_activity"].as_array().unwrap().len(), 1);
     assert_eq!(body["terms_acceptances"].as_array().unwrap().len(), 1);
+    assert!(body["blocks"].is_array());
+    assert!(body["reports_submitted"].is_array());
     assert_eq!(
         body["security_activity"][0]["event_type"],
         "account_registered"

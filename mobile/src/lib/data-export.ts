@@ -9,7 +9,7 @@ const EXPORT_FILE_NAME = 'vazute-account-export.json';
 const MAX_EXPORT_CHARACTERS = 96 * 1024 * 1024;
 
 const accountExportSchema = z.object({
-  format_version: z.literal(2),
+  format_version: z.literal(3),
   exported_at: z.string().datetime({ offset: true }),
   account: z.object({
     id: z.string().uuid(),
@@ -39,6 +39,8 @@ const accountExportSchema = z.object({
   oauth_accounts: z.array(z.unknown()).max(20),
   security_activity: z.array(z.unknown()).max(200),
   terms_acceptances: z.array(z.unknown()).max(100),
+  blocks: z.array(z.unknown()).max(5000),
+  reports_submitted: z.array(z.unknown()).max(5000),
 });
 
 export type AccountDataExport = z.infer<typeof accountExportSchema>;

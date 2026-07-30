@@ -54,7 +54,18 @@ async fn list_notifications(
     let limit = query.limit_val();
 
     let unread_count = sqlx::query_scalar::<_, i64>(
-        "SELECT COUNT(*) FROM notifications WHERE user_id = $1 AND read_at IS NULL",
+        r#"SELECT COUNT(*)
+        FROM notifications notification
+        WHERE notification.user_id = $1
+          AND notification.read_at IS NULL
+          AND NOT EXISTS (
+              SELECT 1
+              FROM user_blocks block
+              WHERE
+                  (block.blocker_id = notification.user_id AND block.blocked_id = notification.actor_id)
+                  OR
+                  (block.blocker_id = notification.actor_id AND block.blocked_id = notification.user_id)
+          )"#,
     )
     .bind(user_id)
     .fetch_one(pool.get_ref())
@@ -76,6 +87,14 @@ async fn list_notifications(
             AND visibility.following_id = actor.id
             AND visibility.status = 'accepted'
         WHERE notification.user_id = $1
+          AND NOT EXISTS (
+              SELECT 1
+              FROM user_blocks block
+              WHERE
+                  (block.blocker_id = notification.user_id AND block.blocked_id = notification.actor_id)
+                  OR
+                  (block.blocker_id = notification.actor_id AND block.blocked_id = notification.user_id)
+          )
           AND (
             $2::timestamptz IS NULL
             OR (notification.created_at, notification.id) < ($2::timestamptz, $3::uuid)
