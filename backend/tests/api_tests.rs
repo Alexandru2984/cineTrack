@@ -341,7 +341,8 @@ async fn register_unverified_user(
         .set_json(json!({
             "username": username,
             "email": email,
-            "password": password
+            "password": password,
+            "accepted_terms": true
         }))
         .peer_addr(peer_addr())
         .to_request();
@@ -436,6 +437,118 @@ async fn test_register_success() {
         .await
         .unwrap();
     assert!(!is_public, "new accounts must start private");
+    let accepted: (Option<String>, Option<chrono::DateTime<chrono::Utc>>) =
+        sqlx::query_as("SELECT terms_accepted_version, terms_accepted_at FROM users WHERE id = $1")
+            .bind(Uuid::parse_str(&user_id).unwrap())
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        accepted.0.as_deref(),
+        Some(cinetrack::services::legal::CURRENT_TERMS_VERSION)
+    );
+    assert!(accepted.1.is_some());
+    let acceptance_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM user_terms_acceptances WHERE user_id = $1")
+            .bind(Uuid::parse_str(&user_id).unwrap())
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(acceptance_count, 1);
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn test_register_requires_explicit_terms_acceptance() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+
+    for include_false_field in [false, true] {
+        let mut payload = json!({
+            "username": "termsrequired",
+            "email": "termsrequired@example.com",
+            "password": "Pass1234"
+        });
+        if include_false_field {
+            payload["accepted_terms"] = json!(false);
+        }
+        let req = actix_test::TestRequest::post()
+            .uri("/api/auth/register")
+            .set_json(payload)
+            .peer_addr(peer_addr())
+            .to_request();
+        assert_eq!(actix_test::call_service(&app, req).await.status(), 400);
+    }
+
+    let user_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(user_count, 0);
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn current_terms_gate_community_writes_until_acceptance() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (access_token, _, user_id) =
+        register_unverified_user(&app, "legacyterms", "legacyterms@example.com", "Pass1234").await;
+    let user_id = Uuid::parse_str(&user_id).unwrap();
+
+    sqlx::query(
+        "UPDATE users SET terms_accepted_version = NULL, terms_accepted_at = NULL WHERE id = $1",
+    )
+    .bind(user_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query("DELETE FROM user_terms_acceptances WHERE user_id = $1")
+        .bind(user_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/lists")
+        .insert_header(("Authorization", format!("Bearer {access_token}")))
+        .set_json(json!({"name": "Blocked until acceptance"}))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 403);
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/auth/terms")
+        .insert_header(("Authorization", format!("Bearer {access_token}")))
+        .set_json(json!({"accepted_terms": false}))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 400);
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/auth/terms")
+        .insert_header(("Authorization", format!("Bearer {access_token}")))
+        .set_json(json!({"accepted_terms": true}))
+        .peer_addr(peer_addr())
+        .to_request();
+    let response = actix_test::call_service(&app, req).await;
+    assert_eq!(response.status(), 200);
+    let body: Value = actix_test::read_body_json(response).await;
+    assert_eq!(body["terms_acceptance_required"], false);
+    assert_eq!(
+        body["terms_accepted_version"],
+        cinetrack::services::legal::CURRENT_TERMS_VERSION
+    );
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/lists")
+        .insert_header(("Authorization", format!("Bearer {access_token}")))
+        .set_json(json!({"name": "Allowed after acceptance"}))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 201);
 }
 
 #[actix_web::test]
@@ -451,7 +564,8 @@ async fn test_mobile_auth_returns_rotating_tokens_without_cookies() {
         .set_json(json!({
             "username": "mobileauth",
             "email": "mobileauth@example.com",
-            "password": "Pass1234"
+            "password": "Pass1234",
+            "accepted_terms": true
         }))
         .peer_addr(peer_addr())
         .to_request();
@@ -537,7 +651,8 @@ async fn test_mobile_logout_revokes_a_token_rotated_during_logout() {
         .set_json(json!({
             "username": "logoutrotation",
             "email": "logoutrotation@example.com",
-            "password": "Pass1234"
+            "password": "Pass1234",
+            "accepted_terms": true
         }))
         .peer_addr(peer_addr())
         .to_request();
@@ -584,7 +699,8 @@ async fn test_mobile_session_list_identifies_current_refresh_token() {
         .set_json(json!({
             "username": "mobilesessions",
             "email": "mobilesessions@example.com",
-            "password": "Pass1234"
+            "password": "Pass1234",
+            "accepted_terms": true
         }))
         .peer_addr(peer_addr())
         .to_request();
@@ -663,7 +779,8 @@ async fn test_register_duplicate_email() {
         .set_json(json!({
             "username": "user2",
             "email": "dup@example.com",
-            "password": "Pass1234"
+            "password": "Pass1234",
+            "accepted_terms": true
         }))
         .peer_addr(peer_addr())
         .to_request();
@@ -698,7 +815,8 @@ async fn test_register_duplicate_username_is_case_insensitive() {
         .set_json(json!({
             "username": "caseuser",
             "email": "case-two@example.com",
-            "password": "Pass1234"
+            "password": "Pass1234",
+            "accepted_terms": true
         }))
         .peer_addr(peer_addr())
         .to_request();
@@ -724,7 +842,8 @@ async fn test_register_weak_password() {
         .set_json(json!({
             "username": "testuser",
             "email": "test@example.com",
-            "password": "password"
+            "password": "password",
+            "accepted_terms": true
         }))
         .peer_addr(peer_addr())
         .to_request();
@@ -745,7 +864,8 @@ async fn test_register_short_password() {
         .set_json(json!({
             "username": "testuser",
             "email": "test@example.com",
-            "password": "Aa1"
+            "password": "Aa1",
+            "accepted_terms": true
         }))
         .peer_addr(peer_addr())
         .to_request();
@@ -5912,13 +6032,18 @@ async fn test_account_export_requires_password_and_excludes_credentials() {
     );
 
     let body: Value = actix_test::read_body_json(response).await;
-    assert_eq!(body["format_version"], 1);
+    assert_eq!(body["format_version"], 2);
     assert_eq!(body["account"]["email"], "export@example.com");
     assert_eq!(body["account"]["two_factor_enabled"], false);
+    assert_eq!(
+        body["account"]["terms_accepted_version"],
+        cinetrack::services::legal::CURRENT_TERMS_VERSION
+    );
     assert!(body["library"].is_array());
     assert!(body["watch_history"].is_array());
     assert!(body["sessions"].is_array());
     assert_eq!(body["security_activity"].as_array().unwrap().len(), 1);
+    assert_eq!(body["terms_acceptances"].as_array().unwrap().len(), 1);
     assert_eq!(
         body["security_activity"][0]["event_type"],
         "account_registered"
@@ -7786,6 +7911,7 @@ async fn test_exploit_mass_assignment_on_register_is_refused() {
             "username": "massassign",
             "email": "massassign@example.com",
             "password": "Passw0rd123",
+            "accepted_terms": true,
             // None of these may be honoured.
             "email_verified": true,
             "is_public": true,

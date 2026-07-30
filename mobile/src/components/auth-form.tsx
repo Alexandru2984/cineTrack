@@ -1,8 +1,9 @@
 import { router, useLocalSearchParams } from 'expo-router';
-import { Eye, EyeOff, Film } from 'lucide-react-native';
+import { Check, Eye, EyeOff, Film } from 'lucide-react-native';
 import { useState } from 'react';
 import {
   KeyboardAvoidingView,
+  Linking,
   Platform,
   Pressable,
   ScrollView,
@@ -19,6 +20,7 @@ import { radius, spacing } from '@/constants/theme';
 import { useT } from '@/hooks/use-t';
 import { useTheme } from '@/hooks/use-theme';
 import { safePostAuthRedirect } from '@/lib/deep-links';
+import { API_ORIGIN } from '@/lib/config';
 import { getErrorMessage, isTwoFactorRequired } from '@/lib/http';
 import { loginSession, registerSession } from '@/lib/session';
 import {
@@ -45,6 +47,7 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
   const [mfaRequired, setMfaRequired] = useState(false);
   const [secondFactorMode, setSecondFactorMode] = useState<SecondFactorMode>('authenticator');
   const [secondFactorCode, setSecondFactorCode] = useState('');
+  const [acceptedTerms, setAcceptedTerms] = useState(false);
   const isRegister = mode === 'register';
 
   const submit = async () => {
@@ -66,6 +69,10 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
       setError(t('auth.passwordNeedsLetterNumber'));
       return;
     }
+    if (isRegister && !acceptedTerms) {
+      setError(t('auth.acceptTermsRequired'));
+      return;
+    }
 
     if (!isRegister && mfaRequired) {
       const validationError = validateSecondFactorInput(t, secondFactorMode, secondFactorCode);
@@ -78,7 +85,7 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
     setPending(true);
     try {
       if (isRegister) {
-        await registerSession(username, normalizedEmail, password);
+        await registerSession(username, normalizedEmail, password, acceptedTerms);
       } else {
         await loginSession(
           normalizedEmail,
@@ -280,6 +287,51 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
               </View>
             ) : null}
 
+            {isRegister ? (
+              <View style={styles.termsRow}>
+                <Pressable
+                  accessibilityRole="checkbox"
+                  accessibilityLabel={t('auth.acceptTermsAria')}
+                  accessibilityState={{ checked: acceptedTerms }}
+                  hitSlop={4}
+                  onPress={() => {
+                    setAcceptedTerms((accepted) => !accepted);
+                    setError(null);
+                  }}
+                  style={[
+                    styles.checkboxTouch,
+                    {
+                      borderColor: acceptedTerms ? theme.primary : theme.border,
+                      backgroundColor: acceptedTerms ? theme.primary : theme.elevated,
+                    },
+                  ]}
+                >
+                  {acceptedTerms ? <Check color="#FFFFFF" size={18} strokeWidth={3} /> : null}
+                </Pressable>
+                <AppText variant="caption" muted style={styles.termsCopy}>
+                  {t('auth.acceptTermsPre')}{' '}
+                  <AppText
+                    variant="caption"
+                    accessibilityRole="link"
+                    style={{ color: theme.primary }}
+                    onPress={() => void Linking.openURL(`${API_ORIGIN}/terms`)}
+                  >
+                    {t('auth.termsOfUse')}
+                  </AppText>{' '}
+                  {t('auth.acceptTermsAnd')}{' '}
+                  <AppText
+                    variant="caption"
+                    accessibilityRole="link"
+                    style={{ color: theme.primary }}
+                    onPress={() => void Linking.openURL(`${API_ORIGIN}/community-guidelines`)}
+                  >
+                    {t('auth.communityGuidelines')}
+                  </AppText>
+                  .
+                </AppText>
+              </View>
+            ) : null}
+
             {error ? (
               <View style={[styles.error, { backgroundColor: theme.dangerSoft }]}>
                 <AppText variant="caption" style={{ color: theme.danger }}>
@@ -297,6 +349,7 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
                     : t('auth.signIn')
               }
               loading={pending}
+              disabled={isRegister && !acceptedTerms}
               onPress={() => void submit()}
             />
           </View>
@@ -400,6 +453,24 @@ const styles = StyleSheet.create({
   error: {
     borderRadius: radius.md,
     padding: spacing.md,
+  },
+  termsRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.sm,
+  },
+  checkboxTouch: {
+    width: 44,
+    height: 44,
+    borderWidth: 1,
+    borderRadius: radius.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  termsCopy: {
+    flex: 1,
+    paddingTop: spacing.xs,
+    lineHeight: 20,
   },
   switchMode: {
     minHeight: 44,

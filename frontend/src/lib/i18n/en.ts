@@ -23,6 +23,8 @@ export const en = {
     register: 'Register',
     about: 'About',
     privacy: 'Privacy',
+    terms: 'Terms',
+    guidelines: 'Community guidelines',
     notifications: 'Notifications',
     viewAllNotifications: 'View all notifications',
     markAllRead: 'Mark all as read',
@@ -56,6 +58,10 @@ export const en = {
     usernamePlaceholder: 'cinephile42',
     passwordMinPlaceholder: 'Min 8 characters',
     registrationFailed: 'Registration failed',
+    acceptTermsPre: 'I agree to the',
+    termsOfUse: 'Terms of Use',
+    acceptTermsAnd: 'and',
+    communityGuidelines: 'Community Guidelines',
     haveAccount: 'Already have an account?',
     resetPassword: 'Reset password',
     forgotSubtitle: "Enter your email and we'll send you a reset link",
@@ -409,6 +415,71 @@ export const en = {
     sending: 'Sending…',
     resendLink: 'Resend link',
     dismiss: 'Dismiss',
+  },
+  legal: {
+    effective: 'Effective and last updated: July 30, 2026',
+    contactTitle: 'Questions, reports, and appeals',
+    termsTitle: 'Terms of Use',
+    termsIntro:
+      'These Terms govern access to Văzute. Creating an account or accepting an updated version forms an agreement between you and the service operator.',
+    terms1Title: 'Eligibility and accounts',
+    terms1Body:
+      'You must be at least 13 years old and legally able to use the service. Provide accurate account information, protect your credentials, and tell us promptly if you believe your account has been compromised. You are responsible for activity performed through your account.',
+    terms2Title: 'The service',
+    terms2Body:
+      'Văzute provides movie and television tracking, calendars, statistics, lists, and social features. Features may change, be interrupted, or be withdrawn. We aim for reliable operation but do not promise uninterrupted availability or that catalog and release information is always complete or current.',
+    terms3Title: 'Your content and licence',
+    terms3Body:
+      'You keep ownership of profile text, avatars, list names, descriptions, and other content you submit. You grant Văzute a non-exclusive, worldwide, royalty-free licence to host, process, reproduce, and display that content only as needed to operate, secure, and improve the service under your chosen privacy settings. Submit only content you have the right to use.',
+    terms4Title: 'Community safety and moderation',
+    terms4Body:
+      'You must follow the Community Guidelines. Văzute may review reports, limit visibility, remove content, restrict features, suspend accounts, or preserve evidence where reasonably necessary to protect people, comply with law, or enforce these Terms. Reporting and blocking tools must not be abused.',
+    terms5Title: 'Third-party data and services',
+    terms5Body:
+      'Movie and television metadata may come from TMDB, and streaming availability may come from JustWatch. Their data can be delayed or inaccurate and remains subject to their terms. External links and platform services are operated by third parties; Văzute does not control or endorse them.',
+    terms6Title: 'Prohibited use',
+    terms6Body:
+      'Do not break the law; harass, threaten, exploit, or impersonate others; publish hateful, sexually exploitative, deceptive, or rights-infringing content; distribute malware or spam; scrape at harmful scale; evade limits, blocks, or moderation; probe accounts or infrastructure; or interfere with the service or another person’s access.',
+    terms7Title: 'Ending access',
+    terms7Body:
+      'You may stop using Văzute and delete your account at any time. Access may be restricted or ended for serious or repeated violations, security threats, legal requirements, or material risk to the service or its users. You may ask for a review through the contact address below.',
+    terms8Title: 'Disclaimers and responsibility',
+    terms8Body:
+      'The service is provided as available. To the extent permitted by law, Văzute disclaims implied warranties and is not responsible for decisions based on catalog, release, recommendation, or provider information. Nothing here limits mandatory consumer rights or liability that cannot legally be excluded.',
+    terms9Title: 'Changes and applicable rules',
+    terms9Body:
+      'Material changes receive a new version and may require renewed acceptance before community features can be used. Romanian law applies where permitted, without removing mandatory protections available in your country. If one provision is unenforceable, the remaining provisions continue to apply.',
+    guidelinesTitle: 'Community Guidelines',
+    guidelinesIntro:
+      'Văzute should be a safe place to share viewing activity and lists. These rules apply to usernames, bios, avatars, public lists, and every community interaction.',
+    guidelines1Title: 'Treat people with respect',
+    guidelines1Body:
+      'Discuss films and shows without attacking the people watching them. Do not bully, shame, intimidate, dogpile, or repeatedly contact someone who has asked you to stop. Disagreement is welcome; targeted abuse is not.',
+    guidelines2Title: 'Keep people safe',
+    guidelines2Body:
+      'Do not publish credible threats, instructions for violence, non-consensual intimate material, sexual exploitation, or any content that endangers a child. Never solicit sexual content from minors. Immediate danger should be reported to local emergency services as well as to Văzute.',
+    guidelines3Title: 'No hate or harassment',
+    guidelines3Body:
+      'Do not attack, degrade, exclude, or encourage violence against people because of race, ethnicity, nationality, religion, disability, sex, gender identity, sexual orientation, age, or another protected characteristic. Contextual discussion of a title is not permission to target a person.',
+    guidelines4Title: 'Be authentic and avoid spam',
+    guidelines4Body:
+      'Do not impersonate people or organizations, coordinate fake engagement, send repetitive follow requests, post scams, advertise deceptively, or use automation to manipulate social features. Usernames and avatars must not mislead others about identity or authority.',
+    guidelines5Title: 'Share content responsibly',
+    guidelines5Body:
+      'Use content you have permission to share. Avoid exposing private information, credentials, or identifying data about another person. Keep list names, descriptions, bios, and avatars suitable for a general audience, and signal major spoilers where practical.',
+    guidelines6Title: 'Report and block',
+    guidelines6Body:
+      'Report content or accounts you reasonably believe violate these rules and choose the closest reason. Do not file coordinated, retaliatory, duplicate, or knowingly false reports. Blocking is available for personal safety and should immediately stop direct social interaction between the two accounts.',
+    guidelines7Title: 'Enforcement and appeals',
+    guidelines7Body:
+      'Responses are based on context, severity, history, and risk. They may include warnings, content removal, feature limits, suspension, or account termination. Serious illegal material may be preserved or reported where required. Include the account name and relevant context when requesting a review.',
+    acceptanceTitle: 'Review the current community terms',
+    acceptanceBody:
+      'The community rules have been versioned so every member has the same clear safety expectations. Accept them before continuing with social and public-content features.',
+    acceptanceReviewPre: 'Please review the',
+    acceptButton: 'Accept and continue',
+    accepting: 'Saving acceptance…',
+    acceptanceError: 'Could not save your acceptance',
   },
   userSearch: {
     loadError: 'People search could not be loaded',

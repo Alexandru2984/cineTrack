@@ -239,7 +239,7 @@ export function Navbar() {
           )}
 
           {!authed && (
-            <div className="hidden items-center gap-4 md:flex">
+            <div className="hidden items-center gap-4 xl:flex">
               <button
                 type="button"
                 onClick={toggle}
@@ -258,6 +258,15 @@ export function Navbar() {
               <Link to="/privacy" className="text-sm hover:text-[hsl(var(--primary))]">
                 {t('nav.privacy')}
               </Link>
+              <Link to="/terms" className="text-sm hover:text-[hsl(var(--primary))]">
+                {t('nav.terms')}
+              </Link>
+              <Link
+                to="/community-guidelines"
+                className="text-sm hover:text-[hsl(var(--primary))]"
+              >
+                {t('nav.guidelines')}
+              </Link>
               <Link
                 to="/register"
                 className="rounded-md bg-[hsl(var(--primary))] px-4 py-2 text-sm text-white hover:opacity-90"
@@ -267,7 +276,7 @@ export function Navbar() {
             </div>
           )}
 
-          <div className="flex items-center gap-1 md:hidden">
+          <div className={`flex items-center gap-1 ${authed ? 'md:hidden' : 'xl:hidden'}`}>
             {authed && (
               <>
                 <Link
@@ -304,7 +313,7 @@ export function Navbar() {
         </div>
 
         {mobileOpen && !authed && (
-          <div id="mobile-navigation" className="space-y-2 pb-4 md:hidden">
+          <div id="mobile-navigation" className="space-y-2 pb-4 xl:hidden">
             <button
               type="button"
               onClick={toggle}
@@ -340,6 +349,20 @@ export function Navbar() {
               onClick={() => setMobileOpen(false)}
             >
               {t('nav.privacy')}
+            </Link>
+            <Link
+              to="/terms"
+              className="block py-2 text-sm"
+              onClick={() => setMobileOpen(false)}
+            >
+              {t('nav.terms')}
+            </Link>
+            <Link
+              to="/community-guidelines"
+              className="block py-2 text-sm"
+              onClick={() => setMobileOpen(false)}
+            >
+              {t('nav.guidelines')}
             </Link>
             <Link
               to="/register"

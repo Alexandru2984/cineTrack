@@ -32,6 +32,7 @@ pub struct RegisterRequest {
         custom(function = "validate_password_strength")
     )]
     pub password: String,
+    pub accepted_terms: bool,
 }
 
 fn validate_password_strength(password: &str) -> Result<(), validator::ValidationError> {
@@ -143,11 +144,17 @@ pub struct UserResponse {
     pub is_public: bool,
     pub email_verified: bool,
     pub two_factor_enabled: bool,
+    pub terms_accepted_version: Option<String>,
+    pub terms_accepted_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub current_terms_version: &'static str,
+    pub terms_acceptance_required: bool,
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
 impl From<crate::models::User> for UserResponse {
     fn from(user: crate::models::User) -> Self {
+        let terms_acceptance_required = user.terms_accepted_version.as_deref()
+            != Some(crate::services::legal::CURRENT_TERMS_VERSION);
         Self {
             id: user.id,
             username: user.username,
@@ -157,9 +164,19 @@ impl From<crate::models::User> for UserResponse {
             is_public: user.is_public,
             email_verified: user.email_verified,
             two_factor_enabled: user.totp_enabled,
+            terms_accepted_version: user.terms_accepted_version,
+            terms_accepted_at: user.terms_accepted_at,
+            current_terms_version: crate::services::legal::CURRENT_TERMS_VERSION,
+            terms_acceptance_required,
             created_at: user.created_at,
         }
     }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AcceptTermsRequest {
+    pub accepted_terms: bool,
 }
 
 /// Lightweight user info without email — for public-facing lists (followers, etc.)
@@ -354,6 +371,7 @@ mod tests {
             username: "testuser".to_string(),
             email: "test@example.com".to_string(),
             password: "SecurePass1".to_string(),
+            accepted_terms: true,
         };
         assert!(req.validate().is_ok());
     }
@@ -365,6 +383,7 @@ mod tests {
                 "username": "testuser",
                 "email": "test@example.com",
                 "password": "SecurePass1",
+                "accepted_terms": true,
                 "admin": true
             }))
             .is_err()
@@ -401,11 +420,29 @@ mod tests {
     }
 
     #[test]
+    fn terms_acceptance_payload_rejects_unknown_fields() {
+        assert!(
+            serde_json::from_value::<AcceptTermsRequest>(serde_json::json!({
+                "accepted_terms": true,
+                "terms_version": "attacker-selected"
+            }))
+            .is_err()
+        );
+        assert!(
+            serde_json::from_value::<AcceptTermsRequest>(serde_json::json!({
+                "accepted_terms": true
+            }))
+            .is_ok()
+        );
+    }
+
+    #[test]
     fn test_register_username_too_short() {
         let req = RegisterRequest {
             username: "ab".to_string(),
             email: "test@example.com".to_string(),
             password: "SecurePass1".to_string(),
+            accepted_terms: true,
         };
         assert!(req.validate().is_err());
     }
@@ -416,6 +453,7 @@ mod tests {
             username: "a".repeat(51),
             email: "test@example.com".to_string(),
             password: "SecurePass1".to_string(),
+            accepted_terms: true,
         };
         assert!(req.validate().is_err());
     }
@@ -426,6 +464,7 @@ mod tests {
             username: "   ".to_string(),
             email: "test@example.com".to_string(),
             password: "SecurePass1".to_string(),
+            accepted_terms: true,
         };
         assert!(req.validate().is_err());
     }
@@ -436,6 +475,7 @@ mod tests {
             username: "testuser".to_string(),
             email: "not-an-email".to_string(),
             password: "SecurePass1".to_string(),
+            accepted_terms: true,
         };
         assert!(req.validate().is_err());
     }
@@ -446,6 +486,7 @@ mod tests {
             username: "testuser".to_string(),
             email: "test@example.com".to_string(),
             password: "Short1".to_string(),
+            accepted_terms: true,
         };
         assert!(req.validate().is_err());
     }
@@ -456,6 +497,7 @@ mod tests {
             username: "testuser".to_string(),
             email: "test@example.com".to_string(),
             password: format!("{}1", "a".repeat(128)),
+            accepted_terms: true,
         };
         assert!(req.validate().is_err());
     }
@@ -466,6 +508,7 @@ mod tests {
             username: "testuser".to_string(),
             email: "test@example.com".to_string(),
             password: "OnlyLettersHere".to_string(),
+            accepted_terms: true,
         };
         assert!(req.validate().is_err());
     }
@@ -476,6 +519,7 @@ mod tests {
             username: "testuser".to_string(),
             email: "test@example.com".to_string(),
             password: "123456789".to_string(),
+            accepted_terms: true,
         };
         assert!(req.validate().is_err());
     }
@@ -486,6 +530,7 @@ mod tests {
             username: "abc".to_string(),
             email: "test@example.com".to_string(),
             password: "SecurePass1".to_string(),
+            accepted_terms: true,
         };
         assert!(req.validate().is_ok());
     }
@@ -496,6 +541,7 @@ mod tests {
             username: "a".repeat(50),
             email: "test@example.com".to_string(),
             password: "SecurePass1".to_string(),
+            accepted_terms: true,
         };
         assert!(req.validate().is_ok());
     }
@@ -506,6 +552,7 @@ mod tests {
             username: "testuser".to_string(),
             email: "test@example.com".to_string(),
             password: "Abcdef1x".to_string(), // exactly 8
+            accepted_terms: true,
         };
         assert!(req.validate().is_ok());
     }
@@ -518,6 +565,7 @@ mod tests {
             username: "testuser".to_string(),
             email,
             password: "SecurePass1".to_string(),
+            accepted_terms: true,
         };
         assert!(req.validate().is_ok());
     }
@@ -531,6 +579,7 @@ mod tests {
             username: "testuser".to_string(),
             email: email.clone(),
             password: "SecurePass1".to_string(),
+            accepted_terms: true,
         }
         .validate()
         .is_err());

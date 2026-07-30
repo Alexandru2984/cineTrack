@@ -107,7 +107,7 @@ log "Creating and seeding the benchmark account"
 SUFFIX="$(date +%s)"
 REGISTER="$(curl -fsS -X POST "$BASE_URL/api/auth/register" \
   -H 'Content-Type: application/json' \
-  -d "{\"username\":\"bench$SUFFIX\",\"email\":\"bench$SUFFIX@example.com\",\"password\":\"Benchmark123!\"}")"
+  -d "{\"username\":\"bench$SUFFIX\",\"email\":\"bench$SUFFIX@example.com\",\"password\":\"Benchmark123!\",\"accepted_terms\":true}")"
 
 TOKEN="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])' <<<"$REGISTER")"
 USER_ID="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["user"]["id"])' <<<"$REGISTER")"

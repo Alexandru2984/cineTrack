@@ -59,6 +59,7 @@ fn scope() -> actix_web::Scope {
         .route("/security-activity", web::get().to(list_security_activity))
         .route("/sessions/logout-all", web::post().to(logout_all_sessions))
         .route("/sessions/{id}", web::delete().to(revoke_session))
+        .route("/terms", web::post().to(accept_terms))
         .route("/me", web::get().to(me))
 }
 
@@ -246,6 +247,22 @@ async fn me(pool: web::Data<PgPool>, req: HttpRequest) -> Result<HttpResponse, A
     let user_id = require_auth(&req).await?;
     let user = services::auth::get_current_user(pool.get_ref(), user_id).await?;
     Ok(HttpResponse::Ok().json(user))
+}
+
+async fn accept_terms(
+    pool: web::Data<PgPool>,
+    req: HttpRequest,
+    body: web::Json<AcceptTermsRequest>,
+) -> Result<HttpResponse, AppError> {
+    let user_id = require_auth(&req).await?;
+    if !body.accepted_terms {
+        return Err(AppError::BadRequest(
+            "Terms acceptance must be explicit".to_string(),
+        ));
+    }
+
+    let user = services::legal::accept_current_terms(pool.get_ref(), user_id).await?;
+    Ok(HttpResponse::Ok().json(UserResponse::from(user)))
 }
 
 async fn change_password(

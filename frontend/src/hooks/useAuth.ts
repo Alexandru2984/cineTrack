@@ -6,11 +6,31 @@ import type { AuthResponse, SecurityActivity, Session, User } from '@/types';
 export function useRegister() {
   const setAuth = useAuthStore((s) => s.setAuth);
   return useMutation({
-    mutationFn: async (data: { username: string; email: string; password: string }) => {
+    mutationFn: async (data: {
+      username: string;
+      email: string;
+      password: string;
+      accepted_terms: boolean;
+    }) => {
       const res = await api.post<AuthResponse>('/auth/register', data);
       return res.data;
     },
     onSuccess: (data) => setAuth(data.access_token, data.user),
+  });
+}
+
+export function useAcceptTerms() {
+  const setUser = useAuthStore((state) => state.setUser);
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      const response = await api.post<User>('/auth/terms', { accepted_terms: true });
+      return response.data;
+    },
+    onSuccess: (user) => {
+      setUser(user);
+      queryClient.setQueryData(['me'], user);
+    },
   });
 }
 

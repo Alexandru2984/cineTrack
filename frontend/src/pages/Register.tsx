@@ -10,12 +10,13 @@ export default function RegisterPage() {
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [acceptedTerms, setAcceptedTerms] = useState(false);
   const register = useRegister();
   const navigate = useNavigate();
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    register.mutate({ username, email, password }, {
+    register.mutate({ username, email, password, accepted_terms: acceptedTerms }, {
       onSuccess: () => navigate('/'),
     });
   };
@@ -49,6 +50,27 @@ export default function RegisterPage() {
               placeholder={t('auth.usernamePlaceholder')}
             />
           </div>
+
+          <label className="flex cursor-pointer items-start gap-3 text-sm leading-5 text-[hsl(var(--muted-foreground))]">
+            <input
+              type="checkbox"
+              checked={acceptedTerms}
+              onChange={(event) => setAcceptedTerms(event.target.checked)}
+              required
+              className="mt-0.5 h-4 w-4 shrink-0 accent-[hsl(var(--primary))]"
+            />
+            <span>
+              {t('auth.acceptTermsPre')}{' '}
+              <Link to="/terms" target="_blank" rel="noreferrer" className="text-[hsl(var(--primary))] hover:underline">
+                {t('auth.termsOfUse')}
+              </Link>{' '}
+              {t('auth.acceptTermsAnd')}{' '}
+              <Link to="/community-guidelines" target="_blank" rel="noreferrer" className="text-[hsl(var(--primary))] hover:underline">
+                {t('auth.communityGuidelines')}
+              </Link>
+              .
+            </span>
+          </label>
           <div>
             <label htmlFor="register-email" className="block text-sm font-medium mb-1">{t('auth.email')}</label>
             <input
@@ -85,7 +107,7 @@ export default function RegisterPage() {
 
           <button
             type="submit"
-            disabled={register.isPending}
+            disabled={register.isPending || !acceptedTerms}
             className="w-full rounded-md bg-[hsl(var(--primary))] py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-2"
           >
             {register.isPending && <Loader2 className="h-4 w-4 animate-spin" />}

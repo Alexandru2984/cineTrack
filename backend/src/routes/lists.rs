@@ -81,6 +81,7 @@ async fn create_list(
 ) -> Result<HttpResponse, AppError> {
     let user_id = require_auth(&req).await?;
     body.validate()?;
+    crate::services::legal::require_current_terms(pool.get_ref(), user_id).await?;
     let data = body.into_inner();
 
     if data.is_public == Some(true) {
@@ -165,6 +166,7 @@ async fn update_list(
     let user_id = require_auth(&req).await?;
     let list_id = path.into_inner();
     body.validate()?;
+    crate::services::legal::require_current_terms(pool.get_ref(), user_id).await?;
     let data = body.into_inner();
 
     if data.is_public == Some(true) {
@@ -220,6 +222,7 @@ async fn add_item(
 ) -> Result<HttpResponse, AppError> {
     let user_id = require_auth(&req).await?;
     let list_id = path.into_inner();
+    crate::services::legal::require_current_terms(pool.get_ref(), user_id).await?;
 
     let mut tx = pool.begin().await?;
     // The row lock serializes item-count checks for this list.

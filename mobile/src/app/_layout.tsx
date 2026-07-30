@@ -17,6 +17,7 @@ import {
   MobileErrorFallback,
 } from '@/components/mobile-error-boundary';
 import { OfflineBanner } from '@/components/offline-banner';
+import { TermsAcceptanceGate } from '@/components/terms-acceptance-gate';
 import { captureClientError, installGlobalErrorHandler } from '@/lib/client-errors';
 import { hydrateSession } from '@/lib/session';
 import {
@@ -96,6 +97,7 @@ export default function RootLayout() {
         <MobileErrorBoundary>
           <View style={{ flex: 1 }}>
             <OfflineBanner />
+            <TermsAcceptanceGate />
             <Stack
               screenOptions={{
                 contentStyle: { backgroundColor: theme.background },

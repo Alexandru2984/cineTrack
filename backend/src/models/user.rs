@@ -25,6 +25,8 @@ pub struct User {
     pub login_last_failed_at: Option<DateTime<Utc>>,
     #[serde(skip_serializing)]
     pub login_locked_until: Option<DateTime<Utc>>,
+    pub terms_accepted_version: Option<String>,
+    pub terms_accepted_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }

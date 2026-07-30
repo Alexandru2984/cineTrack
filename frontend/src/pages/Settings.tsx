@@ -1217,6 +1217,26 @@ export default function SettingsPage() {
         </span>
         <ChevronRight className="h-4 w-4" aria-hidden="true" />
       </Link>
+      <Link
+        to="/terms"
+        className="flex items-center justify-between gap-4 border-b border-[hsl(var(--border))] px-1 py-4 text-sm font-medium hover:text-[hsl(var(--primary))]"
+      >
+        <span className="flex items-center gap-2">
+          <ShieldCheck className="h-5 w-5 text-[hsl(var(--muted-foreground))]" aria-hidden="true" />
+          {t('nav.terms')}
+        </span>
+        <ChevronRight className="h-4 w-4" aria-hidden="true" />
+      </Link>
+      <Link
+        to="/community-guidelines"
+        className="flex items-center justify-between gap-4 border-b border-[hsl(var(--border))] px-1 py-4 text-sm font-medium hover:text-[hsl(var(--primary))]"
+      >
+        <span className="flex items-center gap-2">
+          <ShieldCheck className="h-5 w-5 text-[hsl(var(--muted-foreground))]" aria-hidden="true" />
+          {t('nav.guidelines')}
+        </span>
+        <ChevronRight className="h-4 w-4" aria-hidden="true" />
+      </Link>
       <DangerZoneCard />
     </div>
   );

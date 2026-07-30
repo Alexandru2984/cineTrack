@@ -24,6 +24,8 @@ export const ro: Dictionary = {
     register: 'Înregistrare',
     about: 'Despre',
     privacy: 'Confidențialitate',
+    terms: 'Termeni',
+    guidelines: 'Regulile comunității',
     notifications: 'Notificări',
     viewAllNotifications: 'Vezi toate notificările',
     markAllRead: 'Marchează tot ca citit',
@@ -58,6 +60,10 @@ export const ro: Dictionary = {
     usernamePlaceholder: 'cinefil42',
     passwordMinPlaceholder: 'Minim 8 caractere',
     registrationFailed: 'Înregistrare eșuată',
+    acceptTermsPre: 'Sunt de acord cu',
+    termsOfUse: 'Termenii de utilizare',
+    acceptTermsAnd: 'și',
+    communityGuidelines: 'Regulile comunității',
     haveAccount: 'Ai deja cont?',
     resetPassword: 'Resetează parola',
     forgotSubtitle: 'Introdu adresa de email și îți trimitem un link de resetare',
@@ -411,6 +417,71 @@ export const ro: Dictionary = {
     sending: 'Se trimite…',
     resendLink: 'Retrimite linkul',
     dismiss: 'Închide',
+  },
+  legal: {
+    effective: 'În vigoare și actualizate ultima dată: 30 iulie 2026',
+    contactTitle: 'Întrebări, raportări și contestații',
+    termsTitle: 'Termeni de utilizare',
+    termsIntro:
+      'Acești Termeni reglementează accesul la Văzute. Crearea unui cont sau acceptarea unei versiuni actualizate formează un acord între tine și operatorul serviciului.',
+    terms1Title: 'Eligibilitate și conturi',
+    terms1Body:
+      'Trebuie să ai cel puțin 13 ani și capacitatea legală de a folosi serviciul. Oferă informații corecte, protejează-ți datele de autentificare și anunță-ne rapid dacă suspectezi compromiterea contului. Răspunzi pentru activitatea realizată prin contul tău.',
+    terms2Title: 'Serviciul',
+    terms2Body:
+      'Văzute oferă urmărirea filmelor și serialelor, calendare, statistici, liste și funcții sociale. Funcțiile se pot schimba, întrerupe sau retrage. Urmărim o funcționare fiabilă, dar nu promitem disponibilitate neîntreruptă ori informații de catalog și lansare mereu complete sau actuale.',
+    terms3Title: 'Conținutul tău și licența',
+    terms3Body:
+      'Păstrezi drepturile asupra textului de profil, avatarurilor, numelor și descrierilor listelor și altui conținut trimis. Acorzi Văzute o licență neexclusivă, mondială și fără redevențe pentru a găzdui, procesa, reproduce și afișa acel conținut numai cât este necesar operării, securizării și îmbunătățirii serviciului, conform setărilor tale de confidențialitate. Trimite doar conținut pe care ai dreptul să-l folosești.',
+    terms4Title: 'Siguranța comunității și moderare',
+    terms4Body:
+      'Trebuie să respecți Regulile comunității. Văzute poate analiza raportări, limita vizibilitatea, elimina conținut, restricționa funcții, suspenda conturi sau păstra dovezi când este rezonabil necesar pentru protejarea oamenilor, respectarea legii ori aplicarea acestor Termeni. Instrumentele de raportare și blocare nu trebuie abuzate.',
+    terms5Title: 'Date și servicii terțe',
+    terms5Body:
+      'Metadatele despre filme și seriale pot proveni de la TMDB, iar disponibilitatea pe platforme de la JustWatch. Datele pot întârzia sau fi inexacte și rămân supuse termenilor furnizorilor. Linkurile externe și serviciile platformelor sunt operate de terți; Văzute nu le controlează și nu le garantează.',
+    terms6Title: 'Utilizări interzise',
+    terms6Body:
+      'Nu încălca legea; nu hărțui, amenința, exploata sau uzurpa identitatea altora; nu publica materiale instigatoare la ură, exploatatoare sexual, înșelătoare ori care încalcă drepturi; nu distribui malware sau spam; nu colecta automat date la scară nocivă; nu evita limite, blocări sau moderarea; nu testa conturi ori infrastructura și nu împiedica serviciul sau accesul altcuiva.',
+    terms7Title: 'Încetarea accesului',
+    terms7Body:
+      'Poți opri folosirea Văzute și îți poți șterge contul oricând. Accesul poate fi restricționat sau încheiat pentru încălcări grave ori repetate, amenințări de securitate, obligații legale sau riscuri semnificative pentru serviciu ori utilizatori. Poți cere reanalizarea prin adresa de contact de mai jos.',
+    terms8Title: 'Declinări și răspundere',
+    terms8Body:
+      'Serviciul este oferit în forma disponibilă. În limitele legii, Văzute exclude garanțiile implicite și nu răspunde pentru decizii bazate pe informații despre catalog, lansări, recomandări ori furnizori. Nimic de aici nu limitează drepturile obligatorii ale consumatorilor sau răspunderea care nu poate fi exclusă legal.',
+    terms9Title: 'Modificări și reguli aplicabile',
+    terms9Body:
+      'Modificările importante primesc o versiune nouă și pot necesita o nouă acceptare înainte de folosirea funcțiilor comunitare. Se aplică legea română unde este permis, fără eliminarea protecțiilor obligatorii din țara ta. Dacă o prevedere nu poate fi aplicată, celelalte rămân valabile.',
+    guidelinesTitle: 'Regulile comunității',
+    guidelinesIntro:
+      'Văzute trebuie să fie un loc sigur pentru distribuirea activității de vizionare și a listelor. Regulile se aplică numelor de utilizator, biografiilor, avatarurilor, listelor publice și tuturor interacțiunilor comunitare.',
+    guidelines1Title: 'Respectă oamenii',
+    guidelines1Body:
+      'Discută despre filme și seriale fără să ataci oamenii care le urmăresc. Nu intimida, umili, presa în grup și nu contacta repetat pe cineva care ți-a cerut să te oprești. Dezacordul este binevenit; abuzul țintit nu este.',
+    guidelines2Title: 'Protejează siguranța oamenilor',
+    guidelines2Body:
+      'Nu publica amenințări credibile, instrucțiuni pentru violență, materiale intime fără consimțământ, exploatare sexuală ori conținut care pune un copil în pericol. Nu solicita niciodată materiale sexuale de la minori. Pericolul imediat trebuie raportat serviciilor locale de urgență și Văzute.',
+    guidelines3Title: 'Fără ură sau hărțuire',
+    guidelines3Body:
+      'Nu ataca, degrada, exclude și nu încuraja violența împotriva oamenilor pe baza rasei, etniei, naționalității, religiei, dizabilității, sexului, identității de gen, orientării sexuale, vârstei ori altei caracteristici protejate. Discuția contextuală despre un titlu nu justifică atacarea unei persoane.',
+    guidelines4Title: 'Fii autentic și evită spamul',
+    guidelines4Body:
+      'Nu imita persoane sau organizații, nu coordona interacțiuni false, nu trimite cereri repetitive, nu publica fraude, nu face publicitate înșelătoare și nu folosi automatizări pentru manipularea funcțiilor sociale. Numele și avatarurile nu trebuie să inducă în eroare privind identitatea sau autoritatea.',
+    guidelines5Title: 'Distribuie responsabil',
+    guidelines5Body:
+      'Folosește conținut pe care ai permisiunea să-l distribui. Nu expune informații private, credențiale sau date de identificare despre altă persoană. Păstrează numele și descrierile listelor, biografiile și avatarurile potrivite pentru publicul general și semnalează spoilerele majore când este practic.',
+    guidelines6Title: 'Raportează și blochează',
+    guidelines6Body:
+      'Raportează conținutul sau conturile despre care crezi rezonabil că încalcă regulile și alege motivul cel mai apropiat. Nu trimite raportări coordonate, de răzbunare, duplicate sau intenționat false. Blocarea este disponibilă pentru siguranța personală și trebuie să oprească imediat interacțiunea socială directă dintre conturi.',
+    guidelines7Title: 'Aplicare și contestații',
+    guidelines7Body:
+      'Răspunsurile țin cont de context, gravitate, istoric și risc. Pot include avertismente, eliminarea conținutului, limitarea funcțiilor, suspendarea sau închiderea contului. Materialele ilegale grave pot fi păstrate ori raportate când legea o cere. Include numele contului și contextul relevant când ceri reanalizarea.',
+    acceptanceTitle: 'Revizuiește termenii actuali ai comunității',
+    acceptanceBody:
+      'Regulile comunității sunt acum versionate, astfel încât fiecare membru să aibă aceleași așteptări clare de siguranță. Acceptă-le înainte de a continua cu funcțiile sociale și conținutul public.',
+    acceptanceReviewPre: 'Te rugăm să citești',
+    acceptButton: 'Acceptă și continuă',
+    accepting: 'Salvăm acceptarea…',
+    acceptanceError: 'Acceptarea nu a putut fi salvată',
   },
   userSearch: {
     loadError: 'Căutarea de persoane nu a putut fi încărcată',

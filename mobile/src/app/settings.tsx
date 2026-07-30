@@ -77,6 +77,7 @@ import {
   validatePasswordChange,
   validateProfileDraft,
 } from '@/lib/account';
+import { API_ORIGIN } from '@/lib/config';
 import { exportAndShareAccountData } from '@/lib/data-export';
 import { formatDateTime, getFormatLocaleTag } from '@/lib/format';
 import { getErrorMessage } from '@/lib/http';
@@ -1349,13 +1350,37 @@ export default function SettingsScreen() {
             <Pressable
               accessibilityRole="link"
               accessibilityLabel={t('settings.privacyPolicyAria')}
-              onPress={() => void Linking.openURL('https://vazute.micutu.com/privacy')}
+              onPress={() => void Linking.openURL(`${API_ORIGIN}/privacy`)}
               style={({ pressed }) => [
                 styles.linkRow,
                 { borderColor: theme.border, opacity: pressed ? 0.72 : 1 },
               ]}
             >
               <AppText variant="label">{t('settings.privacyPolicy')}</AppText>
+              <ExternalLink color={theme.mutedText} size={18} />
+            </Pressable>
+            <Pressable
+              accessibilityRole="link"
+              accessibilityLabel={t('settings.termsOfUseAria')}
+              onPress={() => void Linking.openURL(`${API_ORIGIN}/terms`)}
+              style={({ pressed }) => [
+                styles.linkRow,
+                { borderColor: theme.border, opacity: pressed ? 0.72 : 1 },
+              ]}
+            >
+              <AppText variant="label">{t('settings.termsOfUse')}</AppText>
+              <ExternalLink color={theme.mutedText} size={18} />
+            </Pressable>
+            <Pressable
+              accessibilityRole="link"
+              accessibilityLabel={t('settings.communityGuidelinesAria')}
+              onPress={() => void Linking.openURL(`${API_ORIGIN}/community-guidelines`)}
+              style={({ pressed }) => [
+                styles.linkRow,
+                { borderColor: theme.border, opacity: pressed ? 0.72 : 1 },
+              ]}
+            >
+              <AppText variant="label">{t('settings.communityGuidelines')}</AppText>
               <ExternalLink color={theme.mutedText} size={18} />
             </Pressable>
             <Pressable

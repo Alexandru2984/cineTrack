@@ -53,27 +53,54 @@ pub async fn register(
     client: &ClientInfo,
     req: RegisterRequest,
 ) -> Result<(AuthResponse, String), AppError> {
+    if !req.accepted_terms {
+        return Err(AppError::BadRequest(
+            "You must accept the Terms of Use and Community Guidelines".to_string(),
+        ));
+    }
+
     let email = normalize_email(&req.email);
     // Perform the expensive work for duplicate and new accounts alike so the
     // generic conflict response does not expose account existence by timing.
     let password_hash = password::hash_password(&req.password).await?;
 
+    let mut tx = pool.begin().await?;
     let user = sqlx::query_as::<_, User>(
-        r#"INSERT INTO users (username, email, password_hash, is_public)
-        VALUES ($1, $2, $3, FALSE)
+        r#"INSERT INTO users (
+            username,
+            email,
+            password_hash,
+            is_public,
+            terms_accepted_version,
+            terms_accepted_at
+        )
+        VALUES ($1, $2, $3, FALSE, $4, NOW())
         ON CONFLICT DO NOTHING
         RETURNING *"#,
     )
     .bind(&req.username)
     .bind(&email)
     .bind(&password_hash)
-    .fetch_optional(pool)
+    .bind(crate::services::legal::CURRENT_TERMS_VERSION)
+    .fetch_optional(&mut *tx)
     .await?
     .ok_or_else(|| {
         AppError::BadRequest(
             "Unable to create account. Please check your details and try again.".to_string(),
         )
     })?;
+
+    sqlx::query(
+        r#"INSERT INTO user_terms_acceptances (user_id, terms_version, accepted_at)
+        SELECT id, $2, terms_accepted_at
+        FROM users
+        WHERE id = $1"#,
+    )
+    .bind(user.id)
+    .bind(crate::services::legal::CURRENT_TERMS_VERSION)
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
 
     log::info!("audit: account registered user_id={}", user.id);
 

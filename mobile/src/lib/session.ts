@@ -27,6 +27,10 @@ const userSchema = z.object({
   // of failing validation and signing the user out on upgrade.
   email_verified: z.boolean().optional(),
   two_factor_enabled: z.boolean().optional(),
+  terms_accepted_version: z.string().nullable().optional(),
+  terms_accepted_at: z.string().nullable().optional(),
+  current_terms_version: z.string().optional(),
+  terms_acceptance_required: z.boolean().optional(),
   created_at: z.string(),
 });
 
@@ -309,11 +313,21 @@ export async function loginSession(email: string, password: string, totpCode?: s
   await acceptSession(payload, generation);
 }
 
-export async function registerSession(username: string, email: string, password: string) {
+export async function registerSession(
+  username: string,
+  email: string,
+  password: string,
+  acceptedTerms: boolean,
+) {
   const generation = await beginAuthentication();
   const payload = await rawRequest('/auth/mobile/register', {
     method: 'POST',
-    body: { username: username.trim(), email: email.trim(), password },
+    body: {
+      username: username.trim(),
+      email: email.trim(),
+      password,
+      accepted_terms: acceptedTerms,
+    },
   });
   await acceptSession(payload, generation);
 }

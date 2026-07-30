@@ -273,6 +273,7 @@ async fn update_profile(
 ) -> Result<HttpResponse, AppError> {
     let user_id = require_auth(&req).await?;
     body.validate()?;
+    crate::services::legal::require_current_terms(pool.get_ref(), user_id).await?;
     let data = body.into_inner();
 
     if data.is_public == Some(true) {
@@ -371,6 +372,8 @@ async fn export_account_data(
             'is_public', is_public,
             'email_verified', email_verified,
             'two_factor_enabled', totp_enabled,
+            'terms_accepted_version', terms_accepted_version,
+            'terms_accepted_at', terms_accepted_at,
             'created_at', created_at,
             'updated_at', updated_at
         ) FROM users WHERE id = $1"#,
@@ -633,6 +636,19 @@ async fn export_account_data(
     .fetch_all(&mut *tx)
     .await?;
 
+    let terms_acceptances = sqlx::query_scalar::<_, serde_json::Value>(
+        r#"SELECT jsonb_build_object(
+            'terms_version', terms_version,
+            'accepted_at', accepted_at
+        )
+        FROM user_terms_acceptances
+        WHERE user_id = $1
+        ORDER BY accepted_at, terms_version"#,
+    )
+    .bind(user_id)
+    .fetch_all(&mut *tx)
+    .await?;
+
     tx.commit().await?;
 
     let client = crate::routes::auth::client_info(&req);
@@ -660,7 +676,7 @@ async fn export_account_data(
             "attachment; filename=\"vazute-account-export.json\"",
         ))
         .json(AccountDataExport {
-            format_version: 1,
+            format_version: 2,
             exported_at: chrono::Utc::now(),
             account,
             library,
@@ -676,6 +692,7 @@ async fn export_account_data(
             calendar_preferences,
             oauth_accounts,
             security_activity,
+            terms_acceptances,
         }))
 }
 
@@ -752,6 +769,7 @@ async fn follow_user(
     let username = path.into_inner();
 
     crate::services::auth::require_verified_email(pool.get_ref(), user_id).await?;
+    crate::services::legal::require_current_terms(pool.get_ref(), user_id).await?;
 
     let mut tx = pool.begin().await?;
     let target = sqlx::query_as::<_, User>(
@@ -925,6 +943,7 @@ async fn accept_follow_request(
     let user_id = require_auth(&req).await?;
     let follower_id = path.into_inner();
     crate::services::auth::require_verified_email(pool.get_ref(), user_id).await?;
+    crate::services::legal::require_current_terms(pool.get_ref(), user_id).await?;
     let mut tx = pool.begin().await?;
     quota::lock_social_relationship_writes(&mut tx, follower_id, user_id).await?;
     let updated = sqlx::query(

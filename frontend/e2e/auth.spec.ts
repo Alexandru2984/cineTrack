@@ -142,6 +142,7 @@ test('blocks path-unsafe usernames before registration reaches the API', async (
   await username.fill('bad user');
   await page.getByLabel('Email').fill('safe@example.com');
   await page.getByLabel('Password').fill('Password1');
+  await page.getByRole('checkbox').check();
   await page.getByRole('button', { name: 'Create account' }).click();
 
   expect(await username.evaluate((input) => input.checkValidity())).toBe(false);

@@ -6,6 +6,7 @@ pub mod discovery;
 pub mod email;
 pub mod ical;
 pub mod importer;
+pub mod legal;
 pub mod media_cache;
 pub mod notifications;
 pub mod password_breach;

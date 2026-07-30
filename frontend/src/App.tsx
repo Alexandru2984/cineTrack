@@ -7,6 +7,7 @@ import { Navbar } from '@/components/Navbar';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { MobileTabBar } from '@/components/MobileTabBar';
 import { EmailVerificationBanner } from '@/components/EmailVerificationBanner';
+import { TermsAcceptanceGate } from '@/components/TermsAcceptanceGate';
 import { loginPathFor, safeReturnTo } from '@/lib/navigation';
 
 const LoginPage = lazy(() => import('@/pages/Login'));
@@ -31,6 +32,8 @@ const ListDetailPage = lazy(() => import('@/pages/ListDetail'));
 const AboutPage = lazy(() => import('@/pages/About'));
 const PrivacyPage = lazy(() => import('@/pages/Privacy'));
 const AccountDeletionPage = lazy(() => import('@/pages/AccountDeletion'));
+const TermsPage = lazy(() => import('@/pages/Terms'));
+const CommunityGuidelinesPage = lazy(() => import('@/pages/CommunityGuidelines'));
 
 function PageLoader() {
   return (
@@ -85,6 +88,7 @@ export default function App() {
     <div className="flex min-h-dvh flex-col bg-[hsl(var(--background))] text-[hsl(var(--foreground))]">
       <Navbar />
       {authenticated && <EmailVerificationBanner />}
+      {authenticated && <TermsAcceptanceGate />}
       <main
         className={`flex-1 ${
           authenticated
@@ -107,6 +111,8 @@ export default function App() {
               <Route path="/about" element={<AboutPage />} />
               <Route path="/privacy" element={<PrivacyPage />} />
               <Route path="/account-deletion" element={<AccountDeletionPage />} />
+              <Route path="/terms" element={<TermsPage />} />
+              <Route path="/community-guidelines" element={<CommunityGuidelinesPage />} />
               <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
               <Route path="/search" element={<ProtectedRoute><SearchPage /></ProtectedRoute>} />
               <Route path="/calendar" element={<ProtectedRoute><CalendarPage /></ProtectedRoute>} />

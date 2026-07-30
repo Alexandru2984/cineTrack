@@ -7,6 +7,10 @@ export interface User {
   is_public: boolean;
   email_verified: boolean;
   two_factor_enabled: boolean;
+  terms_accepted_version?: string | null;
+  terms_accepted_at?: string | null;
+  current_terms_version?: string;
+  terms_acceptance_required?: boolean;
   created_at: string;
 }
 

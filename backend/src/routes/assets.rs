@@ -345,6 +345,7 @@ async fn upload_avatar(
     mut payload: Multipart,
 ) -> Result<HttpResponse, AppError> {
     let user_id = require_auth(&req).await?;
+    crate::services::legal::require_current_terms(pool.get_ref(), user_id).await?;
     let store = storage_or_503(storage.get_ref())?;
 
     let mut data: Option<(Vec<u8>, &'static str)> = None;

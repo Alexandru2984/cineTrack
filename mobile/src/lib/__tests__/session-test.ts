@@ -16,6 +16,7 @@ import {
   loginSession,
   logoutSession,
   refreshSession,
+  registerSession,
 } from '@/lib/session';
 import { useAuthStore } from '@/store/auth';
 import type { MobileAuthResponse, User } from '@/types';
@@ -177,6 +178,27 @@ describe('mobile session recovery', () => {
 
     expect(mockWriteRefreshToken).toHaveBeenCalledWith(response.refresh_token);
     expect(mockWriteCachedSession).toHaveBeenCalledWith(response.refresh_token, user);
+    expect(useAuthStore.getState()).toMatchObject({
+      status: 'authenticated',
+      accessToken: response.access_token,
+      user,
+    });
+  });
+
+  it('records explicit terms acceptance when creating an account', async () => {
+    mockRawRequest.mockResolvedValueOnce(response);
+
+    await registerSession(' mobile_user ', ' mobile@example.com ', 'Pass1234', true);
+
+    expect(mockRawRequest).toHaveBeenCalledWith('/auth/mobile/register', {
+      method: 'POST',
+      body: {
+        username: 'mobile_user',
+        email: 'mobile@example.com',
+        password: 'Pass1234',
+        accepted_terms: true,
+      },
+    });
     expect(useAuthStore.getState()).toMatchObject({
       status: 'authenticated',
       accessToken: response.access_token,

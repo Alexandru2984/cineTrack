@@ -522,6 +522,7 @@ async fn set_episode_reaction(
     body: web::Json<SetEpisodeReactionRequest>,
 ) -> Result<HttpResponse, AppError> {
     let user_id = require_auth(&req).await?;
+    crate::services::legal::require_current_terms(pool.get_ref(), user_id).await?;
     let episode_id = path.into_inner();
     body.validate()?;
 
