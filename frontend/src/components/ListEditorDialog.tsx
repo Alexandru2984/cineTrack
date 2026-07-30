@@ -162,7 +162,7 @@ export function ListEditorDialog({
             <button
               type="submit"
               disabled={pending}
-              className="flex h-11 flex-1 items-center justify-center gap-2 rounded-md bg-[hsl(var(--primary))] px-4 text-sm font-medium text-white disabled:opacity-50"
+              className="flex h-11 flex-1 items-center justify-center gap-2 rounded-md bg-[hsl(var(--primary))] px-4 text-sm font-medium text-[hsl(var(--primary-foreground))] disabled:opacity-50"
             >
               {pending ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : null}
               {list ? t('listEditor.saveChanges') : t('lists.createList')}

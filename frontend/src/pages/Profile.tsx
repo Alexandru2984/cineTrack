@@ -98,7 +98,7 @@ export default function ProfilePage() {
                   className={`flex items-center gap-1 rounded-md px-3 py-1.5 text-sm font-medium ${
                     removeRelationship
                       ? 'border border-[hsl(var(--border))] hover:border-[hsl(var(--destructive))] hover:text-[hsl(var(--destructive))]'
-                      : 'bg-[hsl(var(--primary))] text-white'
+                      : 'bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))]'
                   } disabled:opacity-50`}
                 >
                   {hasAcceptedFollow ? (

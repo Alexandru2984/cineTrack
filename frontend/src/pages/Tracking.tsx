@@ -49,7 +49,7 @@ export default function TrackingPage() {
             onClick={() => setTab(tabKey)}
             className={`min-h-10 shrink-0 whitespace-nowrap rounded-md px-4 text-sm font-medium transition-colors ${
               tab === tabKey
-                ? 'bg-[hsl(var(--primary))] text-white'
+                ? 'bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))]'
                 : 'border border-[hsl(var(--border))] hover:bg-[hsl(var(--secondary))]'
             }`}
           >

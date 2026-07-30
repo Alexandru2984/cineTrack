@@ -56,7 +56,7 @@ export default function ForgotPasswordPage() {
             <button
               type="submit"
               disabled={forgot.isPending}
-              className="w-full rounded-md bg-[hsl(var(--primary))] py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-2"
+              className="w-full rounded-md bg-[hsl(var(--primary))] py-2 text-sm font-medium text-[hsl(var(--primary-foreground))] hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-2"
             >
               {forgot.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
               {t('auth.sendResetLink')}
@@ -66,7 +66,7 @@ export default function ForgotPasswordPage() {
 
         <p className="text-center text-sm text-[hsl(var(--muted-foreground))]">
           {t('auth.rememberedIt')}{' '}
-          <Link to="/login" className="text-[hsl(var(--primary))] hover:underline">{t('auth.signIn')}</Link>
+          <Link to="/login" className="text-[hsl(var(--primary))] underline underline-offset-2">{t('auth.signIn')}</Link>
         </p>
       </div>
     </div>

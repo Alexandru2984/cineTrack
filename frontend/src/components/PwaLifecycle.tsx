@@ -164,7 +164,7 @@ export function PwaStatus({
         <button
           type="button"
           onClick={onUpdate}
-          className="inline-flex h-9 items-center gap-2 rounded-md bg-[hsl(var(--primary))] px-3 text-sm font-medium text-white"
+          className="inline-flex h-9 items-center gap-2 rounded-md bg-[hsl(var(--primary))] px-3 text-sm font-medium text-[hsl(var(--primary-foreground))]"
         >
           <RefreshCw className="h-4 w-4" aria-hidden="true" />
           {t('pwa.update')}

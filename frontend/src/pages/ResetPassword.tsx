@@ -43,7 +43,7 @@ export default function ResetPasswordPage() {
         {!token ? (
           <div className="rounded-md border border-[hsl(var(--border))] p-4 text-center text-sm text-[hsl(var(--destructive))]">
             {t('auth.resetMissingTokenPre')}{' '}
-            <Link to="/forgot-password" className="text-[hsl(var(--primary))] hover:underline">
+            <Link to="/forgot-password" className="text-[hsl(var(--primary))] underline underline-offset-2">
               {t('auth.forgotPasswordLink')}
             </Link>{' '}
             {t('auth.resetMissingTokenPost')}
@@ -95,7 +95,7 @@ export default function ResetPasswordPage() {
             <button
               type="submit"
               disabled={reset.isPending}
-              className="w-full rounded-md bg-[hsl(var(--primary))] py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-2"
+              className="w-full rounded-md bg-[hsl(var(--primary))] py-2 text-sm font-medium text-[hsl(var(--primary-foreground))] hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-2"
             >
               {reset.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
               {t('auth.setNewPassword')}
@@ -104,7 +104,7 @@ export default function ResetPasswordPage() {
         )}
 
         <p className="text-center text-sm text-[hsl(var(--muted-foreground))]">
-          <Link to="/login" className="text-[hsl(var(--primary))] hover:underline">{t('auth.backToSignIn')}</Link>
+          <Link to="/login" className="text-[hsl(var(--primary))] underline underline-offset-2">{t('auth.backToSignIn')}</Link>
         </p>
       </div>
     </div>

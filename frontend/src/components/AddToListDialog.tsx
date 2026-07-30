@@ -127,7 +127,7 @@ export function AddToListDialog({
               <Link
                 to="/lists"
                 onClick={onClose}
-                className="flex h-10 items-center rounded-md bg-[hsl(var(--primary))] px-4 text-sm font-medium text-white"
+                className="flex h-10 items-center rounded-md bg-[hsl(var(--primary))] px-4 text-sm font-medium text-[hsl(var(--primary-foreground))]"
               >
                 {t('addToList.createList')}
               </Link>

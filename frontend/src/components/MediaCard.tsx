@@ -58,7 +58,7 @@ export function MediaCard({
             {item.vote_average.toFixed(1)}
           </div>
         )}
-        <div className="absolute top-2 left-2 rounded-full bg-[hsl(var(--primary))]/90 px-2 py-0.5 text-xs text-white">
+        <div className="absolute top-2 left-2 rounded-full bg-[hsl(var(--primary))]/90 px-2 py-0.5 text-xs text-[hsl(var(--primary-foreground))]">
           {type === 'tv' ? t('mediaType.tv') : t('mediaType.movie')}
         </div>
         {showQuickAdd && !savedStatus && (
@@ -72,7 +72,7 @@ export function MediaCard({
                   title,
                   status: t('status.watching'),
                 })}
-                className="flex min-h-8 touch-manipulation items-center gap-1 rounded-full bg-[hsl(var(--primary))] px-2 py-1 text-xs text-white hover:opacity-90 disabled:opacity-50"
+                className="flex min-h-8 touch-manipulation items-center gap-1 rounded-full bg-[hsl(var(--primary))] px-2 py-1 text-xs text-[hsl(var(--primary-foreground))] hover:opacity-90 disabled:opacity-50"
                 title={t('status.watching')}
               >
                 <Eye className="h-3 w-3" aria-hidden="true" /> {t('status.watching')}

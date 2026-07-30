@@ -22,7 +22,7 @@ function ErrorFallback() {
       <div className="mt-6 flex items-center justify-center gap-3">
         <button
           onClick={() => window.location.reload()}
-          className="rounded-md bg-[hsl(var(--primary))] px-4 py-2 text-sm font-medium text-white hover:opacity-90"
+          className="rounded-md bg-[hsl(var(--primary))] px-4 py-2 text-sm font-medium text-[hsl(var(--primary-foreground))] hover:opacity-90"
         >
           {t('errorBoundary.reload')}
         </button>

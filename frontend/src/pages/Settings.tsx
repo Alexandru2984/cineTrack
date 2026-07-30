@@ -96,11 +96,16 @@ function SignOutCard() {
   const navigate = useNavigate();
   const logout = useLogout();
 
+  const handleSignOut = async () => {
+    await logout.mutateAsync();
+    navigate('/login', { replace: true });
+  };
+
   return (
     <button
       type="button"
       disabled={logout.isPending}
-      onClick={() => logout.mutate(undefined, { onSuccess: () => navigate('/login') })}
+      onClick={() => void handleSignOut()}
       className="flex h-12 w-full items-center justify-between border-y border-[hsl(var(--border))] px-1 text-sm font-medium text-[hsl(var(--destructive))] disabled:opacity-50"
     >
       <span className="flex items-center gap-2">
@@ -229,7 +234,7 @@ function FollowRequestsCard() {
                 aria-label={t('settings.acceptRequestFrom', { username: request.username })}
                 disabled={accept.isPending || reject.isPending}
                 onClick={() => accept.mutate(request.user_id)}
-                className="rounded-md bg-[hsl(var(--primary))] p-2 text-white disabled:opacity-50"
+                className="rounded-md bg-[hsl(var(--primary))] p-2 text-[hsl(var(--primary-foreground))] disabled:opacity-50"
               >
                 <CheckCircle2 className="h-4 w-4" />
               </button>
@@ -302,7 +307,7 @@ function ProfilePictureCard() {
           <button
             onClick={() => inputRef.current?.click()}
             disabled={upload.isPending}
-            className="flex items-center gap-2 rounded-md bg-[hsl(var(--primary))] px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
+            className="flex items-center gap-2 rounded-md bg-[hsl(var(--primary))] px-4 py-2 text-sm font-medium text-[hsl(var(--primary-foreground))] hover:opacity-90 disabled:opacity-50"
           >
             {upload.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImageUp className="h-4 w-4" />}
             {avatarUrl ? t('settings.changePicture') : t('settings.uploadPicture')}
@@ -428,7 +433,7 @@ function ImportCard() {
               type="file"
               accept=".json,application/json"
               onChange={(e) => setShows(e.target.files?.[0] ?? null)}
-              className="block w-full text-sm file:mr-3 file:rounded-md file:border-0 file:bg-[hsl(var(--primary))] file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-white hover:file:opacity-90"
+              className="block w-full text-sm file:mr-3 file:rounded-md file:border-0 file:bg-[hsl(var(--primary))] file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-[hsl(var(--primary-foreground))] hover:file:opacity-90"
             />
           </div>
           <div>
@@ -469,7 +474,7 @@ function ImportCard() {
           <button
             type="submit"
             disabled={startImport.isPending || !shows}
-            className="flex items-center gap-2 rounded-md bg-[hsl(var(--primary))] px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
+            className="flex items-center gap-2 rounded-md bg-[hsl(var(--primary))] px-4 py-2 text-sm font-medium text-[hsl(var(--primary-foreground))] hover:opacity-90 disabled:opacity-50"
           >
             {startImport.isPending ? (
               <Loader2 className="h-4 w-4 animate-spin" />
@@ -579,7 +584,7 @@ function ChangeEmailCard() {
           <button
             type="submit"
             disabled={changeEmail.isPending}
-            className="rounded-md bg-[hsl(var(--primary))] px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-2"
+            className="rounded-md bg-[hsl(var(--primary))] px-4 py-2 text-sm font-medium text-[hsl(var(--primary-foreground))] hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-2"
           >
             {changeEmail.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
             {t('settings.sendConfirmationLink')}
@@ -694,7 +699,7 @@ function ChangePasswordCard() {
         <button
           type="submit"
           disabled={changePassword.isPending}
-          className="rounded-md bg-[hsl(var(--primary))] px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-2"
+          className="rounded-md bg-[hsl(var(--primary))] px-4 py-2 text-sm font-medium text-[hsl(var(--primary-foreground))] hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-2"
         >
           {changePassword.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
           {t('settings.updatePassword')}
@@ -779,7 +784,7 @@ function TwoFactorCard() {
           <button
             type="button"
             onClick={() => setRecoveryCodes(null)}
-            className="rounded-md bg-[hsl(var(--primary))] px-4 py-2 text-sm font-medium text-white hover:opacity-90"
+            className="rounded-md bg-[hsl(var(--primary))] px-4 py-2 text-sm font-medium text-[hsl(var(--primary-foreground))] hover:opacity-90"
           >
             {t('settings.savedCodes')}
           </button>
@@ -815,7 +820,7 @@ function TwoFactorCard() {
           <button
             type="submit"
             disabled={disable.isPending}
-            className="flex items-center justify-center gap-2 rounded-md border border-[hsl(var(--destructive))] px-4 py-2 text-sm font-medium text-[hsl(var(--destructive))] hover:bg-[hsl(var(--destructive))] hover:text-white disabled:opacity-50"
+            className="flex items-center justify-center gap-2 rounded-md border border-[hsl(var(--destructive))] px-4 py-2 text-sm font-medium text-[hsl(var(--destructive))] hover:bg-[hsl(var(--destructive))] hover:text-[hsl(var(--destructive-foreground))] disabled:opacity-50"
           >
             {disable.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
             {t('settings.disableTwoFactor')}
@@ -857,7 +862,7 @@ function TwoFactorCard() {
             <button
               type="submit"
               disabled={enable.isPending}
-              className="flex items-center justify-center gap-2 rounded-md bg-[hsl(var(--primary))] px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
+              className="flex items-center justify-center gap-2 rounded-md bg-[hsl(var(--primary))] px-4 py-2 text-sm font-medium text-[hsl(var(--primary-foreground))] hover:opacity-90 disabled:opacity-50"
             >
               {enable.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
               {t('settings.confirmEnable')}
@@ -898,7 +903,7 @@ function TwoFactorCard() {
           <button
             type="submit"
             disabled={setup.isPending || !emailVerified}
-            className="flex items-center justify-center gap-2 rounded-md bg-[hsl(var(--primary))] px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
+            className="flex items-center justify-center gap-2 rounded-md bg-[hsl(var(--primary))] px-4 py-2 text-sm font-medium text-[hsl(var(--primary-foreground))] hover:opacity-90 disabled:opacity-50"
           >
             {setup.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
             {t('settings.enableTwoFactor')}
@@ -951,7 +956,7 @@ function SessionsCard() {
               <p className="truncate text-sm font-medium">
                 {session.user_agent || t('settings.unknownDevice')}
                 {session.current && (
-                  <span className="ml-2 rounded-full bg-[hsl(var(--primary))] px-2 py-0.5 text-xs text-white">
+                  <span className="ml-2 rounded-full bg-[hsl(var(--primary))] px-2 py-0.5 text-xs text-[hsl(var(--primary-foreground))]">
                     {t('settings.thisDevice')}
                   </span>
                 )}
@@ -1128,7 +1133,7 @@ function DangerZoneCard() {
       {!confirming ? (
         <button
           onClick={() => setConfirming(true)}
-          className="mt-4 flex items-center gap-2 rounded-md bg-[hsl(var(--destructive))] px-4 py-2 text-sm font-medium text-white hover:opacity-90"
+          className="mt-4 flex items-center gap-2 rounded-md bg-[hsl(var(--destructive))] px-4 py-2 text-sm font-medium text-[hsl(var(--destructive-foreground))] hover:opacity-90"
         >
           <Trash2 className="h-4 w-4" /> {t('settings.deleteMyAccount')}
         </button>
@@ -1167,7 +1172,7 @@ function DangerZoneCard() {
             <button
               type="submit"
               disabled={deleteAccount.isPending}
-              className="flex items-center gap-2 rounded-md bg-[hsl(var(--destructive))] px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
+              className="flex items-center gap-2 rounded-md bg-[hsl(var(--destructive))] px-4 py-2 text-sm font-medium text-[hsl(var(--destructive-foreground))] hover:opacity-90 disabled:opacity-50"
             >
               {deleteAccount.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
               {t('settings.permanentlyDelete')}

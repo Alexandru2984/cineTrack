@@ -17,7 +17,13 @@ export default defineConfig({
     baseURL: 'http://localhost:5173',
     trace: 'on-first-retry',
   },
-  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
+  projects: [
+    { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
+    {
+      name: 'webkit-mobile',
+      use: { ...devices['iPhone 15'] },
+    },
+  ],
   webServer: {
     command: 'npm run dev',
     url: 'http://localhost:5173',

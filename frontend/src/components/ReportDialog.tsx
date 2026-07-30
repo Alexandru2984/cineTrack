@@ -1,5 +1,5 @@
 import { CheckCircle2, Flag, Loader2, X } from 'lucide-react';
-import { useEffect, useId, useState, type FormEvent } from 'react';
+import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
 
 import { useReportContent } from '@/hooks/useCommunitySafety';
 import { useT } from '@/hooks/useT';
@@ -27,19 +27,59 @@ export function ReportDialog({
   const [reason, setReason] = useState<ReportReason>('harassment');
   const [details, setDetails] = useState('');
   const report = useReportContent();
+  const dialogRef = useRef<HTMLElement>(null);
+  const closeRef = useRef(onClose);
+  const pendingRef = useRef(report.isPending);
+
+  useEffect(() => {
+    closeRef.current = onClose;
+    pendingRef.current = report.isPending;
+  }, [onClose, report.isPending]);
 
   useEffect(() => {
     const previousOverflow = document.body.style.overflow;
+    const previouslyFocused =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
     document.body.style.overflow = 'hidden';
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && !report.isPending) onClose();
+    const focusableSelector =
+      'a[href], button:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+    const focusableElements = () =>
+      Array.from(dialogRef.current?.querySelectorAll<HTMLElement>(focusableSelector) ?? []);
+    focusableElements()[0]?.focus();
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !pendingRef.current) {
+        closeRef.current();
+        return;
+      }
+      if (event.key !== 'Tab') return;
+
+      const elements = focusableElements();
+      if (elements.length === 0) {
+        event.preventDefault();
+        dialogRef.current?.focus();
+        return;
+      }
+      const first = elements[0];
+      const last = elements[elements.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      } else if (!dialogRef.current?.contains(document.activeElement)) {
+        event.preventDefault();
+        first.focus();
+      }
     };
-    document.addEventListener('keydown', closeOnEscape);
+    document.addEventListener('keydown', handleKeyDown);
     return () => {
       document.body.style.overflow = previousOverflow;
-      document.removeEventListener('keydown', closeOnEscape);
+      document.removeEventListener('keydown', handleKeyDown);
+      previouslyFocused?.focus();
     };
-  }, [onClose, report.isPending]);
+  }, []);
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -61,9 +101,11 @@ export function ReportDialog({
       }}
     >
       <section
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
+        tabIndex={-1}
         className="max-h-[calc(100dvh-env(safe-area-inset-top))] w-full overflow-y-auto rounded-t-xl border border-[hsl(var(--border))] bg-[hsl(var(--background))] p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))] shadow-2xl sm:max-w-lg sm:rounded-xl sm:p-6"
       >
         <div className="flex items-start justify-between gap-4">
@@ -106,7 +148,7 @@ export function ReportDialog({
             <button
               type="button"
               onClick={onClose}
-              className="h-11 w-full rounded-md bg-[hsl(var(--primary))] px-4 text-sm font-semibold text-white"
+              className="h-11 w-full rounded-md bg-[hsl(var(--primary))] px-4 text-sm font-semibold text-[hsl(var(--primary-foreground))]"
             >
               {t('common.done')}
             </button>
@@ -116,7 +158,6 @@ export function ReportDialog({
             <label className="block space-y-2">
               <span className="text-sm font-medium">{t('safety.reason')}</span>
               <select
-                autoFocus
                 value={reason}
                 onChange={(event) => setReason(event.target.value as ReportReason)}
                 className="h-11 w-full rounded-md border border-[hsl(var(--input))] bg-[hsl(var(--background))] px-3 text-sm outline-none focus:border-[hsl(var(--primary))]"
@@ -168,7 +209,7 @@ export function ReportDialog({
               <button
                 type="submit"
                 disabled={report.isPending}
-                className="flex h-11 flex-1 items-center justify-center gap-2 rounded-md bg-[hsl(var(--destructive))] px-4 text-sm font-semibold text-white disabled:opacity-50"
+                className="flex h-11 flex-1 items-center justify-center gap-2 rounded-md bg-[hsl(var(--destructive))] px-4 text-sm font-semibold text-[hsl(var(--destructive-foreground))] disabled:opacity-50"
               >
                 {report.isPending ? (
                   <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />

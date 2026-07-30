@@ -64,7 +64,7 @@ export default function LoginPage() {
           <div>
             <div className="flex items-center justify-between mb-1">
               <label htmlFor="login-password" className="block text-sm font-medium">{t('auth.password')}</label>
-              <Link to="/forgot-password" className="text-xs text-[hsl(var(--primary))] hover:underline">
+              <Link to="/forgot-password" className="text-xs text-[hsl(var(--primary))] underline underline-offset-2">
                 {t('auth.forgotPassword')}
               </Link>
             </div>
@@ -113,7 +113,7 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={login.isPending}
-            className="w-full rounded-md bg-[hsl(var(--primary))] py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-2"
+            className="w-full rounded-md bg-[hsl(var(--primary))] py-2 text-sm font-medium text-[hsl(var(--primary-foreground))] hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-2"
           >
             {login.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
             {mfaRequired ? t('auth.verify') : t('auth.signIn')}
@@ -122,7 +122,7 @@ export default function LoginPage() {
 
         <p className="text-center text-sm text-[hsl(var(--muted-foreground))]">
           {t('auth.noAccount')}{' '}
-          <Link to="/register" className="text-[hsl(var(--primary))] hover:underline">{t('auth.register')}</Link>
+          <Link to="/register" className="text-[hsl(var(--primary))] underline underline-offset-2">{t('auth.register')}</Link>
         </p>
       </div>
     </div>

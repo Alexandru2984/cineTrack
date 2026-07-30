@@ -40,7 +40,7 @@ export function EmailVerificationBanner() {
               type="button"
               onClick={() => resend.mutate()}
               disabled={resend.isPending}
-              className="rounded-md bg-[hsl(var(--primary))] px-3 py-1.5 text-xs font-medium text-white hover:opacity-90 disabled:opacity-50"
+              className="rounded-md bg-[hsl(var(--primary))] px-3 py-1.5 text-xs font-medium text-[hsl(var(--primary-foreground))] hover:opacity-90 disabled:opacity-50"
             >
               {resend.isPending ? t('banner.sending') : t('banner.resendLink')}
             </button>

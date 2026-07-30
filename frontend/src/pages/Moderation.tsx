@@ -198,7 +198,7 @@ function ReportCard({ report }: { report: ModerationReport }) {
                   { onSuccess: () => setNote('') },
                 )
               }
-              className="flex h-11 w-full items-center justify-center gap-2 rounded-md bg-[hsl(var(--primary))] px-4 text-sm font-semibold text-white disabled:opacity-50 sm:w-auto"
+              className="flex h-11 w-full items-center justify-center gap-2 rounded-md bg-[hsl(var(--primary))] px-4 text-sm font-semibold text-[hsl(var(--primary-foreground))] disabled:opacity-50 sm:w-auto"
             >
               {update.isPending ? (
                 <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
@@ -259,7 +259,7 @@ export default function ModerationPage() {
               onClick={() => chooseFilter(value)}
               className={`h-10 shrink-0 rounded-full border px-3 text-sm font-medium ${
                 filter === value
-                  ? 'border-[hsl(var(--primary))] bg-[hsl(var(--primary))] text-white'
+                  ? 'border-[hsl(var(--primary))] bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))]'
                   : 'border-[hsl(var(--border))]'
               }`}
             >

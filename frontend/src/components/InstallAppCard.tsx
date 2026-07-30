@@ -26,7 +26,7 @@ export function InstallAppCard() {
         <button
           type="button"
           onClick={() => void install()}
-          className="mt-4 flex h-10 items-center gap-2 rounded-md bg-[hsl(var(--primary))] px-4 text-sm font-medium text-white hover:opacity-90"
+          className="mt-4 flex h-10 items-center gap-2 rounded-md bg-[hsl(var(--primary))] px-4 text-sm font-medium text-[hsl(var(--primary-foreground))] hover:opacity-90"
         >
           <Download className="h-4 w-4" aria-hidden="true" />
           {t('install.installApp')}

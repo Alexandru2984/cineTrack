@@ -165,7 +165,7 @@ export function TrackingFeedbackDialog({
           <button
             type="submit"
             disabled={pending}
-            className="h-11 flex-1 rounded-md bg-[hsl(var(--primary))] px-4 text-sm font-medium text-white disabled:opacity-50"
+            className="h-11 flex-1 rounded-md bg-[hsl(var(--primary))] px-4 text-sm font-medium text-[hsl(var(--primary-foreground))] disabled:opacity-50"
           >
             {pending ? t('feedback.saving') : t('common.save')}
           </button>

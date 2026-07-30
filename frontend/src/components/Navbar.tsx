@@ -40,7 +40,7 @@ function unreadLabel(t: Translate, count: number) {
 function UnreadBadge({ count }: { count: number }) {
   if (count === 0) return null;
   return (
-    <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-[hsl(var(--destructive))] px-1 text-[10px] font-semibold leading-none text-white">
+    <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-[hsl(var(--destructive))] px-1 text-[10px] font-semibold leading-none text-[hsl(var(--destructive-foreground))]">
       {count > 99 ? '99+' : count}
     </span>
   );
@@ -92,7 +92,7 @@ export function Navbar() {
 
   const handleLogout = () => {
     logoutMutation.mutate(undefined, {
-      onSuccess: () => navigate('/login'),
+      onSuccess: () => navigate('/login', { replace: true }),
     });
   };
 
@@ -269,7 +269,7 @@ export function Navbar() {
               </Link>
               <Link
                 to="/register"
-                className="rounded-md bg-[hsl(var(--primary))] px-4 py-2 text-sm text-white hover:opacity-90"
+                className="rounded-md bg-[hsl(var(--primary))] px-4 py-2 text-sm text-[hsl(var(--primary-foreground))] hover:opacity-90"
               >
                 {t('nav.register')}
               </Link>

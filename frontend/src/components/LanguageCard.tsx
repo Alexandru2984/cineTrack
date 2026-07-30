@@ -34,7 +34,7 @@ export function LanguageCard() {
             onClick={() => setLocale(option)}
             className={`rounded px-4 py-1.5 text-sm font-medium transition-colors ${
               locale === option
-                ? 'bg-[hsl(var(--primary))] text-white'
+                ? 'bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))]'
                 : 'hover:bg-[hsl(var(--secondary))]'
             }`}
           >

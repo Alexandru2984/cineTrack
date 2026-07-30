@@ -75,7 +75,7 @@ export default function ListsPage() {
         <button
           type="button"
           onClick={openCreate}
-          className="flex h-10 shrink-0 items-center gap-2 rounded-md bg-[hsl(var(--primary))] px-3 text-sm font-medium text-white sm:px-4"
+          className="flex h-10 shrink-0 items-center gap-2 rounded-md bg-[hsl(var(--primary))] px-3 text-sm font-medium text-[hsl(var(--primary-foreground))] sm:px-4"
         >
           <Plus className="h-4 w-4" aria-hidden="true" />
           <span className="hidden sm:inline">{t('lists.createList')}</span>

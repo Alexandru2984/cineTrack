@@ -72,6 +72,10 @@ async function stubAuthedReads(page: Page, discovery = EMPTY_DISCOVERY) {
   });
 }
 
+async function expectAuthenticatedShell(page: Page) {
+  await expect(page.getByRole('link', { name: 'Settings', exact: true })).toBeVisible();
+}
+
 test.beforeEach(async ({ page }) => {
   await page.route('**/api/auth/refresh', (route) =>
     route.fulfill({ status: 401, json: { message: 'No active session' } })
@@ -164,7 +168,7 @@ test('logs in and lands on the dashboard', async ({ page }) => {
   await page.getByRole('button', { name: 'Sign in' }).click();
 
   await expect(page).toHaveURL('http://localhost:5173/');
-  await expect(page.getByRole('button', { name: 'Logout' })).toBeVisible();
+  await expectAuthenticatedShell(page);
   expect(await page.evaluate(() => localStorage.getItem('cinetrack-auth'))).toBeNull();
 });
 
@@ -173,11 +177,11 @@ test('hydrates a session from the HttpOnly-cookie refresh flow after reload', as
   await stubAuthedReads(page);
 
   await page.goto('/');
-  await expect(page.getByRole('button', { name: 'Logout' })).toBeVisible();
+  await expectAuthenticatedShell(page);
   await page.reload();
 
   await expect(page).toHaveURL('http://localhost:5173/');
-  await expect(page.getByRole('button', { name: 'Logout' })).toBeVisible();
+  await expectAuthenticatedShell(page);
   expect(await page.evaluate(() => localStorage.getItem('cinetrack-auth'))).toBeNull();
 });
 
@@ -681,7 +685,10 @@ test('discovers and follows people from search', async ({ page }) => {
   ).toBe(true);
 });
 
-test('shows unread social notifications and marks the inbox as read', async ({ page }) => {
+test('shows unread social notifications and marks the inbox as read', async ({
+  page,
+  isMobile,
+}) => {
   await stubSession(page);
   await stubAuthedReads(page);
   let unread = true;
@@ -713,15 +720,19 @@ test('shows unread social notifications and marks the inbox as read', async ({ p
   });
 
   await page.goto('/');
-  const bell = page.getByRole('button', { name: 'Notifications, 1 unread notification' });
+  const bell = page.getByRole(isMobile ? 'link' : 'button', {
+    name: 'Notifications, 1 unread notification',
+  });
   await expect(bell).toBeVisible();
   await bell.click();
-  await expect(page.getByText('requested to follow you')).toBeVisible();
-  await page.keyboard.press('Tab');
-  await page.keyboard.press('Escape');
-  await expect(bell).toBeFocused();
-  await bell.click();
-  await page.getByRole('link', { name: 'View all notifications' }).click();
+  if (!isMobile) {
+    await expect(page.getByText('requested to follow you')).toBeVisible();
+    await page.keyboard.press('Tab');
+    await page.keyboard.press('Escape');
+    await expect(bell).toBeFocused();
+    await bell.click();
+    await page.getByRole('link', { name: 'View all notifications' }).click();
+  }
 
   await expect(page).toHaveURL(/\/notifications$/);
   await expect(page.getByRole('heading', { name: 'Notifications' })).toBeVisible();
@@ -738,7 +749,7 @@ test('shows unread social notifications and marks the inbox as read', async ({ p
   ).toBe(true);
 });
 
-test('logs out and returns to the login page', async ({ page }) => {
+test('logs out and returns to the login page', async ({ page, isMobile }) => {
   await stubSession(page);
   await stubAuthedReads(page);
   await page.route('**/api/auth/logout', (route) =>
@@ -746,9 +757,12 @@ test('logs out and returns to the login page', async ({ page }) => {
   );
 
   await page.goto('/');
-  const logout = page.getByRole('button', { name: 'Logout' });
-  await expect(logout).toBeVisible();
-  await logout.click();
+  if (isMobile) {
+    await page.getByRole('link', { name: 'Settings', exact: true }).click();
+    await page.getByRole('button', { name: 'Sign out', exact: true }).click();
+  } else {
+    await page.getByRole('button', { name: 'Logout' }).click();
+  }
 
   await expect(page).toHaveURL(/\/login$/);
   await expect(page.getByRole('heading', { name: 'Welcome back' })).toBeVisible();
@@ -775,17 +789,18 @@ test('logs the user out when the token refresh fails', async ({ page }) => {
 
   await stubAuthedReads(page);
   await page.route('**/api/**', (route) => {
-    if (route.request().url().includes('/api/auth/refresh')) {
+    const url = route.request().url();
+    if (url.includes('/api/auth/refresh')) {
       return route.fallback();
     }
-    if (!rejectProtectedRequests) {
+    if (!rejectProtectedRequests || !url.includes('/api/auth/sessions')) {
       return route.fallback();
     }
     return route.fulfill({ status: 401, json: { message: 'Unauthorized' } });
   });
 
   await page.goto('/');
-  await expect(page.getByRole('button', { name: 'Logout' })).toBeVisible();
+  await expectAuthenticatedShell(page);
 
   // Expire the access token only after cookie hydration has completed, then
   // trigger a fresh protected query from a real navigation.
@@ -817,7 +832,7 @@ test('contains a page crash in a fallback and keeps the navbar', async ({ page }
 
   await page.goto('/');
   await expect(page.getByText('Something went wrong')).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Logout' })).toBeVisible();
+  await expectAuthenticatedShell(page);
 });
 
 test('forgot password shows a uniform confirmation', async ({ page }) => {

@@ -92,7 +92,7 @@ function PolicySection({
         <span className="text-[hsl(var(--primary))]" aria-hidden="true">{icon}</span>
         {title}
       </h2>
-      <div className="mt-3 space-y-3 text-sm leading-6 text-[hsl(var(--muted-foreground))] [&_a]:font-medium [&_a]:text-[hsl(var(--primary))] [&_a]:underline-offset-4 hover:[&_a]:underline [&_li]:ml-5 [&_li]:list-disc [&_li]:pl-1">
+      <div className="mt-3 space-y-3 text-sm leading-6 text-[hsl(var(--muted-foreground))] [&_a]:font-medium [&_a]:text-[hsl(var(--primary))] [&_a]:underline [&_a]:underline-offset-4 [&_li]:ml-5 [&_li]:list-disc [&_li]:pl-1">
         {children}
       </div>
     </section>

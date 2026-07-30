@@ -78,7 +78,7 @@ export default function VerifyEmailPage() {
             </div>
             <Link
               to={isAuthenticated ? '/' : '/login'}
-              className="inline-block rounded-md bg-[hsl(var(--primary))] px-4 py-2 text-sm font-medium text-white hover:opacity-90"
+              className="inline-block rounded-md bg-[hsl(var(--primary))] px-4 py-2 text-sm font-medium text-[hsl(var(--primary-foreground))] hover:opacity-90"
             >
               {isAuthenticated ? t('auth.goToDashboard') : t('auth.signIn')}
             </Link>

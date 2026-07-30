@@ -41,7 +41,7 @@ export function TermsAcceptanceGate() {
             to="/terms"
             target="_blank"
             rel="noreferrer"
-            className="font-medium text-[hsl(var(--primary))] hover:underline"
+            className="font-medium text-[hsl(var(--primary))] underline underline-offset-2"
           >
             {t('auth.termsOfUse')}
           </Link>{' '}
@@ -50,7 +50,7 @@ export function TermsAcceptanceGate() {
             to="/community-guidelines"
             target="_blank"
             rel="noreferrer"
-            className="font-medium text-[hsl(var(--primary))] hover:underline"
+            className="font-medium text-[hsl(var(--primary))] underline underline-offset-2"
           >
             {t('auth.communityGuidelines')}
           </Link>
@@ -67,7 +67,7 @@ export function TermsAcceptanceGate() {
           type="button"
           disabled={acceptTerms.isPending}
           onClick={() => acceptTerms.mutate()}
-          className="mt-6 min-h-11 w-full rounded-md bg-[hsl(var(--primary))] px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50"
+          className="mt-6 min-h-11 w-full rounded-md bg-[hsl(var(--primary))] px-4 py-2 text-sm font-semibold text-[hsl(var(--primary-foreground))] hover:opacity-90 disabled:opacity-50"
         >
           {acceptTerms.isPending ? t('legal.accepting') : t('legal.acceptButton')}
         </button>

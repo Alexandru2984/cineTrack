@@ -61,11 +61,11 @@ export default function RegisterPage() {
             />
             <span>
               {t('auth.acceptTermsPre')}{' '}
-              <Link to="/terms" target="_blank" rel="noreferrer" className="text-[hsl(var(--primary))] hover:underline">
+              <Link to="/terms" target="_blank" rel="noreferrer" className="text-[hsl(var(--primary))] underline underline-offset-2">
                 {t('auth.termsOfUse')}
               </Link>{' '}
               {t('auth.acceptTermsAnd')}{' '}
-              <Link to="/community-guidelines" target="_blank" rel="noreferrer" className="text-[hsl(var(--primary))] hover:underline">
+              <Link to="/community-guidelines" target="_blank" rel="noreferrer" className="text-[hsl(var(--primary))] underline underline-offset-2">
                 {t('auth.communityGuidelines')}
               </Link>
               .
@@ -108,7 +108,7 @@ export default function RegisterPage() {
           <button
             type="submit"
             disabled={register.isPending || !acceptedTerms}
-            className="w-full rounded-md bg-[hsl(var(--primary))] py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-2"
+            className="w-full rounded-md bg-[hsl(var(--primary))] py-2 text-sm font-medium text-[hsl(var(--primary-foreground))] hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-2"
           >
             {register.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
             {t('auth.createAccount')}
@@ -117,7 +117,7 @@ export default function RegisterPage() {
 
         <p className="text-center text-sm text-[hsl(var(--muted-foreground))]">
           {t('auth.haveAccount')}{' '}
-          <Link to="/login" className="text-[hsl(var(--primary))] hover:underline">{t('auth.signIn')}</Link>
+          <Link to="/login" className="text-[hsl(var(--primary))] underline underline-offset-2">{t('auth.signIn')}</Link>
         </p>
       </div>
     </div>

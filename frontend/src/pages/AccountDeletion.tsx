@@ -37,7 +37,7 @@ export default function AccountDeletionPage() {
         </p>
         <Link
           to={deletionPath}
-          className="mt-5 inline-flex min-h-11 items-center gap-2 rounded-md bg-[hsl(var(--destructive))] px-4 py-2 text-sm font-medium text-white hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--ring))]"
+          className="mt-5 inline-flex min-h-11 items-center gap-2 rounded-md bg-[hsl(var(--destructive))] px-4 py-2 text-sm font-medium text-[hsl(var(--destructive-foreground))] hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--ring))]"
         >
           <Trash2 className="h-4 w-4" aria-hidden="true" />
           {t('accountDeletion.continueButton')}
@@ -71,13 +71,13 @@ export default function AccountDeletionPage() {
         </h2>
         <p className="mt-3 text-sm leading-6 text-[hsl(var(--muted-foreground))]">
           {t('accountDeletion.helpBodyPre')}{' '}
-          <a className="font-medium text-[hsl(var(--primary))] hover:underline" href={`mailto:${CONTACT_EMAIL}?subject=Vazute%20account%20deletion%20request`}>
+          <a className="font-medium text-[hsl(var(--primary))] underline underline-offset-2" href={`mailto:${CONTACT_EMAIL}?subject=Vazute%20account%20deletion%20request`}>
             {CONTACT_EMAIL}
           </a>{t('accountDeletion.helpBodyPost')}
         </p>
         <p className="mt-4 text-sm text-[hsl(var(--muted-foreground))]">
           {t('accountDeletion.retentionPre')}{' '}
-          <Link className="font-medium text-[hsl(var(--primary))] hover:underline" to="/privacy">
+          <Link className="font-medium text-[hsl(var(--primary))] underline underline-offset-2" to="/privacy">
             {t('accountDeletion.privacyLink')}
           </Link>{t('accountDeletion.retentionPost')}
         </p>

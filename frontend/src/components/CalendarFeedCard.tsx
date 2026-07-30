@@ -105,7 +105,7 @@ export function CalendarFeedCard() {
               type="button"
               onClick={disable}
               disabled={disableFeed.isPending}
-              className={`${BUTTON_BASE} border border-[hsl(var(--destructive))] text-[hsl(var(--destructive))] hover:bg-[hsl(var(--destructive))] hover:text-white`}
+              className={`${BUTTON_BASE} border border-[hsl(var(--destructive))] text-[hsl(var(--destructive))] hover:bg-[hsl(var(--destructive))] hover:text-[hsl(var(--destructive-foreground))]`}
             >
               {t('calendarFeed.disable')}
             </button>
@@ -115,7 +115,7 @@ export function CalendarFeedCard() {
             type="button"
             onClick={generate}
             disabled={enableFeed.isPending}
-            className={`${BUTTON_BASE} bg-[hsl(var(--primary))] text-white hover:opacity-90`}
+            className={`${BUTTON_BASE} bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] hover:opacity-90`}
           >
             {t('calendarFeed.generate')}
           </button>

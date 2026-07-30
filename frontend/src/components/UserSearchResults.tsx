@@ -121,7 +121,7 @@ export function UserSearchResults({
                   className={`flex shrink-0 items-center gap-1.5 rounded-md px-3 py-2 text-sm font-medium disabled:opacity-50 ${
                     removeRelationship
                       ? 'border border-[hsl(var(--border))] hover:border-[hsl(var(--destructive))] hover:text-[hsl(var(--destructive))]'
-                      : 'bg-[hsl(var(--primary))] text-white hover:opacity-90'
+                      : 'bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] hover:opacity-90'
                   }`}
                 >
                   {user.follow_status === 'accepted' ? (

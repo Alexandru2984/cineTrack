@@ -264,7 +264,7 @@ export default function MediaDetail() {
                   aria-pressed={trackingStatus === status}
                   className={`flex items-center gap-1 rounded-md px-4 py-2 text-sm font-medium transition-colors ${
                     trackingStatus === status
-                      ? 'bg-[hsl(var(--primary))] text-white'
+                      ? 'bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))]'
                       : 'border border-[hsl(var(--border))] hover:bg-[hsl(var(--secondary))]'
                   }`}
                 >
@@ -331,7 +331,7 @@ export default function MediaDetail() {
                     })}
                     className={`min-h-10 shrink-0 rounded-md px-3 text-sm font-medium transition-colors ${
                       selectedSeason === season.season_number
-                        ? 'bg-[hsl(var(--primary))] text-white'
+                        ? 'bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))]'
                         : 'border border-[hsl(var(--border))] hover:bg-[hsl(var(--secondary))]'
                     }`}
                   >

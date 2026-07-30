@@ -71,7 +71,7 @@ export default function SearchPage() {
           onClick={() => changeMode('media')}
           className={`flex items-center gap-2 rounded px-3 py-1.5 text-sm font-medium ${
             mode === 'media'
-              ? 'bg-[hsl(var(--primary))] text-white'
+              ? 'bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))]'
               : 'text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))]'
           }`}
         >
@@ -84,7 +84,7 @@ export default function SearchPage() {
           onClick={() => changeMode('people')}
           className={`flex items-center gap-2 rounded px-3 py-1.5 text-sm font-medium ${
             mode === 'people'
-              ? 'bg-[hsl(var(--primary))] text-white'
+              ? 'bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))]'
               : 'text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))]'
           }`}
         >
