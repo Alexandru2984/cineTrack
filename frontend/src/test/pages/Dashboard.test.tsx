@@ -21,6 +21,10 @@ vi.mock('@/hooks/useSocial', () => ({
   useActivityFeed: () => ({ data: [], isLoading: false, isError: false }),
 }));
 
+vi.mock('@/hooks/useTracking', () => ({
+  useTrackingLookupBatch: () => ({ data: [] }),
+}));
+
 vi.mock('@/store/auth', () => ({
   useAuthStore: (selector: (state: { user: { username: string } }) => unknown) =>
     selector({ user: { username: 'dashboard-user' } }),

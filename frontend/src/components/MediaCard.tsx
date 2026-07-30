@@ -10,9 +10,14 @@ import { getApiErrorMessage } from '@/lib/api';
 interface Props {
   item: TmdbSearchResult;
   showQuickAdd?: boolean;
+  trackingStatus?: TrackingStatus | null;
 }
 
-export function MediaCard({ item, showQuickAdd = false }: Props) {
+export function MediaCard({
+  item,
+  showQuickAdd = false,
+  trackingStatus = null,
+}: Props) {
   const t = useT();
   const title = item.title || item.name || t('mediaCard.unknown');
   const date = item.release_date || item.first_air_date;
@@ -20,6 +25,7 @@ export function MediaCard({ item, showQuickAdd = false }: Props) {
   const year = date ? new Date(date).getFullYear() : '';
   const createTracking = useCreateTracking();
   const [added, setAdded] = useState<TrackingStatus | null>(null);
+  const savedStatus = added ?? trackingStatus;
   const detailPath = `/media/${item.id}?type=${type}`;
 
   const handleQuickAdd = (status: TrackingStatus) => {
@@ -55,7 +61,7 @@ export function MediaCard({ item, showQuickAdd = false }: Props) {
         <div className="absolute top-2 left-2 rounded-full bg-[hsl(var(--primary))]/90 px-2 py-0.5 text-xs text-white">
           {type === 'tv' ? t('mediaType.tv') : t('mediaType.movie')}
         </div>
-        {showQuickAdd && !added && (
+        {showQuickAdd && !savedStatus && (
           <div className="media-card-actions absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-2 opacity-100 transition-opacity">
             <div className="flex gap-1 justify-center">
               <button
@@ -100,9 +106,9 @@ export function MediaCard({ item, showQuickAdd = false }: Props) {
             </div>
           </div>
         )}
-        {added && (
+        {savedStatus && (
           <div className="absolute bottom-0 left-0 right-0 bg-green-600/90 p-2 text-center text-xs text-white font-medium">
-            {t('mediaCard.addedAs', { status: t(`status.${added}`) })}
+            {t('mediaCard.addedAs', { status: t(`status.${savedStatus}`) })}
           </div>
         )}
       </div>

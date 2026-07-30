@@ -6,7 +6,8 @@ import { MediaCard } from '@/components/MediaCard';
 import { ActivityList } from '@/components/ActivityList';
 import { UpNextEpisodes } from '@/components/UpNextEpisodes';
 import { useT } from '@/hooks/useT';
-import type { TmdbSearchResult } from '@/types';
+import { useTrackingLookupBatch } from '@/hooks/useTracking';
+import type { TmdbSearchResult, TrackingStatus } from '@/types';
 import CalendarHeatmap from 'react-calendar-heatmap';
 import 'react-calendar-heatmap/dist/styles.css';
 import { Activity, Clock, Film, Flame, RefreshCw, Sparkles, Tv } from 'lucide-react';
@@ -28,6 +29,22 @@ export default function Dashboard() {
     isLoading: activityLoading,
     isError: activityError,
   } = useActivityFeed();
+  const quickAddItems = [
+    ...(discovery?.because_you_watched?.results ?? []),
+    ...(discovery?.recommendations ?? []),
+  ];
+  const tracking = useTrackingLookupBatch(
+    quickAddItems.map((item) => ({
+      tmdb_id: item.id,
+      media_type: item.media_type === 'tv' ? 'tv' : 'movie',
+    })),
+  );
+  const trackingByMedia = new Map<string, TrackingStatus>(
+    (tracking.data ?? []).map((item) => [
+      `${item.media_type}:${item.tmdb_id}`,
+      item.status as TrackingStatus,
+    ]),
+  );
 
   const today = new Date();
   const startDate = new Date(today.getFullYear(), 0, 1);
@@ -95,6 +112,7 @@ export default function Dashboard() {
               isLoading={false}
               emptyMessage={t('dashboard.noRelated')}
               showQuickAdd
+              trackingByMedia={trackingByMedia}
             />
           )}
           <MediaShelf
@@ -110,6 +128,7 @@ export default function Dashboard() {
             isLoading={discoveryLoading}
             emptyMessage={t('dashboard.noRecommendations')}
             showQuickAdd
+            trackingByMedia={trackingByMedia}
           />
           <MediaShelf
             id="popular-movies-heading"
@@ -177,6 +196,7 @@ interface MediaShelfProps {
   isLoading: boolean;
   emptyMessage: string;
   showQuickAdd?: boolean;
+  trackingByMedia?: ReadonlyMap<string, TrackingStatus>;
 }
 
 function MediaShelf({
@@ -188,6 +208,7 @@ function MediaShelf({
   isLoading,
   emptyMessage,
   showQuickAdd = false,
+  trackingByMedia,
 }: MediaShelfProps) {
   const t = useT();
   return (
@@ -211,7 +232,15 @@ function MediaShelf({
         >
           {items.map((item) => (
             <div key={`${item.media_type ?? 'movie'}-${item.id}`} role="listitem" className="snap-start">
-              <MediaCard item={item} showQuickAdd={showQuickAdd} />
+              <MediaCard
+                item={item}
+                showQuickAdd={showQuickAdd}
+                trackingStatus={
+                  trackingByMedia?.get(
+                    `${item.media_type === 'tv' ? 'tv' : 'movie'}:${item.id}`,
+                  ) ?? null
+                }
+              />
             </div>
           ))}
         </div>

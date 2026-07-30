@@ -8,6 +8,30 @@ import type {
   TrackingStatus,
 } from '@/types';
 
+export interface TrackingLookupTarget {
+  tmdb_id: number;
+  media_type: 'movie' | 'tv';
+}
+
+const TRACKING_LOOKUP_BATCH_SIZE = 100;
+
+function trackingLookupBatches(
+  targets: readonly TrackingLookupTarget[],
+): TrackingLookupTarget[][] {
+  const unique = new Map<string, TrackingLookupTarget>();
+  for (const target of targets) {
+    if (!Number.isInteger(target.tmdb_id) || target.tmdb_id <= 0) continue;
+    unique.set(`${target.media_type}:${target.tmdb_id}`, target);
+  }
+
+  const items = Array.from(unique.values());
+  const batches: TrackingLookupTarget[][] = [];
+  for (let offset = 0; offset < items.length; offset += TRACKING_LOOKUP_BATCH_SIZE) {
+    batches.push(items.slice(offset, offset + TRACKING_LOOKUP_BATCH_SIZE));
+  }
+  return batches;
+}
+
 function invalidateTrackingState(
   queryClient: ReturnType<typeof useQueryClient>,
 ) {
@@ -64,6 +88,28 @@ export function useTrackingLookup(
       typeof tmdbId === 'number'
       && tmdbId > 0
       && (mediaType === 'movie' || mediaType === 'tv'),
+  });
+}
+
+export function useTrackingLookupBatch(
+  targets: readonly TrackingLookupTarget[],
+) {
+  const batches = trackingLookupBatches(targets);
+  const lookupKey = batches.flatMap((batch) =>
+    batch.map((item) => `${item.media_type}:${item.tmdb_id}`),
+  );
+
+  return useQuery<TrackingItem[]>({
+    queryKey: ['tracking', 'lookup', 'batch', lookupKey],
+    queryFn: async () => {
+      const responses = await Promise.all(
+        batches.map((items) =>
+          api.post<TrackingItem[]>('/tracking/lookup', { items }),
+        ),
+      );
+      return responses.flatMap((response) => response.data);
+    },
+    enabled: batches.length > 0,
   });
 }
 

@@ -6,8 +6,10 @@ import { UserSearchResults } from '@/components/UserSearchResults';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { useSearch } from '@/hooks/useMedia';
 import { useUserSearch } from '@/hooks/useSocial';
+import { useTrackingLookupBatch } from '@/hooks/useTracking';
 import { getApiErrorMessage } from '@/lib/api';
 import { useT } from '@/hooks/useT';
+import type { TrackingStatus } from '@/types';
 
 type SearchMode = 'media' | 'people';
 
@@ -23,6 +25,24 @@ export default function SearchPage() {
   const peopleSearch = useUserSearch(
     mode === 'people' && validPeopleQuery ? debouncedQuery : '',
     page,
+  );
+  const mediaResults = mediaSearch.data?.results ?? [];
+  const tracking = useTrackingLookupBatch(
+    mode === 'media'
+      ? mediaResults.map((item) => ({
+          tmdb_id: item.id,
+          media_type:
+            item.media_type === 'tv' || (!item.media_type && type === 'tv')
+              ? 'tv'
+              : 'movie',
+        }))
+      : [],
+  );
+  const trackingByMedia = new Map<string, TrackingStatus>(
+    (tracking.data ?? []).map((item) => [
+      `${item.media_type}:${item.tmdb_id}`,
+      item.status as TrackingStatus,
+    ]),
   );
 
   const changeMode = (nextMode: SearchMode) => {
@@ -142,13 +162,22 @@ export default function SearchPage() {
             {t('search.resultsCount', { count: mediaSearch.data.total_results })}
           </p>
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
-            {mediaSearch.data.results.map((item) => (
-              <MediaCard
-                key={`${item.id}-${item.media_type || type}`}
-                item={{ ...item, media_type: item.media_type || type || undefined }}
-                showQuickAdd
-              />
-            ))}
+            {mediaSearch.data.results.map((item) => {
+              const mediaType =
+                item.media_type === 'tv' || (!item.media_type && type === 'tv')
+                  ? 'tv'
+                  : 'movie';
+              return (
+                <MediaCard
+                  key={`${item.id}-${mediaType}`}
+                  item={{ ...item, media_type: mediaType }}
+                  showQuickAdd
+                  trackingStatus={
+                    trackingByMedia.get(`${mediaType}:${item.id}`) ?? null
+                  }
+                />
+              );
+            })}
           </div>
 
           {mediaSearch.data.total_pages > 1 && (

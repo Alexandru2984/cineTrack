@@ -51,6 +51,9 @@ async function stubAuthedReads(page: Page, discovery = EMPTY_DISCOVERY) {
   await page.route('**/api/**', (route) => {
     const req = route.request();
     const url = req.url();
+    if (req.method() === 'POST' && url.includes('/api/tracking/lookup')) {
+      return route.fulfill({ json: [] });
+    }
     if (req.method() !== 'GET') {
       return route.fallback();
     }
@@ -460,8 +463,30 @@ test('saves Plan to Watch from a touch-sized discovery card without navigating',
     popular_shows: [],
   });
   let trackingPayload: unknown;
+  let saved = false;
+  await page.route('**/api/tracking/lookup', (route) =>
+    route.fulfill({
+      json: saved
+        ? [{
+            id: '00000000-0000-4000-8000-000000000130',
+            media_id: '00000000-0000-4000-8000-000000000131',
+            tmdb_id: 700100,
+            media_type: 'movie',
+            title: 'Touch Movie',
+            poster_path: null,
+            status: 'plan_to_watch',
+            rating: null,
+            review: null,
+            is_favorite: false,
+            started_at: null,
+            completed_at: null,
+          }]
+        : [],
+    }),
+  );
   await page.route('**/api/tracking', async (route) => {
     trackingPayload = route.request().postDataJSON();
+    saved = true;
     return route.fulfill({
       status: 201,
       json: {
@@ -494,6 +519,14 @@ test('saves Plan to Watch from a touch-sized discovery card without navigating',
   });
   await expect(page.getByText('✓ Added as Plan to Watch')).toBeVisible();
   await expect(page).toHaveURL(/\/$/);
+
+  await page.reload();
+  await expect(page.getByText('✓ Added as Plan to Watch')).toBeVisible();
+  await expect(
+    page.getByRole('button', {
+      name: 'Add Touch Movie as Plan to Watch',
+    }),
+  ).toHaveCount(0);
 });
 
 test('uses a touch-safe primary tab bar on narrow authenticated screens', async ({ page }) => {

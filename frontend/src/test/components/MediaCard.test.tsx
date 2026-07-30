@@ -64,4 +64,41 @@ describe('MediaCard quick tracking actions', () => {
     );
     expect(screen.getByText('✓ Added as Plan to Watch')).toBeVisible();
   });
+
+  it('shows a previously saved Plan to Watch status after remounting', () => {
+    const item = {
+      id: 123,
+      media_type: 'movie',
+      title: 'Persisted Movie',
+      poster_path: '/poster.jpg',
+    };
+    const { unmount } = render(
+      <MemoryRouter>
+        <MediaCard
+          item={item}
+          showQuickAdd
+          trackingStatus="plan_to_watch"
+        />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText('✓ Added as Plan to Watch')).toBeVisible();
+    expect(
+      screen.queryByRole('button', {
+        name: 'Add Persisted Movie as Plan to Watch',
+      }),
+    ).not.toBeInTheDocument();
+
+    unmount();
+    render(
+      <MemoryRouter>
+        <MediaCard
+          item={item}
+          showQuickAdd
+          trackingStatus="plan_to_watch"
+        />
+      </MemoryRouter>,
+    );
+    expect(screen.getByText('✓ Added as Plan to Watch')).toBeVisible();
+  });
 });
