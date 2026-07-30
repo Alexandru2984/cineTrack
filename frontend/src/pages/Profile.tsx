@@ -1,7 +1,15 @@
-import { Link, useParams } from 'react-router';
-import { useUserProfile, useUserActivity, useFollow, useUnfollow } from '@/hooks/useSocial';
+import { useState } from 'react';
+import { Link, useNavigate, useParams } from 'react-router';
+import {
+  useBlockUser,
+  useFollow,
+  useUnfollow,
+  useUserActivity,
+  useUserProfile,
+} from '@/hooks/useSocial';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
 import { ActivityList } from '@/components/ActivityList';
+import { ReportDialog } from '@/components/ReportDialog';
 import { useAuthStore } from '@/store/auth';
 import { usePageTitle } from '@/hooks/usePageTitle';
 import { formatDate } from '@/lib/utils';
@@ -12,6 +20,8 @@ import {
   Calendar,
   Clock3,
   LockKeyhole,
+  Flag,
+  Ban,
   Settings,
   User,
   UserMinus,
@@ -21,6 +31,7 @@ import {
 export default function ProfilePage() {
   const t = useT();
   const { username } = useParams<{ username: string }>();
+  const navigate = useNavigate();
   const { data: profile, isLoading } = useUserProfile(username!);
   const {
     data: activity,
@@ -31,6 +42,8 @@ export default function ProfilePage() {
   usePageTitle(profile ? `@${profile.username}` : null);
   const follow = useFollow();
   const unfollow = useUnfollow();
+  const block = useBlockUser();
+  const [reporting, setReporting] = useState(false);
 
   if (isLoading) return <LoadingSpinner />;
   if (!profile) return <div className="text-center py-16">{t('profile.notFound')}</div>;
@@ -75,26 +88,52 @@ export default function ProfilePage() {
               </span>
             )}
             {!isOwnProfile && (
-              <button
-                onClick={() =>
-                  removeRelationship ? unfollow.mutate(username!) : follow.mutate(username!)
-                }
-                title={hasPendingRequest ? t('profile.cancelRequest') : undefined}
-                disabled={follow.isPending || unfollow.isPending}
-                className={`flex items-center gap-1 rounded-md px-3 py-1.5 text-sm font-medium ${
-                  removeRelationship
-                    ? 'border border-[hsl(var(--border))] hover:border-[hsl(var(--destructive))] hover:text-[hsl(var(--destructive))]'
-                    : 'bg-[hsl(var(--primary))] text-white'
-                } disabled:opacity-50`}
-              >
-                {hasAcceptedFollow ? (
-                  <><UserMinus className="h-4 w-4" /> {t('profile.unfollow')}</>
-                ) : hasPendingRequest ? (
-                  <><Clock3 className="h-4 w-4" /> {t('profile.requestSent')}</>
-                ) : (
-                  <><UserPlus className="h-4 w-4" /> {profile.is_public ? t('profile.follow') : t('profile.requestToFollow')}</>
-                )}
-              </button>
+              <>
+                <button
+                  onClick={() =>
+                    removeRelationship ? unfollow.mutate(username!) : follow.mutate(username!)
+                  }
+                  title={hasPendingRequest ? t('profile.cancelRequest') : undefined}
+                  disabled={follow.isPending || unfollow.isPending}
+                  className={`flex items-center gap-1 rounded-md px-3 py-1.5 text-sm font-medium ${
+                    removeRelationship
+                      ? 'border border-[hsl(var(--border))] hover:border-[hsl(var(--destructive))] hover:text-[hsl(var(--destructive))]'
+                      : 'bg-[hsl(var(--primary))] text-white'
+                  } disabled:opacity-50`}
+                >
+                  {hasAcceptedFollow ? (
+                    <><UserMinus className="h-4 w-4" /> {t('profile.unfollow')}</>
+                  ) : hasPendingRequest ? (
+                    <><Clock3 className="h-4 w-4" /> {t('profile.requestSent')}</>
+                  ) : (
+                    <><UserPlus className="h-4 w-4" /> {profile.is_public ? t('profile.follow') : t('profile.requestToFollow')}</>
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setReporting(true)}
+                  className="flex h-9 w-9 items-center justify-center rounded-md border border-[hsl(var(--border))] text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--destructive))]"
+                  aria-label={t('safety.reportUserAria', { username: profile.username })}
+                  title={t('safety.report')}
+                >
+                  <Flag className="h-4 w-4" aria-hidden="true" />
+                </button>
+                <button
+                  type="button"
+                  disabled={block.isPending}
+                  onClick={() => {
+                    if (!window.confirm(t('safety.blockConfirm', { username: profile.username }))) {
+                      return;
+                    }
+                    block.mutate(profile.username, { onSuccess: () => navigate('/') });
+                  }}
+                  className="flex h-9 w-9 items-center justify-center rounded-md border border-[hsl(var(--border))] text-[hsl(var(--muted-foreground))] hover:border-[hsl(var(--destructive))] hover:text-[hsl(var(--destructive))] disabled:opacity-50"
+                  aria-label={t('safety.blockUserAria', { username: profile.username })}
+                  title={t('safety.block')}
+                >
+                  <Ban className="h-4 w-4" aria-hidden="true" />
+                </button>
+              </>
             )}
             {!profile.is_public && (
               <span className="flex items-center gap-1 text-xs text-[hsl(var(--muted-foreground))]">
@@ -103,9 +142,12 @@ export default function ProfilePage() {
             )}
           </div>
           {profile.bio && <p className="mt-2 text-[hsl(var(--muted-foreground))]">{profile.bio}</p>}
-          {(follow.error || unfollow.error) && (
+          {(follow.error || unfollow.error || block.error) && (
             <p className="mt-2 text-sm text-[hsl(var(--destructive))]">
-              {getApiErrorMessage(follow.error ?? unfollow.error, t('profile.followError'))}
+              {getApiErrorMessage(
+                follow.error ?? unfollow.error ?? block.error,
+                block.error ? t('safety.blockError') : t('profile.followError'),
+              )}
             </p>
           )}
           <div className="mt-3 flex flex-wrap gap-x-6 gap-y-2 text-sm">
@@ -139,6 +181,15 @@ export default function ProfilePage() {
           />
         )}
       </div>
+
+      {reporting ? (
+        <ReportDialog
+          targetType="user"
+          targetId={profile.id}
+          targetLabel={`@${profile.username}`}
+          onClose={() => setReporting(false)}
+        />
+      ) : null}
     </div>
   );
 }

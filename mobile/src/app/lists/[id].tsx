@@ -1,6 +1,7 @@
 import { Stack, router, useLocalSearchParams } from 'expo-router';
 import {
   Globe2,
+  Flag,
   Lock,
   Pencil,
   Share2,
@@ -22,6 +23,7 @@ import { AppButton } from '@/components/app-button';
 import { AppText } from '@/components/app-text';
 import { ListEditorSheet } from '@/components/list-editor-sheet';
 import { Poster } from '@/components/poster';
+import { ReportSheet } from '@/components/report-sheet';
 import { EmptyState, ErrorState, LoadingState } from '@/components/screen-state';
 import { radius, spacing } from '@/constants/theme';
 import {
@@ -50,6 +52,7 @@ export default function ListDetailScreen() {
   const deleteList = useDeleteList();
   const removeItem = useRemoveListItem();
   const [editing, setEditing] = useState(false);
+  const [reporting, setReporting] = useState(false);
 
   if (detail.isLoading) return <LoadingState label={t('listDetail.loading')} />;
   if (detail.isError || !detail.data) {
@@ -154,6 +157,15 @@ export default function ListDetailScreen() {
                   compact
                   icon={<Share2 color={theme.mutedText} size={18} />}
                   onPress={share}
+                />
+              ) : null}
+              {list.is_public && !isOwner && user ? (
+                <AppButton
+                  label={t('safety.report')}
+                  variant="secondary"
+                  compact
+                  icon={<Flag color={theme.mutedText} size={18} />}
+                  onPress={() => setReporting(true)}
                 />
               ) : null}
               {isOwner ? (
@@ -262,6 +274,14 @@ export default function ListDetailScreen() {
             if (!updateList.isPending) setEditing(false);
           }}
           onSave={save}
+        />
+      ) : null}
+      {reporting ? (
+        <ReportSheet
+          targetType="list"
+          targetId={list.id}
+          targetLabel={list.name}
+          onClose={() => setReporting(false)}
         />
       ) : null}
     </SafeAreaView>

@@ -1,4 +1,9 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import {
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/react-query';
 import api from '@/lib/api';
 import type {
   PublicUserProfile,
@@ -6,6 +11,7 @@ import type {
   UserSummary,
   FollowRequest,
   UserSearchResponse,
+  BlockedUser,
 } from '@/types';
 
 export function useUserProfile(username: string) {
@@ -142,6 +148,62 @@ export function useRejectFollowRequest() {
       void qc.invalidateQueries({ queryKey: ['follow-requests'] });
       void qc.invalidateQueries({ queryKey: ['user'] });
       void qc.invalidateQueries({ queryKey: ['notifications'] });
+    },
+  });
+}
+
+const BLOCKS_PAGE_SIZE = 50;
+
+export function useBlockedUsers() {
+  return useInfiniteQuery({
+    queryKey: ['blocks'],
+    queryFn: async ({ pageParam }) => {
+      const response = await api.get<BlockedUser[]>('/users/me/blocks', {
+        params: { page: pageParam, limit: BLOCKS_PAGE_SIZE },
+      });
+      return response.data;
+    },
+    initialPageParam: 1,
+    getNextPageParam: (lastPage, pages) =>
+      lastPage.length === BLOCKS_PAGE_SIZE ? pages.length + 1 : undefined,
+  });
+}
+
+export function useBlockUser() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (username: string) => {
+      const response = await api.post<{ blocked: true }>(
+        `/users/${encodeURIComponent(username)}/block`,
+      );
+      return response.data;
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['blocks'] });
+      void qc.invalidateQueries({ queryKey: ['user'] });
+      void qc.invalidateQueries({ queryKey: ['user-search'] });
+      void qc.invalidateQueries({ queryKey: ['activity'] });
+      void qc.invalidateQueries({ queryKey: ['followers'] });
+      void qc.invalidateQueries({ queryKey: ['following'] });
+      void qc.invalidateQueries({ queryKey: ['follow-requests'] });
+      void qc.invalidateQueries({ queryKey: ['notifications'] });
+    },
+  });
+}
+
+export function useUnblockUser() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (username: string) => {
+      const response = await api.delete<{ blocked: false }>(
+        `/users/${encodeURIComponent(username)}/block`,
+      );
+      return response.data;
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['blocks'] });
+      void qc.invalidateQueries({ queryKey: ['user'] });
+      void qc.invalidateQueries({ queryKey: ['user-search'] });
     },
   });
 }

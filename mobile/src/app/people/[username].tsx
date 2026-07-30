@@ -1,14 +1,25 @@
 import { Redirect, router, useLocalSearchParams } from 'expo-router';
-import { CalendarDays, Clock3, LockKeyhole, UserMinus, UserPlus } from 'lucide-react-native';
-import { ScrollView, StyleSheet, View } from 'react-native';
+import {
+  Ban,
+  CalendarDays,
+  Clock3,
+  Flag,
+  LockKeyhole,
+  UserMinus,
+  UserPlus,
+} from 'lucide-react-native';
+import { useState } from 'react';
+import { Alert, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { AppButton } from '@/components/app-button';
 import { AppText } from '@/components/app-text';
+import { ReportSheet } from '@/components/report-sheet';
 import { EmptyState, ErrorState, LoadingState } from '@/components/screen-state';
 import { SocialActivityRow } from '@/components/social-activity-row';
 import { UserAvatar } from '@/components/user-avatar';
 import { spacing } from '@/constants/theme';
+import { useBlockUser } from '@/hooks/use-community-safety';
 import {
   useFollowUser,
   usePublicUserActivity,
@@ -40,6 +51,8 @@ export default function PublicProfileScreen() {
   );
   const follow = useFollowUser();
   const unfollow = useUnfollowUser();
+  const block = useBlockUser();
+  const [reporting, setReporting] = useState(false);
   const activityItems = uniqueActivities(activity.data?.pages ?? []);
 
   if (!returnTo) {
@@ -79,8 +92,26 @@ export default function PublicProfileScreen() {
   const person = profile.data;
   const isSelf = person.id === currentUser?.id;
   const remove = person.follow_status !== null;
-  const relationshipPending = follow.isPending || unfollow.isPending;
-  const relationshipError = follow.error ?? unfollow.error;
+  const relationshipPending = follow.isPending || unfollow.isPending || block.isPending;
+  const relationshipError = follow.error ?? unfollow.error ?? block.error;
+
+  const confirmBlock = () => {
+    Alert.alert(
+      t('safety.blockConfirmTitle'),
+      t('safety.blockConfirm', { username: person.username }),
+      [
+        { text: t('common.cancel'), style: 'cancel' },
+        {
+          text: t('safety.block'),
+          style: 'destructive',
+          onPress: () =>
+            block.mutate(person.username, {
+              onSuccess: () => router.replace('/social'),
+            }),
+        },
+      ],
+    );
+  };
 
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: theme.background }]} edges={['bottom']}>
@@ -121,17 +152,38 @@ export default function PublicProfileScreen() {
         </View>
 
         {!isSelf ? (
-          <AppButton
-            label={relationshipLabel(t, person.follow_status, person.is_public)}
-            icon={remove
-              ? <UserMinus color={theme.text} size={18} />
-              : <UserPlus color="#FFFFFF" size={18} />}
-            variant={remove ? 'secondary' : 'primary'}
-            loading={relationshipPending}
-            onPress={() => remove
-              ? unfollow.mutate(person.username)
-              : follow.mutate(person.username)}
-          />
+          <View style={styles.relationshipActions}>
+            <AppButton
+              label={relationshipLabel(t, person.follow_status, person.is_public)}
+              icon={remove
+                ? <UserMinus color={theme.text} size={18} />
+                : <UserPlus color="#FFFFFF" size={18} />}
+              variant={remove ? 'secondary' : 'primary'}
+              loading={follow.isPending || unfollow.isPending}
+              disabled={relationshipPending}
+              onPress={() => remove
+                ? unfollow.mutate(person.username)
+                : follow.mutate(person.username)}
+              style={styles.primaryAction}
+            />
+            <AppButton
+              label={t('safety.report')}
+              icon={<Flag color={theme.text} size={18} />}
+              variant="secondary"
+              compact
+              disabled={relationshipPending}
+              onPress={() => setReporting(true)}
+            />
+            <AppButton
+              label={t('safety.block')}
+              icon={<Ban color="#FFFFFF" size={18} />}
+              variant="danger"
+              compact
+              loading={block.isPending}
+              disabled={relationshipPending}
+              onPress={confirmBlock}
+            />
+          </View>
         ) : null}
         {relationshipError ? (
           <AppText variant="caption" style={{ color: theme.danger }}>
@@ -177,6 +229,14 @@ export default function PublicProfileScreen() {
           )}
         </View>
       </ScrollView>
+      {reporting ? (
+        <ReportSheet
+          targetType="user"
+          targetId={person.id}
+          targetLabel={`@${person.username}`}
+          onClose={() => setReporting(false)}
+        />
+      ) : null}
     </SafeAreaView>
   );
 }
@@ -197,6 +257,12 @@ const styles = StyleSheet.create({
   name: { flexShrink: 1 },
   counts: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.lg },
   joined: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
+  relationshipActions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+  },
+  primaryAction: { flexGrow: 1 },
   activitySection: { gap: spacing.md },
   list: { gap: spacing.md },
 });

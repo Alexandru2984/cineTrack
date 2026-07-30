@@ -50,6 +50,7 @@ import {
 } from 'lucide-react';
 import { InstallAppCard } from '@/components/InstallAppCard';
 import { CalendarFeedCard } from '@/components/CalendarFeedCard';
+import { BlockedUsersCard } from '@/components/BlockedUsersCard';
 import { LanguageCard } from '@/components/LanguageCard';
 import { useAuthStore } from '@/store/auth';
 import { useT } from '@/hooks/useT';
@@ -1190,6 +1191,7 @@ export default function SettingsPage() {
       <InstallAppCard />
       <CalendarFeedCard />
       <FollowRequestsCard />
+      <BlockedUsersCard />
       <ImportCard />
       <ChangeEmailCard />
       <ChangePasswordCard />

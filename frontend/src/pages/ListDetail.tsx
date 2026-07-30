@@ -2,6 +2,7 @@ import {
   ArrowLeft,
   Check,
   Globe2,
+  Flag,
   Loader2,
   Lock,
   Pencil,
@@ -13,6 +14,7 @@ import { Link, useNavigate, useParams } from 'react-router';
 
 import { ListEditorDialog } from '@/components/ListEditorDialog';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
+import { ReportDialog } from '@/components/ReportDialog';
 import {
   useDeleteList,
   useList,
@@ -36,6 +38,7 @@ export default function ListDetailPage() {
   const deleteList = useDeleteList();
   const removeItem = useRemoveListItem();
   const [editing, setEditing] = useState(false);
+  const [reporting, setReporting] = useState(false);
   const [shared, setShared] = useState(false);
   usePageTitle(detail.data?.list?.name);
 
@@ -144,6 +147,16 @@ export default function ListDetailPage() {
                 {shared ? t('listDetail.shared') : t('listDetail.share')}
               </button>
             ) : null}
+            {user && list.is_public && !isOwner ? (
+              <button
+                type="button"
+                onClick={() => setReporting(true)}
+                className="flex h-10 items-center gap-2 rounded-md border border-[hsl(var(--border))] px-3 text-sm font-medium text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--destructive))]"
+              >
+                <Flag className="h-4 w-4" aria-hidden="true" />
+                {t('safety.report')}
+              </button>
+            ) : null}
             {isOwner ? (
               <>
                 <button
@@ -244,6 +257,14 @@ export default function ListDetailPage() {
             if (!updateList.isPending) setEditing(false);
           }}
           onSave={save}
+        />
+      ) : null}
+      {reporting ? (
+        <ReportDialog
+          targetType="list"
+          targetId={list.id}
+          targetLabel={list.name}
+          onClose={() => setReporting(false)}
         />
       ) : null}
     </div>

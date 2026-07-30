@@ -335,6 +335,23 @@ export interface UserSummary {
   bio: string | null;
 }
 
+export interface BlockedUser {
+  id: string;
+  username: string;
+  avatar_url: string | null;
+  blocked_at: string;
+}
+
+export interface SafetyReport {
+  id: string;
+  target_type: 'user' | 'list';
+  target_id: string;
+  reason: string;
+  details: string | null;
+  status: 'open' | 'reviewing' | 'actioned' | 'dismissed';
+  created_at: string;
+}
+
 export interface FollowRequest {
   user_id: string;
   username: string;

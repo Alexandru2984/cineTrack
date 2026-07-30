@@ -43,6 +43,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { AppButton } from '@/components/app-button';
 import { AppText } from '@/components/app-text';
+import { BlockedUsersCard } from '@/components/blocked-users-card';
 import { CalendarFeedSection } from '@/components/calendar-feed-section';
 import { LanguageSection } from '@/components/language-section';
 import { SegmentedControl } from '@/components/segmented-control';
@@ -701,6 +702,8 @@ export default function SettingsScreen() {
           <LanguageSection />
 
           <CalendarFeedSection />
+
+          <BlockedUsersCard />
 
           <View style={[styles.section, { borderBottomColor: theme.border }]}>
             <View style={styles.sectionHeading}>
