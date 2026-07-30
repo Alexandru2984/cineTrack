@@ -4,6 +4,10 @@ A personal movie and TV show tracker with social features, inspired by TV Time. 
 
 **Live at [vazute.micutu.com](https://vazute.micutu.com)**
 
+Release changes are tracked in [`CHANGELOG.md`](CHANGELOG.md), and the manual
+production/EAS procedure is documented in
+[`docs/release-process.md`](docs/release-process.md).
+
 ![Rust](https://img.shields.io/badge/Rust-000000?style=flat&logo=rust&logoColor=white)
 ![React](https://img.shields.io/badge/React-61DAFB?style=flat&logo=react&logoColor=black)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-4169E1?style=flat&logo=postgresql&logoColor=white)
@@ -25,7 +29,8 @@ A personal movie and TV show tracker with social features, inspired by TV Time. 
 - **Import from TV Time** — Upload your TV Time export and bring over your whole library, episode history and rewatches (background job with progress + a matched/unmatched summary)
 - **Profile Avatars** — Upload a profile picture (stored in Cloudflare R2)
 - **Dark Mode** — Toggle between light and dark themes
-- **Social Features** — Follow other users, approve or reject requests to private profiles, and create custom lists
+- **Social Features** — Follow or block members, approve or reject requests to private profiles, create custom lists, and report abusive profiles or public lists
+- **Community Safety** — Versioned terms and guidelines, server-enforced blocking, and a two-factor-gated moderation queue with append-only decision auditing
 - **Privacy Controls** — Toggle profile visibility; private profiles expose details and activity only to approved followers
 
 ## Tech Stack
@@ -268,7 +273,7 @@ promtool check rules ops/prometheus/cinetrack-alerts.yml
 - **Frontend tests** — Zustand stores, query hooks, utility functions, full-backlog Calendar pagination, Up Next actions, PWA lifecycle/install states, episode/season bulk controls, route contracts, About attribution, and error-boundary fallback
 - **Mobile checks** — ESLint with React Compiler rules, strict TypeScript, all 20 Expo Doctor checks, reproducible `npm ci`, Android Hermes export, structured Android/iOS manifest validation, a native Android release compile, and HIGH/CRITICAL dependency gates
 - **Operations checks** — ShellCheck, embedded-Python syntax, isolated backup/restore safety paths, and Prometheus rule validation using digest-pinned tool images
-- **E2E tests (Playwright)** — route guards, auth flows, mobile navigation, sequential episode actions, discovery/social UI, and watched-through confirmation against a mocked API; install/offline PWA behavior against a production build; plus a real-stack suite covering cookies, token rotation, sessions, account deletion, private follows, and password reset
+- **E2E tests (Playwright)** — route guards, auth flows, mobile navigation, sequential episode actions, discovery/social UI, watched-through confirmation, and WCAG A/AA scans against a mocked API in Chromium and WebKit/iPhone; install/offline PWA behavior against a production build; plus a real-stack suite covering cookies, token rotation, sessions, account deletion, private follows, and password reset
 
 ## Project Structure
 

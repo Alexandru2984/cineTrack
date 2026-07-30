@@ -23,6 +23,7 @@ echo ""
 
 echo "=== Mobile Checks ==="
 cd ../mobile
+"$ROOT_DIR/scripts/check_release_metadata.sh"
 CI=1 npm run verify
 CI=1 npm run export:android
 EAS_BUILD_PROFILE=production EXPO_UPDATES_ENABLED=false EXPO_USE_DEV_CLIENT=0 \

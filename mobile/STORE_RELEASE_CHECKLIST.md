@@ -27,6 +27,9 @@ fingerprint alone will not verify Android App Links on store builds.
 
 ## Repository gates
 
+- `./scripts/check_release_metadata.sh` passes from the repository root.
+- The release candidate version is `1.2.0`; EAS reports runtime `1.2.0` and a
+  new remote build number before distribution.
 - The Git worktree contains only the intended release commit.
 - GitHub CI is green, including the Android release compile and validation of
   the final merged release manifest's permissions and exported components.
@@ -52,6 +55,22 @@ fingerprint alone will not verify Android App Links on store builds.
   conversion kept its data.
 - SMTP/Resend delivery is verified for verification, reset, and security-event emails.
 - No `.env`, credentials, signing keys, tokens, database dumps, or generated native projects are tracked by Git.
+
+## Community safety
+
+- Terms of Service and Community Guidelines open from registration and
+  Settings in both supported languages.
+- A fresh account must accept the current terms version before using community
+  features.
+- Reporting and blocking work from a second test account on both web and
+  native clients; blocked members cannot regain visibility through direct API
+  requests.
+- The moderator test account has verified email and 2FA, and every status
+  change requires a note and creates an audit entry.
+- Child-safety and threatening-content reports sort ahead of the normal queue;
+  dismissal/action cannot be reversed from the console.
+- The public privacy policy discloses report snapshots and moderation
+  retention.
 
 ## Google Play
 
@@ -88,3 +107,5 @@ never be guessed or copied from an unrelated signing identity.
 - Log a watch with Today, Yesterday, and the native date picker; verify future dates cannot be selected.
 - Export account data with a correct and incorrect password; inspect the JSON for completeness and absence of credential fields.
 - Record the commit, version, version code/build number, signing identity, CI run, and artifact checksum in the release notes.
+- Verify Romanian and English navigation, validation, legal, reporting, and
+  account-management copy on at least one physical device.

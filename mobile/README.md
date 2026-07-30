@@ -71,10 +71,12 @@ badges, complete statistics, profile/privacy editing, release-region controls,
 password changes, and active-session management.
 
 That build does **not** contain the AsyncStorage, NetInfo, Crypto, or
-Notifications native modules used by the current client. The current native
-runtime is `1.1.0`; never publish this JavaScript as an OTA update to runtime
-`1.0.0`. Because `eas.json` uses remote app-version management, verify that the
-next EAS build resolves to app/runtime version `1.1.0` before distributing it.
+Notifications native modules used by the current client. The current release
+candidate and native runtime are `1.2.0`; never publish this JavaScript as an
+OTA update to runtime `1.0.0` or `1.1.0`. Because `eas.json` uses remote
+developer-facing build-number management, verify that the next EAS build
+resolves to app/runtime version `1.2.0` and a new `versionCode` before
+distributing it.
 
 ## Offline cache
 
@@ -176,8 +178,7 @@ See `STORE_RELEASE_CHECKLIST.md` for the remaining external steps.
 
 ## Locale behavior
 
-Media search, discovery, and details use the device's preferred language and
-language region through `expo-localization`. Dates and times use the device
-locale. The application shell is currently English-only; do not advertise a
-fully translated interface until all user-facing strings have translation
-coverage.
+The complete application shell is available in Romanian and English. The
+selected app language controls interface copy, dates, times, numbers, and
+country names; media search, discovery, and details send the matching language
+and region to the API.
