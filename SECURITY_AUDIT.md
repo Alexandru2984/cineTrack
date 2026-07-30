@@ -1,6 +1,6 @@
 # CineTrack Security Audit
 
-Date: 2026-07-28 (earlier rounds 2026-06-13 through 2026-07-27)
+Date: 2026-07-30 (earlier rounds 2026-06-13 through 2026-07-29)
 
 ## Summary
 
@@ -11,6 +11,37 @@ We fixed the issues carrying immediate risk: the refresh token is no longer expo
 In the second round we closed the remaining gaps on the account and operations side: email normalization, password change/reset, active-session management, account deletion, CSP in Nginx, request-id plus Prometheus metrics, and supply-chain scanning (Dependabot, CodeQL, gitleaks). All new endpoints have integration tests that run against Postgres in CI.
 
 In the third round we reviewed the repo directly on the VPS/prod host and closed three concrete risks: the npm high-severity vulnerability in `form-data` (via the lockfile), logging of the password-reset URL when SMTP is missing in production, and runtime hardening for the containers and Nginx. We also confirmed that `.env.prod` is untracked and `chmod 600`, and that the ports published in Compose are bound to `127.0.0.1`.
+
+## Release security review update (2026-07-30)
+
+**CISO verdict: YELLOW.** The current three-account deployment may ship after a
+verified pre-migration snapshot, migration, and production smoke test. Broad
+public growth remains gated on dedicated backup credentials, off-host Age-key
+escrow, a measured restore/tabletop exercise, and an operational moderator with
+verified email plus TOTP. The repository owner explicitly deferred the backup
+credential/key work for this release.
+
+No exploitable HIGH or CRITICAL application vulnerability was confirmed. This
+release closes the largest product-safety gaps with versioned terms acceptance,
+blocking, reporting, server-captured evidence snapshots, a DB-backed moderator
+role, append-only decisions, bounded queue metrics, alerts, and documented
+triage/retention rules. Moderator access is checked on every request and cannot
+directly suspend or delete an account.
+
+The final gate passed 290 backend unit tests, all 118 PostgreSQL integration
+tests, 160 frontend tests, 44 Chromium/WebKit browser tests, 7 real-stack
+browser tests, 3 PWA tests, and 154 mobile tests. Expo Doctor reported 20/20,
+the complete 429-commit history passed gitleaks, and npm/Cargo audits found no
+actionable vulnerability. The production images built successfully and a
+digest-pinned Trivy 0.72.0 scan found zero fixed HIGH or CRITICAL
+vulnerabilities in both images.
+
+The real-stack test exposed a malformed aggregate `FILTER` expression in the
+new moderation metric before deployment. The query was corrected, made
+explicitly fallible, and added to the PostgreSQL integration gate. The complete
+threat model, blast radius, planning loss ranges, detection/recovery analysis,
+vendor/compliance gaps, and exit criteria are recorded in
+[`docs/ciso-review-2026-07-30.md`](docs/ciso-review-2026-07-30.md).
 
 ## Extreme review update (2026-07-29)
 
