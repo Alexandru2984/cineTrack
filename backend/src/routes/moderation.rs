@@ -249,7 +249,9 @@ async fn update_report_status(
     tx.commit().await?;
 
     crate::metrics::record_moderation_action(&data.status);
-    crate::metrics::refresh_moderation_queue(pool.get_ref()).await;
+    if let Err(error) = crate::metrics::refresh_moderation_queue(pool.get_ref()).await {
+        log::error!("Failed to refresh moderation queue metrics after status change: {error}");
+    }
     log::warn!(
         "audit: moderation report status changed report_id={report_id} actor_id={actor_id} old_status={old_status} new_status={}",
         data.status

@@ -491,42 +491,44 @@ pub(crate) fn record_moderation_action(status: &str) {
         .inc();
 }
 
-pub async fn refresh_moderation_queue(pool: &PgPool) {
-    let result = sqlx::query_as::<_, (i64, i64, i64, i64, i64)>(
-        r#"SELECT
+pub async fn refresh_moderation_queue(pool: &PgPool) -> Result<(), sqlx::Error> {
+    let (open, reviewing, actioned, dismissed, oldest_active_age) =
+        sqlx::query_as::<_, (i64, i64, i64, i64, i64)>(
+            r#"SELECT
             COUNT(*) FILTER (WHERE status = 'open')::BIGINT,
             COUNT(*) FILTER (WHERE status = 'reviewing')::BIGINT,
             COUNT(*) FILTER (WHERE status = 'actioned')::BIGINT,
             COUNT(*) FILTER (WHERE status = 'dismissed')::BIGINT,
             COALESCE(
-                EXTRACT(EPOCH FROM (NOW() - MIN(created_at)))
-                    FILTER (WHERE status IN ('open', 'reviewing')),
+                EXTRACT(EPOCH FROM (
+                    NOW() - (
+                        MIN(created_at)
+                            FILTER (WHERE status IN ('open', 'reviewing'))
+                    )
+                )),
                 0
             )::BIGINT
         FROM user_reports"#,
-    )
-    .fetch_one(pool)
-    .await;
+        )
+        .fetch_one(pool)
+        .await?;
 
-    match result {
-        Ok((open, reviewing, actioned, dismissed, oldest_active_age)) => {
-            for (status, value) in [
-                ("open", open),
-                ("reviewing", reviewing),
-                ("actioned", actioned),
-                ("dismissed", dismissed),
-            ] {
-                COMMUNITY_SAFETY_METRICS
-                    .queue
-                    .with_label_values(&[status])
-                    .set(value);
-            }
-            COMMUNITY_SAFETY_METRICS
-                .oldest_active_age
-                .set(oldest_active_age.max(0));
-        }
-        Err(error) => log::error!("Failed to refresh moderation queue metrics: {error}"),
+    for (status, value) in [
+        ("open", open),
+        ("reviewing", reviewing),
+        ("actioned", actioned),
+        ("dismissed", dismissed),
+    ] {
+        COMMUNITY_SAFETY_METRICS
+            .queue
+            .with_label_values(&[status])
+            .set(value);
     }
+    COMMUNITY_SAFETY_METRICS
+        .oldest_active_age
+        .set(oldest_active_age.max(0));
+
+    Ok(())
 }
 
 pub fn start_moderation_metrics_refresher(pool: PgPool) {
@@ -535,7 +537,9 @@ pub fn start_moderation_metrics_refresher(pool: PgPool) {
         interval.tick().await;
         loop {
             interval.tick().await;
-            refresh_moderation_queue(&pool).await;
+            if let Err(error) = refresh_moderation_queue(&pool).await {
+                log::error!("Failed to refresh moderation queue metrics: {error}");
+            }
         }
     });
 }

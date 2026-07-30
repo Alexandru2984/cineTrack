@@ -1059,6 +1059,10 @@ async fn moderation_queue_requires_database_role_two_factor_and_append_only_audi
     let report: Value = actix_test::read_body_json(response).await;
     let report_id = report["id"].as_str().unwrap();
 
+    cinetrack::metrics::refresh_moderation_queue(&pool)
+        .await
+        .expect("moderation queue metrics query should execute");
+
     let non_moderator_status = actix_test::TestRequest::get()
         .uri("/api/moderation/me")
         .insert_header(("Authorization", format!("Bearer {reporter_token}")))

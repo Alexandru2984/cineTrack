@@ -36,6 +36,7 @@ async function registerAndVerify(page: Page, acct: ReturnType<typeof uniqueAccou
   await page.locator('input[type="text"]').fill(acct.username);
   await page.locator('input[type="email"]').fill(acct.email);
   await page.locator('input[type="password"]').fill(acct.password);
+  await page.getByRole('checkbox').check();
   await page.getByRole('button', { name: 'Create account' }).click();
   await expect(page.getByRole('button', { name: 'Logout' })).toBeVisible();
 }

@@ -318,7 +318,9 @@ async fn main() -> std::io::Result<()> {
         Err(error) => log::error!("Failed to prune security artifacts at startup: {error}"),
     }
     cinetrack::services::retention::start_security_artifact_pruner(pool.clone());
-    metrics::refresh_moderation_queue(&pool).await;
+    if let Err(error) = metrics::refresh_moderation_queue(&pool).await {
+        log::error!("Failed to initialize moderation queue metrics: {error}");
+    }
     metrics::start_moderation_metrics_refresher(pool.clone());
 
     let tmdb_service = TmdbService::new(&config);
