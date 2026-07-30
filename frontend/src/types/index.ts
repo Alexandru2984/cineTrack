@@ -70,6 +70,46 @@ export interface SafetyReport {
   created_at: string;
 }
 
+export type ModerationReportStatus =
+  | 'open'
+  | 'reviewing'
+  | 'actioned'
+  | 'dismissed';
+
+export interface ModerationReport {
+  id: string;
+  reporter_id: string | null;
+  reporter_username: string | null;
+  subject_user_id: string | null;
+  subject_username: string | null;
+  target_type: 'user' | 'list';
+  target_id: string;
+  reason: string;
+  details: string | null;
+  content_snapshot: Record<string, unknown>;
+  status: ModerationReportStatus;
+  moderated_by: string | null;
+  moderator_username: string | null;
+  moderator_note: string | null;
+  resolved_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ModerationStatusCounts {
+  open: number;
+  reviewing: number;
+  actioned: number;
+  dismissed: number;
+}
+
+export interface ModerationQueue {
+  items: ModerationReport[];
+  counts: ModerationStatusCounts;
+  page: number;
+  has_more: boolean;
+}
+
 export interface AuthResponse {
   access_token: string;
   token_type: string;

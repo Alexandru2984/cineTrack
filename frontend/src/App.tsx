@@ -34,6 +34,7 @@ const PrivacyPage = lazy(() => import('@/pages/Privacy'));
 const AccountDeletionPage = lazy(() => import('@/pages/AccountDeletion'));
 const TermsPage = lazy(() => import('@/pages/Terms'));
 const CommunityGuidelinesPage = lazy(() => import('@/pages/CommunityGuidelines'));
+const ModerationPage = lazy(() => import('@/pages/Moderation'));
 
 function PageLoader() {
   return (
@@ -126,6 +127,7 @@ export default function App() {
               <Route path="/notifications" element={<ProtectedRoute><NotificationsPage /></ProtectedRoute>} />
               <Route path="/lists" element={<ProtectedRoute><ListsPage /></ProtectedRoute>} />
               <Route path="/lists/:id" element={<ListDetailPage />} />
+              <Route path="/moderation" element={<ProtectedRoute><ModerationPage /></ProtectedRoute>} />
             </Routes>
           </Suspense>
         </ErrorBoundary>

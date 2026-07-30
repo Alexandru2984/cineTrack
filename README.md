@@ -174,14 +174,17 @@ docker compose -f docker-compose.prod.yml --env-file .env.prod build backend fro
 docker compose -f docker-compose.prod.yml --env-file .env.prod run --rm --no-deps backend /usr/local/bin/cinetrack --check-config
 docker compose -f docker-compose.prod.yml --env-file .env.prod run --rm --no-deps backend /usr/local/bin/cinetrack --check-smtp
 docker compose --profile ops -f docker-compose.prod.yml --env-file .env.prod run --rm migrate
+./scripts/provision_db_role.sh .env.prod
 docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
 ```
 
 - Production migrations are an explicit one-shot job and must complete before the backend is restarted. The web process only verifies embedded migration versions/checksums and refuses to start on a stale schema.
+- Database privileges are reconciled again after migrations so newly created sensitive tables keep their least-privilege grants.
 - The backend connects as `cinetrack_app`, a DML-only role without ownership, `CREATE`, `TEMP`, `TRUNCATE`, trigger, or reference privileges. `cinetrack_migrator` owns the application schema and is passed only to the one-shot migration job and daily catalog reconciliation.
 - The bootstrap `POSTGRES_USER` credential is never passed to the application or migration containers.
 - The `db` service uses a named volume, so rebuilding/redeploying does not touch existing data.
 - Production containers run behind a host-level Nginx reverse proxy with SSL termination, as non-root users on a read-only root filesystem.
+- Moderator access is database-backed, requires verified email plus 2FA, and is managed with `scripts/manage_moderator.sh`. The operating procedure is in [`docs/community-moderation.md`](docs/community-moderation.md).
 - The canonical host vhost is `nginx/vazute.micutu.com.conf`. Activate it through a symlink so `sites-enabled` cannot drift from the tracked configuration:
 
 ```bash
@@ -341,7 +344,8 @@ All endpoints except auth (register/login/refresh) require a valid JWT access to
 | **Tracking** | CRUD for user's movie/show list with status, rating, review |
 | **History** | Log watched episodes/movies, show season progress, mark a season watched, or backfill through an episode |
 | **Stats** | Heatmap data, watch time, streaks, genre distribution, yearly Wrapped recap |
-| **Users** | Public profiles, follow/unfollow, activity feed |
+| **Users** | Public profiles, follow/unfollow, blocking, activity feed |
+| **Safety** | User/public-list reporting; 2FA-gated moderator queue with append-only decisions |
 | **Notifications** | In-app inbox and unread badge counts |
 | **Push** | Opt-in native release alerts: device registration and per-installation revocation (Expo Push) |
 | **Diagnostics** | Authenticated, self-hosted mobile crash reports (redacted, rate-limited) |

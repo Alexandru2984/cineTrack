@@ -54,6 +54,7 @@ import { BlockedUsersCard } from '@/components/BlockedUsersCard';
 import { LanguageCard } from '@/components/LanguageCard';
 import { useAuthStore } from '@/store/auth';
 import { useT } from '@/hooks/useT';
+import { useModeratorStatus } from '@/hooks/useCommunitySafety';
 
 function SensitiveActionCodeField({
   id,
@@ -108,6 +109,33 @@ function SignOutCard() {
       </span>
       <ChevronRight className="h-4 w-4" aria-hidden="true" />
     </button>
+  );
+}
+
+function ModerationCard() {
+  const t = useT();
+  const moderator = useModeratorStatus();
+  if (!moderator.data?.is_moderator) return null;
+
+  return (
+    <Link
+      to="/moderation"
+      className="flex items-center justify-between gap-4 rounded-lg border border-amber-500/50 bg-amber-500/5 p-4 hover:bg-amber-500/10 sm:p-6"
+    >
+      <span className="flex min-w-0 items-start gap-3">
+        <ShieldCheck
+          className="mt-0.5 h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400"
+          aria-hidden="true"
+        />
+        <span>
+          <span className="block font-semibold">{t('moderation.settingsTitle')}</span>
+          <span className="mt-1 block text-sm text-[hsl(var(--muted-foreground))]">
+            {t('moderation.settingsHint')}
+          </span>
+        </span>
+      </span>
+      <ChevronRight className="h-5 w-5 shrink-0" aria-hidden="true" />
+    </Link>
   );
 }
 
@@ -1192,6 +1220,7 @@ export default function SettingsPage() {
       <CalendarFeedCard />
       <FollowRequestsCard />
       <BlockedUsersCard />
+      <ModerationCard />
       <ImportCard />
       <ChangeEmailCard />
       <ChangePasswordCard />

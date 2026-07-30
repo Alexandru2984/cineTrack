@@ -150,6 +150,60 @@ groups:
           summary: Văzute has unusual sensitive account activity
           description: More than five credential changes, account exports, or account deletions completed in fifteen minutes.
 
+  - name: cinetrack-community-safety
+    rules:
+      - alert: CineTrackModerationMetricsMissing
+        expr: absent(cinetrack_moderation_queue_reports{status="open"})
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: Văzute moderation metrics are missing
+          description: The backend is not publishing moderation queue state. Check the backend metrics target and database connectivity.
+
+      - alert: CineTrackChildSafetyReportReceived
+        expr: increase(cinetrack_safety_reports_total{reason="child_safety"}[15m]) > 0
+        labels:
+          severity: critical
+        annotations:
+          summary: Văzute received a child-safety report
+          description: Triage the priority moderation queue immediately and follow the child-safety escalation steps in the moderation runbook.
+
+      - alert: CineTrackThreatReportReceived
+        expr: increase(cinetrack_safety_reports_total{reason="threatening"}[15m]) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: Văzute received a threat or violence report
+          description: Review the priority moderation queue promptly and assess immediate-danger escalation.
+
+      - alert: CineTrackSafetyReportSpike
+        expr: sum(increase(cinetrack_safety_reports_total[15m])) > 30
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: Văzute is receiving an unusual number of safety reports
+          description: More than thirty reports arrived in fifteen minutes. Check for a real incident, coordinated abuse, or automation.
+
+      - alert: CineTrackModerationQueueGrowing
+        expr: sum(cinetrack_moderation_queue_reports{status=~"open|reviewing"}) > 25
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: Văzute moderation queue is growing
+          description: More than twenty-five active reports have remained in the moderation queue for thirty minutes.
+
+      - alert: CineTrackModerationReportStale
+        expr: cinetrack_moderation_oldest_active_age_seconds > 43200
+        for: 15m
+        labels:
+          severity: critical
+        annotations:
+          summary: A Văzute safety report is stale
+          description: The oldest open or reviewing report is more than twelve hours old. Review the queue and document the delay.
+
   - name: cinetrack-releases
     rules:
       - alert: CineTrackReleaseWorkerMetricsMissing

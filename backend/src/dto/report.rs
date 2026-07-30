@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use uuid::Uuid;
 use validator::{Validate, ValidationError};
 
@@ -79,6 +80,117 @@ pub struct BlockedUserResponse {
     pub blocked_at: chrono::DateTime<chrono::Utc>,
 }
 
+const REPORT_STATUSES: &[&str] = &["open", "reviewing", "actioned", "dismissed"];
+
+fn validate_queue_status(value: &str) -> Result<(), ValidationError> {
+    if matches!(
+        value,
+        "active" | "all" | "open" | "reviewing" | "actioned" | "dismissed"
+    ) {
+        return Ok(());
+    }
+    Err(ValidationError::new("invalid_report_status"))
+}
+
+fn validate_moderation_status(value: &str) -> Result<(), ValidationError> {
+    if REPORT_STATUSES.contains(&value) {
+        return Ok(());
+    }
+    Err(ValidationError::new("invalid_report_status"))
+}
+
+fn validate_moderator_note(value: &str) -> Result<(), ValidationError> {
+    if value.trim().len() >= 3 {
+        return Ok(());
+    }
+    let mut error = ValidationError::new("moderator_note_too_short");
+    error.message = Some("Moderator note must contain at least 3 characters".into());
+    Err(error)
+}
+
+#[derive(Debug, Deserialize, Validate)]
+#[serde(deny_unknown_fields)]
+pub struct ModerationQueueParams {
+    #[validate(custom(function = "validate_queue_status"))]
+    pub status: Option<String>,
+    #[validate(range(min = 1, max = 10_000))]
+    pub page: Option<i64>,
+    #[validate(range(min = 1, max = 100))]
+    pub limit: Option<i64>,
+}
+
+impl ModerationQueueParams {
+    pub fn status_val(&self) -> &str {
+        self.status.as_deref().unwrap_or("active")
+    }
+
+    pub fn page_val(&self) -> i64 {
+        self.page.unwrap_or(1)
+    }
+
+    pub fn limit_val(&self) -> i64 {
+        self.limit.unwrap_or(25)
+    }
+
+    pub fn offset(&self) -> i64 {
+        (self.page_val() - 1) * self.limit_val()
+    }
+}
+
+#[derive(Debug, Deserialize, Validate)]
+#[serde(deny_unknown_fields)]
+pub struct UpdateReportStatusRequest {
+    #[validate(custom(function = "validate_moderation_status"))]
+    pub status: String,
+    #[validate(
+        length(max = 2000, message = "Moderator note must be at most 2000 characters"),
+        custom(function = "validate_moderator_note")
+    )]
+    pub note: String,
+}
+
+#[derive(Debug, Serialize, sqlx::FromRow)]
+pub struct ModerationReportResponse {
+    pub id: Uuid,
+    pub reporter_id: Option<Uuid>,
+    pub reporter_username: Option<String>,
+    pub subject_user_id: Option<Uuid>,
+    pub subject_username: Option<String>,
+    pub target_type: String,
+    pub target_id: Uuid,
+    pub reason: String,
+    pub details: Option<String>,
+    pub content_snapshot: Value,
+    pub status: String,
+    pub moderated_by: Option<Uuid>,
+    pub moderator_username: Option<String>,
+    pub moderator_note: Option<String>,
+    pub resolved_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Debug, Serialize, sqlx::FromRow)]
+pub struct ModerationStatusCounts {
+    pub open: i64,
+    pub reviewing: i64,
+    pub actioned: i64,
+    pub dismissed: i64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ModerationQueueResponse {
+    pub items: Vec<ModerationReportResponse>,
+    pub counts: ModerationStatusCounts,
+    pub page: i64,
+    pub has_more: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ModeratorStatusResponse {
+    pub is_moderator: bool,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -123,5 +235,52 @@ mod tests {
             }))
             .is_err()
         );
+    }
+
+    #[test]
+    fn moderation_inputs_are_bounded_and_reject_unknown_fields() {
+        let valid = UpdateReportStatusRequest {
+            status: "reviewing".to_string(),
+            note: "Reviewed the supplied evidence".to_string(),
+        };
+        assert!(valid.validate().is_ok());
+
+        let invalid_status = UpdateReportStatusRequest {
+            status: "banned".to_string(),
+            note: "Attempted privilege expansion".to_string(),
+        };
+        assert!(invalid_status.validate().is_err());
+
+        let blank_note = UpdateReportStatusRequest {
+            status: "dismissed".to_string(),
+            note: "  ".to_string(),
+        };
+        assert!(blank_note.validate().is_err());
+
+        assert!(
+            serde_json::from_value::<UpdateReportStatusRequest>(serde_json::json!({
+                "status": "actioned",
+                "note": "Handled",
+                "delete_user": true
+            }))
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn moderation_queue_parameters_are_strictly_bounded() {
+        let valid = ModerationQueueParams {
+            status: Some("active".to_string()),
+            page: Some(1),
+            limit: Some(100),
+        };
+        assert!(valid.validate().is_ok());
+
+        let invalid = ModerationQueueParams {
+            status: Some("secret".to_string()),
+            page: Some(0),
+            limit: Some(101),
+        };
+        assert!(invalid.validate().is_err());
     }
 }

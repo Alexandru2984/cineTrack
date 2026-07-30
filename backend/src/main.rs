@@ -304,17 +304,22 @@ async fn main() -> std::io::Result<()> {
     match cinetrack::services::retention::prune_security_artifacts(&pool).await {
         Ok(summary) if summary.total() > 0 => log::info!(
             "Pruned security artifacts at startup: refresh_tokens={} password_reset_tokens={} \
-             email_verification_tokens={} email_change_tokens={} security_activity={}",
+             email_verification_tokens={} email_change_tokens={} security_activity={} \
+             moderation_audit={} resolved_reports={}",
             summary.refresh_tokens,
             summary.password_reset_tokens,
             summary.email_verification_tokens,
             summary.email_change_tokens,
             summary.security_activity,
+            summary.moderation_audit,
+            summary.resolved_reports,
         ),
         Ok(_) => {}
         Err(error) => log::error!("Failed to prune security artifacts at startup: {error}"),
     }
     cinetrack::services::retention::start_security_artifact_pruner(pool.clone());
+    metrics::refresh_moderation_queue(&pool).await;
+    metrics::start_moderation_metrics_refresher(pool.clone());
 
     let tmdb_service = TmdbService::new(&config);
     let email_service = EmailService::new(&config);

@@ -1,5 +1,6 @@
 use actix_web_prom::{PrometheusMetrics, PrometheusMetricsBuilder};
-use prometheus::{HistogramOpts, HistogramVec, IntCounterVec, Opts};
+use prometheus::{HistogramOpts, HistogramVec, IntCounterVec, IntGauge, IntGaugeVec, Opts};
+use sqlx::PgPool;
 use std::sync::LazyLock;
 use std::time::Duration;
 
@@ -25,6 +26,29 @@ struct ClientErrorMetrics {
 struct CspReportMetrics {
     reports: IntCounterVec,
 }
+
+#[derive(Clone)]
+struct CommunitySafetyMetrics {
+    reports: IntCounterVec,
+    moderation_actions: IntCounterVec,
+    queue: IntGaugeVec,
+    oldest_active_age: IntGauge,
+}
+
+const SAFETY_REPORT_REASONS: &[&str] = &[
+    "harassment",
+    "hate",
+    "threatening",
+    "sexual",
+    "child_safety",
+    "impersonation",
+    "spam",
+    "privacy",
+    "copyright",
+    "other",
+];
+
+const MODERATION_STATUSES: &[&str] = &["open", "reviewing", "actioned", "dismissed"];
 
 /// The bounded label set for CSP violation reports. `blocked-uri` and
 /// `document-uri` are attacker-influenced and unbounded, so they never become
@@ -233,6 +257,55 @@ impl CspReportMetrics {
     }
 }
 
+impl CommunitySafetyMetrics {
+    fn new() -> Self {
+        let reports = IntCounterVec::new(
+            Opts::new(
+                "safety_reports_total",
+                "Accepted community safety reports by fixed reason",
+            )
+            .namespace("cinetrack"),
+            &["reason"],
+        )
+        .expect("Safety report metric must be valid");
+        let moderation_actions = IntCounterVec::new(
+            Opts::new(
+                "moderation_actions_total",
+                "Moderator report status transitions by destination status",
+            )
+            .namespace("cinetrack"),
+            &["status"],
+        )
+        .expect("Moderation action metric must be valid");
+        let queue = IntGaugeVec::new(
+            Opts::new("moderation_queue_reports", "Current report count by status")
+                .namespace("cinetrack"),
+            &["status"],
+        )
+        .expect("Moderation queue metric must be valid");
+        let oldest_active_age = IntGauge::new(
+            "cinetrack_moderation_oldest_active_age_seconds",
+            "Age in seconds of the oldest open or reviewing report",
+        )
+        .expect("Moderation queue age metric must be valid");
+
+        for reason in SAFETY_REPORT_REASONS {
+            reports.with_label_values(&[reason]);
+        }
+        for status in MODERATION_STATUSES {
+            moderation_actions.with_label_values(&[status]);
+            queue.with_label_values(&[status]);
+        }
+
+        Self {
+            reports,
+            moderation_actions,
+            queue,
+            oldest_active_age,
+        }
+    }
+}
+
 impl EmailMetrics {
     fn new() -> Self {
         let sends = IntCounterVec::new(
@@ -325,6 +398,8 @@ static CLIENT_ERROR_METRICS: LazyLock<ClientErrorMetrics> = LazyLock::new(Client
 static CSP_REPORT_METRICS: LazyLock<CspReportMetrics> = LazyLock::new(CspReportMetrics::new);
 static PRODUCT_METRICS: LazyLock<ProductMetrics> = LazyLock::new(ProductMetrics::new);
 static SECURITY_METRICS: LazyLock<SecurityMetrics> = LazyLock::new(SecurityMetrics::new);
+static COMMUNITY_SAFETY_METRICS: LazyLock<CommunitySafetyMetrics> =
+    LazyLock::new(CommunitySafetyMetrics::new);
 
 pub fn record_tmdb_request(endpoint: &'static str, outcome: &'static str, duration: Duration) {
     TMDB_METRICS
@@ -386,6 +461,85 @@ pub(crate) fn record_security_event(event: SecurityEvent) {
         .inc();
 }
 
+fn bounded_report_reason(reason: &str) -> &'static str {
+    SAFETY_REPORT_REASONS
+        .iter()
+        .copied()
+        .find(|known| *known == reason)
+        .unwrap_or("other")
+}
+
+fn bounded_moderation_status(status: &str) -> &'static str {
+    MODERATION_STATUSES
+        .iter()
+        .copied()
+        .find(|known| *known == status)
+        .unwrap_or("open")
+}
+
+pub(crate) fn record_safety_report(reason: &str) {
+    COMMUNITY_SAFETY_METRICS
+        .reports
+        .with_label_values(&[bounded_report_reason(reason)])
+        .inc();
+}
+
+pub(crate) fn record_moderation_action(status: &str) {
+    COMMUNITY_SAFETY_METRICS
+        .moderation_actions
+        .with_label_values(&[bounded_moderation_status(status)])
+        .inc();
+}
+
+pub async fn refresh_moderation_queue(pool: &PgPool) {
+    let result = sqlx::query_as::<_, (i64, i64, i64, i64, i64)>(
+        r#"SELECT
+            COUNT(*) FILTER (WHERE status = 'open')::BIGINT,
+            COUNT(*) FILTER (WHERE status = 'reviewing')::BIGINT,
+            COUNT(*) FILTER (WHERE status = 'actioned')::BIGINT,
+            COUNT(*) FILTER (WHERE status = 'dismissed')::BIGINT,
+            COALESCE(
+                EXTRACT(EPOCH FROM (NOW() - MIN(created_at)))
+                    FILTER (WHERE status IN ('open', 'reviewing')),
+                0
+            )::BIGINT
+        FROM user_reports"#,
+    )
+    .fetch_one(pool)
+    .await;
+
+    match result {
+        Ok((open, reviewing, actioned, dismissed, oldest_active_age)) => {
+            for (status, value) in [
+                ("open", open),
+                ("reviewing", reviewing),
+                ("actioned", actioned),
+                ("dismissed", dismissed),
+            ] {
+                COMMUNITY_SAFETY_METRICS
+                    .queue
+                    .with_label_values(&[status])
+                    .set(value);
+            }
+            COMMUNITY_SAFETY_METRICS
+                .oldest_active_age
+                .set(oldest_active_age.max(0));
+        }
+        Err(error) => log::error!("Failed to refresh moderation queue metrics: {error}"),
+    }
+}
+
+pub fn start_moderation_metrics_refresher(pool: PgPool) {
+    actix_web::rt::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(60));
+        interval.tick().await;
+        loop {
+            interval.tick().await;
+            refresh_moderation_queue(&pool).await;
+        }
+    });
+}
+
 /// Build the Prometheus metrics middleware. It records per-request count and
 /// latency and serves them at `/metrics`. That endpoint lives on the app's own
 /// port and is not proxied by nginx (which only forwards `/api/`), so it stays
@@ -433,6 +587,24 @@ pub fn build() -> PrometheusMetrics {
         .register(Box::new(SECURITY_METRICS.events.clone()))
         .expect("Failed to register security event metric");
     prometheus
+        .registry
+        .register(Box::new(COMMUNITY_SAFETY_METRICS.reports.clone()))
+        .expect("Failed to register safety report metric");
+    prometheus
+        .registry
+        .register(Box::new(
+            COMMUNITY_SAFETY_METRICS.moderation_actions.clone(),
+        ))
+        .expect("Failed to register moderation action metric");
+    prometheus
+        .registry
+        .register(Box::new(COMMUNITY_SAFETY_METRICS.queue.clone()))
+        .expect("Failed to register moderation queue metric");
+    prometheus
+        .registry
+        .register(Box::new(COMMUNITY_SAFETY_METRICS.oldest_active_age.clone()))
+        .expect("Failed to register moderation queue age metric");
+    prometheus
 }
 
 #[cfg(test)]
@@ -449,6 +621,8 @@ mod tests {
         record_csp_report("script-src", "enforce");
         record_product_action(ProductAction::AnnualRecapViewed);
         record_security_event(SecurityEvent::LoginRejected);
+        record_safety_report("child_safety");
+        record_moderation_action("reviewing");
         let prometheus = build();
         let names = prometheus
             .registry
@@ -484,6 +658,18 @@ mod tests {
         assert!(names
             .iter()
             .any(|name| name == "cinetrack_security_events_total"));
+        assert!(names
+            .iter()
+            .any(|name| name == "cinetrack_safety_reports_total"));
+        assert!(names
+            .iter()
+            .any(|name| name == "cinetrack_moderation_actions_total"));
+        assert!(names
+            .iter()
+            .any(|name| name == "cinetrack_moderation_queue_reports"));
+        assert!(names
+            .iter()
+            .any(|name| name == "cinetrack_moderation_oldest_active_age_seconds"));
     }
 
     #[test]
@@ -565,5 +751,13 @@ mod tests {
             .collect::<Vec<_>>();
         expected.sort();
         assert_eq!(events, expected);
+    }
+
+    #[test]
+    fn safety_metric_labels_are_bounded() {
+        assert_eq!(bounded_report_reason("spam"), "spam");
+        assert_eq!(bounded_report_reason("attacker-controlled"), "other");
+        assert_eq!(bounded_moderation_status("dismissed"), "dismissed");
+        assert_eq!(bounded_moderation_status("unknown"), "open");
     }
 }

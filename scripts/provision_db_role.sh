@@ -284,6 +284,33 @@ SELECT format('GRANT SELECT ON TABLE public._sqlx_migrations TO %I', :'app_role'
 WHERE to_regclass('public._sqlx_migrations') IS NOT NULL
 \gexec
 
+-- Moderator assignment is an operator-only capability. The application may
+-- verify membership but cannot grant, alter, or revoke the role.
+SELECT format(
+    'REVOKE INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER ON TABLE public.moderators FROM %I',
+    :'app_role'
+)
+WHERE to_regclass('public.moderators') IS NOT NULL
+\gexec
+SELECT format('GRANT SELECT ON TABLE public.moderators TO %I', :'app_role')
+WHERE to_regclass('public.moderators') IS NOT NULL
+\gexec
+
+-- The backend appends moderation decisions, but the audit trail cannot be
+-- rewritten. Retention deletes are constrained by a database trigger.
+SELECT format(
+    'REVOKE UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER ON TABLE public.moderation_audit_log FROM %I',
+    :'app_role'
+)
+WHERE to_regclass('public.moderation_audit_log') IS NOT NULL
+\gexec
+SELECT format(
+    'GRANT SELECT, INSERT ON TABLE public.moderation_audit_log TO %I',
+    :'app_role'
+)
+WHERE to_regclass('public.moderation_audit_log') IS NOT NULL
+\gexec
+
 SELECT format(
     'ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA public REVOKE ALL ON TABLES FROM PUBLIC',
     :'migration_role'

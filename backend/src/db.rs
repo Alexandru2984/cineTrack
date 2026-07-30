@@ -65,6 +65,31 @@ pub async fn ensure_runtime_role_is_restricted(pool: &PgPool) -> anyhow::Result<
                   AND privilege.table_schema = 'public'
                   AND privilege.privilege_type IN ('TRUNCATE', 'REFERENCES', 'TRIGGER')
             )
+            OR (
+                TO_REGCLASS('public.moderators') IS NOT NULL
+                AND (
+                    has_table_privilege(
+                        CURRENT_USER, 'public.moderators', 'INSERT'
+                    )
+                    OR has_table_privilege(
+                        CURRENT_USER, 'public.moderators', 'UPDATE'
+                    )
+                    OR has_table_privilege(
+                        CURRENT_USER, 'public.moderators', 'DELETE'
+                    )
+                )
+            )
+            OR (
+                TO_REGCLASS('public.moderation_audit_log') IS NOT NULL
+                AND (
+                    has_table_privilege(
+                        CURRENT_USER, 'public.moderation_audit_log', 'UPDATE'
+                    )
+                    OR has_table_privilege(
+                        CURRENT_USER, 'public.moderation_audit_log', 'DELETE'
+                    )
+                )
+            )
         FROM pg_roles r
         WHERE r.rolname = CURRENT_USER"#,
     )
@@ -73,7 +98,7 @@ pub async fn ensure_runtime_role_is_restricted(pool: &PgPool) -> anyhow::Result<
 
     anyhow::ensure!(
         !dangerous,
-        "production database role has ownership, DDL, elevated table privileges, or memberships"
+        "production database role has ownership, DDL, elevated or moderator-management privileges, or memberships"
     );
     Ok(())
 }

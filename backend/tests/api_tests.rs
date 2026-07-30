@@ -133,6 +133,14 @@ fn create_app_with_config(
 }
 
 async fn clean_db(pool: &PgPool) {
+    sqlx::query("TRUNCATE moderation_audit_log")
+        .execute(pool)
+        .await
+        .ok();
+    sqlx::query("DELETE FROM moderators")
+        .execute(pool)
+        .await
+        .ok();
     sqlx::query("DELETE FROM user_reports")
         .execute(pool)
         .await
@@ -288,6 +296,38 @@ async fn security_artifact_retention_preserves_active_refresh_families() {
     .await
     .unwrap();
 
+    let old_report_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO user_reports (
+            subject_user_id, target_type, target_id, reason, content_snapshot,
+            status, resolved_at, created_at, updated_at
+        )
+        VALUES (
+            $1, 'user', $1, 'spam', '{}'::jsonb, 'dismissed',
+            NOW() - INTERVAL '731 days',
+            NOW() - INTERVAL '731 days',
+            NOW() - INTERVAL '731 days'
+        )
+        RETURNING id"#,
+    )
+    .bind(user_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO moderation_audit_log (
+            report_id, actor_id, old_status, new_status, note, created_at
+        )
+        VALUES (
+            $1, $2, 'open', 'dismissed', 'Old resolved case',
+            NOW() - INTERVAL '731 days'
+        )"#,
+    )
+    .bind(old_report_id)
+    .bind(user_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
     let summary = cinetrack::services::retention::prune_security_artifacts(&pool)
         .await
         .unwrap();
@@ -297,6 +337,8 @@ async fn security_artifact_retention_preserves_active_refresh_families() {
     assert_eq!(summary.email_verification_tokens, 1);
     assert_eq!(summary.email_change_tokens, 0);
     assert_eq!(summary.security_activity, 1);
+    assert_eq!(summary.moderation_audit, 1);
+    assert_eq!(summary.resolved_reports, 1);
 
     let remaining: Vec<String> = sqlx::query_scalar(
         "SELECT token_hash FROM refresh_tokens WHERE user_id = $1 ORDER BY token_hash",
@@ -959,6 +1001,198 @@ async fn reports_are_validated_deduplicated_and_snapshot_server_content() {
     .await
     .unwrap();
     assert_eq!(preserved, (2, 0));
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn moderation_queue_requires_database_role_two_factor_and_append_only_audit() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (moderator_token, _, moderator_id) =
+        register_user(&app, "safetymod", "safetymod@example.com", "Pass1234").await;
+    let (reporter_token, _, reporter_id) = register_user(
+        &app,
+        "safetyreporter",
+        "safetyreporter@example.com",
+        "Pass1234",
+    )
+    .await;
+    let (_, _, subject_id) = register_user(
+        &app,
+        "safetysubject",
+        "safetysubject@example.com",
+        "Pass1234",
+    )
+    .await;
+    let moderator_id = Uuid::parse_str(&moderator_id).unwrap();
+    let reporter_id = Uuid::parse_str(&reporter_id).unwrap();
+    let subject_id = Uuid::parse_str(&subject_id).unwrap();
+
+    sqlx::query("UPDATE users SET totp_enabled = TRUE WHERE id = $1")
+        .bind(moderator_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO moderators (user_id, granted_by)
+         VALUES ($1, 'integration-test')",
+    )
+    .bind(moderator_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let report_request = actix_test::TestRequest::post()
+        .uri("/api/reports")
+        .insert_header(("Authorization", format!("Bearer {reporter_token}")))
+        .set_json(json!({
+            "target_type": "user",
+            "target_id": subject_id,
+            "reason": "child_safety",
+            "details": "Evidence requiring urgent review"
+        }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let response = actix_test::call_service(&app, report_request).await;
+    assert_eq!(response.status(), 201);
+    let report: Value = actix_test::read_body_json(response).await;
+    let report_id = report["id"].as_str().unwrap();
+
+    let non_moderator_status = actix_test::TestRequest::get()
+        .uri("/api/moderation/me")
+        .insert_header(("Authorization", format!("Bearer {reporter_token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let response = actix_test::call_service(&app, non_moderator_status).await;
+    assert_eq!(response.status(), 200);
+    let body: Value = actix_test::read_body_json(response).await;
+    assert_eq!(body["is_moderator"], false);
+
+    let denied_queue = actix_test::TestRequest::get()
+        .uri("/api/moderation/reports")
+        .insert_header(("Authorization", format!("Bearer {reporter_token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(
+        actix_test::call_service(&app, denied_queue).await.status(),
+        403
+    );
+
+    let queue = actix_test::TestRequest::get()
+        .uri("/api/moderation/reports?status=active&page=1&limit=25")
+        .insert_header(("Authorization", format!("Bearer {moderator_token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let response = actix_test::call_service(&app, queue).await;
+    assert_eq!(response.status(), 200);
+    assert_eq!(
+        response
+            .headers()
+            .get(header::CACHE_CONTROL)
+            .and_then(|value| value.to_str().ok()),
+        Some("no-store")
+    );
+    let body: Value = actix_test::read_body_json(response).await;
+    assert_eq!(body["counts"]["open"], 1);
+    assert_eq!(body["items"][0]["reporter_id"], reporter_id.to_string());
+    assert_eq!(body["items"][0]["subject_username"], "safetysubject");
+    assert_eq!(
+        body["items"][0]["content_snapshot"]["username"],
+        "safetysubject"
+    );
+
+    let missing_note = actix_test::TestRequest::patch()
+        .uri(&format!("/api/moderation/reports/{report_id}"))
+        .insert_header(("Authorization", format!("Bearer {moderator_token}")))
+        .set_json(json!({"status": "reviewing", "note": " "}))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(
+        actix_test::call_service(&app, missing_note).await.status(),
+        400
+    );
+
+    let review = actix_test::TestRequest::patch()
+        .uri(&format!("/api/moderation/reports/{report_id}"))
+        .insert_header(("Authorization", format!("Bearer {moderator_token}")))
+        .set_json(json!({
+            "status": "reviewing",
+            "note": "Claimed for urgent evidence review"
+        }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let response = actix_test::call_service(&app, review).await;
+    assert_eq!(response.status(), 200);
+    let body: Value = actix_test::read_body_json(response).await;
+    assert_eq!(body["status"], "reviewing");
+    assert_eq!(body["moderator_username"], "safetymod");
+
+    let dismiss = actix_test::TestRequest::patch()
+        .uri(&format!("/api/moderation/reports/{report_id}"))
+        .insert_header(("Authorization", format!("Bearer {moderator_token}")))
+        .set_json(json!({
+            "status": "dismissed",
+            "note": "Evidence reviewed; no policy violation found"
+        }))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, dismiss).await.status(), 200);
+
+    let reopen = actix_test::TestRequest::patch()
+        .uri(&format!("/api/moderation/reports/{report_id}"))
+        .insert_header(("Authorization", format!("Bearer {moderator_token}")))
+        .set_json(json!({
+            "status": "reviewing",
+            "note": "Attempt to rewrite a final decision"
+        }))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, reopen).await.status(), 409);
+
+    let audit_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM moderation_audit_log WHERE report_id = $1")
+            .bind(Uuid::parse_str(report_id).unwrap())
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(audit_count, 2);
+    assert!(
+        sqlx::query("UPDATE moderation_audit_log SET note = 'tampered' WHERE report_id = $1",)
+            .bind(Uuid::parse_str(report_id).unwrap())
+            .execute(&pool)
+            .await
+            .is_err()
+    );
+
+    sqlx::query("UPDATE users SET totp_enabled = FALSE WHERE id = $1")
+        .bind(moderator_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let disabled_status = actix_test::TestRequest::get()
+        .uri("/api/moderation/me")
+        .insert_header(("Authorization", format!("Bearer {moderator_token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let response = actix_test::call_service(&app, disabled_status).await;
+    let body: Value = actix_test::read_body_json(response).await;
+    assert_eq!(body["is_moderator"], false);
+
+    sqlx::query("DELETE FROM users WHERE id = $1")
+        .bind(moderator_id)
+        .execute(&pool)
+        .await
+        .expect("account deletion must detach, not rewrite, moderator audit identity");
+    let detached_actor_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM moderation_audit_log
+         WHERE report_id = $1 AND actor_id IS NULL",
+    )
+    .bind(Uuid::parse_str(report_id).unwrap())
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(detached_actor_count, 2);
 }
 
 #[actix_web::test]

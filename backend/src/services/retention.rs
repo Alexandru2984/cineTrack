@@ -11,6 +11,8 @@ pub struct RetentionSummary {
     pub email_verification_tokens: u64,
     pub email_change_tokens: u64,
     pub security_activity: u64,
+    pub moderation_audit: u64,
+    pub resolved_reports: u64,
 }
 
 impl RetentionSummary {
@@ -20,6 +22,8 @@ impl RetentionSummary {
             + self.email_verification_tokens
             + self.email_change_tokens
             + self.security_activity
+            + self.moderation_audit
+            + self.resolved_reports
     }
 }
 
@@ -87,6 +91,14 @@ pub async fn prune_security_artifacts(pool: &PgPool) -> Result<RetentionSummary,
     .await?
     .rows_affected();
 
+    // Community reports may contain a server-side evidence snapshot and
+    // moderator notes. Active reports are retained until resolved; closed
+    // cases and their audit trail receive a two-year accountability window.
+    let (moderation_audit, resolved_reports) =
+        sqlx::query_as::<_, (i64, i64)>("SELECT * FROM prune_old_moderation_records()")
+            .fetch_one(&mut *tx)
+            .await?;
+
     tx.commit().await?;
 
     Ok(RetentionSummary {
@@ -95,6 +107,8 @@ pub async fn prune_security_artifacts(pool: &PgPool) -> Result<RetentionSummary,
         email_verification_tokens,
         email_change_tokens,
         security_activity,
+        moderation_audit: moderation_audit.max(0) as u64,
+        resolved_reports: resolved_reports.max(0) as u64,
     })
 }
 
@@ -109,12 +123,15 @@ pub fn start_security_artifact_pruner(pool: PgPool) {
             match prune_security_artifacts(&pool).await {
                 Ok(summary) if summary.total() > 0 => log::info!(
                     "Pruned security artifacts: refresh_tokens={} password_reset_tokens={} \
-                     email_verification_tokens={} email_change_tokens={} security_activity={}",
+                     email_verification_tokens={} email_change_tokens={} security_activity={} \
+                     moderation_audit={} resolved_reports={}",
                     summary.refresh_tokens,
                     summary.password_reset_tokens,
                     summary.email_verification_tokens,
                     summary.email_change_tokens,
                     summary.security_activity,
+                    summary.moderation_audit,
+                    summary.resolved_reports,
                 ),
                 Ok(_) => {}
                 Err(error) => log::error!("Failed to prune security artifacts: {error}"),

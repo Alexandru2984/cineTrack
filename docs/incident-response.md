@@ -35,6 +35,9 @@ docker logs --since 30m cinetrack-backend-1 2>&1 | \
   source is still active in Nginx/backend logs before changing rate limits.
 - `CineTrackSensitiveAccountActivitySpike`: correlate the same time window with
   `audit:` events for credential changes, exports, and deletions.
+- Community-safety alerts are handled through
+  [`community-moderation.md`](community-moderation.md). Child-safety and credible
+  imminent-threat reports take priority over ordinary infrastructure triage.
 
 Target MTTD for refresh-token reuse and recovery-code use is under one minute:
 15-second scrape/evaluation plus Alertmanager's 30-second group wait.

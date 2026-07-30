@@ -140,6 +140,7 @@ async fn create_report(
     .await?;
     tx.commit().await?;
 
+    crate::metrics::record_safety_report(&report.reason);
     log::warn!(
         "audit: safety report submitted report_id={} reporter_id={reporter_id} subject_user_id={subject_user_id} target_type={} reason={}",
         report.id,
