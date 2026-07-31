@@ -1,6 +1,28 @@
 # CineTrack Security Audit
 
-Date: 2026-07-30 (earlier rounds 2026-06-13 through 2026-07-29)
+Date: 2026-07-31 (earlier rounds 2026-06-13 through 2026-07-30)
+
+## Security and reliability review update (2026-07-31)
+
+**CISO verdict: YELLOW.** No exploitable HIGH or CRITICAL application
+vulnerability remained confirmed after remediation. The review removed a
+RustSec memory-safety advisory, eliminated stale audit suppression, added
+release SBOMs and dependency review, strengthened CI/local/edge contracts,
+made local WebKit coverage reproducible, and added a responsible-disclosure
+policy.
+
+The full gate passed 290 runnable backend tests, all 118 PostgreSQL integration
+tests, 160 frontend tests, 44 Chromium/WebKit tests, 3 PWA tests, 7 real-stack
+tests, and 154 mobile tests. Raw Cargo/npm audits, complete-history gitleaks,
+production image builds, CycloneDX validation, and digest-pinned Trivy
+vulnerability/misconfiguration scans passed.
+
+Before public growth, apply the pending VPS security updates and reboot, reduce
+or monitor the shared-host blast radius, and enrol an operational moderator with
+verified email plus TOTP. Dedicated backup credentials and off-host Age-key
+escrow remain explicitly deferred by the repository owner. Full findings,
+runtime evidence, six forcing questions, and exit criteria are in
+[`docs/security-review-2026-07-31.md`](docs/security-review-2026-07-31.md).
 
 ## Summary
 
