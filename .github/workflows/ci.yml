@@ -504,6 +504,66 @@ jobs:
           ignore-unfixed: false
           exit-code: "1"
 
+      - name: Prepare release evidence
+        run: mkdir -p artifacts/sbom
+
+      - name: Generate backend CycloneDX SBOM
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          skip-setup-trivy: true
+          scan-type: image
+          image-ref: cinetrack-backend:ci
+          scanners: vuln
+          format: cyclonedx
+          output: artifacts/sbom/backend.cdx.json
+          exit-code: "0"
+
+      - name: Generate frontend CycloneDX SBOM
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          skip-setup-trivy: true
+          scan-type: image
+          image-ref: cinetrack-frontend:ci
+          scanners: vuln
+          format: cyclonedx
+          output: artifacts/sbom/frontend.cdx.json
+          exit-code: "0"
+
+      - name: Validate release evidence
+        env:
+          SOURCE_COMMIT: ${{ github.sha }}
+        run: |
+          for sbom in artifacts/sbom/backend.cdx.json artifacts/sbom/frontend.cdx.json; do
+            jq --exit-status '
+              .bomFormat == "CycloneDX" and
+              (.specVersion | type == "string") and
+              (.components | type == "array" and length > 0)
+            ' "$sbom" >/dev/null
+          done
+          jq --null-input \
+            --arg source_commit "$SOURCE_COMMIT" \
+            --arg backend_image "$(docker image inspect --format '{{.Id}}' cinetrack-backend:ci)" \
+            --arg frontend_image "$(docker image inspect --format '{{.Id}}' cinetrack-frontend:ci)" \
+            '{
+              source_commit: $source_commit,
+              backend_image: $backend_image,
+              frontend_image: $frontend_image
+            }' > artifacts/sbom/release-images.json
+          sha256sum \
+            artifacts/sbom/backend.cdx.json \
+            artifacts/sbom/frontend.cdx.json \
+            artifacts/sbom/release-images.json \
+            > artifacts/sbom/SHA256SUMS
+          (cd artifacts/sbom && sha256sum --check SHA256SUMS)
+
+      - name: Upload release evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-sboms-${{ github.sha }}
+          path: artifacts/sbom
+          if-no-files-found: error
+          retention-days: 30
+
       - name: Scan deployment configuration
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
