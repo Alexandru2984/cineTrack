@@ -13,7 +13,7 @@ Cloudflare ──TLS──▶ host nginx (443) ──▶ 127.0.0.1:8090  (backen
 
 | File | Role |
 |------|------|
-| `vazute.micutu.com.conf` | **The deployed edge vhost.** Mirror of `/etc/nginx/sites-available/vazute.micutu.com`. Per-route rate limits, Cloudflare-origin gate, security headers + CSP, LetsEncrypt TLS. |
+| `vazute.micutu.com.conf` | **The deployed edge vhost.** Exact mirror of `/etc/nginx/sites-available/vazute.micutu.com`. Per-route rate limits, Cloudflare-origin gate, security headers + CSP, LetsEncrypt TLS. The local operations gate fails when the two readable files drift. |
 | `nginx.conf` | **Validation fixture only** for `nginx -t`. Not deployed. See the header in that file. |
 
 ## Host dependencies (NOT in this repo — live under `/etc/nginx`)
