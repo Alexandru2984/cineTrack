@@ -474,9 +474,7 @@ jobs:
         run: cargo install cargo-audit --version 0.22.2 --locked
 
       - name: Audit dependencies
-        # RUSTSEC-2023-0071 is reported through sqlx-mysql metadata in Cargo.lock,
-        # but this backend builds sqlx with only the postgres feature enabled.
-        run: cargo audit --ignore RUSTSEC-2023-0071
+        run: cargo audit
 
   container-security:
     name: Container Security

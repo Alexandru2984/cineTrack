@@ -101,6 +101,11 @@ require(
     "cargo test --test api_tests -- --ignored --test-threads=1" in ci,
     "PostgreSQL integration tests must remain serial",
 )
+require("cargo audit --ignore" not in ci, "CI must not suppress RustSec advisories")
+require(
+    "cargo audit --ignore" not in local_gate,
+    "the local gate must not suppress RustSec advisories",
+)
 require("format: cyclonedx" in ci, "release images must produce CycloneDX SBOMs")
 require("if-no-files-found: error" in ci, "missing release evidence must fail CI")
 require(

@@ -102,7 +102,7 @@ section "Backend"
   cargo fmt --check
   cargo clippy --all-targets -- -D warnings
   cargo test
-  cargo audit --ignore RUSTSEC-2023-0071
+  cargo audit
 )
 
 section "Frontend"
