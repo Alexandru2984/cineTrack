@@ -263,8 +263,13 @@ python3 scripts/tests/check_embedded_python.py scripts/backup_to_r2.sh scripts/r
 scripts/tests/backup_restore_test.sh
 promtool check rules ops/prometheus/cinetrack-alerts.yml
 
-# Or run everything at once:
+# Reproducible local CI gate (unit/integration, lint, audits, builds, native
+# config, workflow and operations security):
 ./scripts/run_tests.sh
+
+# Full release gate (also Playwright, real-stack, production images, Trivy,
+# and CycloneDX SBOM validation):
+./scripts/run_tests.sh --full
 ```
 
 **What's tested:**
@@ -272,7 +277,7 @@ promtool check rules ops/prometheus/cinetrack-alerts.yml
 - **Integration tests** — Full auth flows, access control, IDOR protection, user enumeration prevention, profile privacy, atomic tracking/history transitions, sequential Up Next selection, bulk episode history, Calendar ownership and pagination, release schedules, statistics, lists, and imports
 - **Frontend tests** — Zustand stores, query hooks, utility functions, full-backlog Calendar pagination, Up Next actions, PWA lifecycle/install states, episode/season bulk controls, route contracts, About attribution, and error-boundary fallback
 - **Mobile checks** — ESLint with React Compiler rules, strict TypeScript, all 20 Expo Doctor checks, reproducible `npm ci`, Android Hermes export, structured Android/iOS manifest validation, a native Android release compile, and HIGH/CRITICAL dependency gates
-- **Operations checks** — ShellCheck, embedded-Python syntax, isolated backup/restore safety paths, and Prometheus rule validation using digest-pinned tool images
+- **Operations checks** — ShellCheck, Actionlint, workflow contract tests, embedded-Python syntax, isolated backup/restore safety paths, and Prometheus rule validation using digest-pinned tool images
 - **E2E tests (Playwright)** — route guards, auth flows, mobile navigation, sequential episode actions, discovery/social UI, watched-through confirmation, and WCAG A/AA scans against a mocked API in Chromium and WebKit/iPhone; install/offline PWA behavior against a production build; plus a real-stack suite covering cookies, token rotation, sessions, account deletion, private follows, and password reset
 
 ## Project Structure

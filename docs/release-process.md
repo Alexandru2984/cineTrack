@@ -30,7 +30,9 @@ Run the invariant locally:
 2. Move the matching changelog entry from `Unreleased` to the release date only
    after the signed artifact is accepted for distribution.
 3. Run `./scripts/check_release_metadata.sh`.
-4. Run the full local gate with `./scripts/run_tests.sh`.
+4. Run the full local gate with `./scripts/run_tests.sh --full`. The faster
+   `./scripts/run_tests.sh` gate is intended for normal development, but does
+   not run browser E2E or rebuild and scan the production images.
 5. Review the complete diff and commit it. Do not build or deploy from a dirty
    worktree.
 6. Let the repository owner push the reviewed commit.

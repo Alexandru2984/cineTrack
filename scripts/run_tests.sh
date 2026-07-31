@@ -2,64 +2,213 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-TEST_PROJECT="cinetrack-test"
+TEST_PROJECT="cinetrack-test-local-${BASHPID}"
+REALSTACK_PROJECT="cinetrack-e2e-local-${BASHPID}"
+INTEGRATION_DB_PORT=""
+REALSTACK_DB_PORT=""
+FULL=false
+TEMP_DIR=""
+
+usage() {
+  cat <<'EOF'
+Usage: ./scripts/run_tests.sh [--full]
+
+Runs the reproducible local CI gate. The default covers static analysis, unit
+and integration tests, dependency audits, web/mobile builds, native config,
+and operational security checks.
+
+--full additionally runs every Playwright suite and production-container
+build, vulnerability, misconfiguration, and SBOM validation.
+EOF
+}
+
+case "${1:-}" in
+  "") ;;
+  --full) FULL=true ;;
+  -h|--help)
+    usage
+    exit 0
+    ;;
+  *)
+    usage >&2
+    exit 2
+    ;;
+esac
 
 cleanup() {
-  docker compose -p "$TEST_PROJECT" -f "$ROOT_DIR/docker-compose.test.yml" down >/dev/null 2>&1 || true
+  if [ -n "$INTEGRATION_DB_PORT" ]; then
+    TEST_DB_PORT="$INTEGRATION_DB_PORT" docker compose -p "$TEST_PROJECT" \
+      -f "$ROOT_DIR/docker-compose.test.yml" down >/dev/null 2>&1 || true
+  fi
+  if [ -n "$REALSTACK_DB_PORT" ]; then
+    TEST_DB_PORT="$REALSTACK_DB_PORT" docker compose -p "$REALSTACK_PROJECT" \
+      -f "$ROOT_DIR/docker-compose.test.yml" down >/dev/null 2>&1 || true
+  fi
+  if [ -n "$TEMP_DIR" ] && [ -d "$TEMP_DIR" ]; then
+    rm -rf -- "$TEMP_DIR"
+  fi
+}
+
+section() {
+  printf '\n=== %s ===\n' "$1"
+}
+
+require_command() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    echo "Required command not found: $1" >&2
+    exit 1
+  fi
+}
+
+free_loopback_port() {
+  python3 - <<'PY'
+import socket
+
+with socket.socket() as listener:
+    listener.bind(("127.0.0.1", 0))
+    print(listener.getsockname()[1])
+PY
 }
 
 trap cleanup EXIT
 cd "$ROOT_DIR"
 
-echo "=== Backend Unit Tests ==="
-cd backend
-cargo test 2>&1 | grep -E "test |test result:|running"
-echo ""
+for command in cargo cargo-audit docker node npm npx python3; do
+  require_command "$command"
+done
+if [ "$FULL" = true ]; then
+  require_command jq
+fi
+INTEGRATION_DB_PORT="${TEST_DB_PORT:-$(free_loopback_port)}"
+REALSTACK_DB_PORT="${E2E_TEST_DB_PORT:-$(free_loopback_port)}"
 
-echo "=== Frontend Tests ==="
-cd ../frontend
-npx vitest run 2>&1 | grep -E "✓|✗|Test Files|Tests|Duration"
-echo ""
+section "Release metadata"
+scripts/check_release_metadata.sh
 
-echo "=== Mobile Checks ==="
-cd ../mobile
-"$ROOT_DIR/scripts/check_release_metadata.sh"
-CI=1 npm run verify
-CI=1 npm run export:android
-EAS_BUILD_PROFILE=production EXPO_UPDATES_ENABLED=false EXPO_USE_DEV_CLIENT=0 \
-  npx expo prebuild --platform all --no-install --clean
-python3 scripts/validate_native_config.py
-echo ""
+section "Backend"
+(
+  cd backend
+  cargo fmt --check
+  cargo clippy --all-targets -- -D warnings
+  cargo test
+  cargo audit --ignore RUSTSEC-2023-0071
+)
 
-echo "=== Operations Checks ==="
-cd ..
+section "Frontend"
+(
+  cd frontend
+  npm run lint
+  npm test
+  npm run build
+  npm audit --omit=dev
+)
+
+section "Mobile"
+(
+  cd mobile
+  CI=1 npm run verify
+  npm run audit:high
+  CI=1 npm run export:android
+
+  config_dir="$(mktemp -d)"
+  trap 'rm -rf -- "$config_dir"' EXIT
+  production_config="$config_dir/production.json"
+  preview_config="$config_dir/preview.json"
+  EAS_BUILD_PROFILE=production EXPO_UPDATES_ENABLED=true \
+    npx expo config --type public --json >"$production_config"
+  node -e 'const fs=require("node:fs"); const c=JSON.parse(fs.readFileSync(process.argv[1], "utf8")); if(c.updates?.enabled !== false) process.exit(1)' \
+    "$production_config"
+  EAS_BUILD_PROFILE=preview EXPO_UPDATES_ENABLED=true \
+    npx expo config --type public --json >"$preview_config"
+  node -e 'const fs=require("node:fs"); const c=JSON.parse(fs.readFileSync(process.argv[1], "utf8")); if(c.updates?.enabled !== true) process.exit(1)' \
+    "$preview_config"
+  rm -rf -- "$config_dir"
+  trap - EXIT
+
+  EAS_BUILD_PROFILE=production EXPO_UPDATES_ENABLED=false EXPO_USE_DEV_CLIENT=0 \
+    npx expo prebuild --platform all --no-install --clean
+  python3 scripts/validate_native_config.py
+)
+
+section "Operations and workflow security"
 bash -n scripts/*.sh scripts/tests/*.sh
 python3 scripts/tests/check_embedded_python.py \
-  scripts/backup_to_r2.sh scripts/restore_from_r2.sh
+  scripts/backup_to_r2.sh scripts/restore_from_r2.sh \
+  scripts/tests/deployment_hardening_test.sh \
+  scripts/tests/ci_contract_test.sh
+scripts/tests/ci_contract_test.sh
 scripts/tests/backup_restore_test.sh
 scripts/tests/release_schedule_metrics_test.sh
-if command -v promtool >/dev/null; then
-  promtool check rules ops/prometheus/cinetrack-alerts.yml
-else
-  echo "promtool not installed; skipped Prometheus rule validation"
+scripts/tests/alertmanager_config_test.sh
+scripts/tests/calendar_feed_log_safety_test.sh
+scripts/tests/edge_security_config_test.sh
+scripts/tests/deployment_hardening_test.sh
+docker run --rm --volume "$ROOT_DIR:$ROOT_DIR:ro" --workdir "$ROOT_DIR" \
+  rhysd/actionlint:1.7.7@sha256:1d74bfc9fd1963af8f89a7c22afaaafd42f49aad711a09951d02cb996398f61d \
+  -color
+docker run --rm --volume "$ROOT_DIR:$ROOT_DIR:ro" --workdir "$ROOT_DIR" \
+  koalaman/shellcheck:v0.10.0@sha256:0fa384f2a6171aef8aab2999a531c8c8158727d54a8f20157a5c3c51a734d6b2 \
+  --external-sources scripts/*.sh scripts/tests/*.sh bench/*.sh bench/db/*.sh
+docker run --rm --volume "$ROOT_DIR:/repo:ro" --entrypoint promtool \
+  prom/prometheus:v3.6.0@sha256:d9a702d3f7f398540e7190c4d80dbb8a0dc95c1e481e8ebd8a08e5bcf83cf735 \
+  check rules /repo/ops/prometheus/cinetrack-alerts.yml
+
+section "Backend integration"
+TEST_DB_PORT="$INTEGRATION_DB_PORT" docker compose -p "$TEST_PROJECT" \
+  -f docker-compose.test.yml up -d --wait
+(
+  cd backend
+  TEST_DATABASE_URL="postgres://test_user:test_pass@127.0.0.1:$INTEGRATION_DB_PORT/cinetrack_test" \
+    cargo test --test api_tests -- --ignored --test-threads=1
+)
+TEST_DB_PORT="$INTEGRATION_DB_PORT" docker compose -p "$TEST_PROJECT" \
+  -f docker-compose.test.yml down
+
+if [ "$FULL" = true ]; then
+  section "Frontend browser E2E"
+  (
+    cd frontend
+    CI=1 npm run test:e2e
+    CI=1 npm run test:e2e:pwa
+  )
+
+  section "Frontend real-stack E2E"
+  TEST_DB_PORT="$REALSTACK_DB_PORT" docker compose -p "$REALSTACK_PROJECT" \
+    -f docker-compose.test.yml up -d --wait
+  (
+    cd frontend
+    CI=1 E2E_DATABASE_URL="postgres://test_user:test_pass@127.0.0.1:$REALSTACK_DB_PORT/cinetrack_test" \
+      npm run test:e2e:realstack
+  )
+  TEST_DB_PORT="$REALSTACK_DB_PORT" docker compose -p "$REALSTACK_PROJECT" \
+    -f docker-compose.test.yml down
+
+  section "Production container security"
+  docker build --tag cinetrack-backend:local-ci --file backend/Dockerfile.prod backend
+  docker build --tag cinetrack-frontend:local-ci --file frontend/Dockerfile.prod frontend
+
+  TEMP_DIR="$(mktemp -d)"
+  docker save --output "$TEMP_DIR/backend.tar" cinetrack-backend:local-ci
+  docker save --output "$TEMP_DIR/frontend.tar" cinetrack-frontend:local-ci
+
+  TRIVY_IMAGE="aquasec/trivy@sha256:cffe3f5161a47a6823fbd23d985795b3ed72a4c806da4c4df16266c02accdd6f"
+  for image in backend frontend; do
+    docker run --rm --volume "$TEMP_DIR:/evidence" "$TRIVY_IMAGE" image \
+      --input "/evidence/$image.tar" --scanners vuln --severity HIGH,CRITICAL \
+      --exit-code 1
+    docker run --rm --volume "$TEMP_DIR:/evidence" "$TRIVY_IMAGE" image \
+      --input "/evidence/$image.tar" --scanners vuln --format cyclonedx \
+      --output "/evidence/$image.cdx.json"
+    jq --exit-status '
+      .bomFormat == "CycloneDX" and
+      (.specVersion | type == "string") and
+      (.components | type == "array" and length > 0)
+    ' "$TEMP_DIR/$image.cdx.json" >/dev/null
+  done
+  docker run --rm --volume "$ROOT_DIR:/repo:ro" "$TRIVY_IMAGE" config \
+    --severity HIGH,CRITICAL --exit-code 1 /repo
 fi
-echo ""
 
-echo "=== Backend Integration Tests ==="
-echo "Starting test database..."
-cd "$ROOT_DIR"
-docker compose -p "$TEST_PROJECT" -f docker-compose.test.yml up -d --wait 2>/dev/null
-
-echo "Running integration tests..."
-cd backend
-export TEST_DATABASE_URL="${TEST_DATABASE_URL:-postgres://test_user:test_pass@127.0.0.1:${TEST_DB_PORT:-55433}/cinetrack_test}"
-cargo test --test api_tests -- --ignored --test-threads=1 2>&1 | grep -E "test |test result:|running"
-
-echo ""
-echo "Cleaning up test database..."
-cd ..
-cleanup
 trap - EXIT
-
-echo ""
-echo "=== All tests complete ==="
+cleanup
+section "All local CI checks passed"
