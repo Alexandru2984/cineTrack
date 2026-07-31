@@ -42,6 +42,19 @@ for workflow_path in workflow_paths:
         f"{workflow_path.relative_to(root)} must disable persisted credentials for every checkout",
     )
 
+dependency_review = (root / ".github/workflows/dependency-review.yml").read_text(encoding="utf-8")
+require("  pull_request:\n" in dependency_review, "dependency review must run on pull requests")
+require("  push:\n" not in dependency_review, "dependency review cannot compare a plain push")
+require("fail-on-severity: moderate" in dependency_review, "dependency review must reject MODERATE findings")
+require(
+    "fail-on-scopes: runtime, development" in dependency_review,
+    "dependency review must cover build-time dependencies as well as runtime packages",
+)
+require(
+    "retry-on-snapshot-warnings: true" in dependency_review,
+    "dependency review must tolerate delayed dependency snapshots",
+)
+
 job_names = (
     "backend",
     "integration",
