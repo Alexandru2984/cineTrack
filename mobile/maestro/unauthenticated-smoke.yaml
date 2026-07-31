@@ -30,6 +30,8 @@ tags:
 - tapOn:
     id: "auth-switch-mode"
 - assertVisible: "Create your watch history"
+- tapOn:
+    id: "auth-accept-terms"
 - tapOn: "Create account"
 - assertVisible: "Enter a valid email address"
 - openLink: "vazute://reset-password"

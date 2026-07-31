@@ -290,6 +290,7 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
             {isRegister ? (
               <View style={styles.termsRow}>
                 <Pressable
+                  testID="auth-accept-terms"
                   accessibilityRole="checkbox"
                   accessibilityLabel={t('auth.acceptTermsAria')}
                   accessibilityState={{ checked: acceptedTerms }}
