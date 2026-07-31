@@ -1,5 +1,7 @@
 import { defineConfig, devices } from '@playwright/test';
 
+const ephemeralOutput = process.env.PLAYWRIGHT_EPHEMERAL_OUTPUT === 'true';
+
 /**
  * Real-stack E2E: drives the browser against an actually-running backend and
  * Postgres (no network mocking), so it covers what the mocked suite and the
@@ -36,7 +38,21 @@ export default defineConfig({
   workers: 1,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
-  reporter: process.env.CI ? [['github'], ['html', { open: 'never' }]] : 'list',
+  outputDir: ephemeralOutput ? '/tmp/cinetrack-playwright-results' : 'test-results',
+  reporter: process.env.CI
+    ? [
+        ['github'],
+        [
+          'html',
+          {
+            open: 'never',
+            outputFolder: ephemeralOutput
+              ? '/tmp/cinetrack-playwright-report'
+              : 'playwright-report',
+          },
+        ],
+      ]
+    : 'list',
   use: {
     baseURL: `http://localhost:${FRONTEND_PORT}`,
     trace: 'on-first-retry',

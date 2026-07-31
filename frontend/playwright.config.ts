@@ -1,5 +1,7 @@
 import { defineConfig, devices } from '@playwright/test';
 
+const ephemeralOutput = process.env.PLAYWRIGHT_EPHEMERAL_OUTPUT === 'true';
+
 /**
  * E2E config. These specs drive the real browser against the built SPA but mock
  * the backend at the network layer (page.route on **\/api\/**), so they need no
@@ -12,7 +14,21 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
   workers: process.env.CI ? 1 : undefined,
-  reporter: process.env.CI ? [['github'], ['html', { open: 'never' }]] : 'list',
+  outputDir: ephemeralOutput ? '/tmp/cinetrack-playwright-results' : 'test-results',
+  reporter: process.env.CI
+    ? [
+        ['github'],
+        [
+          'html',
+          {
+            open: 'never',
+            outputFolder: ephemeralOutput
+              ? '/tmp/cinetrack-playwright-report'
+              : 'playwright-report',
+          },
+        ],
+      ]
+    : 'list',
   use: {
     baseURL: 'http://localhost:5173',
     trace: 'on-first-retry',

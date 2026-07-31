@@ -8,6 +8,7 @@ INTEGRATION_DB_PORT=""
 REALSTACK_DB_PORT=""
 FULL=false
 TEMP_DIR=""
+PLAYWRIGHT_IMAGE="mcr.microsoft.com/playwright:v1.61.1-noble@sha256:5b8f294aff9041b7191c34a4bab3ac270157a28774d4b0660e9743297b697e48"
 
 usage() {
   cat <<'EOF'
@@ -68,6 +69,16 @@ with socket.socket() as listener:
     listener.bind(("127.0.0.1", 0))
     print(listener.getsockname()[1])
 PY
+}
+
+run_containerized_playwright() {
+  docker run --rm --init --ipc=host --network host \
+    --volume "$ROOT_DIR:/repo:ro" \
+    --tmpfs /repo/frontend/node_modules/.tmp:rw,exec,mode=1777 \
+    --tmpfs /repo/frontend/node_modules/.vite:rw,exec,mode=1777 \
+    --tmpfs /repo/frontend/node_modules/.vite-temp:rw,exec,mode=1777 \
+    --workdir /repo/frontend --env CI=1 --env PLAYWRIGHT_EPHEMERAL_OUTPUT=true \
+    "$PLAYWRIGHT_IMAGE" "$@"
 }
 
 trap cleanup EXIT
@@ -167,11 +178,11 @@ TEST_DB_PORT="$INTEGRATION_DB_PORT" docker compose -p "$TEST_PROJECT" \
 
 if [ "$FULL" = true ]; then
   section "Frontend browser E2E"
-  (
-    cd frontend
-    CI=1 npm run test:e2e
-    CI=1 npm run test:e2e:pwa
-  )
+  # Keep Chromium/WebKit and their system libraries reproducible without
+  # installing browser packages into the host. Source and dependencies are
+  # read-only; generated output remains inside the disposable container.
+  run_containerized_playwright npm run test:e2e
+  run_containerized_playwright npm run test:e2e:pwa
 
   section "Frontend real-stack E2E"
   TEST_DB_PORT="$REALSTACK_DB_PORT" docker compose -p "$REALSTACK_PROJECT" \

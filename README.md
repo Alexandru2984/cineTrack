@@ -228,7 +228,13 @@ Native simulator/device builds require Android Studio or Xcode. See
 
 ### Testing
 
-The project has a broad automated test suite: **262 backend unit tests** and **109 PostgreSQL-backed integration tests** in Rust, a Vitest component/logic suite plus Playwright E2E (mocked, PWA, and real-stack) for the web, and a Jest suite for the mobile client. The native client additionally has lint, strict TypeScript, Expo Doctor, dependency-audit, prebuild, and Android-export gates. One credential-gated R2 test is ignored by default. Exact counts are whatever the suites report — they are deliberately not duplicated here, so run the commands below rather than trusting a hardcoded total:
+The project has a broad automated Rust and PostgreSQL integration suite, a
+Vitest component/logic suite plus Playwright E2E (mocked, PWA, and real-stack)
+for the web, and a Jest suite for the mobile client. The native client
+additionally has lint, strict TypeScript, Expo Doctor, dependency-audit,
+prebuild, and Android-export gates. One credential-gated R2 test is ignored by
+default. Exact counts are whatever the suites report, so run the commands below
+rather than trusting a hardcoded total:
 
 ```bash
 # Backend unit tests — no external dependencies
@@ -271,6 +277,12 @@ promtool check rules ops/prometheus/cinetrack-alerts.yml
 # and CycloneDX SBOM validation):
 ./scripts/run_tests.sh --full
 ```
+
+The full runner executes the mocked Chromium/WebKit and PWA suites in a
+digest-pinned official Playwright container. It mounts the repository read-only
+and keeps generated browser/build evidence inside the disposable container, so
+local browser-library drift cannot silently reduce coverage or dirty the
+worktree.
 
 **What's tested:**
 - **Unit tests** — JWT generation/validation, Argon2id hashing, password policy, all DTO validators (boundary cases, XSS rejection), error mapping & sanitization

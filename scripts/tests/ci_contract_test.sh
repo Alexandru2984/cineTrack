@@ -55,6 +55,25 @@ require(
     "dependency review must tolerate delayed dependency snapshots",
 )
 
+local_gate = (root / "scripts/run_tests.sh").read_text(encoding="utf-8")
+require(
+    re.search(
+        r'PLAYWRIGHT_IMAGE="mcr\.microsoft\.com/playwright:[^"@]+@sha256:[0-9a-f]{64}"',
+        local_gate,
+    )
+    is not None,
+    "the local browser runtime must be pinned to an immutable Playwright image",
+)
+require(
+    '--volume "$ROOT_DIR:/repo:ro"' in local_gate,
+    "the Playwright container must not be able to modify the repository",
+)
+require(
+    "run_containerized_playwright npm run test:e2e" in local_gate
+    and "run_containerized_playwright npm run test:e2e:pwa" in local_gate,
+    "the mocked and PWA browser suites must use the reproducible runtime",
+)
+
 job_names = (
     "backend",
     "integration",
