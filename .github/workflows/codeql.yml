@@ -18,6 +18,7 @@ concurrency:
 jobs:
   analyze:
     name: Analyze JS/TS
+    timeout-minutes: 20
     runs-on: ubuntu-latest
     permissions:
       actions: read # Read workflow metadata for CodeQL analysis.

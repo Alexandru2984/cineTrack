@@ -329,7 +329,11 @@ jobs:
         run: |
           python3 scripts/tests/check_embedded_python.py \
             scripts/backup_to_r2.sh scripts/restore_from_r2.sh \
-            scripts/tests/deployment_hardening_test.sh
+            scripts/tests/deployment_hardening_test.sh \
+            scripts/tests/ci_contract_test.sh
+
+      - name: Validate CI security and smoke-test contracts
+        run: scripts/tests/ci_contract_test.sh
 
       - name: Backup and restore safety tests
         run: scripts/tests/backup_restore_test.sh
@@ -357,6 +361,7 @@ jobs:
 
   e2e:
     name: Frontend E2E
+    timeout-minutes: 25
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -388,6 +393,7 @@ jobs:
 
   e2e-realstack:
     name: Frontend E2E (real stack)
+    timeout-minutes: 25
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -442,6 +448,7 @@ jobs:
 
   rust-audit:
     name: Rust Audit
+    timeout-minutes: 15
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -472,6 +479,7 @@ jobs:
 
   container-security:
     name: Container Security
+    timeout-minutes: 30
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -573,3 +581,36 @@ jobs:
           scanners: misconfig
           severity: HIGH,CRITICAL
           exit-code: "1"
+
+  ci-gate:
+    name: CI Gate
+    if: always()
+    needs:
+      - backend
+      - integration
+      - frontend
+      - mobile
+      - operations
+      - e2e
+      - e2e-realstack
+      - rust-audit
+      - container-security
+    timeout-minutes: 5
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Require every CI job to succeed
+        env:
+          JOB_RESULTS: ${{ toJSON(needs) }}
+        run: |
+          failures=$(jq --raw-output '
+            to_entries[] |
+            select(.value.result != "success") |
+            "\(.key)=\(.value.result)"
+          ' <<<"$JOB_RESULTS")
+          if [ -n "$failures" ]; then
+            echo "::error::Required CI jobs did not succeed:"
+            printf '%s\n' "$failures"
+            exit 1
+          fi
+          echo "All required CI jobs succeeded"
