@@ -112,6 +112,7 @@ section "Frontend"
   npm run lint
   npm test
   npm run build
+  npm run check:bundle
   npm audit --omit=dev
 )
 

@@ -8,11 +8,13 @@ different instruments.
 | `backend/benches/hot_paths.rs` | CPU on the auth path — Argon2, JWT, TOTP | Criterion |
 | `bench/api/mobile_session.js` | Per-screen latency **and payload size** | k6 |
 | `bench/db/explain_hot_queries.sh` | Query plans, and whether an index is used | `EXPLAIN ANALYZE` |
+| `bench/frontend/check_bundle_budget.mjs` | Initial transfer, largest chunk, total JS/CSS | Node + gzip |
 
 ```bash
 docker compose -f docker-compose.test.yml up -d      # the disposable database
 bench/run_benchmarks.sh                              # everything
 bench/run_benchmarks.sh --skip-micro                 # only the server-side work
+cd frontend && npm run build && npm run check:bundle # frontend transfer budgets
 ```
 
 Results land in `bench/results/<timestamp>/` (git-ignored).

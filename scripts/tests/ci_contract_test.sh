@@ -111,6 +111,10 @@ require(
     and 'BENCH_DB_PORT=5433 ../bench/db/explain_hot_queries.sh "$bench_user_id"' in ci,
     "CI must reject regressed plans on the seeded PostgreSQL dataset",
 )
+require(
+    "npm run check:bundle" in ci and "npm run check:bundle" in local_gate,
+    "frontend transfer budgets must be gated in CI and locally",
+)
 require("cargo audit --ignore" not in ci, "CI must not suppress RustSec advisories")
 require(
     "cargo audit --ignore" not in local_gate,
