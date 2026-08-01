@@ -186,6 +186,26 @@ FROM others o
 CROSS JOIN generate_series(1, 2000) AS n
 JOIN pool p ON p.idx = n % 240;
 
+SELECT
+  COUNT(*) FILTER (WHERE user_id = :user_id) * 10 >= COUNT(*)
+    AS invalid_user_media_share
+FROM user_media
+\gset
+\if :invalid_user_media_share
+  \echo 'benchmark seed error: measured user owns at least 10% of user_media'
+  \quit 1
+\endif
+
+SELECT
+  COUNT(*) FILTER (WHERE user_id = :user_id) * 10 >= COUNT(*)
+    AS invalid_watch_history_share
+FROM watch_history
+\gset
+\if :invalid_watch_history_share
+  \echo 'benchmark seed error: measured user owns at least 10% of watch_history'
+  \quit 1
+\endif
+
 COMMIT;
 
 ANALYZE media;

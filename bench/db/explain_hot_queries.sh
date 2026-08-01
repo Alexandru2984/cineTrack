@@ -14,12 +14,13 @@ set -euo pipefail
 
 USER_ID="${1:?usage: explain_hot_queries.sh <user_id> [output_file]}"
 OUT="${2:-/dev/stdout}"
+DB_PORT="${BENCH_DB_PORT:-55433}"
 YEAR="$(date +%Y)"
 TODAY="$(date +%F)"
 
-CONTAINER="$(docker ps -qf publish=55433)"
+CONTAINER="${BENCH_DB_CONTAINER:-$(docker ps -qf "publish=$DB_PORT" | head -n 1)}"
 if [[ -z "$CONTAINER" ]]; then
-  echo "test database container is not running on 55433" >&2
+  echo "test database container is not running on $DB_PORT" >&2
   exit 1
 fi
 
@@ -44,6 +45,7 @@ run_case() {
 
   if [[ -n "$seq_tables" ]]; then
     printf '%-28s %8s ms   SEQ SCAN: %s\n' "$name" "${ms:-?}" "$seq_tables"
+    PLAN_FAILURES=$((PLAN_FAILURES + 1))
   else
     printf '%-28s %8s ms   indexed\n' "$name" "${ms:-?}"
   fi
@@ -57,6 +59,7 @@ run_case() {
 
 PLAN_LOG="$(mktemp)"
 REPORT="$(mktemp)"
+PLAN_FAILURES=0
 trap 'rm -f "$PLAN_LOG" "$REPORT"' EXIT
 
 {
@@ -148,4 +151,7 @@ trap 'rm -f "$PLAN_LOG" "$REPORT"' EXIT
 
 cat "$REPORT"
 [[ "$OUT" != "/dev/stdout" ]] && cp "$REPORT" "$OUT"
-exit 0
+if (( PLAN_FAILURES > 0 )); then
+  echo "query-plan regression: $PLAN_FAILURES hot path(s) sequentially scanned a growing table" >&2
+  exit 1
+fi

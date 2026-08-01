@@ -52,7 +52,9 @@ endpoint reads from the seeded local tables and is measured honestly.
 context.** The script only flags sequential scans on `watch_history`,
 `user_media` and `episodes` — the tables that grow without bound. A sequential
 scan there is fast on seeded data and catastrophic later, which is exactly the
-failure that does not show up as a slow benchmark today.
+failure that does not show up as a slow benchmark today. Any such plan now
+makes the benchmark fail, and the same seeded plan gate runs after the backend
+integration suite in CI.
 
 The seed deliberately inserts watch rows for *other* accounts too. Without them
 the benchmark account owned a quarter of `watch_history`, and Postgres

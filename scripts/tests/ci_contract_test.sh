@@ -101,6 +101,11 @@ require(
     "cargo test --test api_tests -- --ignored --test-threads=1" in ci,
     "PostgreSQL integration tests must remain serial",
 )
+require(
+    "Database query-plan regressions" in ci
+    and 'BENCH_DB_PORT=5433 ../bench/db/explain_hot_queries.sh "$bench_user_id"' in ci,
+    "CI must reject regressed plans on the seeded PostgreSQL dataset",
+)
 require("cargo audit --ignore" not in ci, "CI must not suppress RustSec advisories")
 require(
     "cargo audit --ignore" not in local_gate,
