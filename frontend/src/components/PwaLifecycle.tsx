@@ -1,5 +1,4 @@
 import {
-  useCallback,
   useEffect,
   useMemo,
   useState,
@@ -11,16 +10,6 @@ import { useAuthStore } from '@/store/auth';
 import { isIosInstallPlatform } from '@/lib/pwa';
 import { useT } from '@/hooks/useT';
 
-interface InstallChoice {
-  outcome: 'accepted' | 'dismissed';
-  platform: string;
-}
-
-interface BeforeInstallPromptEvent extends Event {
-  prompt: () => Promise<void>;
-  userChoice: Promise<InstallChoice>;
-}
-
 function standaloneMode(): boolean {
   const iosNavigator = navigator as Navigator & { standalone?: boolean };
   return window.matchMedia('(display-mode: standalone)').matches
@@ -29,7 +18,6 @@ function standaloneMode(): boolean {
 
 export function PwaProvider({ children }: { children: React.ReactNode }) {
   const authenticated = useAuthStore((state) => state.status === 'authenticated');
-  const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [isStandalone, setIsStandalone] = useState(standaloneMode);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const {
@@ -44,49 +32,28 @@ export function PwaProvider({ children }: { children: React.ReactNode }) {
   });
 
   useEffect(() => {
-    const onInstallPrompt = (event: Event) => {
-      event.preventDefault();
-      setInstallPrompt(event as BeforeInstallPromptEvent);
-    };
     const onInstalled = () => {
-      setInstallPrompt(null);
       setIsStandalone(true);
     };
     const onOnline = () => setIsOnline(true);
     const onOffline = () => setIsOnline(false);
 
-    window.addEventListener('beforeinstallprompt', onInstallPrompt);
     window.addEventListener('appinstalled', onInstalled);
     window.addEventListener('online', onOnline);
     window.addEventListener('offline', onOffline);
     return () => {
-      window.removeEventListener('beforeinstallprompt', onInstallPrompt);
       window.removeEventListener('appinstalled', onInstalled);
       window.removeEventListener('online', onOnline);
       window.removeEventListener('offline', onOffline);
     };
   }, []);
 
-  const install = useCallback(async () => {
-    if (!installPrompt) return;
-    try {
-      await installPrompt.prompt();
-      await installPrompt.userChoice;
-    } catch (error) {
-      console.error('App install prompt failed', error);
-    } finally {
-      setInstallPrompt(null);
-    }
-  }, [installPrompt]);
-
   const value = useMemo<PwaContextValue>(
     () => ({
-      canInstall: !isStandalone && installPrompt !== null,
-      install,
       isStandalone,
       needsManualInstall: !isStandalone && isIosInstallPlatform(),
     }),
-    [install, installPrompt, isStandalone],
+    [isStandalone],
   );
 
   return (

@@ -1,8 +1,6 @@
 import { createContext, useContext } from 'react';
 
 export interface PwaContextValue {
-  canInstall: boolean;
-  install: () => Promise<void>;
   isStandalone: boolean;
   needsManualInstall: boolean;
 }
