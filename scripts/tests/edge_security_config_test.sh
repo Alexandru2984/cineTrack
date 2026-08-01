@@ -87,6 +87,21 @@ assert "'unsafe-inline'" not in script_value, "inline scripts must remain blocke
 assert "'unsafe-eval'" not in script_value, "eval must remain blocked"
 assert "https://analytics.micutu.com" in script_value
 assert "https://static.cloudflareinsights.com" in script_value
+
+assert "limit_conn_zone $binary_remote_addr zone=vazute_assets_conn:10m;" in text
+for path in ("/api/img/", "/api/assets/"):
+    location = re.search(
+        rf"location {re.escape(path)} \{{(?P<body>.*?)\n    \}}",
+        text,
+        re.DOTALL,
+    )
+    assert location is not None, f"{path} location is missing"
+    body = location.group("body")
+    assert "limit_req zone=vazute_assets burst=100 nodelay;" in body
+    assert "limit_conn vazute_assets_conn 128;" in body
+    assert "limit_conn vazute_api_conn" not in body, (
+        f"{path} still shares the interactive API connection ceiling"
+    )
 PY
 
 # On the production host, make configuration drift fail the local operations
