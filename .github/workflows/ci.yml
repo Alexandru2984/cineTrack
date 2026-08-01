@@ -349,6 +349,11 @@ jobs:
             scripts/tests/ci_contract_test.sh \
             scripts/tests/edge_security_config_test.sh
 
+      - name: Validate dependency policy
+        run: |
+          python3 scripts/check_dependency_policy.py
+          python3 scripts/tests/dependency_policy_test.py
+
       - name: Validate CI security and smoke-test contracts
         run: scripts/tests/ci_contract_test.sh
 
@@ -486,11 +491,15 @@ jobs:
         with:
           workspaces: backend
 
-      - name: Install cargo-audit
-        run: cargo install cargo-audit --version 0.22.2 --locked
+      - name: Install Rust security tools
+        run: |
+          cargo install cargo-audit --version 0.22.2 --locked
+          cargo install cargo-deny --version 0.20.2 --locked
 
       - name: Audit dependencies
-        run: cargo audit
+        run: |
+          cargo audit
+          cargo deny check --hide-inclusion-graph licenses sources bans
 
   container-security:
     name: Container Security

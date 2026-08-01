@@ -84,7 +84,7 @@ run_containerized_playwright() {
 trap cleanup EXIT
 cd "$ROOT_DIR"
 
-for command in cargo cargo-audit docker node npm npx python3; do
+for command in cargo cargo-audit cargo-deny docker node npm npx python3; do
   require_command "$command"
 done
 if [ "$FULL" = true ]; then
@@ -103,6 +103,7 @@ section "Backend"
   cargo clippy --all-targets -- -D warnings
   cargo test
   cargo audit
+  cargo deny check --hide-inclusion-graph licenses sources bans
 )
 
 section "Frontend"
@@ -143,6 +144,8 @@ section "Mobile"
 
 section "Operations and workflow security"
 bash -n scripts/*.sh scripts/tests/*.sh
+python3 scripts/check_dependency_policy.py
+python3 scripts/tests/dependency_policy_test.py
 python3 scripts/tests/check_embedded_python.py \
   scripts/backup_to_r2.sh scripts/restore_from_r2.sh \
   scripts/tests/deployment_hardening_test.sh \

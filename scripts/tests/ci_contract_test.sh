@@ -54,6 +54,11 @@ require(
     "retry-on-snapshot-warnings: true" in dependency_review,
     "dependency review must tolerate delayed dependency snapshots",
 )
+require(
+    "allow-licenses:" in dependency_review
+    and re.search(r"(?<![LA])GPL-", dependency_review) is None,
+    "dependency review must allow-list licenses without strong copyleft",
+)
 
 local_gate = (root / "scripts/run_tests.sh").read_text(encoding="utf-8")
 require(
@@ -110,6 +115,16 @@ require("cargo audit --ignore" not in ci, "CI must not suppress RustSec advisori
 require(
     "cargo audit --ignore" not in local_gate,
     "the local gate must not suppress RustSec advisories",
+)
+require(
+    "cargo deny check --hide-inclusion-graph licenses sources bans" in ci
+    and "cargo deny check --hide-inclusion-graph licenses sources bans" in local_gate,
+    "Rust licenses and package sources must be gated in CI and locally",
+)
+require(
+    "python3 scripts/check_dependency_policy.py" in ci
+    and "python3 scripts/check_dependency_policy.py" in local_gate,
+    "npm lockfile licenses, sources and integrity must be gated in CI and locally",
 )
 for image in ("backend", "frontend"):
     require(
