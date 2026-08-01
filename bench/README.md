@@ -23,7 +23,10 @@ It builds the backend **in release mode**, points it at the test database on
 port 55433, and gives it its own port. Production is never involved. A fresh
 account is registered per run and seeded from `db/seed_bench_data.sql` with a
 heavy library — 320 tracked titles, ~4.8k episodes, ~3.8k watches over three
-years.
+years. The seed also creates 30 fixed background accounts and resets them on
+every run. That keeps the measured account below 10% of shared-table rows even
+on a brand-new database, so query-plan results do not depend on stale benchmark
+accounts left by earlier runs.
 
 That seeding is the part people skip, and skipping it invalidates everything.
 On an empty database every list query returns nothing, the planner prefers a

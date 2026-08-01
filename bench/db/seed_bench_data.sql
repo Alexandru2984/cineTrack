@@ -17,6 +17,35 @@ BEGIN;
 DELETE FROM watch_history WHERE user_id = :user_id;
 DELETE FROM user_media WHERE user_id = :user_id;
 
+-- Keep repeated runs deterministic. The runner creates accounts named from a
+-- Unix timestamp; older runner accounts would otherwise accumulate and change
+-- planner selectivity from one run to the next.
+DELETE FROM users
+WHERE id <> :user_id
+  AND email ~ '^bench[0-9]+@example[.]com$';
+
+-- A fresh disposable database contains only the account created by the
+-- benchmark runner. Seed fixed background accounts so the measured user is a
+-- realistic minority of shared tables even on the very first run.
+INSERT INTO users (username, email, is_public, email_verified)
+SELECT
+  'bench-bg-' || lpad(n::text, 2, '0'),
+  'bench-bg-' || lpad(n::text, 2, '0') || '@example.invalid',
+  FALSE,
+  TRUE
+FROM generate_series(1, 30) AS n
+ON CONFLICT DO NOTHING;
+
+DELETE FROM watch_history history
+USING users background
+WHERE history.user_id = background.id
+  AND background.email LIKE 'bench-bg-%@example.invalid';
+
+DELETE FROM user_media tracked
+USING users background
+WHERE tracked.user_id = background.id
+  AND background.email LIKE 'bench-bg-%@example.invalid';
+
 -- 320 titles: 80 shows, 240 films. Offset into a tmdb_id range that the real
 -- catalogue will not collide with.
 INSERT INTO media (tmdb_id, media_type, title, overview, poster_path, backdrop_path,
@@ -84,6 +113,33 @@ CROSS JOIN LATERAL (
 ) st
 WHERE m.tmdb_id BETWEEN 9000001 AND 9000320;
 
+-- Shared-table background for the library list plans. Each synthetic account
+-- has the same realistic library shape as the measured account, keeping the
+-- measured user's share below 10% without relying on previous benchmark runs.
+INSERT INTO user_media (user_id, media_id, status, rating, is_favorite, started_at, completed_at, created_at, updated_at)
+SELECT
+  background.id,
+  m.id,
+  st.status,
+  CASE WHEN st.status = 'completed' THEN 5 + (m.tmdb_id % 6) ELSE NULL END,
+  (m.tmdb_id % 11) = 0,
+  DATE '2023-01-01' + (m.tmdb_id % 400),
+  CASE WHEN st.status = 'completed' THEN DATE '2024-06-01' + (m.tmdb_id % 300) ELSE NULL END,
+  NOW() - ((m.tmdb_id % 500) || ' days')::interval,
+  NOW() - ((m.tmdb_id % 90) || ' days')::interval
+FROM users background
+CROSS JOIN media m
+CROSS JOIN LATERAL (
+  SELECT CASE
+    WHEN m.tmdb_id % 10 < 5 THEN 'completed'
+    WHEN m.tmdb_id % 10 < 8 THEN 'plan_to_watch'
+    WHEN m.tmdb_id % 10 = 8 THEN 'watching'
+    ELSE 'on_hold'
+  END AS status
+) st
+WHERE background.email LIKE 'bench-bg-%@example.invalid'
+  AND m.tmdb_id BETWEEN 9000001 AND 9000320;
+
 -- Episode watches spread across three years so the heatmap, streaks and the
 -- Wrapped year filter all have to discriminate by date rather than scan.
 INSERT INTO watch_history (user_id, media_id, episode_id, watched_at)
@@ -119,7 +175,10 @@ WITH pool AS (
   SELECT id, (row_number() OVER (ORDER BY tmdb_id) - 1) AS idx
   FROM media WHERE tmdb_id BETWEEN 9000081 AND 9000320
 ), others AS (
-  SELECT id FROM users WHERE id <> :user_id LIMIT 30
+  SELECT id
+  FROM users
+  WHERE email LIKE 'bench-bg-%@example.invalid'
+  ORDER BY email
 )
 INSERT INTO watch_history (user_id, media_id, episode_id, watched_at)
 SELECT o.id, p.id, NULL, NOW() - ((n % 1000) || ' days')::interval
@@ -139,3 +198,21 @@ SELECT 'user_media' AS table, count(*) FROM user_media WHERE user_id = :user_id
 UNION ALL SELECT 'watch_history', count(*) FROM watch_history WHERE user_id = :user_id
 UNION ALL SELECT 'episodes', count(*) FROM episodes
 UNION ALL SELECT 'media', count(*) FROM media;
+
+SELECT
+  ROUND(
+    100.0 * COUNT(*) FILTER (WHERE user_id = :user_id) / NULLIF(COUNT(*), 0),
+    2
+  ) AS benchmark_user_percent,
+  COUNT(*) AS total_rows,
+  'user_media' AS table
+FROM user_media
+UNION ALL
+SELECT
+  ROUND(
+    100.0 * COUNT(*) FILTER (WHERE user_id = :user_id) / NULLIF(COUNT(*), 0),
+    2
+  ),
+  COUNT(*),
+  'watch_history'
+FROM watch_history;
