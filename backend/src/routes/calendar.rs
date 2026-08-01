@@ -122,10 +122,11 @@ async fn up_next_episodes(
     let user_id = require_auth(&req).await?;
     let params = query.resolve()?;
     let items = sqlx::query_as::<_, UpNextEpisode>(
-        // Keep one sequential next episode per started show, then surface newly
-        // available episodes before older backlog. An explicit "Watch next"
-        // bookmark remains the strongest signal; last-watched time only breaks
-        // ties between episodes released on the same day.
+        // Keep one sequential next episode per started show. Explicit "Watch
+        // next" bookmarks come first, followed by recently watched shows in
+        // activity order. Dormant shows remain available afterwards, ordered
+        // by their newest next episode so fresh releases can revive a backlog
+        // without crowding an actively watched show out of the bounded list.
         r#"WITH progress AS (
             SELECT media_id, MAX(watched_at) AS last_watched_at
             FROM watch_history
@@ -163,7 +164,7 @@ async fn up_next_episodes(
                 episodes.air_date,
                 episodes.id
         ),
-        selected AS (
+        prioritized AS (
             SELECT
                 next_ids.media_id,
                 next_ids.episode_id,
@@ -171,16 +172,26 @@ async fn up_next_episodes(
                 next_ids.episode_number,
                 next_ids.air_date,
                 next_ids.last_watched_at,
-                plans.episode_id IS NOT NULL AS is_planned
+                plans.episode_id IS NOT NULL AS is_planned,
+                CASE
+                    WHEN plans.episode_id IS NOT NULL THEN 0
+                    WHEN next_ids.last_watched_at >= $5 THEN 1
+                    ELSE 2
+                END AS queue_priority
             FROM next_ids
             LEFT JOIN episode_plans plans
               ON plans.user_id = $1
              AND plans.episode_id = next_ids.episode_id
+        ),
+        selected AS (
+            SELECT *
+            FROM prioritized
             ORDER BY
-                plans.episode_id IS NOT NULL DESC,
-                next_ids.air_date DESC,
-                next_ids.last_watched_at DESC,
-                next_ids.episode_id DESC
+                queue_priority,
+                CASE WHEN queue_priority < 2 THEN last_watched_at END DESC,
+                CASE WHEN queue_priority = 2 THEN air_date END DESC,
+                last_watched_at DESC,
+                episode_id DESC
             LIMIT $4
         )
         SELECT
@@ -202,8 +213,9 @@ async fn up_next_episodes(
         JOIN media ON media.id = selected.media_id
         JOIN episodes ON episodes.id = selected.episode_id
         ORDER BY
-            selected.is_planned DESC,
-            selected.air_date DESC,
+            selected.queue_priority,
+            CASE WHEN selected.queue_priority < 2 THEN selected.last_watched_at END DESC,
+            CASE WHEN selected.queue_priority = 2 THEN selected.air_date END DESC,
             selected.last_watched_at DESC,
             selected.episode_id DESC"#,
     )
@@ -211,6 +223,7 @@ async fn up_next_episodes(
     .bind(params.today)
     .bind(params.include_specials)
     .bind(params.limit)
+    .bind(Utc::now() - chrono::Duration::days(30))
     .fetch_all(pool.get_ref())
     .await?;
 

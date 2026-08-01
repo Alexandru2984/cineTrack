@@ -5770,7 +5770,7 @@ async fn test_calendar_lists_new_and_regional_upcoming_releases() {
 
 #[actix_web::test]
 #[ignore = "requires test DB"]
-async fn test_up_next_orders_new_releases_before_old_backlog() {
+async fn test_up_next_keeps_recent_activity_ahead_of_new_dormant_releases() {
     let pool = setup_pool().await;
     clean_db(&pool).await;
     let app = actix_test::init_service(create_app(pool.clone())).await;
@@ -5779,73 +5779,73 @@ async fn test_up_next_orders_new_releases_before_old_backlog() {
     let user_id = Uuid::parse_str(&user_id).unwrap();
     let today = chrono::Utc::now().date_naive();
 
-    let recent_show_id = sqlx::query_scalar::<_, Uuid>(
+    let dormant_show_id = sqlx::query_scalar::<_, Uuid>(
         r#"INSERT INTO media (tmdb_id, media_type, title)
-        VALUES (780010, 'tv', 'Recently Released')
+        VALUES (780010, 'tv', 'Dormant Fresh Release')
         RETURNING id"#,
     )
     .fetch_one(&pool)
     .await
     .unwrap();
-    let recent_season_id = sqlx::query_scalar::<_, Uuid>(
+    let dormant_season_id = sqlx::query_scalar::<_, Uuid>(
         "INSERT INTO seasons (media_id, season_number) VALUES ($1, 1) RETURNING id",
     )
-    .bind(recent_show_id)
+    .bind(dormant_show_id)
     .fetch_one(&pool)
     .await
     .unwrap();
-    let recent_watched_id = sqlx::query_scalar::<_, Uuid>(
+    let dormant_watched_id = sqlx::query_scalar::<_, Uuid>(
         r#"INSERT INTO episodes (season_id, episode_number, name, air_date)
-        VALUES ($1, 1, 'Recent Show Start', $2)
+        VALUES ($1, 1, 'Dormant Show Start', $2)
         RETURNING id"#,
     )
-    .bind(recent_season_id)
+    .bind(dormant_season_id)
     .bind(today - chrono::Duration::days(100))
     .fetch_one(&pool)
     .await
     .unwrap();
-    let recent_next_id = sqlx::query_scalar::<_, Uuid>(
+    let dormant_next_id = sqlx::query_scalar::<_, Uuid>(
         r#"INSERT INTO episodes (season_id, episode_number, name, air_date)
         VALUES ($1, 2, 'Fresh Episode', $2)
         RETURNING id"#,
     )
-    .bind(recent_season_id)
+    .bind(dormant_season_id)
     .bind(today - chrono::Duration::days(1))
     .fetch_one(&pool)
     .await
     .unwrap();
 
-    let backlog_show_id = sqlx::query_scalar::<_, Uuid>(
+    let active_show_id = sqlx::query_scalar::<_, Uuid>(
         r#"INSERT INTO media (tmdb_id, media_type, title)
-        VALUES (780011, 'tv', 'Older Backlog')
+        VALUES (780011, 'tv', 'Active Older Series')
         RETURNING id"#,
     )
     .fetch_one(&pool)
     .await
     .unwrap();
-    let backlog_season_id = sqlx::query_scalar::<_, Uuid>(
+    let active_season_id = sqlx::query_scalar::<_, Uuid>(
         "INSERT INTO seasons (media_id, season_number) VALUES ($1, 1) RETURNING id",
     )
-    .bind(backlog_show_id)
+    .bind(active_show_id)
     .fetch_one(&pool)
     .await
     .unwrap();
-    let backlog_watched_id = sqlx::query_scalar::<_, Uuid>(
+    let active_watched_id = sqlx::query_scalar::<_, Uuid>(
         r#"INSERT INTO episodes (season_id, episode_number, name, air_date)
-        VALUES ($1, 1, 'Backlog Show Start', $2)
+        VALUES ($1, 1, 'Active Show Start', $2)
         RETURNING id"#,
     )
-    .bind(backlog_season_id)
+    .bind(active_season_id)
     .bind(today - chrono::Duration::days(60))
     .fetch_one(&pool)
     .await
     .unwrap();
-    let backlog_next_id = sqlx::query_scalar::<_, Uuid>(
+    let active_next_id = sqlx::query_scalar::<_, Uuid>(
         r#"INSERT INTO episodes (season_id, episode_number, name, air_date)
         VALUES ($1, 2, 'Old Episode', $2)
         RETURNING id"#,
     )
-    .bind(backlog_season_id)
+    .bind(active_season_id)
     .bind(today - chrono::Duration::days(30))
     .fetch_one(&pool)
     .await
@@ -5856,8 +5856,8 @@ async fn test_up_next_orders_new_releases_before_old_backlog() {
         VALUES ($1, $2, 'watching'), ($1, $3, 'watching')"#,
     )
     .bind(user_id)
-    .bind(recent_show_id)
-    .bind(backlog_show_id)
+    .bind(dormant_show_id)
+    .bind(active_show_id)
     .execute(&pool)
     .await
     .unwrap();
@@ -5869,13 +5869,26 @@ async fn test_up_next_orders_new_releases_before_old_backlog() {
             ($1, $4, $5, NOW())"#,
     )
     .bind(user_id)
-    .bind(recent_show_id)
-    .bind(recent_watched_id)
-    .bind(backlog_show_id)
-    .bind(backlog_watched_id)
+    .bind(dormant_show_id)
+    .bind(dormant_watched_id)
+    .bind(active_show_id)
+    .bind(active_watched_id)
     .execute(&pool)
     .await
     .unwrap();
+
+    let req = actix_test::TestRequest::get()
+        .uri(&format!("/api/calendar/up-next?today={today}&limit=1"))
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let body: Value = actix_test::call_and_read_body_json(&app, req).await;
+    let items = body["items"].as_array().unwrap();
+
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["episode_id"], active_next_id.to_string());
+    assert_eq!(items[0]["title"], "Active Older Series");
+    assert_ne!(items[0]["episode_id"], dormant_next_id.to_string());
 
     let req = actix_test::TestRequest::get()
         .uri(&format!("/api/calendar/up-next?today={today}&limit=2"))
@@ -5884,16 +5897,11 @@ async fn test_up_next_orders_new_releases_before_old_backlog() {
         .to_request();
     let body: Value = actix_test::call_and_read_body_json(&app, req).await;
     let items = body["items"].as_array().unwrap();
-
-    assert_eq!(items.len(), 2);
-    assert_eq!(items[0]["episode_id"], recent_next_id.to_string());
-    assert_eq!(items[0]["title"], "Recently Released");
-    assert_eq!(items[1]["episode_id"], backlog_next_id.to_string());
-    assert_eq!(items[1]["title"], "Older Backlog");
+    assert_eq!(items[0]["episode_id"], active_next_id.to_string());
+    assert_eq!(items[1]["episode_id"], dormant_next_id.to_string());
     assert!(
-        items[0]["last_watched_at"].as_str().unwrap()
-            < items[1]["last_watched_at"].as_str().unwrap(),
-        "release date, not recent viewing activity, must determine the order"
+        items[0]["air_date"].as_str().unwrap() < items[1]["air_date"].as_str().unwrap(),
+        "recent viewing activity must outrank a newer dormant release"
     );
 }
 
