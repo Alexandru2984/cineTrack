@@ -10,7 +10,9 @@ RUN mkdir -p src benches \
   && cargo build --release --locked \
   && rm -rf src benches
 COPY . .
-RUN touch src/main.rs && cargo build --release --locked
+RUN touch src/main.rs \
+  && cargo build --release --locked \
+  && strip --strip-unneeded /app/target/release/cinetrack
 
 FROM gcr.io/distroless/cc-debian12:nonroot@sha256:66aa873a4a14fb164aa01296058efd8253744606d72715e45acface073359faa
 COPY --from=builder --chown=nonroot:nonroot /app/target/release/cinetrack /usr/local/bin/cinetrack
