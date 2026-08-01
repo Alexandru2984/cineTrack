@@ -85,6 +85,25 @@ groups:
           summary: CineTrack backend has a high 5xx rate
           description: More than 5 percent of requests returned 5xx during the last 15 minutes.
 
+      # A saturated service can keep returning 200 while requests queue for
+      # seconds. Error-rate alerts alone miss exactly that failure mode.
+      - alert: CineTrackHighApiLatency
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (le) (
+              rate(cinetrack_http_requests_duration_seconds_bucket{endpoint!="/metrics"}[5m])
+            )
+          ) > 0.5
+          and
+          sum(rate(cinetrack_http_requests_duration_seconds_count{endpoint!="/metrics"}[5m])) > 1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: CineTrack API latency is above budget
+          description: The API p95 has exceeded 500 ms for ten minutes while serving more than one request per second.
+
       - alert: CineTrackTransactionalEmailErrors
         expr: increase(cinetrack_email_send_total{outcome=~"smtp_error|invalid_message|not_configured"}[15m]) > 0
         for: 1m
@@ -149,6 +168,18 @@ groups:
         annotations:
           summary: Văzute has unusual sensitive account activity
           description: More than five credential changes, account exports, or account deletions completed in fifteen minutes.
+
+      - alert: CineTrackScriptCspViolationSpike
+        expr: |
+          sum(increase(cinetrack_csp_reports_total{
+            directive=~"script-src.*",disposition="enforce"
+          }[15m])) > 5
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: Văzute is blocking an unusual number of scripts
+          description: More than five enforced script CSP violations arrived in fifteen minutes. Check for a broken release or attempted script injection.
 
   - name: cinetrack-community-safety
     rules:
