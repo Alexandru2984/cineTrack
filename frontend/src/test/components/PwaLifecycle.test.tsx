@@ -1,7 +1,15 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { PwaStatus } from '@/components/PwaLifecycle';
+import { PwaProvider, PwaStatus } from '@/components/PwaLifecycle';
 import { isIosInstallPlatform } from '@/lib/pwa';
+
+vi.mock('virtual:pwa-register/react', () => ({
+  useRegisterSW: () => ({
+    offlineReady: [false, vi.fn()],
+    needRefresh: [false, vi.fn()],
+    updateServiceWorker: vi.fn(),
+  }),
+}));
 
 function statusProps() {
   return {
@@ -62,5 +70,20 @@ describe('iOS PWA installation detection', () => {
     expect(isIosInstallPlatform('Mozilla/5.0 (X11; Linux x86_64)', 'Linux x86_64', 0))
       .toBe(false);
     expect(isIosInstallPlatform('Mozilla/5.0 (Macintosh)', 'MacIntel', 0)).toBe(false);
+  });
+});
+
+describe('native PWA installation', () => {
+  it('does not suppress the browser install promotion', () => {
+    render(
+      <PwaProvider>
+        <div>Application shell</div>
+      </PwaProvider>,
+    );
+
+    const event = new Event('beforeinstallprompt', { cancelable: true });
+    window.dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(false);
   });
 });

@@ -1,4 +1,84 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
+
+const TEST_USER = {
+  id: '00000000-0000-0000-0000-000000000001',
+  username: 'pwa_user',
+  email: 'pwa@example.com',
+  avatar_url: null,
+  bio: null,
+  is_public: true,
+  email_verified: true,
+  two_factor_enabled: false,
+  created_at: '2026-01-01T00:00:00Z',
+};
+
+async function stubAuthenticatedShell(page: Page) {
+  await page.route('**/api/**', async (route) => {
+    const request = route.request();
+    const path = new URL(request.url()).pathname;
+
+    if (request.method() === 'POST' && path === '/api/auth/refresh') {
+      return route.fulfill({
+        json: {
+          access_token: 'pwa-access-token',
+          token_type: 'Bearer',
+          expires_in: 3600,
+          user: TEST_USER,
+        },
+      });
+    }
+    if (path === '/api/notifications') {
+      return route.fulfill({ json: { items: [], unread_count: 0, has_more: false } });
+    }
+    if (path === '/api/calendar/up-next') {
+      return route.fulfill({ json: { items: [] } });
+    }
+    if (path === '/api/media/discovery') {
+      return route.fulfill({
+        json: {
+          recommendations: [],
+          personalized: false,
+          recommendation_basis: [],
+          popular_movies: [],
+          popular_shows: [],
+        },
+      });
+    }
+    if (path === '/api/stats/me') {
+      return route.fulfill({
+        json: {
+          total_movies: 0,
+          total_shows: 0,
+          total_episodes: 0,
+          total_hours: 0,
+          current_streak: 0,
+          longest_streak: 0,
+        },
+      });
+    }
+    return route.fulfill({ json: [] });
+  });
+}
+
+test('loads the installable shell without browser console noise', async ({ page }) => {
+  const consoleProblems: string[] = [];
+
+  await stubAuthenticatedShell(page);
+  page.on('console', (message) => {
+    if (message.type() === 'error' || message.type() === 'warning') {
+      consoleProblems.push(`${message.type()}: ${message.text()}`);
+    }
+  });
+  page.on('pageerror', (error) => {
+    consoleProblems.push(`pageerror: ${error.message}`);
+  });
+
+  await page.goto('/');
+  await expect(page.getByRole('link', { name: 'Settings', exact: true })).toBeVisible();
+  await page.waitForLoadState('networkidle');
+
+  expect(consoleProblems).toEqual([]);
+});
 
 test('ships an installable manifest with adaptive icons', async ({ page, request }) => {
   const response = await request.get('/manifest.webmanifest');

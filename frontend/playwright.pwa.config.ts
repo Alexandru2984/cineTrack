@@ -36,7 +36,7 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: `npm run build -- --outDir ${buildDir} --emptyOutDir && npm run preview -- --outDir ${buildDir} --host 127.0.0.1 --port 4173`,
+    command: `VITE_API_URL=http://127.0.0.1:4173 npm run build -- --outDir ${buildDir} --emptyOutDir && npm run preview -- --outDir ${buildDir} --host 127.0.0.1 --port 4173`,
     url: 'http://127.0.0.1:4173',
     reuseExistingServer: false,
     timeout: 120_000,
