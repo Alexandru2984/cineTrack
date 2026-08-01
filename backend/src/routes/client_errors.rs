@@ -1,5 +1,3 @@
-use actix_governor::governor::middleware::NoOpMiddleware;
-use actix_governor::{Governor, GovernorConfig, GovernorConfigBuilder};
 use actix_web::{web, HttpRequest, HttpResponse};
 use chrono::{Duration, Utc};
 use serde_json::json;
@@ -9,20 +7,15 @@ use validator::Validate;
 use crate::dto::client_error::ClientErrorReport;
 use crate::errors::AppError;
 use crate::middleware::auth::require_auth;
-use crate::middleware::rate_limit::TrustedProxyIpKeyExtractor;
+use crate::middleware::rate_limit::{RateLimit, RateLimitConfig};
 
 const MAX_REPORT_AGE: Duration = Duration::days(7);
 const MAX_FUTURE_SKEW: Duration = Duration::minutes(5);
 
-pub type ClientErrorGovernorConfig = GovernorConfig<TrustedProxyIpKeyExtractor, NoOpMiddleware>;
+pub type ClientErrorGovernorConfig = RateLimitConfig;
 
 pub fn build_rate_limiter() -> ClientErrorGovernorConfig {
-    GovernorConfigBuilder::default()
-        .requests_per_second(2)
-        .burst_size(10)
-        .key_extractor(TrustedProxyIpKeyExtractor)
-        .finish()
-        .expect("Failed to build client error rate limiter")
+    RateLimitConfig::new(2, 10).expect("Failed to build client error rate limiter")
 }
 
 fn scope() -> actix_web::Scope {
@@ -37,7 +30,7 @@ pub fn configure_rate_limited(
     cfg: &mut web::ServiceConfig,
     rate_limiter: &ClientErrorGovernorConfig,
 ) {
-    cfg.service(scope().wrap(Governor::new(rate_limiter)));
+    cfg.service(scope().wrap(RateLimit::new(rate_limiter)));
 }
 
 fn strip_url_secrets_from_word(value: &str) -> Option<String> {
@@ -164,7 +157,7 @@ async fn report_client_error(
 #[cfg(test)]
 mod tests {
     use super::{build_rate_limiter, sanitized_log_text};
-    use actix_governor::Governor;
+    use crate::middleware::rate_limit::RateLimit;
     use actix_web::{http::StatusCode, test as actix_test, web, App, HttpResponse};
 
     #[test]
@@ -211,13 +204,13 @@ mod tests {
         let limiter = build_rate_limiter();
         let app_one = actix_test::init_service(
             App::new()
-                .wrap(Governor::new(&limiter))
+                .wrap(RateLimit::new(&limiter))
                 .route("/", web::post().to(ok)),
         )
         .await;
         let app_two = actix_test::init_service(
             App::new()
-                .wrap(Governor::new(&limiter))
+                .wrap(RateLimit::new(&limiter))
                 .route("/", web::post().to(ok)),
         )
         .await;

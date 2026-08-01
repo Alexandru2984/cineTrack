@@ -16,15 +16,13 @@ pub mod stats;
 pub mod tracking;
 pub mod users;
 
-use actix_governor::governor::middleware::NoOpMiddleware;
-use actix_governor::{Governor, GovernorConfig};
 use actix_web::web;
 
-use crate::middleware::rate_limit::TrustedProxyIpKeyExtractor;
+use crate::middleware::rate_limit::{RateLimit, RateLimitConfig};
 
 /// The limiter every non-image API route shares. Env-driven via
 /// `RATE_LIMIT_REQUESTS_PER_SECOND` / `RATE_LIMIT_BURST_SIZE`.
-pub type SharedGovernorConfig = GovernorConfig<TrustedProxyIpKeyExtractor, NoOpMiddleware>;
+pub type SharedGovernorConfig = RateLimitConfig;
 
 pub fn configure(cfg: &mut web::ServiceConfig) {
     // Same split as the rate-limited path, minus the limiters: public images
@@ -74,7 +72,7 @@ pub fn configure_with_rate_limits(
         web::scope("/api")
             // The shared limiter now wraps only the non-image API, not every
             // request via the App, so images are not double-counted.
-            .wrap(Governor::new(shared_rate_limiter))
+            .wrap(RateLimit::new(shared_rate_limiter))
             .configure(health::configure)
             .configure(|cfg| auth::configure_rate_limited(cfg, auth_rate_limiter))
             .configure(assets::configure)

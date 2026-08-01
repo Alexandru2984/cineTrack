@@ -1,27 +1,147 @@
-use actix_governor::{KeyExtractor, SimpleKeyExtractionError};
-use actix_web::dev::ServiceRequest;
+use actix_web::body::{EitherBody, MessageBody};
+use actix_web::dev::{Service, ServiceRequest, ServiceResponse, Transform};
+use actix_web::{http::header, Error, HttpResponse};
+use futures_util::future::{ready, LocalBoxFuture, Ready};
+use governor::{DefaultKeyedRateLimiter, Quota, RateLimiter};
 use std::net::{IpAddr, SocketAddr};
+use std::num::NonZeroU32;
+use std::rc::Rc;
 use std::str::FromStr;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
+use std::task::{Context, Poll};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TrustedProxyIpKeyExtractor;
 
-impl KeyExtractor for TrustedProxyIpKeyExtractor {
-    type Key = IpAddr;
-    type KeyExtractionError = SimpleKeyExtractionError<&'static str>;
-
-    fn extract(&self, req: &ServiceRequest) -> Result<Self::Key, Self::KeyExtractionError> {
-        let peer_ip = req.peer_addr().map(|socket| socket.ip()).ok_or_else(|| {
-            SimpleKeyExtractionError::new("Could not extract peer IP address from request")
-        })?;
+impl TrustedProxyIpKeyExtractor {
+    fn extract(&self, req: &ServiceRequest) -> Option<IpAddr> {
+        let peer_ip = req.peer_addr().map(|socket| socket.ip())?;
 
         if is_trusted_proxy_peer(peer_ip) {
             if let Some(forwarded_ip) = forwarded_for_ip(req) {
-                return Ok(forwarded_ip);
+                return Some(forwarded_ip);
             }
         }
 
-        Ok(peer_ip)
+        Some(peer_ip)
+    }
+}
+
+#[derive(Clone)]
+pub struct RateLimitConfig {
+    limiter: Arc<DefaultKeyedRateLimiter<IpAddr>>,
+    checks: Arc<AtomicU64>,
+}
+
+impl RateLimitConfig {
+    pub fn new(requests_per_second: u32, burst_size: u32) -> Result<Self, &'static str> {
+        let rate = NonZeroU32::new(requests_per_second)
+            .ok_or("requests per second must be greater than zero")?;
+        let burst = NonZeroU32::new(burst_size).ok_or("burst size must be greater than zero")?;
+        let quota = Quota::per_second(rate).allow_burst(burst);
+
+        Ok(Self {
+            limiter: Arc::new(RateLimiter::keyed(quota)),
+            checks: Arc::new(AtomicU64::new(0)),
+        })
+    }
+
+    fn check(&self, key: &IpAddr) -> bool {
+        // Keyed limiters retain one entry per client. Periodic eviction keeps
+        // spoofed or short-lived addresses from turning that map into an
+        // unbounded memory sink while preserving active buckets.
+        if self
+            .checks
+            .fetch_add(1, Ordering::Relaxed)
+            .is_multiple_of(1024)
+        {
+            self.limiter.retain_recent();
+        }
+        self.limiter.check_key(key).is_ok()
+    }
+}
+
+#[derive(Clone)]
+pub struct RateLimit {
+    config: RateLimitConfig,
+    extractor: TrustedProxyIpKeyExtractor,
+}
+
+impl RateLimit {
+    pub fn new(config: &RateLimitConfig) -> Self {
+        Self {
+            config: config.clone(),
+            extractor: TrustedProxyIpKeyExtractor,
+        }
+    }
+}
+
+pub struct RateLimitMiddleware<S> {
+    service: Rc<S>,
+    config: RateLimitConfig,
+    extractor: TrustedProxyIpKeyExtractor,
+}
+
+impl<S, B> Transform<S, ServiceRequest> for RateLimit
+where
+    S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error> + 'static,
+    S::Future: 'static,
+    B: MessageBody + 'static,
+{
+    type Response = ServiceResponse<EitherBody<B>>;
+    type Error = Error;
+    type InitError = ();
+    type Transform = RateLimitMiddleware<S>;
+    type Future = Ready<Result<Self::Transform, Self::InitError>>;
+
+    fn new_transform(&self, service: S) -> Self::Future {
+        ready(Ok(RateLimitMiddleware {
+            service: Rc::new(service),
+            config: self.config.clone(),
+            extractor: self.extractor,
+        }))
+    }
+}
+
+impl<S, B> Service<ServiceRequest> for RateLimitMiddleware<S>
+where
+    S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error> + 'static,
+    S::Future: 'static,
+    B: MessageBody + 'static,
+{
+    type Response = ServiceResponse<EitherBody<B>>;
+    type Error = Error;
+    type Future = LocalBoxFuture<'static, Result<Self::Response, Self::Error>>;
+
+    fn poll_ready(&self, context: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.service.poll_ready(context)
+    }
+
+    fn call(&self, request: ServiceRequest) -> Self::Future {
+        let service = Rc::clone(&self.service);
+        let key = self.extractor.extract(&request);
+        let allowed = key
+            .as_ref()
+            .is_some_and(|client_ip| self.config.check(client_ip));
+
+        Box::pin(async move {
+            if key.is_none() {
+                let response = HttpResponse::InternalServerError().finish();
+                return Ok(request.into_response(response).map_into_right_body());
+            }
+            if !allowed {
+                let response = HttpResponse::TooManyRequests()
+                    .insert_header((header::RETRY_AFTER, "1"))
+                    .finish();
+                return Ok(request.into_response(response).map_into_right_body());
+            }
+
+            service
+                .call(request)
+                .await
+                .map(ServiceResponse::map_into_left_body)
+        })
     }
 }
 
@@ -73,6 +193,38 @@ fn is_trusted_proxy_peer(ip: IpAddr) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use actix_web::{test as actix_test, web, App};
+
+    #[test]
+    fn rejects_zero_rate_or_burst() {
+        assert!(RateLimitConfig::new(0, 1).is_err());
+        assert!(RateLimitConfig::new(1, 0).is_err());
+    }
+
+    #[actix_web::test]
+    async fn rejects_exhausted_buckets_with_retry_after() {
+        let config = RateLimitConfig::new(1, 1).unwrap();
+        let app = actix_test::init_service(
+            App::new()
+                .wrap(RateLimit::new(&config))
+                .route("/", web::get().to(|| async { HttpResponse::Ok().finish() })),
+        )
+        .await;
+
+        let first = actix_test::TestRequest::get()
+            .uri("/")
+            .peer_addr("203.0.113.20:1234".parse().unwrap())
+            .to_request();
+        assert_eq!(actix_test::call_service(&app, first).await.status(), 200);
+
+        let second = actix_test::TestRequest::get()
+            .uri("/")
+            .peer_addr("203.0.113.20:1234".parse().unwrap())
+            .to_request();
+        let response = actix_test::call_service(&app, second).await;
+        assert_eq!(response.status(), 429);
+        assert_eq!(response.headers().get(header::RETRY_AFTER).unwrap(), "1");
+    }
 
     #[test]
     fn parses_plain_ip_and_socket_addr() {

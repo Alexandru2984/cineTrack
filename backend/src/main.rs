@@ -1,5 +1,4 @@
 use actix_cors::Cors;
-use actix_governor::GovernorConfigBuilder;
 use actix_web::{middleware as actix_middleware, web, App, HttpResponse, HttpServer};
 
 use std::io::{Read, Write};
@@ -8,7 +7,7 @@ use std::time::Duration;
 
 use cinetrack::{
     config, db, metrics,
-    middleware::rate_limit::TrustedProxyIpKeyExtractor,
+    middleware::rate_limit::RateLimitConfig,
     middleware::request_id::{current_request_id, request_id},
     routes,
     services::catalog_hydration::{hydrate_popular_catalog, HydrationOptions},
@@ -356,11 +355,7 @@ async fn main() -> std::io::Result<()> {
     let port = config.app_port;
     let allowed_origins = config.cors_allowed_origins.clone();
 
-    let governor_conf = GovernorConfigBuilder::default()
-        .requests_per_second(config.rate_limit_rps.into())
-        .burst_size(config.rate_limit_burst)
-        .key_extractor(TrustedProxyIpKeyExtractor)
-        .finish()
+    let governor_conf = RateLimitConfig::new(config.rate_limit_rps, config.rate_limit_burst)
         .expect("Failed to build rate limiter config");
     // Built once and cloned through Arc into every Actix worker. Building these
     // inside route configuration would multiply scoped bursts by worker count.

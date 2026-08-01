@@ -1,5 +1,3 @@
-use actix_governor::governor::middleware::NoOpMiddleware;
-use actix_governor::{Governor, GovernorConfig, GovernorConfigBuilder};
 use actix_web::{
     cookie::{time::Duration as CookieDuration, Cookie, SameSite},
     http::header,
@@ -12,7 +10,7 @@ use crate::config::Config;
 use crate::dto::auth::*;
 use crate::errors::AppError;
 use crate::middleware::auth::require_auth;
-use crate::middleware::rate_limit::TrustedProxyIpKeyExtractor;
+use crate::middleware::rate_limit::{RateLimit, RateLimitConfig};
 use crate::services;
 use crate::services::email::EmailService;
 use crate::services::password_breach::BreachChecker;
@@ -20,15 +18,10 @@ use crate::services::password_breach::BreachChecker;
 const REFRESH_COOKIE_NAME: &str = "cinetrack_refresh";
 const REFRESH_COOKIE_PATH: &str = "/api/auth";
 
-pub type AuthGovernorConfig = GovernorConfig<TrustedProxyIpKeyExtractor, NoOpMiddleware>;
+pub type AuthGovernorConfig = RateLimitConfig;
 
 pub fn build_rate_limiter() -> AuthGovernorConfig {
-    GovernorConfigBuilder::default()
-        .requests_per_second(3)
-        .burst_size(10)
-        .key_extractor(TrustedProxyIpKeyExtractor)
-        .finish()
-        .expect("Failed to build auth rate limiter")
+    RateLimitConfig::new(3, 10).expect("Failed to build auth rate limiter")
 }
 
 fn scope() -> actix_web::Scope {
@@ -68,7 +61,7 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
 }
 
 pub fn configure_rate_limited(cfg: &mut web::ServiceConfig, rate_limiter: &AuthGovernorConfig) {
-    cfg.service(scope().wrap(Governor::new(rate_limiter)));
+    cfg.service(scope().wrap(RateLimit::new(rate_limiter)));
 }
 
 async fn register(
@@ -751,7 +744,7 @@ mod tests {
         let limiter = build_rate_limiter();
         let app = actix_test::init_service(
             App::new()
-                .wrap(Governor::new(&limiter))
+                .wrap(RateLimit::new(&limiter))
                 .route("/", web::get().to(ok)),
         )
         .await;
@@ -792,13 +785,13 @@ mod tests {
         let limiter = build_rate_limiter();
         let app_one = actix_test::init_service(
             App::new()
-                .wrap(Governor::new(&limiter))
+                .wrap(RateLimit::new(&limiter))
                 .route("/", web::get().to(ok)),
         )
         .await;
         let app_two = actix_test::init_service(
             App::new()
-                .wrap(Governor::new(&limiter))
+                .wrap(RateLimit::new(&limiter))
                 .route("/", web::get().to(ok)),
         )
         .await;

@@ -9,13 +9,11 @@
 //! token that leaked into a URL is not re-logged here) and counted by a
 //! fixed-cardinality metric. The response is always 204 with no body.
 
-use actix_governor::governor::middleware::NoOpMiddleware;
-use actix_governor::{Governor, GovernorConfig, GovernorConfigBuilder};
 use actix_web::{web, HttpResponse};
 use serde::Deserialize;
 use serde_json::json;
 
-use crate::middleware::rate_limit::TrustedProxyIpKeyExtractor;
+use crate::middleware::rate_limit::{RateLimit, RateLimitConfig};
 
 /// Cap the accepted body well below the global JSON limit: a CSP report is a
 /// few hundred bytes, and `script-sample` is truncated by the browser to 40
@@ -25,17 +23,12 @@ const MAX_URI_LEN: usize = 512;
 const MAX_SAMPLE_LEN: usize = 256;
 const MAX_DIRECTIVE_LEN: usize = 128;
 
-pub type CspReportGovernorConfig = GovernorConfig<TrustedProxyIpKeyExtractor, NoOpMiddleware>;
+pub type CspReportGovernorConfig = RateLimitConfig;
 
 pub fn build_rate_limiter() -> CspReportGovernorConfig {
-    GovernorConfigBuilder::default()
-        // A single navigation can trip several directives at once, so the burst
-        // is generous while the sustained rate stays low.
-        .requests_per_second(2)
-        .burst_size(20)
-        .key_extractor(TrustedProxyIpKeyExtractor)
-        .finish()
-        .expect("Failed to build CSP report rate limiter")
+    // A single navigation can trip several directives at once, so the burst is
+    // generous while the sustained rate stays low.
+    RateLimitConfig::new(2, 20).expect("Failed to build CSP report rate limiter")
 }
 
 fn scope() -> actix_web::Scope {
@@ -50,7 +43,7 @@ pub fn configure_rate_limited(
     cfg: &mut web::ServiceConfig,
     rate_limiter: &CspReportGovernorConfig,
 ) {
-    cfg.service(scope().wrap(Governor::new(rate_limiter)));
+    cfg.service(scope().wrap(RateLimit::new(rate_limiter)));
 }
 
 /// Legacy `report-uri` payload: `{ "csp-report": { ... } }` with hyphenated keys.

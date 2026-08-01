@@ -1,5 +1,3 @@
-use actix_governor::governor::middleware::NoOpMiddleware;
-use actix_governor::{Governor, GovernorConfig, GovernorConfigBuilder};
 use actix_web::{web, HttpRequest, HttpResponse};
 use sha2::{Digest, Sha256};
 use sqlx::PgPool;
@@ -8,19 +6,14 @@ use validator::Validate;
 use crate::dto::push::{RegisterPushDeviceRequest, RevokePushDeviceRequest};
 use crate::errors::AppError;
 use crate::middleware::auth::require_auth;
-use crate::middleware::rate_limit::TrustedProxyIpKeyExtractor;
+use crate::middleware::rate_limit::{RateLimit, RateLimitConfig};
 
 const MAX_PUSH_DEVICES_PER_USER: i64 = 10;
 
-pub type PushGovernorConfig = GovernorConfig<TrustedProxyIpKeyExtractor, NoOpMiddleware>;
+pub type PushGovernorConfig = RateLimitConfig;
 
 pub fn build_rate_limiter() -> PushGovernorConfig {
-    GovernorConfigBuilder::default()
-        .requests_per_second(2)
-        .burst_size(10)
-        .key_extractor(TrustedProxyIpKeyExtractor)
-        .finish()
-        .expect("Failed to build push device rate limiter")
+    RateLimitConfig::new(2, 10).expect("Failed to build push device rate limiter")
 }
 
 fn scope() -> actix_web::Scope {
@@ -34,7 +27,7 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
 }
 
 pub fn configure_rate_limited(cfg: &mut web::ServiceConfig, rate_limiter: &PushGovernorConfig) {
-    cfg.service(scope().wrap(Governor::new(rate_limiter)));
+    cfg.service(scope().wrap(RateLimit::new(rate_limiter)));
 }
 
 fn hash_unregister_secret(secret: &str) -> String {

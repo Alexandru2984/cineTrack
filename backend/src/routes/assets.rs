@@ -1,5 +1,3 @@
-use actix_governor::governor::middleware::NoOpMiddleware;
-use actix_governor::{Governor, GovernorConfig, GovernorConfigBuilder};
 use actix_multipart::Multipart;
 use actix_web::{web, HttpRequest, HttpResponse};
 use futures_util::StreamExt;
@@ -9,11 +7,11 @@ use uuid::Uuid;
 use crate::config::Config;
 use crate::errors::AppError;
 use crate::middleware::auth::require_auth;
-use crate::middleware::rate_limit::TrustedProxyIpKeyExtractor;
+use crate::middleware::rate_limit::{RateLimit, RateLimitConfig};
 use crate::services::storage::{StorageService, AVATAR_EXTENSIONS};
 use crate::services::tmdb::TmdbService;
 
-pub type ImageGovernorConfig = GovernorConfig<TrustedProxyIpKeyExtractor, NoOpMiddleware>;
+pub type ImageGovernorConfig = RateLimitConfig;
 
 /// Public images get a far more generous budget than the rest of the API.
 /// A single page of cards requests dozens of posters at once; under the shared
@@ -21,12 +19,7 @@ pub type ImageGovernorConfig = GovernorConfig<TrustedProxyIpKeyExtractor, NoOpMi
 /// that never load. The images are public, immutable and cached for a week, so
 /// a high ceiling here costs nothing.
 pub fn build_image_rate_limiter() -> ImageGovernorConfig {
-    GovernorConfigBuilder::default()
-        .requests_per_second(50)
-        .burst_size(300)
-        .key_extractor(TrustedProxyIpKeyExtractor)
-        .finish()
-        .expect("valid image rate limiter configuration")
+    RateLimitConfig::new(50, 300).expect("valid image rate limiter configuration")
 }
 
 const MAX_AVATAR_BYTES: usize = 3 * 1024 * 1024; // 3 MB
@@ -69,12 +62,12 @@ pub fn configure_public_images_unlimited(cfg: &mut web::ServiceConfig) {
 pub fn configure_public_images(cfg: &mut web::ServiceConfig, limiter: &ImageGovernorConfig) {
     cfg.service(
         web::scope("/api/img")
-            .wrap(Governor::new(limiter))
+            .wrap(RateLimit::new(limiter))
             .route("/{size}/{file}", web::get().to(serve_poster)),
     )
     .service(
         web::scope("/api/assets")
-            .wrap(Governor::new(limiter))
+            .wrap(RateLimit::new(limiter))
             .route("/avatars/{file}", web::get().to(serve_avatar_asset))
             .route("/posters/{size}/{file}", web::get().to(serve_cached_poster)),
     );

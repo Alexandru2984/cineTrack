@@ -9176,15 +9176,9 @@ fn build_rate_limited_app(
         InitError = (),
     >,
 > {
-    use actix_governor::{GovernorConfig, GovernorConfigBuilder};
-    use cinetrack::middleware::rate_limit::TrustedProxyIpKeyExtractor;
+    use cinetrack::middleware::rate_limit::RateLimitConfig;
 
-    let shared: GovernorConfig<TrustedProxyIpKeyExtractor, _> = GovernorConfigBuilder::default()
-        .requests_per_second(20)
-        .burst_size(100)
-        .key_extractor(TrustedProxyIpKeyExtractor)
-        .finish()
-        .expect("shared limiter");
+    let shared = RateLimitConfig::new(20, 100).expect("shared limiter");
     let auth = cinetrack::routes::auth::build_rate_limiter();
     let client_error = cinetrack::routes::client_errors::build_rate_limiter();
     let csp_report = cinetrack::routes::csp_report::build_rate_limiter();
