@@ -579,12 +579,15 @@ jobs:
               backend_image: $backend_image,
               frontend_image: $frontend_image
             }' > artifacts/sbom/release-images.json
-          sha256sum \
-            artifacts/sbom/backend.cdx.json \
-            artifacts/sbom/frontend.cdx.json \
-            artifacts/sbom/release-images.json \
-            > artifacts/sbom/SHA256SUMS
-          (cd artifacts/sbom && sha256sum --check SHA256SUMS)
+          (
+            cd artifacts/sbom
+            sha256sum \
+              backend.cdx.json \
+              frontend.cdx.json \
+              release-images.json \
+              > SHA256SUMS
+            sha256sum --check SHA256SUMS
+          )
 
       - name: Upload release evidence
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

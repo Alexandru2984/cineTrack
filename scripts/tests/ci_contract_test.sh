@@ -133,6 +133,16 @@ for image in ("backend", "frontend"):
     )
 require('--format cyclonedx' in ci, "release images must produce CycloneDX SBOMs")
 require('[[ ! -s "$sbom" ]]' in ci, "empty release SBOMs must fail CI clearly")
+require(
+    re.search(
+        r"cd artifacts/sbom\s+sha256sum\s+\\\s+backend\.cdx\.json\s+\\\s+"
+        r"frontend\.cdx\.json\s+\\\s+release-images\.json\s+\\\s+> SHA256SUMS\s+"
+        r"sha256sum --check SHA256SUMS",
+        ci,
+    )
+    is not None,
+    "release checksums must contain portable paths relative to the artifact directory",
+)
 require("if-no-files-found: error" in ci, "missing release evidence must fail CI")
 require(
     "name: release-sboms-${{ github.sha }}" in ci,
