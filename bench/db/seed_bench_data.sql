@@ -154,6 +154,23 @@ JOIN seasons se ON se.id = ep.season_id
 JOIN media m ON m.id = se.media_id
 WHERE m.tmdb_id BETWEEN 9000001 AND 9000060;
 
+-- Keep one actively watched show incomplete and recent. The broad history
+-- above intentionally completes its first 60 shows, which is useful for stats
+-- but used to leave the Up Next benchmark measuring an empty response.
+UPDATE user_media tracked
+SET status = 'watching', started_at = CURRENT_DATE - 1, updated_at = NOW()
+FROM media m
+WHERE tracked.user_id = :user_id
+  AND tracked.media_id = m.id
+  AND m.tmdb_id = 9000068;
+
+INSERT INTO watch_history (user_id, media_id, episode_id, watched_at)
+SELECT :user_id, m.id, ep.id, NOW() - INTERVAL '1 hour'
+FROM media m
+JOIN seasons se ON se.media_id = m.id AND se.season_number = 1
+JOIN episodes ep ON ep.season_id = se.id AND ep.episode_number = 1
+WHERE m.tmdb_id = 9000068;
+
 -- Film watches, so movie-only paths are not empty either.
 INSERT INTO watch_history (user_id, media_id, episode_id, watched_at)
 SELECT
@@ -203,6 +220,35 @@ FROM watch_history
 \gset
 \if :invalid_watch_history_share
   \echo 'benchmark seed error: measured user owns at least 10% of watch_history'
+  \quit 1
+\endif
+
+SELECT NOT EXISTS (
+  SELECT 1
+  FROM media m
+  JOIN user_media tracked
+    ON tracked.media_id = m.id
+   AND tracked.user_id = :user_id
+   AND tracked.status = 'watching'
+  JOIN watch_history history
+    ON history.media_id = m.id
+   AND history.user_id = :user_id
+   AND history.watched_at >= NOW() - INTERVAL '30 days'
+  JOIN seasons se ON se.media_id = m.id AND se.season_number = 1
+  JOIN episodes next_episode
+    ON next_episode.season_id = se.id
+   AND next_episode.episode_number = 2
+  WHERE m.tmdb_id = 9000068
+    AND NOT EXISTS (
+      SELECT 1
+      FROM watch_history watched
+      WHERE watched.user_id = :user_id
+        AND watched.episode_id = next_episode.id
+    )
+) AS invalid_up_next_seed
+\gset
+\if :invalid_up_next_seed
+  \echo 'benchmark seed error: Up Next fixture is missing or already completed'
   \quit 1
 \endif
 

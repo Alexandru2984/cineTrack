@@ -106,12 +106,14 @@ export const options = {
   },
 };
 
-function get(path, screen, name) {
+function get(path, screen, name, validate = null) {
   const res = http.get(`${BASE}${path}`, {
     headers,
     tags: { screen, endpoint: name },
   });
-  const ok = check(res, { [`${name} is 200`]: (r) => r.status === 200 });
+  const assertions = { [`${name} is 200`]: (r) => r.status === 200 };
+  if (validate) assertions[`${name} has representative data`] = validate;
+  const ok = check(res, assertions);
   if (res.status === 429) {
     // Measuring the rate limiter instead of the endpoint; the run is void.
     throttled.add(1, { endpoint: name });
@@ -134,7 +136,19 @@ export function coldStart() {
   // than inflating this one with 429s. Add its bytes when budgeting a launch.
   total += get('/api/media/discovery?language=en-US', 'cold_start', 'discovery');
   total += get('/api/stats/me', 'cold_start', 'stats_me');
-  total += get(`/api/calendar/up-next?today=${TODAY}&limit=6`, 'cold_start', 'up_next');
+  total += get(
+    `/api/calendar/up-next?today=${TODAY}&limit=6`,
+    'cold_start',
+    'up_next',
+    (res) => {
+      try {
+        const body = res.json();
+        return Array.isArray(body.items) && body.items.length > 0;
+      } catch {
+        return false;
+      }
+    },
+  );
   total += get('/api/notifications?limit=5', 'cold_start', 'notifications');
   total += get(`/api/calendar/summary?today=${TODAY}`, 'cold_start', 'calendar_summary');
   screenBytes.add(total, { screen: 'cold_start' });
