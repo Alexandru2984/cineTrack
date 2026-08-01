@@ -137,7 +137,8 @@ if [[ "$RUN_CAPACITY" == 1 ]]; then
   log "Capacity ramp (finding the point where the budget breaks)"
   ( cd "$RUN_DIR" && BASE_URL="$BASE_URL" TOKEN="$TOKEN" SHOW_ID="$SHOW_ID" \
       PEAK_RPS="${PEAK_RPS:-600}" \
-      k6 run --out "csv=capacity.csv" "$ROOT_DIR/bench/api/capacity.js" 2>&1 | tee capacity.txt )
+      k6 run --summary-trend-stats='avg,min,med,p(90),p(95),p(99),max' \
+      --out "csv=capacity.csv" "$ROOT_DIR/bench/api/capacity.js" 2>&1 | tee capacity.txt )
   log "Per-window breakdown"
   python3 "$ROOT_DIR/bench/analyze_capacity.py" "$RUN_DIR/capacity.csv" \
     | tee "$RUN_DIR/capacity-windows.txt"

@@ -90,6 +90,10 @@ meaningful relative to the same machine, since a loaded VPS moves every figure.
 screen costs, but how much load the service takes before it stops being usable.
 It ramps arrival rate and reports the highest window that stayed inside the
 budget (p95 < 500 ms, errors < 1%). `PEAK_RPS=N` raises the target.
+Crossing that budget is an expected result, so the ramp itself does not use k6
+pass/fail thresholds; the CSV analyzer decides which individual window was the
+highest sustainable one. A JavaScript exception or analyzer failure still
+makes the command fail.
 
 Two details decide whether the number means anything:
 

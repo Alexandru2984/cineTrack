@@ -55,11 +55,6 @@ export const options = {
       ],
     },
   },
-  thresholds: {
-    // Deliberately not aborting the run: the point is to find where these break.
-    http_req_duration: ['p(95)<500'],
-    http_req_failed: ['rate<0.01'],
-  },
 };
 
 /** A distinct client IP per VU, so the per-IP limiter behaves as in production. */
@@ -104,8 +99,11 @@ export default function () {
 
 export function handleSummary(data) {
   const m = data.metrics;
-  const val = (name, field) => (m[name] ? m[name].values[field] : 0);
-  const count = (name) => (m[name] ? m[name].values.count : 0);
+  const val = (name, field) => {
+    const value = m[name]?.values[field];
+    return Number.isFinite(value) ? value : 0;
+  };
+  const count = (name) => val(name, 'count');
 
   const reqs = val('http_reqs', 'count');
   const rate = val('http_reqs', 'rate');
@@ -131,12 +129,14 @@ export function handleSummary(data) {
     out += '                      the achieved rate is the server ceiling)\n';
   }
 
+  // A capacity ramp is expected to cross the budget. k6 thresholds make that
+  // expected outcome a non-zero process exit, which prevents the per-window
+  // analyzer from locating the last healthy step. Report the aggregate here;
+  // the CSV analyzer below remains the authoritative capacity result.
+  const p95 = val('http_req_duration', 'p(95)');
   const breached = [];
-  for (const [name, metric] of Object.entries(m)) {
-    for (const [expr, result] of Object.entries(metric.thresholds || {})) {
-      if (!result.ok) breached.push(`${name} ${expr}`);
-    }
-  }
+  if (p95 >= 500) breached.push('p95 latency >= 500ms');
+  if (failRate >= 1) breached.push('errors >= 1%');
   out += breached.length
     ? `\n  Budget exceeded at peak: ${breached.join(', ')}\n` +
       '  The sustainable rate is below the peak; read the per-stage output above.\n'
