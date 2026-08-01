@@ -14,6 +14,7 @@ for config in \
 done
 
 VHOST="$ROOT_DIR/nginx/vazute.micutu.com.conf"
+FRONTEND_VHOST="$ROOT_DIR/frontend/nginx-spa.conf"
 
 # The origin must not be reachable directly, and an attacker-supplied XFF chain
 # must never be forwarded to Actix as the rate-limit identity.
@@ -34,6 +35,28 @@ grep -Fq 'client_max_body_size 4M;' "$VHOST"
 grep -Fq 'limit_req zone=vazute_auth burst=10 nodelay;' "$VHOST"
 grep -Fq 'limit_req zone=vazute_import burst=2 nodelay;' "$VHOST"
 grep -Fq 'limit_conn vazute_api_conn 20;' "$VHOST"
+
+# Keep Cloudflare from injecting a per-request inline bot-detection bootstrap
+# into the SPA shell. Its volatile contents cannot be safely hash-allowlisted,
+# and weakening script-src with unsafe-inline is not acceptable.
+python3 - "$FRONTEND_VHOST" <<'PY'
+import pathlib
+import re
+import sys
+
+text = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
+for location in ("/", "= /index.html"):
+    block = re.search(
+        rf"location {re.escape(location)} \{{(?P<body>.*?)\n    \}}",
+        text,
+        re.DOTALL,
+    )
+    assert block is not None, f"frontend location {location} is missing"
+    assert (
+        'add_header Cache-Control "no-cache, no-transform" always;'
+        in block.group("body")
+    ), f"frontend location {location} permits CDN HTML transformation"
+PY
 
 # A calendar-feed URL contains a bearer credential. Neither access nor error
 # logs may persist that path. The CSP deliberately permits only named script
