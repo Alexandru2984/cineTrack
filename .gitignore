@@ -5,6 +5,10 @@
 # Rust / Backend
 backend/target/
 
+# Python tooling
+__pycache__/
+*.py[cod]
+
 # Node / Frontend
 frontend/node_modules/
 frontend/dist/
