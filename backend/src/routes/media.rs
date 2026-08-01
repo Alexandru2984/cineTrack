@@ -195,29 +195,6 @@ async fn search(
     require_auth(&req).await?;
     query.validate()?;
     let page = query.page.unwrap_or(1);
-    let local = match catalog::search_local(
-        pool.get_ref(),
-        &query.q,
-        query.media_type.as_deref(),
-        page,
-        query.language.as_deref(),
-    )
-    .await
-    {
-        Ok(response) => Some(response),
-        Err(error) => {
-            log::warn!("Local catalog search failed: {error}");
-            None
-        }
-    };
-    if let Some(response) = local
-        .as_ref()
-        .filter(|response| catalog::has_local_results(response))
-    {
-        crate::metrics::record_tmdb_cache("local_search", "hit");
-        return Ok(HttpResponse::Ok().json(response));
-    }
-
     let provider = tmdb
         .search_cached(
             pool.get_ref(),
@@ -245,13 +222,26 @@ async fn search(
             }
             results
         }
-        Err(error) => {
-            if let Some(response) = local.filter(|response| !response.results.is_empty()) {
-                crate::metrics::record_tmdb_cache("local_search", "fallback");
-                log::warn!("Serving local catalog results after TMDB search failure");
-                response
-            } else {
-                return Err(error);
+        Err(provider_error) => {
+            match catalog::search_local(
+                pool.get_ref(),
+                &query.q,
+                query.media_type.as_deref(),
+                page,
+                query.language.as_deref(),
+            )
+            .await
+            {
+                Ok(response) if !response.results.is_empty() => {
+                    crate::metrics::record_tmdb_cache("local_search", "fallback");
+                    log::warn!("Serving local catalog results after TMDB search failure");
+                    response
+                }
+                Ok(_) => return Err(provider_error),
+                Err(local_error) => {
+                    log::warn!("Local catalog search failed: {local_error}");
+                    return Err(provider_error);
+                }
             }
         }
     };

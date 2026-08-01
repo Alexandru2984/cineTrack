@@ -4250,12 +4250,112 @@ async fn test_media_search_uses_fresh_and_stale_provider_cache() {
     assert!(metrics.contains("cinetrack_tmdb_requests_total"));
     assert!(metrics.contains("cinetrack_tmdb_request_duration_seconds"));
     assert!(metrics.contains("cinetrack_tmdb_cache_events_total"));
-    assert!(metrics.contains("endpoint=\"search\",outcome=\"2xx\"} 1"));
+    let successful_searches = metrics
+        .lines()
+        .find_map(|line| {
+            line.strip_prefix("cinetrack_tmdb_requests_total{endpoint=\"search\",outcome=\"2xx\"} ")
+        })
+        .and_then(|value| value.parse::<f64>().ok())
+        .unwrap_or_default();
+    assert!(successful_searches >= 1.0);
 }
 
 #[actix_web::test]
 #[ignore = "requires test DB"]
-async fn test_local_catalog_search_skips_or_replaces_unavailable_provider() {
+async fn test_media_search_does_not_let_fuzzy_catalog_results_hide_provider_matches() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let upstream = actix_web::rt::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let mut request = vec![0_u8; 4096];
+        let read = stream.read(&mut request).await.unwrap();
+        let request = String::from_utf8_lossy(&request[..read]);
+        assert!(request.starts_with("GET /search/multi?"));
+        assert!(request.contains("language=ro-RO"));
+        let body = r#"{
+            "page": 1,
+            "total_pages": 1,
+            "total_results": 1,
+            "results": [{
+                "id": 205050,
+                "name": "Shangri-La Frontier",
+                "original_name": "シャングリラ・フロンティア",
+                "first_air_date": "2023-10-01",
+                "media_type": "tv",
+                "vote_average": 8.0
+            }]
+        }"#;
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        stream.write_all(response.as_bytes()).await.unwrap();
+    });
+
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    sqlx::query(
+        r#"INSERT INTO catalog_external_ids
+            (media_type, tmdb_id, adult, video, popularity)
+        VALUES
+            ('tv', 205050, false, false, 17.0),
+            ('tv', 89954, false, false, 20.0)"#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO catalog_external_titles (media_type, tmdb_id, title)
+        VALUES
+            ('tv', 205050, 'シャングリラ・フロンティア'),
+            ('tv', 89954, 'Shangri-La')"#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let local = cinetrack::services::catalog::search_local(
+        &pool,
+        "shangri-la frontier",
+        None,
+        1,
+        Some("ro-RO"),
+    )
+    .await
+    .unwrap();
+    assert!(local.results.iter().any(|result| result.id == 89954));
+    assert!(!local.results.iter().any(|result| result.id == 205050));
+
+    let mut config = test_config();
+    config.tmdb_base_url = format!("http://{address}");
+    let app = actix_test::init_service(create_app_with_config(pool.clone(), config)).await;
+    let (token, _, _) = register_user(
+        &app,
+        "searchrelevance",
+        "searchrelevance@example.com",
+        "Pass1234",
+    )
+    .await;
+    let request = actix_test::TestRequest::get()
+        .uri("/api/media/search?q=shangri-la%20frontier&page=1&language=ro-RO")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let response = actix_test::call_service(&app, request).await;
+    assert_eq!(response.status(), 200);
+    let body: Value = actix_test::read_body_json(response).await;
+    assert_eq!(body["total_results"], 1);
+    assert_eq!(body["results"][0]["id"], 205050);
+    assert_eq!(body["results"][0]["name"], "Shangri-La Frontier");
+    upstream.await.unwrap();
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn test_local_catalog_search_replaces_unavailable_provider() {
     let pool = setup_pool().await;
     clean_db(&pool).await;
     let mut config = test_config();

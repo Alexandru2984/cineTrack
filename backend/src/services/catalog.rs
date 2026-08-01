@@ -392,10 +392,6 @@ pub async fn cache_search_results(
     Ok(affected)
 }
 
-pub fn has_local_results(response: &TmdbSearchResponse) -> bool {
-    !response.results.is_empty()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -412,27 +408,5 @@ mod tests {
             (Some("ro".to_string()), Some("RO".to_string()))
         );
         assert_eq!(locale_parts(Some("invalid")), (None, None));
-    }
-
-    #[test]
-    fn any_local_match_skips_the_provider() {
-        let mut response = empty_response(1);
-        assert!(!has_local_results(&response));
-        response.results.push(TmdbSearchResult {
-            id: 1,
-            title: Some("Title".to_string()),
-            name: None,
-            original_title: None,
-            original_name: None,
-            overview: None,
-            poster_path: None,
-            backdrop_path: None,
-            release_date: None,
-            first_air_date: None,
-            vote_average: None,
-            media_type: Some("movie".to_string()),
-            genre_ids: None,
-        });
-        assert!(has_local_results(&response));
     }
 }
