@@ -87,6 +87,7 @@ export function MediaTile({
             added ? t('mediaCard.inLibrary', { title }) : t('mediaCard.addToPlan', { title })
           }
           disabled={added || addPending}
+          hitSlop={6}
           onPress={onAdd}
           style={({ pressed }) => [
             styles.addButton,

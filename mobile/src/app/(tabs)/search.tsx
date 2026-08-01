@@ -1,5 +1,5 @@
 import { Search as SearchIcon } from 'lucide-react-native';
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import {
   FlatList,
   RefreshControl,
@@ -23,6 +23,7 @@ import { useT } from '@/hooks/use-t';
 import { useTheme } from '@/hooks/use-theme';
 import { formatNumber } from '@/lib/format';
 import { getErrorMessage } from '@/lib/http';
+import { KeyedTaskGate } from '@/lib/keyed-task-gate';
 import type { MediaType, TmdbSearchResult } from '@/types';
 
 type SearchType = 'all' | MediaType;
@@ -39,6 +40,9 @@ export default function SearchScreen() {
   const [query, setQuery] = useState('');
   const [type, setType] = useState<SearchType>('all');
   const [added, setAdded] = useState(() => new Set<string>());
+  const [pendingAdds, setPendingAdds] = useState(() => new Set<string>());
+  const addGate = useRef(new KeyedTaskGate()).current;
+  const [addError, setAddError] = useState<unknown>(null);
   const debouncedQuery = useDebouncedValue(query.trim(), 350);
   const search = useMediaSearch(
     debouncedQuery,
@@ -78,17 +82,29 @@ export default function SearchScreen() {
   const addToPlan = (item: TmdbSearchResult) => {
     const mediaType = mediaResultType(item, type === 'all' ? undefined : type);
     const key = `${item.id}-${mediaType}`;
-    add.mutate(
-      { tmdb_id: item.id, media_type: mediaType, status: 'plan_to_watch' },
-      {
-        onSuccess: () =>
-          setAdded((current) => {
-            const next = new Set(current);
-            next.add(key);
-            return next;
+    if (trackedKeys.has(key)) return;
+    setAddError(null);
+
+    void addGate
+      .run(
+        key,
+        () =>
+          add.mutateAsync({
+            tmdb_id: item.id,
+            media_type: mediaType,
+            status: 'plan_to_watch',
           }),
-      },
-    );
+        setPendingAdds,
+      )
+      .then((result) => {
+        if (!result.started) return;
+        setAdded((current) => {
+          const next = new Set(current);
+          next.add(key);
+          return next;
+        });
+      })
+      .catch(setAddError);
   };
 
   return (
@@ -147,9 +163,9 @@ export default function SearchScreen() {
                 {t('search.results', { count: formatNumber(totalResults) })}
               </AppText>
             ) : null}
-            {add.error ? (
+            {addError ? (
               <AppText variant="caption" style={{ color: theme.danger }}>
-                {getErrorMessage(add.error, t('search.addError'))}
+                {getErrorMessage(addError, t('search.addError'))}
               </AppText>
             ) : null}
           </View>
@@ -189,11 +205,7 @@ export default function SearchScreen() {
                 fallbackType={type === 'all' ? undefined : type}
                 onAdd={() => addToPlan(item)}
                 added={trackedKeys.has(key)}
-                addPending={
-                  add.isPending &&
-                  add.variables?.tmdb_id === item.id &&
-                  add.variables.media_type === mediaType
-                }
+                addPending={pendingAdds.has(key)}
               />
             </View>
           );
