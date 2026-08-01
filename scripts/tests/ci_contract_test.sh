@@ -106,7 +106,13 @@ require(
     "cargo audit --ignore" not in local_gate,
     "the local gate must not suppress RustSec advisories",
 )
-require("format: cyclonedx" in ci, "release images must produce CycloneDX SBOMs")
+for image in ("backend", "frontend"):
+    require(
+        f'--output "${{GITHUB_WORKSPACE}}/artifacts/sbom/{image}.cdx.json"' in ci,
+        f"the {image} CycloneDX SBOM must be written to the workspace",
+    )
+require('--format cyclonedx' in ci, "release images must produce CycloneDX SBOMs")
+require('[[ ! -s "$sbom" ]]' in ci, "empty release SBOMs must fail CI clearly")
 require("if-no-files-found: error" in ci, "missing release evidence must fail CI")
 require(
     "name: release-sboms-${{ github.sha }}" in ci,

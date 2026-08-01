@@ -515,32 +515,30 @@ jobs:
         run: mkdir -p artifacts/sbom
 
       - name: Generate backend CycloneDX SBOM
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
-        with:
-          skip-setup-trivy: true
-          scan-type: image
-          image-ref: cinetrack-backend:ci
-          scanners: vuln
-          format: cyclonedx
-          output: artifacts/sbom/backend.cdx.json
-          exit-code: "0"
+        run: |
+          trivy image \
+            --scanners vuln \
+            --format cyclonedx \
+            --output "${GITHUB_WORKSPACE}/artifacts/sbom/backend.cdx.json" \
+            cinetrack-backend:ci
 
       - name: Generate frontend CycloneDX SBOM
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
-        with:
-          skip-setup-trivy: true
-          scan-type: image
-          image-ref: cinetrack-frontend:ci
-          scanners: vuln
-          format: cyclonedx
-          output: artifacts/sbom/frontend.cdx.json
-          exit-code: "0"
+        run: |
+          trivy image \
+            --scanners vuln \
+            --format cyclonedx \
+            --output "${GITHUB_WORKSPACE}/artifacts/sbom/frontend.cdx.json" \
+            cinetrack-frontend:ci
 
       - name: Validate release evidence
         env:
           SOURCE_COMMIT: ${{ github.sha }}
         run: |
           for sbom in artifacts/sbom/backend.cdx.json artifacts/sbom/frontend.cdx.json; do
+            if [[ ! -s "$sbom" ]]; then
+              echo "::error file=${sbom}::Trivy did not create a non-empty SBOM"
+              exit 1
+            fi
             jq --exit-status '
               .bomFormat == "CycloneDX" and
               (.specVersion | type == "string") and
