@@ -55,7 +55,10 @@ grep -qx 'cinetrack_release_schedule_stale_active_titles 2' "$METRICS_FILE"
 grep -qx 'cinetrack_release_schedule_repeated_failures 3' "$METRICS_FILE"
 grep -qx 'cinetrack_release_push_failed_last_run 4' "$METRICS_FILE"
 grep -qx 'cinetrack_release_push_overdue_deliveries 5' "$METRICS_FILE"
+grep -Fq "COALESCE(state.outcome, '') <> 'not_found'" "$TEST_DIR/state/db-query.sql"
 grep -Fq "state.outcome <> 'not_found'" "$TEST_DIR/state/db-query.sql"
+grep -A6 -F 'alert: CineTrackReleaseWorkerFailed' \
+  "$ROOT_DIR/ops/prometheus/cinetrack-alerts.yml" | grep -Eq 'for: 65m$'
 first_success="$(awk '/^cinetrack_release_worker_last_success_timestamp_seconds / { print $2 }' "$METRICS_FILE")"
 [[ "$first_success" =~ ^[0-9]+$ ]] && (( first_success > 0 ))
 

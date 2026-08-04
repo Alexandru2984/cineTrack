@@ -248,12 +248,14 @@ groups:
 
       - alert: CineTrackReleaseWorkerFailed
         expr: cinetrack_release_worker_last_run_success == 0
-        for: 5m
+        # The worker runs hourly. Wait past the next scheduled run so one
+        # transient provider failure does not page as a critical incident.
+        for: 65m
         labels:
           severity: critical
         annotations:
           summary: Văzute release worker failed
-          description: The most recent schedule synchronization or push dispatch run exited unsuccessfully.
+          description: The release worker has remained unsuccessful across two scheduled hourly runs.
 
       - alert: CineTrackReleaseWorkerStale
         expr: time() - cinetrack_release_worker_last_success_timestamp_seconds > 10800

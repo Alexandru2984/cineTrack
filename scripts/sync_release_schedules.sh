@@ -52,6 +52,9 @@ collect_database_metrics() {
       COUNT(*) FILTER (
         WHERE tracked.media_type = 'tv'
           AND LOWER(COALESCE(tracked.status, '')) NOT IN ('ended', 'canceled')
+          -- A confirmed provider 404 is already retried with multi-day
+          -- backoff. It is catalog state, not a stale refresh failure.
+          AND COALESCE(state.outcome, '') <> 'not_found'
           AND (
             state.last_success_at IS NULL
             OR state.last_success_at < NOW() - INTERVAL '12 hours'
