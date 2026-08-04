@@ -159,8 +159,8 @@ jobs:
       - name: Enforce bundle budgets
         run: npm run check:bundle
 
-      - name: Audit production dependencies
-        run: npm audit --omit=dev
+      - name: Audit runtime and build dependencies
+        run: npm audit --audit-level=moderate
 
   mobile:
     name: Mobile

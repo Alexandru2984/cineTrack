@@ -113,7 +113,7 @@ section "Frontend"
   npm test
   npm run build
   npm run check:bundle
-  npm audit --omit=dev
+  npm audit --audit-level=moderate
 )
 
 section "Mobile"

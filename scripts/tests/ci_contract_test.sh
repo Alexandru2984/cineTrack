@@ -115,6 +115,15 @@ require(
     "npm run check:bundle" in ci and "npm run check:bundle" in local_gate,
     "frontend transfer budgets must be gated in CI and locally",
 )
+require(
+    "npm audit --audit-level=moderate" in ci
+    and "npm audit --audit-level=moderate" in local_gate,
+    "frontend runtime and build dependencies must reject MODERATE advisories in CI and locally",
+)
+require(
+    "npm audit --omit=dev" not in ci and "npm audit --omit=dev" not in local_gate,
+    "frontend dependency audits must not exclude the build toolchain",
+)
 require("cargo audit --ignore" not in ci, "CI must not suppress RustSec advisories")
 require(
     "cargo audit --ignore" not in local_gate,
