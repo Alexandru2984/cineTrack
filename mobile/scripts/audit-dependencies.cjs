@@ -4,7 +4,10 @@ const assert = require('node:assert/strict');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
-const allowedAdvisory = 'https://github.com/advisories/GHSA-mh99-v99m-4gvg';
+const allowedAdvisories = new Set([
+  'https://github.com/advisories/GHSA-mh99-v99m-4gvg',
+  'https://github.com/advisories/GHSA-rgw5-rvv9-x895',
+]);
 
 const patchCheck = spawnSync(
   process.execPath,
@@ -47,7 +50,7 @@ function inspectPatchedAdvisoryChain(name, visiting = new Set()) {
   next.add(name);
   const causes = vulnerability.via.map((cause) => {
     if (typeof cause === 'string') return inspectPatchedAdvisoryChain(cause, next);
-    const allowed = Boolean(cause && cause.url === allowedAdvisory);
+    const allowed = Boolean(cause && allowedAdvisories.has(cause.url));
     return { allowed, foundAdvisory: allowed };
   });
 
@@ -71,6 +74,6 @@ if (Object.keys(vulnerabilities).length === 0) {
   console.log('No HIGH or CRITICAL dependency vulnerabilities found.');
 } else {
   console.log(
-    `Accepted only ${allowedAdvisory}; affected legacy consumers are redirected to patched brace-expansion 5.0.8.`,
+    `Accepted only ${[...allowedAdvisories].join(', ')}; affected legacy consumers are redirected to patched brace-expansion 5.0.9 or newer.`,
   );
 }

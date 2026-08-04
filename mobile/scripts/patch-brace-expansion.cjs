@@ -6,7 +6,7 @@ const path = require('node:path');
 
 const nodeModules = path.resolve(__dirname, '..', 'node_modules');
 const checkOnly = process.argv.includes('--check');
-const marker = 'Vazute compatibility backport for CVE-2026-14257';
+const marker = 'Vazute compatibility backport for brace-expansion DoS advisories';
 
 const compatibilityModule = `'use strict';
 
@@ -14,8 +14,8 @@ const compatibilityModule = `'use strict';
 //
 // brace-expansion 1.x has no patched release. Its legacy CommonJS consumers
 // expect the package itself to be callable, while the fixed 5.x API exports an
-// \`expand\` function. Delegate to the audited 5.x implementation installed at
-// the project root and preserve the old calling convention.
+// \`expand\` function. Delegate to an audited 5.0.9+ implementation installed
+// at the project root and preserve the old calling convention.
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -31,10 +31,14 @@ function resolveSafeExpand() {
           fs.readFileSync(path.join(candidate, 'package.json'), 'utf8'),
         );
         const implementation = require(candidate);
-        if (
-          Number.parseInt(manifest.version, 10) >= 5 &&
-          typeof implementation.expand === 'function'
-        ) {
+        const version = /^(\\d+)\\.(\\d+)\\.(\\d+)/.exec(manifest.version);
+        const isPatched =
+          version &&
+          (Number(version[1]) > 5 ||
+            (Number(version[1]) === 5 &&
+              (Number(version[2]) > 0 ||
+                (Number(version[2]) === 0 && Number(version[3]) >= 9))));
+        if (isPatched && typeof implementation.expand === 'function') {
           return implementation.expand;
         }
       } catch {
@@ -47,7 +51,7 @@ function resolveSafeExpand() {
     cursor = parent;
   }
 
-  throw new Error('Patched brace-expansion 5.x implementation is missing');
+  throw new Error('Patched brace-expansion 5.0.9+ implementation is missing');
 }
 
 const safeExpand = resolveSafeExpand();
