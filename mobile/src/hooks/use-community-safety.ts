@@ -35,6 +35,7 @@ function invalidateSafetyContext(queryClient: ReturnType<typeof useQueryClient>)
   void queryClient.invalidateQueries({ queryKey: socialKeys.all });
   void queryClient.invalidateQueries({ queryKey: ['notifications'] });
   void queryClient.invalidateQueries({ queryKey: ['lists'] });
+  void queryClient.invalidateQueries({ queryKey: ['messages'] });
 }
 
 export function useBlockUser() {

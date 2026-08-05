@@ -61,6 +61,11 @@
               "scheme": "https",
               "host": "vazute.micutu.com",
               "pathPrefix": "/lists"
+            },
+            {
+              "scheme": "https",
+              "host": "vazute.micutu.com",
+              "pathPrefix": "/messages"
             }
           ],
           "category": [

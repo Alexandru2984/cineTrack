@@ -24,6 +24,8 @@ export const socialKeys = {
   activity: (username: string) => ['social', 'activity', username] as const,
   requests: ['social', 'requests'] as const,
   connections: (kind: 'followers' | 'following') => ['social', kind] as const,
+  profileConnections: (username: string, kind: 'followers' | 'following') =>
+    ['social', 'connections', username.toLowerCase(), kind] as const,
 };
 
 export function useSocialFeed(enabled = true) {
@@ -120,11 +122,34 @@ export function useConnections(kind: 'followers' | 'following', enabled = true) 
   });
 }
 
+export function useProfileConnections(
+  username: string,
+  kind: 'followers' | 'following',
+  enabled = true,
+) {
+  return useInfiniteQuery({
+    queryKey: socialKeys.profileConnections(username, kind),
+    queryFn: ({ pageParam, signal }) =>
+      apiRequest<UserSummary[]>(
+        withQuery(`/users/${encodeURIComponent(username)}/${kind}`, {
+          page: pageParam,
+          limit: SOCIAL_PAGE_LIMIT,
+        }),
+        { signal },
+      ),
+    initialPageParam: 1,
+    getNextPageParam: (lastPage, pages) =>
+      lastPage.length === SOCIAL_PAGE_LIMIT ? pages.length + 1 : undefined,
+    enabled: enabled && username.length > 0,
+  });
+}
+
 function useInvalidateSocial() {
   const queryClient = useQueryClient();
   return () => {
     void queryClient.invalidateQueries({ queryKey: socialKeys.all });
     void queryClient.invalidateQueries({ queryKey: ['notifications'] });
+    void queryClient.invalidateQueries({ queryKey: ['messages'] });
   };
 }
 

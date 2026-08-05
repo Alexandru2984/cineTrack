@@ -1,5 +1,6 @@
 import {
   episodePath,
+  messagePath,
   mediaPath,
   profilePath,
   publicUrl,
@@ -19,6 +20,9 @@ describe('mobile deep links', () => {
     expect(publicUrl(profilePath('alex_984'))).toBe(
       'https://vazute.micutu.com/profile/alex_984',
     );
+    expect(publicUrl(messagePath('alex_984'))).toBe(
+      'https://vazute.micutu.com/messages/alex_984',
+    );
   });
 
   it.each([
@@ -26,6 +30,7 @@ describe('mobile deep links', () => {
     '/media/550?type=movie',
     `/episodes/${episodeId}`,
     '/profile/alex_984',
+    '/messages/alex_984',
   ])('accepts the canonical protected destination %s', (value) => {
     expect(safePostAuthRedirect(value)).toBe(value);
   });
@@ -39,6 +44,8 @@ describe('mobile deep links', () => {
     '/episodes/not-a-uuid',
     '/profile/a',
     '/profile/alex%2Fsettings',
+    '/messages/a',
+    '/messages/alex%2Fsettings',
     '/settings',
     '/media\\1?type=tv',
     '/media/1?type=tv\n/evil',

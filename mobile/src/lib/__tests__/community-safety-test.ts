@@ -25,4 +25,14 @@ describe('community safety helpers', () => {
       reason: 'spam',
     });
   });
+
+  it('allows an individual received message to be reported', () => {
+    expect(reportInputFromDraft('message', 'message-id', 'harassment', ' Threat '))
+      .toEqual({
+        target_type: 'message',
+        target_id: 'message-id',
+        reason: 'harassment',
+        details: 'Threat',
+      });
+  });
 });

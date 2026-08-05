@@ -120,6 +120,9 @@ export default function RootLayout() {
               <Stack.Screen name="lists" options={{ title: t('screens.lists') }} />
               <Stack.Screen name="lists/[id]" options={{ title: t('screens.list') }} />
               <Stack.Screen name="social" options={{ title: t('screens.social') }} />
+              <Stack.Screen name="connections/[username]" options={{ title: t('screens.connections') }} />
+              <Stack.Screen name="messages" options={{ title: t('screens.messages') }} />
+              <Stack.Screen name="messages/[username]" options={{ title: t('screens.conversation') }} />
               <Stack.Screen name="people/[username]" options={{ title: t('screens.profile') }} />
               <Stack.Screen name="profile/[username]" options={{ title: t('screens.profile') }} />
               <Stack.Screen name="settings" options={{ title: t('screens.settings') }} />

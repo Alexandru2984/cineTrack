@@ -5,11 +5,12 @@ import {
   Clock3,
   Flag,
   LockKeyhole,
+  MessageCircle,
   UserMinus,
   UserPlus,
 } from 'lucide-react-native';
 import { useState } from 'react';
-import { Alert, ScrollView, StyleSheet, View } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { AppButton } from '@/components/app-button';
@@ -129,16 +130,44 @@ export default function PublicProfileScreen() {
             {person.followers_count !== null || person.following_count !== null ? (
               <View style={styles.counts}>
                 {person.followers_count !== null ? (
-                  <AppText>
-                    <AppText variant="label">{person.followers_count}</AppText>{' '}
-                    {t('profile.followers')}
-                  </AppText>
+                  <Pressable
+                    accessibilityRole="link"
+                    accessibilityLabel={t('profile.openFollowers', {
+                      username: person.username,
+                    })}
+                    onPress={() =>
+                      router.push({
+                        pathname: '/connections/[username]',
+                        params: { username: person.username, kind: 'followers' },
+                      })
+                    }
+                    style={({ pressed }) => [styles.countLink, { opacity: pressed ? 0.65 : 1 }]}
+                  >
+                    <AppText>
+                      <AppText variant="label">{person.followers_count}</AppText>{' '}
+                      {t('profile.followers')}
+                    </AppText>
+                  </Pressable>
                 ) : null}
                 {person.following_count !== null ? (
-                  <AppText>
-                    <AppText variant="label">{person.following_count}</AppText>{' '}
-                    {t('profile.following')}
-                  </AppText>
+                  <Pressable
+                    accessibilityRole="link"
+                    accessibilityLabel={t('profile.openFollowing', {
+                      username: person.username,
+                    })}
+                    onPress={() =>
+                      router.push({
+                        pathname: '/connections/[username]',
+                        params: { username: person.username, kind: 'following' },
+                      })
+                    }
+                    style={({ pressed }) => [styles.countLink, { opacity: pressed ? 0.65 : 1 }]}
+                  >
+                    <AppText>
+                      <AppText variant="label">{person.following_count}</AppText>{' '}
+                      {t('profile.following')}
+                    </AppText>
+                  </Pressable>
                 ) : null}
               </View>
             ) : null}
@@ -153,6 +182,22 @@ export default function PublicProfileScreen() {
 
         {!isSelf ? (
           <View style={styles.relationshipActions}>
+            {person.is_following && person.is_followed_by ? (
+              <AppButton
+                label={t('profile.message')}
+                accessibilityLabel={t('profile.messageUser', {
+                  username: person.username,
+                })}
+                icon={<MessageCircle color="#FFFFFF" size={18} />}
+                onPress={() =>
+                  router.push({
+                    pathname: '/messages/[username]',
+                    params: { username: person.username },
+                  })
+                }
+                style={styles.primaryAction}
+              />
+            ) : null}
             <AppButton
               label={relationshipLabel(t, person.follow_status, person.is_public)}
               icon={remove
@@ -256,6 +301,7 @@ const styles = StyleSheet.create({
   nameRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   name: { flexShrink: 1 },
   counts: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.lg },
+  countLink: { minHeight: 44, justifyContent: 'center' },
   joined: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
   relationshipActions: {
     flexDirection: 'row',

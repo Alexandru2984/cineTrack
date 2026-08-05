@@ -12,7 +12,7 @@ export const REPORT_REASONS = [
 ] as const;
 
 export type ReportReason = (typeof REPORT_REASONS)[number];
-export type ReportTargetType = 'user' | 'list';
+export type ReportTargetType = 'user' | 'list' | 'message';
 
 export interface ReportInput {
   target_type: ReportTargetType;

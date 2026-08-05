@@ -14,6 +14,7 @@ describe('offline query cache policy', () => {
     expect(shouldPersistQueryKey(['stats', 'heatmap', 2026])).toBe(false);
     expect(shouldPersistQueryKey(['account-sessions'])).toBe(false);
     expect(shouldPersistQueryKey(['notifications', 'list'])).toBe(false);
+    expect(shouldPersistQueryKey(['messages', 'thread', 'alex'])).toBe(false);
     expect(shouldPersistQueryKey(['social', 'feed'])).toBe(false);
     expect(shouldPersistQueryKey(['users', 'search', 'alex'])).toBe(false);
   });

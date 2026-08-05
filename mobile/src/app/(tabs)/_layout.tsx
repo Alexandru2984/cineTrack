@@ -10,6 +10,7 @@ import {
 import { LoadingState } from '@/components/screen-state';
 import { useT } from '@/hooks/use-t';
 import { useTheme } from '@/hooks/use-theme';
+import { useMessageSummary } from '@/hooks/use-messages';
 import { useNotificationSummary } from '@/hooks/use-notifications';
 import { hasLocalSession, useAuthStore } from '@/store/auth';
 
@@ -18,7 +19,10 @@ export default function TabsLayout() {
   const t = useT();
   const status = useAuthStore((state) => state.status);
   const notificationSummary = useNotificationSummary(status === 'authenticated', true);
-  const unreadCount = notificationSummary.data?.unread_count ?? 0;
+  const messageSummary = useMessageSummary(status === 'authenticated', true);
+  const unreadCount =
+    (notificationSummary.data?.unread_count ?? 0) +
+    (messageSummary.data?.unread_count ?? 0);
 
   if (status === 'loading') return <LoadingState label="Restoring session" />;
   if (!hasLocalSession(status)) return <Redirect href="/" />;

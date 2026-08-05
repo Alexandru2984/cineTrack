@@ -9,6 +9,7 @@ import {
   History,
   ListPlus,
   LogOut,
+  MessageCircle,
   Settings,
   ShieldCheck,
   Users,
@@ -29,6 +30,7 @@ import { ScreenHeader } from '@/components/screen-header';
 import { TmdbLogo } from '@/components/tmdb-logo';
 import { UserAvatar } from '@/components/user-avatar';
 import { spacing } from '@/constants/theme';
+import { useMessageSummary } from '@/hooks/use-messages';
 import { useMyStats } from '@/hooks/use-stats';
 import { useNotificationSummary } from '@/hooks/use-notifications';
 import { useT } from '@/hooks/use-t';
@@ -43,6 +45,8 @@ export default function ProfileScreen() {
   const stats = useMyStats();
   const notifications = useNotificationSummary();
   const unreadCount = notifications.data?.unread_count ?? 0;
+  const messageSummary = useMessageSummary();
+  const unreadMessages = messageSummary.data?.unread_count ?? 0;
   const [loggingOut, setLoggingOut] = useState(false);
 
   const logout = async () => {
@@ -103,6 +107,33 @@ export default function ProfileScreen() {
               <AppText variant="label">{t('profileTab.social')}</AppText>
             </View>
             <ChevronRight color={theme.mutedText} size={18} />
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={t('profileTab.openMessages')}
+            onPress={() => router.push('/messages')}
+            style={({ pressed }) => [
+              styles.navigationRow,
+              {
+                borderColor: theme.border,
+                opacity: pressed ? 0.72 : 1,
+              },
+            ]}
+          >
+            <View style={styles.navigationLabel}>
+              <MessageCircle color={theme.mutedText} size={20} />
+              <AppText variant="label">{t('profileTab.messages')}</AppText>
+            </View>
+            <View style={styles.navigationMeta}>
+              {unreadMessages > 0 ? (
+                <View style={[styles.countBadge, { backgroundColor: theme.danger }]}>
+                  <AppText variant="caption" style={styles.countBadgeText}>
+                    {unreadMessages > 99 ? '99+' : unreadMessages}
+                  </AppText>
+                </View>
+              ) : null}
+              <ChevronRight color={theme.mutedText} size={18} />
+            </View>
           </Pressable>
           <Pressable
             accessibilityRole="button"

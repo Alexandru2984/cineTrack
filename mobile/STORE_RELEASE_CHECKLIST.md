@@ -65,6 +65,9 @@ fingerprint alone will not verify Android App Links on store builds.
 - Reporting and blocking work from a second test account on both web and
   native clients; blocked members cannot regain visibility through direct API
   requests.
+- Direct messages work only between mutual followers; unfollowing disables new
+  sends, blocking removes the relationship, received messages can be reported,
+  and message bodies never enter the persistent mobile query cache.
 - The moderator test account has verified email and 2FA, and every status
   change requires a note and creates an audit entry.
 - Child-safety and threatening-content reports sort ahead of the normal queue;
@@ -77,7 +80,7 @@ fingerprint alone will not verify Android App Links on store builds.
 - Create the Play application and enable Play App Signing.
 - Add the Play **app signing** SHA-256 fingerprint, not only the upload/EAS fingerprint, to `frontend/public/.well-known/assetlinks.json`.
 - Verify `https://vazute.micutu.com/.well-known/assetlinks.json` returns HTTP 200, no redirect, and `application/json`.
-- Reinstall the signed release and test `/reset-password`, `/media`, `/episodes`, `/profile`, and `/lists` links with `adb`.
+- Reinstall the signed release and test `/reset-password`, `/media`, `/episodes`, `/profile`, `/lists`, and `/messages` links with `adb`.
 - Complete Data safety from the actual behavior documented at `https://vazute.micutu.com/privacy`.
 - Set the account-deletion URL to `https://vazute.micutu.com/account-deletion` and verify deletion inside the app.
 - Review the production AAB permissions and confirm that blocked permissions did not return.
@@ -99,6 +102,9 @@ never be guessed or copied from an unrelated signing identity.
 - Install the exact signed artifact on a normal device, not only Expo Orbit or an emulator.
 - Test fresh install, login with and without 2FA, offline launch, token refresh, logout, reset link, and account deletion.
 - Test media/episode sharing, incoming app links while signed out, login return, and incoming links while offline.
+- With two mutual-follow test accounts, verify inbox badges, idempotent resend,
+  read state, unfollowed/blocked composer behavior, and individual message
+  reporting in both Romanian and English.
 - Confirm `completed`, season bulk watch, and watched-through never add unreleased episodes.
 - Confirm privacy/cache clearing, crash-report redaction, notification opt-in/out, and device-token revocation.
 - Select valid and invalid TV Time exports, verify upload limits, background progress, and the completed library refresh.

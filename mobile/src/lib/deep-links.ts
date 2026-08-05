@@ -10,6 +10,7 @@ const MEDIA_PATH = /^\/media\/([1-9]\d{0,9})\?type=(movie|tv)$/;
 const EPISODE_PATH =
   /^\/episodes\/[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const PROFILE_PATH = /^\/profile\/[A-Za-z0-9](?:[A-Za-z0-9_-]{1,48}[A-Za-z0-9])$/;
+const MESSAGE_PATH = /^\/messages\/[A-Za-z0-9](?:[A-Za-z0-9_-]{1,48}[A-Za-z0-9])$/;
 
 export function mediaPath(tmdbId: number | string, type: MediaType) {
   return `/media/${tmdbId}?type=${type}` as const;
@@ -21,6 +22,10 @@ export function episodePath(episodeId: string) {
 
 export function profilePath(username: string) {
   return `/profile/${username}` as const;
+}
+
+export function messagePath(username: string) {
+  return `/messages/${username}` as const;
 }
 
 export function publicUrl(path: string) {
@@ -48,7 +53,11 @@ export function safePostAuthRedirect(value: string | string[] | undefined): Href
     }
   }
 
-  if (EPISODE_PATH.test(candidate) || PROFILE_PATH.test(candidate)) {
+  if (
+    EPISODE_PATH.test(candidate) ||
+    PROFILE_PATH.test(candidate) ||
+    MESSAGE_PATH.test(candidate)
+  ) {
     return candidate as Href;
   }
 

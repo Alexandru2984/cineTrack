@@ -86,7 +86,9 @@ device-only key held in SecureStore. Cache restoration is scoped to the
 SecureStore user identity, and logout, an account change, or the Settings clear
 action removes it. Tokens remain in SecureStore. Exact history timestamps,
 custom lists, statistics, notifications, social data, account sessions, and
-user search results are excluded from persistence.
+user search results are excluded from persistence. Direct-message summaries,
+conversation lists, and message bodies are also memory-only and are discarded
+when the process ends or the query cache is cleared.
 
 ## TV Time import and first-run guidance
 
@@ -159,11 +161,12 @@ after update signing is configured and a newly signed runtime is distributed.
 ## App and universal links
 
 Android App Links are enabled for password resets, media details, episode
-details, profiles, and public lists under `https://vazute.micutu.com`. Protected
-links preserve a strictly validated internal destination through login; an
-external or malformed redirect value is discarded. The domain association
-contains the SHA-256 fingerprint of the EAS Android keystore. After Google Play
-App Signing is enabled, add the Play signing certificate fingerprint to
+details, profiles, public lists, and direct-message conversations under
+`https://vazute.micutu.com`. Protected profile and conversation links preserve
+a strictly validated internal destination through login; an external or
+malformed redirect value is discarded. The domain association contains the
+SHA-256 fingerprint of the EAS Android keystore. After Google Play App Signing
+is enabled, add the Play signing certificate fingerprint to
 `frontend/public/.well-known/assetlinks.json` alongside the EAS fingerprint.
 
 The password-reset token stays in the URL fragment so it is not sent in HTTP
