@@ -4,7 +4,7 @@ use uuid::Uuid;
 use crate::errors::AppError;
 use crate::models::User;
 
-pub const CURRENT_TERMS_VERSION: &str = "2026-07-30";
+pub const CURRENT_TERMS_VERSION: &str = "2026-08-05";
 
 pub async fn accept_current_terms(pool: &PgPool, user_id: Uuid) -> Result<User, AppError> {
     let mut tx = pool.begin().await?;

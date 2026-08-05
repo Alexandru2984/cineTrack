@@ -15,8 +15,9 @@ vi.mock('@/hooks/useSocial', () => ({
       is_public: true,
       followers_count: 2,
       following_count: 3,
-      is_following: false,
-      follow_status: null,
+      is_following: true,
+      is_followed_by: true,
+      follow_status: 'accepted',
       can_view_activity: true,
       created_at: '2026-08-05T00:00:00Z',
     },
@@ -30,7 +31,7 @@ vi.mock('@/hooks/useSocial', () => ({
 
 vi.mock('@/store/auth', () => ({
   useAuthStore: (selector: (state: { user: { id: string } }) => unknown) =>
-    selector({ user: { id: '00000000-0000-0000-0000-000000000001' } }),
+    selector({ user: { id: '00000000-0000-0000-0000-000000000002' } }),
 }));
 
 vi.mock('@/components/ConnectionsDialog', () => ({
@@ -53,5 +54,10 @@ describe('ProfilePage connections', () => {
 
     await user.click(screen.getByRole('button', { name: '3 following' }));
     expect(screen.getByRole('dialog')).toHaveTextContent('following');
+
+    expect(screen.getByRole('link', { name: 'Message @alice' })).toHaveAttribute(
+      'href',
+      '/messages/alice',
+    );
   });
 });

@@ -36,6 +36,7 @@ export default function PrivacyPage() {
             <li>{t('privacy.data6')}</li>
             <li>{t('privacy.data7')}</li>
             <li>{t('privacy.data8')}</li>
+            <li>{t('privacy.data9')}</li>
           </ul>
         </PolicySection>
 

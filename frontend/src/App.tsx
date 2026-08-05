@@ -27,6 +27,7 @@ const WrappedPage = lazy(() => import('@/pages/Wrapped'));
 const ProfilePage = lazy(() => import('@/pages/Profile'));
 const SettingsPage = lazy(() => import('@/pages/Settings'));
 const NotificationsPage = lazy(() => import('@/pages/Notifications'));
+const MessagesPage = lazy(() => import('@/pages/Messages'));
 const ListsPage = lazy(() => import('@/pages/Lists'));
 const ListDetailPage = lazy(() => import('@/pages/ListDetail'));
 const AboutPage = lazy(() => import('@/pages/About'));
@@ -125,6 +126,8 @@ export default function App() {
               <Route path="/profile/:username" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
               <Route path="/settings" element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />
               <Route path="/notifications" element={<ProtectedRoute><NotificationsPage /></ProtectedRoute>} />
+              <Route path="/messages" element={<ProtectedRoute><MessagesPage /></ProtectedRoute>} />
+              <Route path="/messages/:username" element={<ProtectedRoute><MessagesPage /></ProtectedRoute>} />
               <Route path="/lists" element={<ProtectedRoute><ListsPage /></ProtectedRoute>} />
               <Route path="/lists/:id" element={<ListDetailPage />} />
               <Route path="/moderation" element={<ProtectedRoute><ModerationPage /></ProtectedRoute>} />

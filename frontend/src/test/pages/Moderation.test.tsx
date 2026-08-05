@@ -18,13 +18,13 @@ vi.mock('@/hooks/useCommunitySafety', () => ({
           reporter_username: 'reporter',
           subject_user_id: 'subject-1',
           subject_username: 'subject',
-          target_type: 'user',
-          target_id: 'subject-1',
+          target_type: 'message',
+          target_id: 'message-1',
           reason: 'child_safety',
           details: 'Urgent context',
           content_snapshot: {
-            username: 'subject',
-            bio: '<script>alert(1)</script>',
+            sender_id: 'subject-1',
+            body: '<script>alert(1)</script>',
           },
           status: 'open',
           moderated_by: null,
@@ -60,6 +60,7 @@ describe('Moderation page', () => {
     render(<ModerationPage />);
 
     expect(screen.getByText('Priority review')).toBeVisible();
+    expect(screen.getByRole('heading', { name: 'Message from @subject' })).toBeVisible();
     await user.click(screen.getByText('Server evidence snapshot'));
     expect(screen.getByText('<script>alert(1)</script>')).toBeVisible();
     expect(document.querySelector('script')).toBeNull();

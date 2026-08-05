@@ -22,6 +22,7 @@ import {
   Calendar,
   Clock3,
   LockKeyhole,
+  MessageCircle,
   Flag,
   Ban,
   Settings,
@@ -112,6 +113,16 @@ export default function ProfilePage() {
                     <><UserPlus className="h-4 w-4" /> {profile.is_public ? t('profile.follow') : t('profile.requestToFollow')}</>
                   )}
                 </button>
+                {profile.is_following && profile.is_followed_by ? (
+                  <Link
+                    to={`/messages/${encodeURIComponent(profile.username)}`}
+                    className="flex h-9 items-center gap-1.5 rounded-md border border-[hsl(var(--border))] px-3 text-sm font-medium text-[hsl(var(--muted-foreground))] hover:border-[hsl(var(--primary))] hover:text-[hsl(var(--primary))]"
+                    aria-label={t('profile.messageUser', { username: profile.username })}
+                  >
+                    <MessageCircle className="h-4 w-4" aria-hidden="true" />
+                    <span className="hidden sm:inline">{t('profile.message')}</span>
+                  </Link>
+                ) : null}
                 <button
                   type="button"
                   onClick={() => setReporting(true)}

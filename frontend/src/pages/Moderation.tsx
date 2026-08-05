@@ -95,6 +95,12 @@ function ReportCard({ report }: { report: ModerationReport }) {
           <h2 className="mt-3 break-words text-lg font-semibold">
             {report.target_type === 'user'
               ? `@${report.subject_username ?? t('moderation.deletedAccount')}`
+              : report.target_type === 'message'
+                ? t('moderation.messageFrom', {
+                    username: report.subject_username
+                      ? `@${report.subject_username}`
+                      : t('moderation.deletedAccount'),
+                  })
               : snapshotValue(report.content_snapshot.name)}
           </h2>
           <p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">

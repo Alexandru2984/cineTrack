@@ -20,6 +20,7 @@ export default function CommunityGuidelinesPage() {
         { title: t('legal.guidelines5Title'), body: t('legal.guidelines5Body') },
         { title: t('legal.guidelines6Title'), body: t('legal.guidelines6Body') },
         { title: t('legal.guidelines7Title'), body: t('legal.guidelines7Body') },
+        { title: t('legal.guidelines8Title'), body: t('legal.guidelines8Body') },
       ]}
     />
   );

@@ -62,7 +62,7 @@ export interface BlockedUser {
 
 export interface SafetyReport {
   id: string;
-  target_type: 'user' | 'list';
+  target_type: 'user' | 'list' | 'message';
   target_id: string;
   reason: string;
   details: string | null;
@@ -82,7 +82,7 @@ export interface ModerationReport {
   reporter_username: string | null;
   subject_user_id: string | null;
   subject_username: string | null;
-  target_type: 'user' | 'list';
+  target_type: 'user' | 'list' | 'message';
   target_id: string;
   reason: string;
   details: string | null;
@@ -420,9 +420,48 @@ export interface PublicUserProfile {
   followers_count: number | null;
   following_count: number | null;
   is_following: boolean;
+  is_followed_by: boolean;
   follow_status: 'pending' | 'accepted' | null;
   can_view_activity: boolean;
   created_at: string;
+}
+
+export interface DirectMessage {
+  id: string;
+  sender_id: string;
+  recipient_id: string;
+  body: string;
+  read_at: string | null;
+  created_at: string;
+}
+
+export interface MessagePeer {
+  id: string;
+  username: string;
+  avatar_url: string | null;
+}
+
+export interface MessageThread {
+  user: MessagePeer;
+  can_message: boolean;
+  messages: DirectMessage[];
+}
+
+export interface MessageConversation {
+  user_id: string;
+  username: string;
+  avatar_url: string | null;
+  last_message_id: string;
+  last_message_sender_id: string;
+  last_message_body: string;
+  last_message_at: string;
+  last_message_read_at: string | null;
+  unread_count: number;
+  can_message: boolean;
+}
+
+export interface MessageSummary {
+  unread_count: number;
 }
 
 export interface FollowRequest {

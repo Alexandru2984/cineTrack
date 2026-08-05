@@ -22,6 +22,7 @@ export default function TermsPage() {
         { title: t('legal.terms7Title'), body: t('legal.terms7Body') },
         { title: t('legal.terms8Title'), body: t('legal.terms8Body') },
         { title: t('legal.terms9Title'), body: t('legal.terms9Body') },
+        { title: t('legal.terms10Title'), body: t('legal.terms10Body') },
       ]}
     />
   );

@@ -89,6 +89,7 @@ describe('Type contracts', () => {
       followers_count: 10,
       following_count: 5,
       is_following: false,
+      is_followed_by: false,
       follow_status: null,
       can_view_activity: true,
       created_at: '2024-01-01',

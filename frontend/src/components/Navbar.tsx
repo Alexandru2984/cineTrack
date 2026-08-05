@@ -9,6 +9,7 @@ import {
   LogOut,
   ListPlus,
   Menu,
+  MessageCircle,
   Moon,
   Search,
   Settings,
@@ -24,6 +25,7 @@ import {
   useMarkNotificationRead,
   useNotificationSummary,
 } from '@/hooks/useNotifications';
+import { useMessageSummary } from '@/hooks/useMessages';
 import { useAuthStore } from '@/store/auth';
 import { useThemeStore } from '@/store/theme';
 import { useT } from '@/hooks/useT';
@@ -35,6 +37,13 @@ function unreadLabel(t: Translate, count: number) {
   return count === 1
     ? t('nav.notificationsUnreadOne')
     : t('nav.notificationsUnreadMany', { count });
+}
+
+function unreadMessagesLabel(t: Translate, count: number) {
+  if (count === 0) return t('nav.messagesNoUnread');
+  return count === 1
+    ? t('nav.messagesUnreadOne')
+    : t('nav.messagesUnreadMany', { count });
 }
 
 function UnreadBadge({ count }: { count: number }) {
@@ -58,10 +67,12 @@ export function Navbar() {
   const authed = isAuthenticated();
   const logoutMutation = useLogout();
   const notificationSummary = useNotificationSummary(authed);
+  const messageSummary = useMessageSummary(authed);
   const calendarSummary = useCalendarSummary(authed);
   const markRead = useMarkNotificationRead();
   const markAllRead = useMarkAllNotificationsRead();
   const unreadCount = notificationSummary.data?.unread_count ?? 0;
+  const unreadMessageCount = messageSummary.data?.unread_count ?? 0;
   const newEpisodeCount = calendarSummary.data?.new_count ?? 0;
 
   useEffect(() => {
@@ -144,6 +155,16 @@ export function Navbar() {
                 className="flex items-center gap-1 text-sm transition-colors hover:text-[hsl(var(--primary))]"
               >
                 <ListPlus className="h-4 w-4" /> {t('nav.lists')}
+              </Link>
+
+              <Link
+                to="/messages"
+                aria-label={unreadMessagesLabel(t, unreadMessageCount)}
+                title={t('nav.messages')}
+                className="relative flex h-9 w-9 items-center justify-center rounded-md transition-colors hover:bg-[hsl(var(--accent))]"
+              >
+                <MessageCircle className="h-4 w-4" aria-hidden="true" />
+                <UnreadBadge count={unreadMessageCount} />
               </Link>
 
               <div ref={notificationsRef} className="relative">
@@ -279,6 +300,14 @@ export function Navbar() {
           <div className={`flex items-center gap-1 ${authed ? 'md:hidden' : 'xl:hidden'}`}>
             {authed && (
               <>
+                <Link
+                  to="/messages"
+                  aria-label={unreadMessagesLabel(t, unreadMessageCount)}
+                  className="relative flex h-10 w-10 items-center justify-center rounded-md transition-colors hover:bg-[hsl(var(--accent))]"
+                >
+                  <MessageCircle className="h-5 w-5" aria-hidden="true" />
+                  <UnreadBadge count={unreadMessageCount} />
+                </Link>
                 <Link
                   to="/notifications"
                   aria-label={unreadLabel(t, unreadCount)}
