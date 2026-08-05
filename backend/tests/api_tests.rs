@@ -7540,6 +7540,113 @@ async fn test_follow_and_unfollow() {
 
 #[actix_web::test]
 #[ignore = "requires test DB"]
+async fn test_profile_connection_lists_enforce_privacy_and_blocks() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+
+    let (_owner_token, _, owner_id) =
+        register_user(&app, "privateowner", "owner@example.com", "Pass1234").await;
+    let (viewer_token, _, viewer_id) =
+        register_user(&app, "approvedviewer", "viewer@example.com", "Pass1234").await;
+    let (stranger_token, _, _stranger_id) =
+        register_user(&app, "stranger", "stranger@example.com", "Pass1234").await;
+    let (_connection_token, _, connection_id) =
+        register_user(&app, "privatefriend", "friend@example.com", "Pass1234").await;
+
+    let owner_id = Uuid::parse_str(&owner_id).unwrap();
+    let viewer_id = Uuid::parse_str(&viewer_id).unwrap();
+    let connection_id = Uuid::parse_str(&connection_id).unwrap();
+
+    sqlx::query("UPDATE users SET is_public = false, avatar_url = $2, bio = $3 WHERE id = $1")
+        .bind(owner_id)
+        .bind("https://example.com/owner.jpg")
+        .bind("private owner")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE users SET is_public = false, avatar_url = $2, bio = $3 WHERE id = $1")
+        .bind(connection_id)
+        .bind("https://example.com/friend.jpg")
+        .bind("private friend")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        r#"INSERT INTO follows (follower_id, following_id, status)
+        VALUES ($1, $2, 'accepted'), ($3, $2, 'accepted'), ($2, $3, 'accepted')"#,
+    )
+    .bind(viewer_id)
+    .bind(owner_id)
+    .bind(connection_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let req = actix_test::TestRequest::get()
+        .uri("/api/users/privateowner/followers")
+        .insert_header(("Authorization", format!("Bearer {stranger_token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 403);
+
+    let req = actix_test::TestRequest::get()
+        .uri("/api/users/privateowner/followers")
+        .insert_header(("Authorization", format!("Bearer {viewer_token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let body: Value = actix_test::read_body_json(resp).await;
+    let private_friend = body
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|user| user["username"] == "privatefriend")
+        .unwrap();
+    assert!(private_friend["avatar_url"].is_null());
+    assert!(private_friend["bio"].is_null());
+
+    let req = actix_test::TestRequest::get()
+        .uri("/api/users/privateowner/following")
+        .insert_header(("Authorization", format!("Bearer {viewer_token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let body: Value = actix_test::read_body_json(resp).await;
+    assert_eq!(body.as_array().unwrap().len(), 1);
+    assert_eq!(body[0]["username"], "privatefriend");
+    assert!(body[0]["avatar_url"].is_null());
+
+    sqlx::query("INSERT INTO user_blocks (blocker_id, blocked_id) VALUES ($1, $2)")
+        .bind(connection_id)
+        .bind(viewer_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let req = actix_test::TestRequest::get()
+        .uri("/api/users/privateowner/following")
+        .insert_header(("Authorization", format!("Bearer {viewer_token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let body: Value = actix_test::read_body_json(resp).await;
+    assert!(body.as_array().unwrap().is_empty());
+
+    let req = actix_test::TestRequest::get()
+        .uri("/api/users/privateowner/followers")
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 401);
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
 async fn test_private_follow_request_requires_owner_approval() {
     let pool = setup_pool().await;
     clean_db(&pool).await;

@@ -112,6 +112,31 @@ export function useFollowing() {
   });
 }
 
+export type UserConnectionKind = 'followers' | 'following';
+
+const CONNECTIONS_PAGE_SIZE = 50;
+
+export function useUserConnections(
+  username: string,
+  kind: UserConnectionKind,
+  enabled = true,
+) {
+  return useInfiniteQuery({
+    queryKey: ['connections', username, kind],
+    queryFn: async ({ pageParam }) => {
+      const response = await api.get<UserSummary[]>(
+        `/users/${encodeURIComponent(username)}/${kind}`,
+        { params: { page: pageParam, limit: CONNECTIONS_PAGE_SIZE } },
+      );
+      return response.data;
+    },
+    initialPageParam: 1,
+    getNextPageParam: (lastPage, pages) =>
+      lastPage.length === CONNECTIONS_PAGE_SIZE ? pages.length + 1 : undefined,
+    enabled: Boolean(username) && enabled,
+  });
+}
+
 export function useFollowRequests() {
   return useQuery<FollowRequest[]>({
     queryKey: ['follow-requests'],

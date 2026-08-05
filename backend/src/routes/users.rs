@@ -120,12 +120,14 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
                 web::delete().to(reject_follow_request),
             )
             .route("/search", web::get().to(search_users))
-            .route("/{username}", web::get().to(get_profile))
+            .route("/{username}/followers", web::get().to(profile_followers))
+            .route("/{username}/following", web::get().to(profile_following))
             .route("/{username}/activity", web::get().to(get_user_activity))
             .route("/{username}/block", web::post().to(block_user))
             .route("/{username}/block", web::delete().to(unblock_user))
             .route("/{username}/follow", web::post().to(follow_user))
-            .route("/{username}/follow", web::delete().to(unfollow_user)),
+            .route("/{username}/follow", web::delete().to(unfollow_user))
+            .route("/{username}", web::get().to(get_profile)),
     );
 }
 
@@ -1293,6 +1295,170 @@ async fn my_following(
     let response: Vec<crate::dto::auth::UserSummary> =
         following.into_iter().map(|u| u.into()).collect();
     Ok(HttpResponse::Ok().json(response))
+}
+
+#[derive(Clone, Copy)]
+enum ConnectionList {
+    Followers,
+    Following,
+}
+
+async fn visible_connection_owner(
+    pool: &PgPool,
+    viewer_id: Uuid,
+    username: &str,
+) -> Result<User, AppError> {
+    let owner = sqlx::query_as::<_, User>("SELECT * FROM users WHERE LOWER(username) = LOWER($1)")
+        .bind(username)
+        .fetch_optional(pool)
+        .await?
+        .ok_or_else(|| AppError::NotFound("User not found".to_string()))?;
+
+    if owner.id != viewer_id
+        && crate::services::community_safety::interaction_is_blocked(pool, viewer_id, owner.id)
+            .await?
+    {
+        return Err(AppError::NotFound("User not found".to_string()));
+    }
+
+    if !owner.is_public && owner.id != viewer_id {
+        let follows_owner = sqlx::query_scalar::<_, bool>(
+            r#"SELECT EXISTS(
+                SELECT 1 FROM follows
+                WHERE follower_id = $1 AND following_id = $2 AND status = 'accepted'
+            )"#,
+        )
+        .bind(viewer_id)
+        .bind(owner.id)
+        .fetch_one(pool)
+        .await?;
+
+        if !follows_owner {
+            return Err(AppError::Forbidden(
+                "This follow list is private".to_string(),
+            ));
+        }
+    }
+
+    Ok(owner)
+}
+
+async fn profile_connections(
+    pool: &PgPool,
+    viewer_id: Uuid,
+    username: &str,
+    pagination: &PaginationParams,
+    list: ConnectionList,
+) -> Result<Vec<crate::dto::auth::UserSummary>, AppError> {
+    let owner = visible_connection_owner(pool, viewer_id, username).await?;
+    let query = match list {
+        ConnectionList::Followers => {
+            r#"SELECT u.id, u.username,
+                CASE
+                    WHEN u.is_public OR u.id = $1 OR viewer_relationship.status = 'accepted'
+                    THEN u.avatar_url ELSE NULL
+                END,
+                CASE
+                    WHEN u.is_public OR u.id = $1 OR viewer_relationship.status = 'accepted'
+                    THEN u.bio ELSE NULL
+                END
+            FROM users u
+            JOIN follows connection ON connection.follower_id = u.id
+            LEFT JOIN follows viewer_relationship
+                ON viewer_relationship.follower_id = $1
+                AND viewer_relationship.following_id = u.id
+            WHERE connection.following_id = $2
+              AND connection.status = 'accepted'
+              AND NOT EXISTS (
+                  SELECT 1 FROM user_blocks block
+                  WHERE (block.blocker_id = $1 AND block.blocked_id = u.id)
+                     OR (block.blocker_id = u.id AND block.blocked_id = $1)
+              )
+            ORDER BY connection.created_at DESC, connection.follower_id
+            LIMIT $3 OFFSET $4"#
+        }
+        ConnectionList::Following => {
+            r#"SELECT u.id, u.username,
+                CASE
+                    WHEN u.is_public OR u.id = $1 OR viewer_relationship.status = 'accepted'
+                    THEN u.avatar_url ELSE NULL
+                END,
+                CASE
+                    WHEN u.is_public OR u.id = $1 OR viewer_relationship.status = 'accepted'
+                    THEN u.bio ELSE NULL
+                END
+            FROM users u
+            JOIN follows connection ON connection.following_id = u.id
+            LEFT JOIN follows viewer_relationship
+                ON viewer_relationship.follower_id = $1
+                AND viewer_relationship.following_id = u.id
+            WHERE connection.follower_id = $2
+              AND connection.status = 'accepted'
+              AND NOT EXISTS (
+                  SELECT 1 FROM user_blocks block
+                  WHERE (block.blocker_id = $1 AND block.blocked_id = u.id)
+                     OR (block.blocker_id = u.id AND block.blocked_id = $1)
+              )
+            ORDER BY connection.created_at DESC, connection.following_id
+            LIMIT $3 OFFSET $4"#
+        }
+    };
+
+    let rows = sqlx::query_as::<_, (Uuid, String, Option<String>, Option<String>)>(query)
+        .bind(viewer_id)
+        .bind(owner.id)
+        .bind(pagination.limit_val())
+        .bind(pagination.offset())
+        .fetch_all(pool)
+        .await?;
+
+    Ok(rows
+        .into_iter()
+        .map(
+            |(id, username, avatar_url, bio)| crate::dto::auth::UserSummary {
+                id,
+                username,
+                avatar_url,
+                bio,
+            },
+        )
+        .collect())
+}
+
+async fn profile_followers(
+    pool: web::Data<PgPool>,
+    req: HttpRequest,
+    path: web::Path<String>,
+    pagination: web::Query<PaginationParams>,
+) -> Result<HttpResponse, AppError> {
+    let viewer_id = require_auth(&req).await?;
+    let users = profile_connections(
+        pool.get_ref(),
+        viewer_id,
+        &path.into_inner(),
+        &pagination,
+        ConnectionList::Followers,
+    )
+    .await?;
+    Ok(HttpResponse::Ok().json(users))
+}
+
+async fn profile_following(
+    pool: web::Data<PgPool>,
+    req: HttpRequest,
+    path: web::Path<String>,
+    pagination: web::Query<PaginationParams>,
+) -> Result<HttpResponse, AppError> {
+    let viewer_id = require_auth(&req).await?;
+    let users = profile_connections(
+        pool.get_ref(),
+        viewer_id,
+        &path.into_inner(),
+        &pagination,
+        ConnectionList::Following,
+    )
+    .await?;
+    Ok(HttpResponse::Ok().json(users))
 }
 
 /// Returns user's recent watch activity. Respects is_public flag:

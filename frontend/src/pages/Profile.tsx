@@ -10,6 +10,8 @@ import {
 import { LoadingSpinner } from '@/components/LoadingSpinner';
 import { ActivityList } from '@/components/ActivityList';
 import { ReportDialog } from '@/components/ReportDialog';
+import { ConnectionsDialog } from '@/components/ConnectionsDialog';
+import type { UserConnectionKind } from '@/hooks/useSocial';
 import { useAuthStore } from '@/store/auth';
 import { usePageTitle } from '@/hooks/usePageTitle';
 import { formatDate } from '@/lib/utils';
@@ -44,6 +46,7 @@ export default function ProfilePage() {
   const unfollow = useUnfollow();
   const block = useBlockUser();
   const [reporting, setReporting] = useState(false);
+  const [connections, setConnections] = useState<UserConnectionKind | null>(null);
 
   if (isLoading) return <LoadingSpinner />;
   if (!profile) return <div className="text-center py-16">{t('profile.notFound')}</div>;
@@ -152,10 +155,24 @@ export default function ProfilePage() {
           )}
           <div className="mt-3 flex flex-wrap gap-x-6 gap-y-2 text-sm">
             {profile.followers_count !== null && (
-              <span><strong>{profile.followers_count}</strong> {t('profile.followers')}</span>
+              <button
+                type="button"
+                aria-haspopup="dialog"
+                onClick={() => setConnections('followers')}
+                className="rounded-sm hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--ring))]"
+              >
+                <strong>{profile.followers_count}</strong> {t('profile.followers')}
+              </button>
             )}
             {profile.following_count !== null && (
-              <span><strong>{profile.following_count}</strong> {t('profile.following')}</span>
+              <button
+                type="button"
+                aria-haspopup="dialog"
+                onClick={() => setConnections('following')}
+                className="rounded-sm hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--ring))]"
+              >
+                <strong>{profile.following_count}</strong> {t('profile.following')}
+              </button>
             )}
             <span className="flex items-center gap-1 text-[hsl(var(--muted-foreground))]">
               <Calendar className="h-3 w-3" /> {t('profile.joined', { date: formatDate(profile.created_at) })}
@@ -188,6 +205,14 @@ export default function ProfilePage() {
           targetId={profile.id}
           targetLabel={`@${profile.username}`}
           onClose={() => setReporting(false)}
+        />
+      ) : null}
+
+      {connections ? (
+        <ConnectionsDialog
+          username={profile.username}
+          kind={connections}
+          onClose={() => setConnections(null)}
         />
       ) : null}
     </div>
