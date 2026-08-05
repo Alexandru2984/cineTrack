@@ -52,6 +52,7 @@ import { InstallAppCard } from '@/components/InstallAppCard';
 import { CalendarFeedCard } from '@/components/CalendarFeedCard';
 import { BlockedUsersCard } from '@/components/BlockedUsersCard';
 import { LanguageCard } from '@/components/LanguageCard';
+import { Switch } from '@/components/Switch';
 import { useAuthStore } from '@/store/auth';
 import { useT } from '@/hooks/useT';
 import { useModeratorStatus } from '@/hooks/useCommunitySafety';
@@ -166,23 +167,12 @@ function PrivacyCard() {
               : t('settings.privacyPublic')}
           </p>
         </div>
-        <button
-          type="button"
-          role="switch"
-          aria-checked={isPrivate}
-          aria-label={t('settings.privateProfileAria')}
+        <Switch
+          checked={isPrivate}
+          label={t('settings.privateProfileAria')}
           disabled={!me || updatePrivacy.isPending || needsVerification}
-          onClick={() => updatePrivacy.mutate(isPrivate)}
-          className={`relative h-6 w-11 shrink-0 rounded-full transition-colors disabled:opacity-50 ${
-            isPrivate ? 'bg-[hsl(var(--primary))]' : 'bg-[hsl(var(--muted))]'
-          }`}
-        >
-          <span
-            className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${
-              isPrivate ? 'translate-x-5' : 'translate-x-0.5'
-            }`}
-          />
-        </button>
+          onCheckedChange={(privateProfile) => updatePrivacy.mutate(!privateProfile)}
+        />
       </div>
       {updatePrivacy.error && (
         <p className="mt-3 text-sm text-[hsl(var(--destructive))]">
