@@ -10,6 +10,7 @@ use crate::middleware::auth::require_auth;
 use crate::middleware::rate_limit::{RateLimit, RateLimitConfig};
 use crate::services::storage::{StorageService, AVATAR_EXTENSIONS};
 use crate::services::tmdb::TmdbService;
+use crate::utils::image_metadata;
 
 pub type ImageGovernorConfig = RateLimitConfig;
 
@@ -306,6 +307,31 @@ fn validate_avatar_image(bytes: &[u8], declared_type: &str) -> Result<ImageInfo,
     Ok(info)
 }
 
+/// Remove embedded metadata before the bytes reach public storage. Avatars are
+/// served unauthenticated, so EXIF GPS coordinates in an uploaded photo would
+/// otherwise be world-readable. The mobile client already re-encodes, but the
+/// web client uploads the file as chosen and a direct API call skips both, so
+/// this is the only place the guarantee holds for every caller.
+///
+/// Fails closed: an image whose container cannot be rewritten confidently, or
+/// that no longer describes the same picture afterwards, is refused rather than
+/// stored with metadata intact.
+fn strip_avatar_metadata(bytes: &[u8], info: ImageInfo) -> Result<Vec<u8>, AppError> {
+    let stripped = image_metadata::strip_metadata(bytes, info.extension)
+        .ok_or_else(|| AppError::BadRequest("Avatar metadata could not be removed".to_string()))?;
+    let rewritten = inspect_image(&stripped).filter(|rewritten| {
+        rewritten.content_type == info.content_type
+            && rewritten.width == info.width
+            && rewritten.height == info.height
+    });
+    if rewritten.is_none() {
+        return Err(AppError::BadRequest(
+            "Avatar metadata could not be removed".to_string(),
+        ));
+    }
+    Ok(stripped)
+}
+
 fn storage_or_503(storage: &Option<StorageService>) -> Result<&StorageService, AppError> {
     storage
         .as_ref()
@@ -372,6 +398,7 @@ async fn upload_avatar(
     let (bytes, declared_type) =
         data.ok_or_else(|| AppError::BadRequest("No image uploaded".to_string()))?;
     let info = validate_avatar_image(&bytes, declared_type)?;
+    let bytes = strip_avatar_metadata(&bytes, info)?;
 
     let mut tx = pool.begin().await?;
     lock_user(&mut tx, user_id).await?;
