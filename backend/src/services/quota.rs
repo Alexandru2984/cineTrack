@@ -8,6 +8,7 @@ pub const MAX_HISTORY_EVENTS_PER_USER: i64 = 100_000;
 pub const MAX_SOCIAL_RELATIONSHIPS_PER_USER: i64 = 5_000;
 pub const MAX_PENDING_FOLLOW_REQUESTS_PER_USER: i64 = 5_000;
 pub const MAX_EPISODE_PLANS_PER_USER: i64 = 10_000;
+pub const MAX_DIRECT_MESSAGES_PER_USER: i64 = 100_000;
 
 pub async fn lock_and_count_tracking(
     tx: &mut Transaction<'_, Postgres>,
@@ -148,6 +149,15 @@ pub fn ensure_pending_follow_request_capacity(
     )
 }
 
+pub fn ensure_direct_message_capacity(current: i64, additional: i64) -> Result<(), AppError> {
+    ensure_capacity(
+        current,
+        additional,
+        MAX_DIRECT_MESSAGES_PER_USER,
+        "direct messages",
+    )
+}
+
 fn ensure_capacity(
     current: i64,
     additional: i64,
@@ -221,6 +231,15 @@ mod tests {
         ));
         assert!(matches!(
             ensure_pending_follow_request_capacity(MAX_PENDING_FOLLOW_REQUESTS_PER_USER, 1),
+            Err(AppError::Conflict(_))
+        ));
+    }
+
+    #[test]
+    fn direct_message_quota_rejects_new_rows_at_limit() {
+        assert!(ensure_direct_message_capacity(MAX_DIRECT_MESSAGES_PER_USER - 1, 1).is_ok());
+        assert!(matches!(
+            ensure_direct_message_capacity(MAX_DIRECT_MESSAGES_PER_USER, 1),
             Err(AppError::Conflict(_))
         ));
     }

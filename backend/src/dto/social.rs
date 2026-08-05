@@ -36,6 +36,7 @@ pub struct PublicUserProfile {
     pub followers_count: Option<i64>,
     pub following_count: Option<i64>,
     pub is_following: bool,
+    pub is_followed_by: bool,
     pub follow_status: Option<String>,
     pub can_view_activity: bool,
     pub created_at: chrono::DateTime<chrono::Utc>,

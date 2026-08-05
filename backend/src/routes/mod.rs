@@ -8,6 +8,7 @@ pub mod history;
 pub mod import;
 pub mod lists;
 pub mod media;
+pub mod messages;
 pub mod moderation;
 pub mod notifications;
 pub mod push;
@@ -44,6 +45,7 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
             .configure(client_errors::configure)
             .configure(csp_report::configure)
             .configure(media::configure)
+            .configure(messages::configure)
             .configure(moderation::configure)
             .configure(tracking::configure)
             .configure(history::configure)
@@ -84,6 +86,7 @@ pub fn configure_with_rate_limits(
             .configure(|cfg| client_errors::configure_rate_limited(cfg, client_error_rate_limiter))
             .configure(|cfg| csp_report::configure_rate_limited(cfg, csp_report_rate_limiter))
             .configure(media::configure)
+            .configure(messages::configure)
             .configure(moderation::configure)
             .configure(tracking::configure)
             .configure(history::configure)

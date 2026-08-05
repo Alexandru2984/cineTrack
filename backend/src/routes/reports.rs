@@ -103,9 +103,26 @@ async fn create_report(
         .fetch_optional(&mut *tx)
         .await?
         .ok_or_else(|| AppError::NotFound("Report target not found".to_string()))?,
+        "message" => sqlx::query_as(
+            r#"SELECT message.sender_id, jsonb_build_object(
+                    'id', message.id,
+                    'sender_id', message.sender_id,
+                    'recipient_id', message.recipient_id,
+                    'body', message.body,
+                    'read_at', message.read_at,
+                    'created_at', message.created_at
+                )
+                FROM direct_messages message
+                WHERE message.id = $1 AND message.recipient_id = $2"#,
+        )
+        .bind(data.target_id)
+        .bind(reporter_id)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or_else(|| AppError::NotFound("Report target not found".to_string()))?,
         _ => {
             return Err(AppError::BadRequest(
-                "Report target must be user or list".to_string(),
+                "Report target must be user, list, or message".to_string(),
             ));
         }
     };

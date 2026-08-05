@@ -4,6 +4,7 @@ pub mod client_error;
 pub mod common;
 pub mod import;
 pub mod media;
+pub mod message;
 pub mod notification;
 pub mod push;
 pub mod report;

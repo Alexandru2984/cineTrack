@@ -145,6 +145,10 @@ async fn clean_db(pool: &PgPool) {
         .execute(pool)
         .await
         .ok();
+    sqlx::query("DELETE FROM direct_messages")
+        .execute(pool)
+        .await
+        .ok();
     sqlx::query("DELETE FROM user_blocks")
         .execute(pool)
         .await
@@ -6830,7 +6834,7 @@ async fn test_account_export_requires_password_and_excludes_credentials() {
     );
 
     let body: Value = actix_test::read_body_json(response).await;
-    assert_eq!(body["format_version"], 3);
+    assert_eq!(body["format_version"], 4);
     assert_eq!(body["account"]["email"], "export@example.com");
     assert_eq!(body["account"]["two_factor_enabled"], false);
     assert_eq!(
@@ -6844,6 +6848,7 @@ async fn test_account_export_requires_password_and_excludes_credentials() {
     assert_eq!(body["terms_acceptances"].as_array().unwrap().len(), 1);
     assert!(body["blocks"].is_array());
     assert!(body["reports_submitted"].is_array());
+    assert!(body["direct_messages"].is_array());
     assert_eq!(
         body["security_activity"][0]["event_type"],
         "account_registered"
@@ -7985,6 +7990,277 @@ async fn test_social_relationship_quotas_are_atomic_and_bound_pending_requests()
         .to_request();
     let resp = actix_test::call_service(&app, req).await;
     assert_eq!(resp.status(), 409);
+}
+
+// ── Direct Message Tests ──────────────────────────────────────
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn test_direct_messages_enforce_relationships_idempotency_privacy_and_abuse_controls() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+
+    let (alice_token, _, alice_id) =
+        register_user(&app, "messagealice", "messagealice@example.com", "Pass1234").await;
+    let (bob_token, _, bob_id) =
+        register_user(&app, "messagebob", "messagebob@example.com", "Pass1234").await;
+    let (stranger_token, _, _) = register_user(
+        &app,
+        "messagestranger",
+        "messagestranger@example.com",
+        "Pass1234",
+    )
+    .await;
+    let alice_id = Uuid::parse_str(&alice_id).unwrap();
+    let bob_id = Uuid::parse_str(&bob_id).unwrap();
+    let client_nonce = Uuid::new_v4();
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/messages/messagebob")
+        .insert_header(("Authorization", format!("Bearer {alice_token}")))
+        .set_json(json!({
+            "client_nonce": client_nonce,
+            "body": "hello"
+        }))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 403);
+
+    sqlx::query(
+        r#"INSERT INTO follows (follower_id, following_id, status)
+        VALUES ($1, $2, 'accepted'), ($2, $1, 'accepted')"#,
+    )
+    .bind(alice_id)
+    .bind(bob_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let req = actix_test::TestRequest::get()
+        .uri("/api/users/messagebob")
+        .insert_header(("Authorization", format!("Bearer {alice_token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let mutual_profile: Value = actix_test::read_body_json(resp).await;
+    assert_eq!(mutual_profile["is_following"], true);
+    assert_eq!(mutual_profile["is_followed_by"], true);
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/messages/messagebob")
+        .insert_header(("Authorization", format!("Bearer {alice_token}")))
+        .set_json(json!({
+            "client_nonce": client_nonce,
+            "body": "  hello <script>alert(1)</script>\r\nworld  "
+        }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 201);
+    assert_eq!(
+        resp.headers()
+            .get(header::CACHE_CONTROL)
+            .and_then(|value| value.to_str().ok()),
+        Some("no-store")
+    );
+    let sent: Value = actix_test::read_body_json(resp).await;
+    let message_id = sent["id"].as_str().unwrap().to_string();
+    assert_eq!(sent["body"], "hello <script>alert(1)</script>\nworld");
+    assert_eq!(sent["sender_id"], alice_id.to_string());
+    assert_eq!(sent["recipient_id"], bob_id.to_string());
+
+    let tamper = sqlx::query("UPDATE direct_messages SET body = 'tampered' WHERE id = $1")
+        .bind(Uuid::parse_str(&message_id).unwrap())
+        .execute(&pool)
+        .await;
+    assert!(tamper.is_err(), "stored message content must be immutable");
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/messages/messagebob")
+        .insert_header(("Authorization", format!("Bearer {alice_token}")))
+        .set_json(json!({
+            "client_nonce": client_nonce,
+            "body": "hello <script>alert(1)</script>\nworld"
+        }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let replayed: Value = actix_test::read_body_json(resp).await;
+    assert_eq!(replayed["id"], message_id);
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/messages/messagebob")
+        .insert_header(("Authorization", format!("Bearer {alice_token}")))
+        .set_json(json!({
+            "client_nonce": client_nonce,
+            "body": "different message"
+        }))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 409);
+
+    let req = actix_test::TestRequest::get()
+        .uri("/api/messages/summary")
+        .insert_header(("Authorization", format!("Bearer {bob_token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let summary: Value = actix_test::read_body_json(resp).await;
+    assert_eq!(summary["unread_count"], 1);
+
+    let req = actix_test::TestRequest::get()
+        .uri("/api/messages/messagealice?limit=50")
+        .insert_header(("Authorization", format!("Bearer {bob_token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let thread: Value = actix_test::read_body_json(resp).await;
+    assert_eq!(thread["user"]["username"], "messagealice");
+    assert_eq!(thread["can_message"], true);
+    assert_eq!(thread["messages"].as_array().unwrap().len(), 1);
+    assert_eq!(thread["messages"][0]["id"], message_id);
+
+    let req = actix_test::TestRequest::get()
+        .uri("/api/messages/messagealice")
+        .insert_header(("Authorization", format!("Bearer {stranger_token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 403);
+
+    let req = actix_test::TestRequest::get()
+        .uri("/api/messages")
+        .insert_header(("Authorization", format!("Bearer {bob_token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let conversations: Value = actix_test::read_body_json(resp).await;
+    assert_eq!(conversations.as_array().unwrap().len(), 1);
+    assert_eq!(conversations[0]["username"], "messagealice");
+    assert_eq!(conversations[0]["unread_count"], 1);
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/messages/messagealice/read")
+        .insert_header(("Authorization", format!("Bearer {bob_token}")))
+        .set_json(json!({ "through_id": message_id }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let read_result: Value = actix_test::read_body_json(resp).await;
+    assert_eq!(read_result["updated_count"], 1);
+
+    let req = actix_test::TestRequest::get()
+        .uri("/api/messages/summary")
+        .insert_header(("Authorization", format!("Bearer {bob_token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    let summary: Value = actix_test::read_body_json(resp).await;
+    assert_eq!(summary["unread_count"], 0);
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/reports")
+        .insert_header(("Authorization", format!("Bearer {bob_token}")))
+        .set_json(json!({
+            "target_type": "message",
+            "target_id": message_id,
+            "reason": "harassment"
+        }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 201);
+    let report: Value = actix_test::read_body_json(resp).await;
+    assert_eq!(report["target_type"], "message");
+    let snapshot: Value =
+        sqlx::query_scalar("SELECT content_snapshot FROM user_reports WHERE id = $1")
+            .bind(Uuid::parse_str(report["id"].as_str().unwrap()).unwrap())
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(snapshot["body"], "hello <script>alert(1)</script>\nworld");
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/reports")
+        .insert_header(("Authorization", format!("Bearer {alice_token}")))
+        .set_json(json!({
+            "target_type": "message",
+            "target_id": message_id,
+            "reason": "harassment"
+        }))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 404);
+
+    sqlx::query(
+        r#"INSERT INTO direct_messages (sender_id, recipient_id, client_nonce, body)
+        SELECT $1, $2, gen_random_uuid(), 'rate-limit seed ' || value
+        FROM generate_series(1, 29) value"#,
+    )
+    .bind(alice_id)
+    .bind(bob_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let req = actix_test::TestRequest::post()
+        .uri("/api/messages/messagebob")
+        .insert_header(("Authorization", format!("Bearer {alice_token}")))
+        .set_json(json!({
+            "client_nonce": Uuid::new_v4(),
+            "body": "one too many"
+        }))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 429);
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/users/messagebob/block")
+        .insert_header(("Authorization", format!("Bearer {alice_token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 201);
+
+    let req = actix_test::TestRequest::get()
+        .uri("/api/messages/messagealice")
+        .insert_header(("Authorization", format!("Bearer {bob_token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let blocked_thread: Value = actix_test::read_body_json(resp).await;
+    assert_eq!(blocked_thread["can_message"], false);
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/messages/messagealice")
+        .insert_header(("Authorization", format!("Bearer {bob_token}")))
+        .set_json(json!({
+            "client_nonce": Uuid::new_v4(),
+            "body": "blocked"
+        }))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 404);
+
+    let direct_insert = sqlx::query(
+        "INSERT INTO direct_messages (sender_id, recipient_id, client_nonce, body) VALUES ($1, $2, $3, 'blocked')",
+    )
+    .bind(bob_id)
+    .bind(alice_id)
+    .bind(Uuid::new_v4())
+    .execute(&pool)
+    .await;
+    assert!(
+        direct_insert.is_err(),
+        "database invariant must reject blocked messages"
+    );
+
+    clean_db(&pool).await;
 }
 
 // ── List CRUD Tests ───────────────────────────────────────────

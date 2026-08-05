@@ -251,17 +251,23 @@ async fn get_profile(
     .fetch_one(pool.get_ref())
     .await?;
 
-    let follow_status = if let Some(uid) = current_user_id.filter(|uid| *uid != user.id) {
-        sqlx::query_scalar::<_, String>(
-            "SELECT status FROM follows WHERE follower_id = $1 AND following_id = $2",
-        )
-        .bind(uid)
-        .bind(user.id)
-        .fetch_optional(pool.get_ref())
-        .await?
-    } else {
-        None
-    };
+    let (follow_status, is_followed_by) =
+        if let Some(uid) = current_user_id.filter(|uid| *uid != user.id) {
+            sqlx::query_as::<_, (Option<String>, bool)>(
+                r#"SELECT
+                (SELECT status FROM follows WHERE follower_id = $1 AND following_id = $2),
+                EXISTS(
+                    SELECT 1 FROM follows
+                    WHERE follower_id = $2 AND following_id = $1 AND status = 'accepted'
+                )"#,
+            )
+            .bind(uid)
+            .bind(user.id)
+            .fetch_one(pool.get_ref())
+            .await?
+        } else {
+            (None, false)
+        };
     let is_following = follow_status.as_deref() == Some("accepted");
     let can_view_private_details = user.is_public
         || current_user_id == Some(user.id)
@@ -286,6 +292,7 @@ async fn get_profile(
         followers_count: can_view_private_details.then_some(followers_count),
         following_count: can_view_private_details.then_some(following_count),
         is_following,
+        is_followed_by,
         follow_status,
         can_view_activity: can_view_private_details,
         created_at: user.created_at,
@@ -501,6 +508,27 @@ async fn export_account_data(
         END
         WHERE f.follower_id = $1 OR f.following_id = $1
         ORDER BY f.created_at, other.username"#,
+    )
+    .bind(user_id)
+    .fetch_all(&mut *tx)
+    .await?;
+
+    let direct_messages = sqlx::query_scalar::<_, serde_json::Value>(
+        r#"SELECT jsonb_build_object(
+            'id', message.id,
+            'direction', CASE WHEN message.sender_id = $1 THEN 'sent' ELSE 'received' END,
+            'peer_username', peer.username,
+            'body', message.body,
+            'read_at', message.read_at,
+            'created_at', message.created_at
+        )
+        FROM direct_messages message
+        JOIN users peer ON peer.id = CASE
+            WHEN message.sender_id = $1 THEN message.recipient_id
+            ELSE message.sender_id
+        END
+        WHERE message.sender_id = $1 OR message.recipient_id = $1
+        ORDER BY message.created_at, message.id"#,
     )
     .bind(user_id)
     .fetch_all(&mut *tx)
@@ -737,13 +765,14 @@ async fn export_account_data(
             "attachment; filename=\"vazute-account-export.json\"",
         ))
         .json(AccountDataExport {
-            format_version: 3,
+            format_version: 4,
             exported_at: chrono::Utc::now(),
             account,
             library,
             watch_history,
             lists,
             relationships,
+            direct_messages,
             episode_plans,
             episode_reactions,
             notifications,

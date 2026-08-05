@@ -47,6 +47,7 @@ pub struct AccountDataExport {
     pub watch_history: Vec<Value>,
     pub lists: Vec<Value>,
     pub relationships: Vec<Value>,
+    pub direct_messages: Vec<Value>,
     pub episode_plans: Vec<Value>,
     pub episode_reactions: Vec<Value>,
     pub notifications: Vec<Value>,

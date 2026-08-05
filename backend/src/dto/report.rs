@@ -17,12 +17,12 @@ pub const REPORT_REASONS: &[&str] = &[
 ];
 
 fn validate_target_type(value: &str) -> Result<(), ValidationError> {
-    if matches!(value, "user" | "list") {
+    if matches!(value, "user" | "list" | "message") {
         return Ok(());
     }
 
     let mut error = ValidationError::new("invalid_target_type");
-    error.message = Some("Report target must be user or list".into());
+    error.message = Some("Report target must be user, list, or message".into());
     Err(error)
 }
 
