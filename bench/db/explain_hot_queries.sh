@@ -25,7 +25,7 @@ if [[ -z "$CONTAINER" ]]; then
 fi
 
 # Tables whose growth is unbounded; a sequential scan here is the alarm.
-GROWING='watch_history|user_media|episodes'
+GROWING='watch_history|user_media|episodes|direct_messages'
 
 psql() {
   docker exec -i "$CONTAINER" psql -U test_user -d cinetrack_test -X -q "$@"
@@ -143,6 +143,66 @@ trap 'rm -f "$PLAN_LOG" "$REPORT"' EXIT
         SELECT 1 FROM watch_history wh
         WHERE wh.user_id = um.user_id AND wh.episode_id = ep.id)
     GROUP BY m.id LIMIT 20;"
+
+  # Inbox: rank the newest message and unread total for each peer. This is the
+  # most expensive message read because it spans every conversation.
+  run_case "messages: conversations" "
+    WITH message_rows AS (
+      SELECT
+        message.*,
+        CASE
+          WHEN message.sender_id = '$USER_ID' THEN message.recipient_id
+          ELSE message.sender_id
+        END AS peer_id,
+        ROW_NUMBER() OVER (
+          PARTITION BY CASE
+            WHEN message.sender_id = '$USER_ID' THEN message.recipient_id
+            ELSE message.sender_id
+          END
+          ORDER BY message.created_at DESC, message.id DESC
+        ) AS row_number,
+        COUNT(*) FILTER (
+          WHERE message.recipient_id = '$USER_ID' AND message.read_at IS NULL
+        ) OVER (
+          PARTITION BY CASE
+            WHEN message.sender_id = '$USER_ID' THEN message.recipient_id
+            ELSE message.sender_id
+          END
+        ) AS unread_count
+      FROM direct_messages message
+      WHERE message.sender_id = '$USER_ID' OR message.recipient_id = '$USER_ID'
+    )
+    SELECT peer_id, id, body, created_at, unread_count
+    FROM message_rows
+    WHERE row_number = 1
+    ORDER BY created_at DESC, id DESC
+    LIMIT 30;"
+
+  run_case "messages: unread summary" "
+    SELECT COUNT(*)
+    FROM direct_messages
+    WHERE recipient_id = '$USER_ID' AND read_at IS NULL;"
+
+  run_case "messages: recent thread" "
+    SELECT id, sender_id, recipient_id, body, read_at, created_at
+    FROM (
+      SELECT id, sender_id, recipient_id, body, read_at, created_at
+      FROM direct_messages
+      WHERE
+        (sender_id = '$USER_ID' AND recipient_id = (
+          SELECT id FROM users
+          WHERE email LIKE 'bench-bg-%@example.invalid'
+          ORDER BY email LIMIT 1
+        ))
+        OR (recipient_id = '$USER_ID' AND sender_id = (
+          SELECT id FROM users
+          WHERE email LIKE 'bench-bg-%@example.invalid'
+          ORDER BY email LIMIT 1
+        ))
+      ORDER BY created_at DESC, id DESC
+      LIMIT 50
+    ) recent
+    ORDER BY created_at, id;"
 
   echo
   echo "Full plans:"

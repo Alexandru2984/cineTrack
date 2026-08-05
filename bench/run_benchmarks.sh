@@ -121,11 +121,15 @@ docker exec -i "$(docker ps -qf publish=55433)" \
 SHOW_ID="$(docker exec -i "$(docker ps -qf publish=55433)" psql -U test_user -d cinetrack_test -X -t -A \
   -c "SELECT tmdb_id FROM media WHERE media_type='tv' AND tmdb_id BETWEEN 9000001 AND 9000080 ORDER BY tmdb_id LIMIT 1;")"
 
+# A seeded mutual follower with a representative message history.
+MESSAGE_PEER="$(docker exec -i "$(docker ps -qf publish=55433)" psql -U test_user -d cinetrack_test -X -t -A \
+  -c "SELECT username FROM users WHERE email LIKE 'bench-bg-%@example.invalid' ORDER BY email LIMIT 1;")"
+
 # ── API benchmark ───────────────────────────────────────────────
 if [[ "$RUN_API" == 1 ]]; then
   require k6
   log "API benchmark (mobile screens: latency and payload size)"
-  ( cd "$RUN_DIR" && BASE_URL="$BASE_URL" TOKEN="$TOKEN" SHOW_ID="$SHOW_ID" \
+  ( cd "$RUN_DIR" && BASE_URL="$BASE_URL" TOKEN="$TOKEN" SHOW_ID="$SHOW_ID" MESSAGE_PEER="$MESSAGE_PEER" \
       k6 run --summary-trend-stats='avg,min,med,p(95),p(99),max' \
       "$ROOT_DIR/bench/api/mobile_session.js" 2>&1 | tee api.txt )
 fi

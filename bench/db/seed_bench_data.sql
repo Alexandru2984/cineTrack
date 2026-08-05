@@ -46,6 +46,130 @@ USING users background
 WHERE tracked.user_id = background.id
   AND background.email LIKE 'bench-bg-%@example.invalid';
 
+-- Reset the social fixture as well. Background accounts persist between runs,
+-- so leaving their old relationships or messages behind would make inbox
+-- latency and unread counts depend on how often the benchmark was executed.
+DELETE FROM direct_messages message
+USING users background
+WHERE background.email LIKE 'bench-bg-%@example.invalid'
+  AND (message.sender_id = background.id OR message.recipient_id = background.id);
+
+DELETE FROM follows relationship
+USING users background
+WHERE background.email LIKE 'bench-bg-%@example.invalid'
+  AND (
+    relationship.follower_id = background.id
+    OR relationship.following_id = background.id
+  );
+
+-- Thirty mutual conversations for the measured account. The application and
+-- database both require accepted follows in both directions before a message
+-- can be inserted, so the performance fixture exercises the real invariant.
+INSERT INTO follows (follower_id, following_id, status)
+SELECT :user_id, background.id, 'accepted'
+FROM users background
+WHERE background.email LIKE 'bench-bg-%@example.invalid'
+UNION ALL
+SELECT background.id, :user_id, 'accepted'
+FROM users background
+WHERE background.email LIKE 'bench-bg-%@example.invalid'
+ON CONFLICT (follower_id, following_id) DO UPDATE SET status = 'accepted';
+
+-- A ring of mutual background relationships supplies traffic that does not
+-- involve the measured account. This keeps its share below 10%, making the
+-- planner choose as it would when one production user is a small slice of the
+-- table instead of flattering the queries with a tiny fixture.
+WITH ordered AS (
+  SELECT
+    id,
+    row_number() OVER (ORDER BY email) AS position,
+    count(*) OVER () AS total
+  FROM users
+  WHERE email LIKE 'bench-bg-%@example.invalid'
+), pairs AS (
+  SELECT source.id AS source_id, destination.id AS destination_id
+  FROM ordered source
+  JOIN ordered destination
+    ON destination.position = CASE
+      WHEN source.position = source.total THEN 1
+      ELSE source.position + 1
+    END
+)
+INSERT INTO follows (follower_id, following_id, status)
+SELECT source_id, destination_id, 'accepted' FROM pairs
+UNION ALL
+SELECT destination_id, source_id, 'accepted' FROM pairs
+ON CONFLICT (follower_id, following_id) DO UPDATE SET status = 'accepted';
+
+-- One hundred messages per conversation: 3,000 rows for the benchmark user,
+-- with a small recent unread tail. Bodies are deliberately non-empty and
+-- representative so payload measurements include actual message content.
+WITH peers AS (
+  SELECT id, row_number() OVER (ORDER BY email) AS position
+  FROM users
+  WHERE email LIKE 'bench-bg-%@example.invalid'
+), generated AS (
+  SELECT
+    CASE WHEN sequence % 2 = 0 THEN :user_id ELSE peer.id END AS sender_id,
+    CASE WHEN sequence % 2 = 0 THEN peer.id ELSE :user_id END AS recipient_id,
+    sequence,
+    NOW() - ((peer.position * 100 + sequence) || ' minutes')::interval AS sent_at
+  FROM peers peer
+  CROSS JOIN generate_series(1, 100) AS sequence
+)
+INSERT INTO direct_messages (
+  sender_id, recipient_id, client_nonce, body, read_at, created_at
+)
+SELECT
+  sender_id,
+  recipient_id,
+  gen_random_uuid(),
+  'Benchmark message ' || sequence || ': representative direct-message payload.',
+  CASE
+    WHEN recipient_id = :user_id AND sequence > 90 THEN NULL
+    ELSE sent_at + INTERVAL '1 second'
+  END,
+  sent_at
+FROM generated;
+
+-- A thousand messages on every background edge: 30,000 more rows that give
+-- Postgres enough selectivity to expose missing indexes or sequential scans.
+WITH ordered AS (
+  SELECT
+    id,
+    row_number() OVER (ORDER BY email) AS position,
+    count(*) OVER () AS total
+  FROM users
+  WHERE email LIKE 'bench-bg-%@example.invalid'
+), pairs AS (
+  SELECT source.id AS source_id, destination.id AS destination_id, source.position
+  FROM ordered source
+  JOIN ordered destination
+    ON destination.position = CASE
+      WHEN source.position = source.total THEN 1
+      ELSE source.position + 1
+    END
+), generated AS (
+  SELECT
+    CASE WHEN sequence % 2 = 0 THEN source_id ELSE destination_id END AS sender_id,
+    CASE WHEN sequence % 2 = 0 THEN destination_id ELSE source_id END AS recipient_id,
+    sequence,
+    NOW() - ((position * 1000 + sequence) || ' minutes')::interval AS sent_at
+  FROM pairs
+  CROSS JOIN generate_series(1, 1000) AS sequence
+)
+INSERT INTO direct_messages (
+  sender_id, recipient_id, client_nonce, body, read_at, created_at
+)
+SELECT
+  sender_id,
+  recipient_id,
+  gen_random_uuid(),
+  'Background benchmark message ' || sequence,
+  sent_at + INTERVAL '1 second',
+  sent_at
+FROM generated;
+
 -- 320 titles: 80 shows, 240 films. Offset into a tmdb_id range that the real
 -- catalogue will not collide with.
 INSERT INTO media (tmdb_id, media_type, title, overview, poster_path, backdrop_path,
@@ -259,9 +383,13 @@ ANALYZE seasons;
 ANALYZE episodes;
 ANALYZE user_media;
 ANALYZE watch_history;
+ANALYZE follows;
+ANALYZE direct_messages;
 
 SELECT 'user_media' AS table, count(*) FROM user_media WHERE user_id = :user_id
 UNION ALL SELECT 'watch_history', count(*) FROM watch_history WHERE user_id = :user_id
+UNION ALL SELECT 'direct_messages', count(*) FROM direct_messages
+  WHERE sender_id = :user_id OR recipient_id = :user_id
 UNION ALL SELECT 'episodes', count(*) FROM episodes
 UNION ALL SELECT 'media', count(*) FROM media;
 
@@ -281,4 +409,15 @@ SELECT
   ),
   COUNT(*),
   'watch_history'
-FROM watch_history;
+FROM watch_history
+UNION ALL
+SELECT
+  ROUND(
+    100.0 * COUNT(*) FILTER (
+      WHERE sender_id = :user_id OR recipient_id = :user_id
+    ) / NULLIF(COUNT(*), 0),
+    2
+  ),
+  COUNT(*),
+  'direct_messages'
+FROM direct_messages;

@@ -15,6 +15,7 @@ import { Trend, Counter } from 'k6/metrics';
 const BASE = __ENV.BASE_URL;
 const TOKEN = __ENV.TOKEN;
 const SHOW_ID = __ENV.SHOW_ID;
+const MESSAGE_PEER = __ENV.MESSAGE_PEER;
 const TODAY = new Date().toISOString().slice(0, 10);
 const YEAR = new Date().getFullYear();
 
@@ -46,6 +47,7 @@ const ENDPOINTS = [
   'tracking_watching', 'tracking_completed', 'tracking_plan',
   'media_detail', 'seasons', 'episodes',
   'stats_genres', 'stats_monthly', 'stats_heatmap', 'stats_wrapped',
+  'message_conversations', 'message_summary', 'message_thread',
   'auth_me',
 ];
 
@@ -54,7 +56,7 @@ for (const name of ENDPOINTS) {
   perEndpoint[`payload_bytes{endpoint:${name}}`] = ['max>=0'];
   perEndpoint[`http_req_duration{endpoint:${name}}`] = ['max>=0'];
 }
-for (const screen of ['library', 'browse', 'stats', 'session']) {
+for (const screen of ['library', 'browse', 'stats', 'messages', 'session']) {
   perEndpoint[`screen_total_bytes{screen:${screen}}`] = ['max>=0'];
 }
 
@@ -80,12 +82,17 @@ export const options = {
       rate: 11, timeUnit: '1s', duration: '15s', startTime: '51s', // 4 -> ~44
       preAllocatedVUs: 10, maxVUs: 20, exec: 'statistics',
     },
+    messages: {
+      executor: 'constant-arrival-rate',
+      rate: 12, timeUnit: '1s', duration: '15s', startTime: '68s', // 3 -> ~36
+      preAllocatedVUs: 10, maxVUs: 20, exec: 'messages',
+    },
     // The /auth scope is limited to 3 req/s by design, far below the global
     // limiter. Measured separately at 2 req/s so the figure is the endpoint's
     // own cost rather than the limiter's.
     session: {
       executor: 'constant-arrival-rate',
-      rate: 2, timeUnit: '1s', duration: '10s', startTime: '68s',
+      rate: 2, timeUnit: '1s', duration: '10s', startTime: '85s',
       preAllocatedVUs: 4, maxVUs: 8, exec: 'session',
     },
   },
@@ -95,6 +102,7 @@ export const options = {
     'http_req_duration{screen:library}': ['p(95)<600'],
     'http_req_duration{screen:browse}': ['p(95)<600'],
     'http_req_duration{screen:stats}': ['p(95)<1500'],
+    'http_req_duration{screen:messages}': ['p(95)<600'],
     'http_req_duration{screen:session}': ['p(95)<400'],
     // Roughly one second of a poor 3G link (~250 KB) for a whole screen.
     'screen_total_bytes{screen:cold_start}': ['p(95)<262144'],
@@ -182,6 +190,38 @@ export function statistics() {
   screenBytes.add(total, { screen: 'stats' });
 }
 
+/** Inbox plus an open thread: the polling burst paid while messaging. */
+export function messages() {
+  let total = 0;
+  total += get(
+    '/api/messages?page=1&limit=30',
+    'messages',
+    'message_conversations',
+    (res) => {
+      try {
+        return Array.isArray(res.json()) && res.json().length > 0;
+      } catch {
+        return false;
+      }
+    },
+  );
+  total += get('/api/messages/summary', 'messages', 'message_summary');
+  total += get(
+    `/api/messages/${encodeURIComponent(MESSAGE_PEER)}?limit=50`,
+    'messages',
+    'message_thread',
+    (res) => {
+      try {
+        const body = res.json();
+        return Array.isArray(body.messages) && body.messages.length === 50;
+      } catch {
+        return false;
+      }
+    },
+  );
+  screenBytes.add(total, { screen: 'messages' });
+}
+
 /** Current user, behind the strict auth limiter — see the scenario comment. */
 export function session() {
   const bytes = get('/api/auth/me', 'session', 'auth_me');
@@ -211,7 +251,7 @@ export function handleSummary(data) {
     out += '  ' + r.name.padEnd(20) + kib(r.bytes) + '  ' + r.p95.toFixed(2).padStart(9) + '\n';
   }
 
-  const screens = ['cold_start', 'library', 'browse', 'stats', 'session'];
+  const screens = ['cold_start', 'library', 'browse', 'stats', 'messages', 'session'];
   out += '\n  Total bytes per screen\n';
   for (const screen of screens) {
     const m = data.metrics[`screen_total_bytes{screen:${screen}}`];
