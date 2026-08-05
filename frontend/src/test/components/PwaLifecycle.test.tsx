@@ -74,6 +74,20 @@ describe('iOS PWA installation detection', () => {
 });
 
 describe('native PWA installation', () => {
+  it('tracks browser connectivity events', () => {
+    render(
+      <PwaProvider>
+        <div>Application shell</div>
+      </PwaProvider>,
+    );
+
+    fireEvent(window, new Event('offline'));
+    expect(screen.getByRole('status')).toHaveTextContent('You are offline');
+
+    fireEvent(window, new Event('online'));
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+  });
+
   it('does not suppress the browser install promotion', () => {
     render(
       <PwaProvider>

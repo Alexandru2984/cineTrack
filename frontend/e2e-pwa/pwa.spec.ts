@@ -160,6 +160,11 @@ test('registers the service worker and launches its shell offline', async ({
   await context.setOffline(true);
   await page.reload({ waitUntil: 'domcontentloaded' });
   await expect(page.getByRole('heading', { name: 'Welcome back' })).toBeVisible();
+
+  // Network emulation and the browser's online/offline DOM events are separate
+  // concerns. Exercise both explicitly so the cached-shell assertion does not
+  // depend on a browser-specific navigator.onLine implementation.
+  await page.evaluate(() => window.dispatchEvent(new Event('offline')));
   await expect(page.getByRole('status')).toContainText('You are offline');
   await context.setOffline(false);
 });
