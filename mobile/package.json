@@ -6,9 +6,9 @@
     "@react-native-async-storage/async-storage": "2.2.0",
     "@react-native-community/datetimepicker": "9.1.0",
     "@react-native-community/netinfo": "12.0.1",
-    "@tanstack/query-async-storage-persister": "^5.101.2",
-    "@tanstack/react-query": "^5.101.2",
-    "@tanstack/react-query-persist-client": "^5.101.2",
+    "@tanstack/query-async-storage-persister": "^5.101.4",
+    "@tanstack/react-query": "^5.101.4",
+    "@tanstack/react-query-persist-client": "^5.101.4",
     "expo": "~57.0.10",
     "expo-build-properties": "~57.0.8",
     "expo-constants": "~57.0.9",
@@ -30,7 +30,7 @@
     "expo-status-bar": "~57.0.1",
     "expo-system-ui": "~57.0.2",
     "expo-updates": "~57.0.12",
-    "lucide-react-native": "^1.24.0",
+    "lucide-react-native": "^1.28.0",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "react-native": "0.86.2",
@@ -45,7 +45,6 @@
     "@react-native/jest-preset": "0.86.2",
     "@types/jest": "29.5.14",
     "@types/react": "~19.2.2",
-    "brace-expansion": "5.0.9",
     "eslint": "^9.39.5",
     "eslint-config-expo": "~57.0.1",
     "expo-doctor": "1.20.1",
@@ -57,8 +56,7 @@
     "start": "expo start",
     "android": "expo run:android",
     "ios": "expo run:ios",
-    "postinstall": "node scripts/patch-brace-expansion.cjs",
-    "audit:high": "node scripts/audit-dependencies.cjs",
+    "audit:high": "npm audit --audit-level=high",
     "lint": "expo lint",
     "typecheck": "tsc --noEmit",
     "test": "jest --runInBand",
@@ -68,6 +66,9 @@
     "verify": "npm run lint && npm run typecheck && npm test && npm run doctor"
   },
   "overrides": {
+    "minimatch@3.1.5": {
+      "brace-expansion": "1.1.18"
+    },
     "uuid": "11.1.1"
   },
   "engines": {
