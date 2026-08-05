@@ -183,6 +183,19 @@ trap 'rm -f "$PLAN_LOG" "$REPORT"' EXIT
     FROM direct_messages
     WHERE recipient_id = '$USER_ID' AND read_at IS NULL;"
 
+  run_case "messages: send rate window" "
+    SELECT
+      COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '1 minute'),
+      COUNT(*)
+    FROM direct_messages
+    WHERE sender_id = '$USER_ID'
+      AND created_at >= NOW() - INTERVAL '24 hours';"
+
+  run_case "messages: user quota count" "
+    SELECT COUNT(*)
+    FROM direct_messages
+    WHERE sender_id = '$USER_ID' OR recipient_id = '$USER_ID';"
+
   run_case "messages: recent thread" "
     SELECT id, sender_id, recipient_id, body, read_at, created_at
     FROM (

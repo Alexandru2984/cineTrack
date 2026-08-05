@@ -8263,6 +8263,90 @@ async fn test_direct_messages_enforce_relationships_idempotency_privacy_and_abus
     clean_db(&pool).await;
 }
 
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn test_direct_message_daily_quota_ignores_expired_rows() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+
+    let (sender_token, _, sender_id) =
+        register_user(&app, "quotasender", "quotasender@example.com", "Pass1234").await;
+    let (_, _, recipient_id) = register_user(
+        &app,
+        "quotarecipient",
+        "quotarecipient@example.com",
+        "Pass1234",
+    )
+    .await;
+    let sender_id = Uuid::parse_str(&sender_id).unwrap();
+    let recipient_id = Uuid::parse_str(&recipient_id).unwrap();
+
+    sqlx::query(
+        r#"INSERT INTO follows (follower_id, following_id, status)
+        VALUES ($1, $2, 'accepted'), ($2, $1, 'accepted')"#,
+    )
+    .bind(sender_id)
+    .bind(recipient_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    sqlx::query(
+        r#"INSERT INTO direct_messages (
+            sender_id, recipient_id, client_nonce, body, created_at
+        )
+        SELECT $1, $2, gen_random_uuid(), 'expired quota row',
+               NOW() - INTERVAL '25 hours'
+        FROM generate_series(1, $3::bigint)"#,
+    )
+    .bind(sender_id)
+    .bind(recipient_id)
+    .bind(cinetrack::routes::messages::MAX_MESSAGES_PER_DAY)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/messages/quotarecipient")
+        .insert_header(("Authorization", format!("Bearer {sender_token}")))
+        .set_json(json!({
+            "client_nonce": Uuid::new_v4(),
+            "body": "expired rows do not consume today's quota"
+        }))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 201);
+
+    sqlx::query(
+        r#"INSERT INTO direct_messages (
+            sender_id, recipient_id, client_nonce, body, created_at
+        )
+        SELECT $1, $2, gen_random_uuid(), 'daily quota row',
+               NOW() - INTERVAL '2 hours'
+        FROM generate_series(1, $3::bigint)"#,
+    )
+    .bind(sender_id)
+    .bind(recipient_id)
+    .bind(cinetrack::routes::messages::MAX_MESSAGES_PER_DAY - 1)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/messages/quotarecipient")
+        .insert_header(("Authorization", format!("Bearer {sender_token}")))
+        .set_json(json!({
+            "client_nonce": Uuid::new_v4(),
+            "body": "one too many today"
+        }))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 429);
+
+    clean_db(&pool).await;
+}
+
 // ── List CRUD Tests ───────────────────────────────────────────
 
 #[actix_web::test]

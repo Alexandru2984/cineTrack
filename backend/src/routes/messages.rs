@@ -372,9 +372,10 @@ async fn send_message(
     let (minute_count, day_count) = sqlx::query_as::<_, (i64, i64)>(
         r#"SELECT
             COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '1 minute'),
-            COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '24 hours')
+            COUNT(*)
         FROM direct_messages
-        WHERE sender_id = $1"#,
+        WHERE sender_id = $1
+          AND created_at >= NOW() - INTERVAL '24 hours'"#,
     )
     .bind(sender_id)
     .fetch_one(&mut *tx)
