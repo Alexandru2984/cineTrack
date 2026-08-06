@@ -461,7 +461,7 @@ export const ro: Dictionary = {
     dismiss: 'Închide',
   },
   legal: {
-    effective: 'În vigoare și actualizate ultima dată: 5 august 2026',
+    effective: 'În vigoare și actualizate ultima dată: 6 august 2026',
     contactTitle: 'Întrebări, raportări și contestații',
     termsTitle: 'Termeni de utilizare',
     termsIntro:
@@ -617,7 +617,7 @@ export const ro: Dictionary = {
   },
   privacy: {
     title: 'Politica de confidențialitate',
-    effective: 'În vigoare și ultima actualizare: 5 august 2026',
+    effective: 'În vigoare și ultima actualizare: 6 august 2026',
     s1Title: 'Cine este responsabil',
     s1Pre: 'Văzute este operat de Dragne Alexandru Mihai. Întrebările și cererile privind confidențialitatea pot fi trimise la',
     s2Title: 'Ce date procesăm',
@@ -653,7 +653,7 @@ export const ro: Dictionary = {
     s6Title: 'Alegerile și drepturile tale',
     rights: 'Setările contului permit utilizatorilor să corecteze informațiile de profil, să controleze vizibilitatea profilului, să verifice activitatea de securitate, să gestioneze sesiunile, să exporte o copie portabilă JSON a datelor contului în aplicația mobilă, să dezactiveze alertele de lansare și să șteargă contul. Setările de notificări ale sistemului oferă un control suplimentar la nivel de platformă. În funcție de legislație, utilizatorii pot cere de asemenea acces, corectare, restricționare, portabilitate, opoziție sau ștergere contactând adresa de mai sus. Utilizatorii din SEE pot depune o plângere la autoritatea locală de protecție a datelor.',
     s7Title: 'Securitate, copii și modificări',
-    security: 'Văzute folosește HTTPS, parole și tokenuri hash-uite, roluri de bază de date restricționate, validarea cererilor, limite de rată și infrastructură criptată în repaus. Niciun serviciu de internet nu poate garanta securitate absolută. Văzute nu este destinat copiilor sub 13 ani și nu colectează cu bună știință datele lor personale. Modificările importante ale politicii vor fi reflectate pe această pagină cu o nouă dată de intrare în vigoare.',
+    security: 'Văzute folosește HTTPS, parole și tokenuri hash-uite, roluri de bază de date restricționate, validarea cererilor, limite de rată și infrastructură criptată în repaus. Niciun serviciu de internet nu poate garanta securitate absolută. Văzute nu este destinat copiilor sub 16 ani și nu colectează cu bună știință datele lor personale. Modificările importante ale politicii vor fi reflectate pe această pagină cu o nouă dată de intrare în vigoare.',
   },
   settings: {
     title: 'Setări',

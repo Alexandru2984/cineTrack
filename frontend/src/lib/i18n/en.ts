@@ -459,7 +459,7 @@ export const en = {
     dismiss: 'Dismiss',
   },
   legal: {
-    effective: 'Effective and last updated: August 5, 2026',
+    effective: 'Effective and last updated: August 6, 2026',
     contactTitle: 'Questions, reports, and appeals',
     termsTitle: 'Terms of Use',
     termsIntro:
@@ -615,7 +615,7 @@ export const en = {
   },
   privacy: {
     title: 'Privacy policy',
-    effective: 'Effective and last updated: August 5, 2026',
+    effective: 'Effective and last updated: August 6, 2026',
     s1Title: 'Who is responsible',
     s1Pre: 'Văzute is operated by Dragne Alexandru Mihai. Questions and privacy requests can be sent to',
     s2Title: 'Data we process',
@@ -651,7 +651,7 @@ export const en = {
     s6Title: 'Your choices and rights',
     rights: 'Account settings allow users to correct profile information, control profile visibility, review security activity, manage sessions, export a portable JSON copy of their account data in the mobile app, disable release alerts, and delete the account. System notification settings provide an additional platform-level control. Depending on local law, users may also request access, correction, restriction, portability, objection, or deletion by contacting the address above. EEA users may lodge a complaint with their local data-protection authority.',
     s7Title: 'Security, children, and changes',
-    security: 'Văzute uses HTTPS, hashed passwords and tokens, restricted database roles, request validation, rate limits, and encrypted-at-rest infrastructure. No internet service can guarantee absolute security. Văzute is not directed to children under 13 and does not knowingly collect their personal data. Material policy changes will be reflected on this page with a new effective date.',
+    security: 'Văzute uses HTTPS, hashed passwords and tokens, restricted database roles, request validation, rate limits, and encrypted-at-rest infrastructure. No internet service can guarantee absolute security. Văzute is not directed to children under 16 and does not knowingly collect their personal data. Material policy changes will be reflected on this page with a new effective date.',
   },
   settings: {
     title: 'Settings',
