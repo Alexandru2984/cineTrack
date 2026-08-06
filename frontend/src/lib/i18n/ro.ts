@@ -802,6 +802,19 @@ export const ro: Dictionary = {
     mobileTitle: 'Șterge din aplicația mobilă',
     mobileBody:
       'Deschide Profil, alege Setări cont, apoi Șterge contul meu. Aplicația cere parola curentă și o confirmare finală distructivă.',
+    partialTitle: 'Șterge date fără a închide contul',
+    partialBody:
+      'Datele personale pot fi eliminate bucată cu bucată, contul rămânând activ. Autentifică-te pe web sau în aplicația mobilă, apoi folosește comanda de lângă elementul respectiv:',
+    partialLibrary:
+      'Bibliotecă și istoric — elimină un serial sau un film din bibliotecă ori șterge episoade vizionate individual.',
+    partialLists:
+      'Liste și planificări — șterge o listă întreagă, scoate un singur element din ea, anulează un episod planificat sau retrage o reacție.',
+    partialProfile:
+      'Profil și conexiuni — elimină poza de profil, anulează o urmărire sau o cerere de urmărire ori deblochează un membru.',
+    partialSessions:
+      'Dispozitive și fluxuri — deconectează un dispozitiv din Setări sau șterge linkul fluxului de calendar.',
+    partialRetention:
+      'Ce este eliminat astfel dispare imediat din serviciu și părăsește copiile de siguranță în termen de 14 zile. Metadatele despre filme și seriale sunt date comune de catalog, nu date personale, deci rămân. O cerere poate fi trimisă și la adresa de mai jos.',
     deletedTitle: 'Ce se șterge',
     deletedBody:
       'Profilul activ, emailul, credențialele, sesiunile, avatarul, biblioteca, istoricul de vizionare, notele, recenziile, listele personalizate, planurile de episoade, importurile, urmăririle și notificările sunt eliminate. Backupurile de recuperare în caz de dezastru expiră în 14 zile. Metadatele partajate despre filme și seriale care nu sunt legate de cont pot rămâne în cache.',
