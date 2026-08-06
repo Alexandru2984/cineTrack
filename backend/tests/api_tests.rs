@@ -1188,24 +1188,41 @@ async fn moderation_queue_requires_database_role_two_factor_and_append_only_audi
         .to_request();
     assert_eq!(actix_test::call_service(&app, dismiss).await.status(), 200);
 
+    // An appeal reopens a decided report for a second look, which is what the
+    // Community Guidelines commit to. It goes back to review rather than
+    // straight to the opposite outcome.
     let reopen = actix_test::TestRequest::patch()
         .uri(&format!("/api/moderation/reports/{report_id}"))
         .insert_header(("Authorization", format!("Bearer {moderator_token}")))
         .set_json(json!({
             "status": "reviewing",
-            "note": "Attempt to rewrite a final decision"
+            "note": "Reopened after the reported member appealed"
         }))
         .peer_addr(peer_addr())
         .to_request();
-    assert_eq!(actix_test::call_service(&app, reopen).await.status(), 409);
+    assert_eq!(actix_test::call_service(&app, reopen).await.status(), 200);
 
+    // Flipping a decision directly to its opposite is still refused.
+    let flip = actix_test::TestRequest::patch()
+        .uri(&format!("/api/moderation/reports/{report_id}"))
+        .insert_header(("Authorization", format!("Bearer {moderator_token}")))
+        .set_json(json!({
+            "status": "reviewing",
+            "note": "No-op transition onto the current status"
+        }))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, flip).await.status(), 409);
+
+    // Reopening adds to the record instead of rewriting it: the dismissal and
+    // the reopening both survive, so an appeal can be reconstructed.
     let audit_count: i64 =
         sqlx::query_scalar("SELECT COUNT(*) FROM moderation_audit_log WHERE report_id = $1")
             .bind(Uuid::parse_str(report_id).unwrap())
             .fetch_one(&pool)
             .await
             .unwrap();
-    assert_eq!(audit_count, 2);
+    assert_eq!(audit_count, 3);
     assert!(
         sqlx::query("UPDATE moderation_audit_log SET note = 'tampered' WHERE report_id = $1",)
             .bind(Uuid::parse_str(report_id).unwrap())
@@ -1241,7 +1258,7 @@ async fn moderation_queue_requires_database_role_two_factor_and_append_only_audi
     .fetch_one(&pool)
     .await
     .unwrap();
-    assert_eq!(detached_actor_count, 2);
+    assert_eq!(detached_actor_count, 3);
 }
 
 #[actix_web::test]

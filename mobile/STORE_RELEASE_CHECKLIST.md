@@ -70,8 +70,12 @@ fingerprint alone will not verify Android App Links on store builds.
   and message bodies never enter the persistent mobile query cache.
 - The moderator test account has verified email and 2FA, and every status
   change requires a note and creates an audit entry.
-- Child-safety and threatening-content reports sort ahead of the normal queue;
-  dismissal/action cannot be reversed from the console.
+- Child-safety and threatening-content reports sort ahead of the normal queue.
+  A decided report can be reopened for review when someone appeals, which is
+  what the Community Guidelines promise; the outcome is never flipped straight
+  to the opposite one, and every transition appends its own audit entry.
+- Sign-up requires both the Terms acceptance and the 16+ attestation, matching
+  the target-audience declaration in Play Console.
 - The public privacy policy discloses report snapshots and moderation
   retention.
 
