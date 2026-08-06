@@ -396,7 +396,8 @@ async fn register_unverified_user(
             "username": username,
             "email": email,
             "password": password,
-            "accepted_terms": true
+            "accepted_terms": true,
+            "confirmed_minimum_age": true
         }))
         .peer_addr(peer_addr())
         .to_request();
@@ -540,6 +541,46 @@ async fn test_register_requires_explicit_terms_acceptance() {
         .await
         .unwrap();
     assert_eq!(user_count, 0);
+}
+
+/// The age attestation is a separate gate from accepting the Terms: direct
+/// messages and public profiles put this service above the GDPR Art. 8 consent
+/// age, and Play Console asks for the same declaration. Omitting the field is
+/// refused as firmly as answering it with `false`, so an outdated client cannot
+/// create accounts that never made the statement.
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn test_registration_requires_the_minimum_age_attestation() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+
+    for age_field in [None, Some(json!(false))] {
+        let mut payload = json!({
+            "username": "toyoung",
+            "email": "toyoung@example.com",
+            "password": "Pass1234",
+            "accepted_terms": true
+        });
+        if let Some(value) = age_field {
+            payload["confirmed_minimum_age"] = value;
+        }
+        let req = actix_test::TestRequest::post()
+            .uri("/api/auth/register")
+            .set_json(payload)
+            .peer_addr(peer_addr())
+            .to_request();
+        assert_eq!(actix_test::call_service(&app, req).await.status(), 400);
+    }
+
+    let user_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        user_count, 0,
+        "an account was created without the attestation"
+    );
 }
 
 #[actix_web::test]
@@ -1259,7 +1300,8 @@ async fn test_mobile_auth_returns_rotating_tokens_without_cookies() {
             "username": "mobileauth",
             "email": "mobileauth@example.com",
             "password": "Pass1234",
-            "accepted_terms": true
+            "accepted_terms": true,
+            "confirmed_minimum_age": true
         }))
         .peer_addr(peer_addr())
         .to_request();
@@ -1346,7 +1388,8 @@ async fn test_mobile_logout_revokes_a_token_rotated_during_logout() {
             "username": "logoutrotation",
             "email": "logoutrotation@example.com",
             "password": "Pass1234",
-            "accepted_terms": true
+            "accepted_terms": true,
+            "confirmed_minimum_age": true
         }))
         .peer_addr(peer_addr())
         .to_request();
@@ -1394,7 +1437,8 @@ async fn test_mobile_session_list_identifies_current_refresh_token() {
             "username": "mobilesessions",
             "email": "mobilesessions@example.com",
             "password": "Pass1234",
-            "accepted_terms": true
+            "accepted_terms": true,
+            "confirmed_minimum_age": true
         }))
         .peer_addr(peer_addr())
         .to_request();
@@ -1474,7 +1518,8 @@ async fn test_register_duplicate_email() {
             "username": "user2",
             "email": "dup@example.com",
             "password": "Pass1234",
-            "accepted_terms": true
+            "accepted_terms": true,
+            "confirmed_minimum_age": true
         }))
         .peer_addr(peer_addr())
         .to_request();
@@ -1510,7 +1555,8 @@ async fn test_register_duplicate_username_is_case_insensitive() {
             "username": "caseuser",
             "email": "case-two@example.com",
             "password": "Pass1234",
-            "accepted_terms": true
+            "accepted_terms": true,
+            "confirmed_minimum_age": true
         }))
         .peer_addr(peer_addr())
         .to_request();
@@ -1537,7 +1583,8 @@ async fn test_register_weak_password() {
             "username": "testuser",
             "email": "test@example.com",
             "password": "password",
-            "accepted_terms": true
+            "accepted_terms": true,
+            "confirmed_minimum_age": true
         }))
         .peer_addr(peer_addr())
         .to_request();
@@ -1559,7 +1606,8 @@ async fn test_register_short_password() {
             "username": "testuser",
             "email": "test@example.com",
             "password": "Aa1",
-            "accepted_terms": true
+            "accepted_terms": true,
+            "confirmed_minimum_age": true
         }))
         .peer_addr(peer_addr())
         .to_request();

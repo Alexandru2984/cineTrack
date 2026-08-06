@@ -318,6 +318,7 @@ export async function registerSession(
   email: string,
   password: string,
   acceptedTerms: boolean,
+  confirmedMinimumAge: boolean,
 ) {
   const generation = await beginAuthentication();
   const payload = await rawRequest('/auth/mobile/register', {
@@ -327,6 +328,7 @@ export async function registerSession(
       email: email.trim(),
       password,
       accepted_terms: acceptedTerms,
+      confirmed_minimum_age: confirmedMinimumAge,
     },
   });
   await acceptSession(payload, generation);

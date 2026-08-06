@@ -62,6 +62,12 @@ pub async fn register(
             "You must accept the Terms of Use and Community Guidelines".to_string(),
         ));
     }
+    if !req.confirmed_minimum_age {
+        return Err(AppError::BadRequest(format!(
+            "You must confirm that you are at least {} years old",
+            crate::services::legal::MINIMUM_AGE_YEARS
+        )));
+    }
 
     let email = normalize_email(&req.email);
     // Perform the expensive work for duplicate and new accounts alike so the

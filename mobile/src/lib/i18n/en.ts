@@ -121,6 +121,8 @@ export const en = {
     acceptTermsAnd: 'and',
     communityGuidelines: 'Community Guidelines',
     acceptTermsRequired: 'Accept the Terms of Use and Community Guidelines to create an account',
+    confirmAge: 'I confirm that I am at least 16 years old.',
+    confirmAgeRequired: 'You must confirm that you are at least 16 years old to create an account',
     acceptTermsAria: 'Accept the Terms of Use and Community Guidelines',
     authFailed: 'Authentication failed',
     resetPassword: 'Reset password',

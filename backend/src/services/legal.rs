@@ -6,6 +6,12 @@ use crate::models::User;
 
 pub const CURRENT_TERMS_VERSION: &str = "2026-08-05";
 
+/// Minimum age for an account. Chosen as the highest consent age GDPR Art. 8
+/// lets a member state set, so one threshold covers the whole EEA without
+/// per-country logic. Romania sets 16. Keep the Terms, the sign-up attestation
+/// and the Play Console target-audience declaration on this same number.
+pub const MINIMUM_AGE_YEARS: u8 = 16;
+
 pub async fn accept_current_terms(pool: &PgPool, user_id: Uuid) -> Result<User, AppError> {
     let mut tx = pool.begin().await?;
 

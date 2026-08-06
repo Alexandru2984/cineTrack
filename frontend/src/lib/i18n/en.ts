@@ -66,6 +66,7 @@ export const en = {
     termsOfUse: 'Terms of Use',
     acceptTermsAnd: 'and',
     communityGuidelines: 'Community Guidelines',
+    confirmAge: 'I confirm that I am at least 16 years old.',
     haveAccount: 'Already have an account?',
     resetPassword: 'Reset password',
     forgotSubtitle: "Enter your email and we'll send you a reset link",

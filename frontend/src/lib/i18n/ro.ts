@@ -68,6 +68,7 @@ export const ro: Dictionary = {
     termsOfUse: 'Termenii de utilizare',
     acceptTermsAnd: 'și',
     communityGuidelines: 'Regulile comunității',
+    confirmAge: 'Confirm că am cel puțin 16 ani.',
     haveAccount: 'Ai deja cont?',
     resetPassword: 'Resetează parola',
     forgotSubtitle: 'Introdu adresa de email și îți trimitem un link de resetare',

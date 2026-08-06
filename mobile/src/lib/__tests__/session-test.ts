@@ -185,10 +185,10 @@ describe('mobile session recovery', () => {
     });
   });
 
-  it('records explicit terms acceptance when creating an account', async () => {
+  it('records explicit terms acceptance and the age attestation when creating an account', async () => {
     mockRawRequest.mockResolvedValueOnce(response);
 
-    await registerSession(' mobile_user ', ' mobile@example.com ', 'Pass1234', true);
+    await registerSession(' mobile_user ', ' mobile@example.com ', 'Pass1234', true, true);
 
     expect(mockRawRequest).toHaveBeenCalledWith('/auth/mobile/register', {
       method: 'POST',
@@ -197,6 +197,7 @@ describe('mobile session recovery', () => {
         email: 'mobile@example.com',
         password: 'Pass1234',
         accepted_terms: true,
+        confirmed_minimum_age: true,
       },
     });
     expect(useAuthStore.getState()).toMatchObject({

@@ -123,6 +123,8 @@ export const ro: Dictionary = {
     acceptTermsRequired:
       'Acceptă Termenii de utilizare și Regulile comunității pentru a crea un cont',
     acceptTermsAria: 'Acceptă Termenii de utilizare și Regulile comunității',
+    confirmAge: 'Confirm că am cel puțin 16 ani.',
+    confirmAgeRequired: 'Trebuie să confirmi că ai cel puțin 16 ani pentru a crea un cont',
     authFailed: 'Autentificarea a eșuat',
     resetPassword: 'Resetează parola',
     resetSent: 'Verifică-ți inboxul. Linkul de resetare este valabil o perioadă limitată.',

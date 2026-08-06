@@ -26,7 +26,7 @@ vi.mock('@/hooks/useAuth', () => ({
 describe('RegisterPage terms acceptance', () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it('requires acceptance and sends it explicitly with registration', async () => {
+  it('requires both statements and sends them explicitly with registration', async () => {
     const user = userEvent.setup();
     render(
       <MemoryRouter>
@@ -40,7 +40,15 @@ describe('RegisterPage terms acceptance', () => {
     await user.type(screen.getByLabelText('Username'), 'viewer_one');
     await user.type(screen.getByLabelText('Email'), 'viewer@example.com');
     await user.type(screen.getByLabelText('Password'), 'Pass1234');
-    await user.click(screen.getByRole('checkbox'));
+
+    const [terms, age] = screen.getAllByRole('checkbox');
+
+    // Each statement is its own gate: accepting the Terms says nothing about
+    // age, and the age attestation is what Play Console and GDPR Art. 8 need.
+    await user.click(terms);
+    expect(submit).toBeDisabled();
+    await user.click(age);
+    expect(submit).toBeEnabled();
 
     expect(screen.getByRole('link', { name: 'Terms of Use' })).toHaveAttribute(
       'href',
@@ -50,7 +58,6 @@ describe('RegisterPage terms acceptance', () => {
       'href',
       '/community-guidelines',
     );
-    expect(submit).toBeEnabled();
 
     await user.click(submit);
 
@@ -60,6 +67,7 @@ describe('RegisterPage terms acceptance', () => {
         email: 'viewer@example.com',
         password: 'Pass1234',
         accepted_terms: true,
+        confirmed_minimum_age: true,
       },
       expect.objectContaining({ onSuccess: expect.any(Function) }),
     );

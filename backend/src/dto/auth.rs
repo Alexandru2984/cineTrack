@@ -33,6 +33,10 @@ pub struct RegisterRequest {
     )]
     pub password: String,
     pub accepted_terms: bool,
+    /// Self-attested confirmation of the minimum age. Direct messages, public
+    /// profiles and free-text fields put this service above the GDPR Art. 8
+    /// consent age, so the account cannot be created without it.
+    pub confirmed_minimum_age: bool,
 }
 
 fn validate_password_strength(password: &str) -> Result<(), validator::ValidationError> {
@@ -372,6 +376,7 @@ mod tests {
             email: "test@example.com".to_string(),
             password: "SecurePass1".to_string(),
             accepted_terms: true,
+            confirmed_minimum_age: true,
         };
         assert!(req.validate().is_ok());
     }
@@ -384,6 +389,7 @@ mod tests {
                 "email": "test@example.com",
                 "password": "SecurePass1",
                 "accepted_terms": true,
+                "confirmed_minimum_age": true,
                 "admin": true
             }))
             .is_err()
@@ -443,6 +449,7 @@ mod tests {
             email: "test@example.com".to_string(),
             password: "SecurePass1".to_string(),
             accepted_terms: true,
+            confirmed_minimum_age: true,
         };
         assert!(req.validate().is_err());
     }
@@ -454,6 +461,7 @@ mod tests {
             email: "test@example.com".to_string(),
             password: "SecurePass1".to_string(),
             accepted_terms: true,
+            confirmed_minimum_age: true,
         };
         assert!(req.validate().is_err());
     }
@@ -465,6 +473,7 @@ mod tests {
             email: "test@example.com".to_string(),
             password: "SecurePass1".to_string(),
             accepted_terms: true,
+            confirmed_minimum_age: true,
         };
         assert!(req.validate().is_err());
     }
@@ -476,6 +485,7 @@ mod tests {
             email: "not-an-email".to_string(),
             password: "SecurePass1".to_string(),
             accepted_terms: true,
+            confirmed_minimum_age: true,
         };
         assert!(req.validate().is_err());
     }
@@ -487,6 +497,7 @@ mod tests {
             email: "test@example.com".to_string(),
             password: "Short1".to_string(),
             accepted_terms: true,
+            confirmed_minimum_age: true,
         };
         assert!(req.validate().is_err());
     }
@@ -498,6 +509,7 @@ mod tests {
             email: "test@example.com".to_string(),
             password: format!("{}1", "a".repeat(128)),
             accepted_terms: true,
+            confirmed_minimum_age: true,
         };
         assert!(req.validate().is_err());
     }
@@ -509,6 +521,7 @@ mod tests {
             email: "test@example.com".to_string(),
             password: "OnlyLettersHere".to_string(),
             accepted_terms: true,
+            confirmed_minimum_age: true,
         };
         assert!(req.validate().is_err());
     }
@@ -520,6 +533,7 @@ mod tests {
             email: "test@example.com".to_string(),
             password: "123456789".to_string(),
             accepted_terms: true,
+            confirmed_minimum_age: true,
         };
         assert!(req.validate().is_err());
     }
@@ -531,6 +545,7 @@ mod tests {
             email: "test@example.com".to_string(),
             password: "SecurePass1".to_string(),
             accepted_terms: true,
+            confirmed_minimum_age: true,
         };
         assert!(req.validate().is_ok());
     }
@@ -542,6 +557,7 @@ mod tests {
             email: "test@example.com".to_string(),
             password: "SecurePass1".to_string(),
             accepted_terms: true,
+            confirmed_minimum_age: true,
         };
         assert!(req.validate().is_ok());
     }
@@ -553,6 +569,7 @@ mod tests {
             email: "test@example.com".to_string(),
             password: "Abcdef1x".to_string(), // exactly 8
             accepted_terms: true,
+            confirmed_minimum_age: true,
         };
         assert!(req.validate().is_ok());
     }
@@ -566,6 +583,7 @@ mod tests {
             email,
             password: "SecurePass1".to_string(),
             accepted_terms: true,
+            confirmed_minimum_age: true,
         };
         assert!(req.validate().is_ok());
     }
@@ -580,6 +598,7 @@ mod tests {
             email: email.clone(),
             password: "SecurePass1".to_string(),
             accepted_terms: true,
+            confirmed_minimum_age: true,
         }
         .validate()
         .is_err());
