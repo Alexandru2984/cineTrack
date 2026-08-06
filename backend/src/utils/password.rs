@@ -2,12 +2,32 @@ use std::time::Duration;
 
 use argon2::{
     password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, Salt, SaltString},
-    Argon2,
+    Algorithm, Argon2, Params, Version,
 };
 use rand::TryRng;
 use tokio::sync::{OnceCell, Semaphore};
 
 use crate::errors::AppError;
+
+/// Argon2id cost, raised above the crate default of 19 MiB with two passes —
+/// the OWASP floor, picked to stay affordable on constrained hosts. Measured on
+/// this machine: the default costs an attacker ~50 ms per guess, these settings
+/// ~114 ms, and 64 MiB with three passes ~259 ms.
+///
+/// 64 MiB is deliberately *not* used. Sign-in answers a locked account without
+/// hashing at all and pads that reply to a fixed floor, so the hash has to stay
+/// comfortably under that floor; otherwise refusing a locked account becomes
+/// measurably quicker than a real verification and leaks the lock state through
+/// timing. Roughly doubling the attacker's cost is worth more here than the
+/// last factor of two, given a breach-checked password policy already blocks
+/// the guesses that a faster hash would find.
+///
+/// Verification reads the parameters recorded inside each stored PHC hash, so
+/// passwords hashed at the old cost keep working untouched and simply move to
+/// these settings the next time they are set.
+const ARGON2_MEMORY_KIB: u32 = 32 * 1024;
+const ARGON2_ITERATIONS: u32 = 3;
+const ARGON2_PARALLELISM: u32 = 1;
 
 const MAX_CONCURRENT_PASSWORD_JOBS: usize = 4;
 const PASSWORD_QUEUE_TIMEOUT: Duration = Duration::from_secs(2);
@@ -34,9 +54,22 @@ fn generate_salt() -> Result<SaltString, AppError> {
         .map_err(|error| AppError::InternalError(anyhow::anyhow!("salt encoding failed: {error}")))
 }
 
+fn hasher() -> Result<Argon2<'static>, AppError> {
+    let params = Params::new(
+        ARGON2_MEMORY_KIB,
+        ARGON2_ITERATIONS,
+        ARGON2_PARALLELISM,
+        None,
+    )
+    .map_err(|error| {
+        AppError::InternalError(anyhow::anyhow!("invalid Argon2 parameters: {error}"))
+    })?;
+    Ok(Argon2::new(Algorithm::Argon2id, Version::V0x13, params))
+}
+
 fn hash_password_sync(password: &str) -> Result<String, AppError> {
     let salt = generate_salt()?;
-    let argon2 = Argon2::default();
+    let argon2 = hasher()?;
     let hash = argon2
         .hash_password(password.as_bytes(), &salt)
         .map_err(|error| {
@@ -113,6 +146,17 @@ pub async fn verify_password_or_dummy(
 mod tests {
     use super::*;
 
+    // Tests that assert cryptographic behaviour — salting, verification, the
+    // recorded cost — call the synchronous functions directly. The asynchronous
+    // wrappers add only the shared concurrency limit, which is orthogonal to
+    // what those tests check, and routing them through it makes them race every
+    // other Argon2-heavy test for one of four global slots. That race is real
+    // under `cargo test`: an unoptimised build hashes roughly seventeen times
+    // slower than the release binary, so a handful of parallel tests exhaust the
+    // queue's timeout and fail with a busy response instead of the assertion
+    // they were written for. The queue itself stays covered by the two tests
+    // below that genuinely exercise it.
+
     #[test]
     fn generated_salts_are_unique_and_recommended_width() {
         // Guards the RNG wiring: a constant or short salt would still hash and
@@ -124,8 +168,8 @@ mod tests {
         assert_eq!(first.len(), 22);
     }
 
-    #[tokio::test]
-    async fn verifies_a_hash_whose_salt_this_code_did_not_generate() {
+    #[test]
+    fn verifies_a_hash_whose_salt_this_code_did_not_generate() {
         // Every stored hash in production was salted by the previous code path.
         // Verification reads the salt out of the encoded string, so changing how
         // salts are produced must not invalidate them — this builds a hash from
@@ -138,53 +182,49 @@ mod tests {
             .expect("hash with a fixed salt")
             .to_string();
 
-        assert!(verify_password("Passw0rd123!", &legacy)
-            .await
-            .expect("verify"));
-        assert!(!verify_password("Wr0ngPassword!", &legacy)
-            .await
-            .expect("verify"));
+        assert!(verify_password_sync("Passw0rd123!", &legacy).expect("verify"));
+        assert!(!verify_password_sync("Wr0ngPassword!", &legacy).expect("verify"));
     }
 
-    #[tokio::test]
-    async fn hashes_from_the_generated_salt_verify_and_differ() {
-        let one = hash_password("Passw0rd123!").await.expect("hash");
-        let two = hash_password("Passw0rd123!").await.expect("hash");
+    #[test]
+    fn hashes_from_the_generated_salt_verify_and_differ() {
+        let one = hash_password_sync("Passw0rd123!").expect("hash");
+        let two = hash_password_sync("Passw0rd123!").expect("hash");
         // Same password, different salt, therefore different stored value.
         assert_ne!(one, two);
-        assert!(verify_password("Passw0rd123!", &one).await.expect("verify"));
-        assert!(!verify_password("Wr0ngPassword!", &one)
-            .await
-            .expect("verify"));
+        assert!(verify_password_sync("Passw0rd123!", &one).expect("verify"));
+        assert!(!verify_password_sync("Wr0ngPassword!", &one).expect("verify"));
     }
 
     #[tokio::test]
     async fn test_hash_password_produces_argon2_hash() {
+        // Deliberately on the asynchronous path: this is the one test covering
+        // that the queue hands work to the blocking pool and returns the hash.
         let hash = hash_password("TestPass123").await.unwrap();
         assert!(hash.starts_with("$argon2"));
     }
 
-    #[tokio::test]
-    async fn test_verify_password_correct() {
-        let hash = hash_password("MyPassword1").await.unwrap();
-        assert!(verify_password("MyPassword1", &hash).await.unwrap());
+    #[test]
+    fn test_verify_password_correct() {
+        let hash = hash_password_sync("MyPassword1").unwrap();
+        assert!(verify_password_sync("MyPassword1", &hash).unwrap());
     }
 
-    #[tokio::test]
-    async fn test_verify_password_wrong() {
-        let hash = hash_password("MyPassword1").await.unwrap();
-        assert!(!verify_password("WrongPassword1", &hash).await.unwrap());
+    #[test]
+    fn test_verify_password_wrong() {
+        let hash = hash_password_sync("MyPassword1").unwrap();
+        assert!(!verify_password_sync("WrongPassword1", &hash).unwrap());
     }
 
-    #[tokio::test]
-    async fn test_hash_password_unique_salts() {
-        let h1 = hash_password("SamePassword1").await.unwrap();
-        let h2 = hash_password("SamePassword1").await.unwrap();
+    #[test]
+    fn test_hash_password_unique_salts() {
+        let h1 = hash_password_sync("SamePassword1").unwrap();
+        let h2 = hash_password_sync("SamePassword1").unwrap();
         // Different salts → different hashes
         assert_ne!(h1, h2);
         // But both verify correctly
-        assert!(verify_password("SamePassword1", &h1).await.unwrap());
-        assert!(verify_password("SamePassword1", &h2).await.unwrap());
+        assert!(verify_password_sync("SamePassword1", &h1).unwrap());
+        assert!(verify_password_sync("SamePassword1", &h2).unwrap());
     }
 
     #[test]
@@ -203,5 +243,40 @@ mod tests {
         assert!(!verify_password_or_dummy(DUMMY_PASSWORD, None)
             .await
             .unwrap());
+    }
+
+    #[test]
+    fn new_hashes_record_the_raised_cost() {
+        let hash = hash_password_sync("Pass1234").expect("hash");
+        let parsed = PasswordHash::new(&hash).expect("parse");
+        let params = Params::try_from(&parsed).expect("params");
+
+        assert_eq!(params.m_cost(), ARGON2_MEMORY_KIB);
+        assert_eq!(params.t_cost(), ARGON2_ITERATIONS);
+        assert_eq!(params.p_cost(), ARGON2_PARALLELISM);
+        assert!(hash.starts_with("$argon2id$"));
+    }
+
+    #[test]
+    fn passwords_hashed_at_the_previous_cost_still_verify() {
+        // Raising the cost must not lock anyone out: the parameters travel
+        // inside each PHC string, so an older hash has to keep verifying with
+        // its own settings rather than the ones configured here.
+        let salt = generate_salt().expect("salt");
+        let legacy = Argon2::default()
+            .hash_password(b"Pass1234", &salt)
+            .expect("legacy hash")
+            .to_string();
+
+        let legacy_params =
+            Params::try_from(&PasswordHash::new(&legacy).expect("parse")).expect("legacy params");
+        assert_ne!(
+            legacy_params.m_cost(),
+            ARGON2_MEMORY_KIB,
+            "the default cost now matches ours, so this test proves nothing"
+        );
+
+        assert!(verify_password_sync("Pass1234", &legacy).expect("verify"));
+        assert!(!verify_password_sync("WrongPass9", &legacy).expect("verify"));
     }
 }
