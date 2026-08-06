@@ -2674,7 +2674,7 @@ async fn test_password_reset_releases_the_sign_in_lock() {
 
     let req = actix_test::TestRequest::post()
         .uri("/api/auth/password/reset")
-        .set_json(json!({ "token": token, "new_password": "BrandNew12" }))
+        .set_json(json!({ "token": token, "new_password": "NewPass5678" }))
         .peer_addr(peer_addr())
         .to_request();
     assert_eq!(actix_test::call_service(&app, req).await.status(), 200);
@@ -2689,7 +2689,7 @@ async fn test_password_reset_releases_the_sign_in_lock() {
 
     let (status, _) = login_json(
         &app,
-        json!({ "email": "locked@example.com", "password": "BrandNew12" }),
+        json!({ "email": "locked@example.com", "password": "NewPass5678" }),
     )
     .await;
     assert_eq!(status, 200, "the user could not sign in after resetting");
