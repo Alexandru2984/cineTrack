@@ -34,6 +34,24 @@ async function invalidateWatchState(
   ]);
 }
 
+async function invalidateTrackingState(
+  queryClient: ReturnType<typeof useQueryClient>,
+) {
+  await Promise.all([
+    queryClient.invalidateQueries({ queryKey: ['tracking'] }),
+    queryClient.invalidateQueries({ queryKey: ['stats'] }),
+    queryClient.invalidateQueries({ queryKey: ['discovery'] }),
+    queryClient.invalidateQueries({ queryKey: calendarKeys.all }),
+    // Moving a show to `completed` fills in the watch history for every aired
+    // episode server-side, so the episode list and the progress bars go stale
+    // on a plain status change too. These are keyed by show and only the one
+    // on screen is active, so invalidating the whole family costs a single
+    // refetch at most.
+    queryClient.invalidateQueries({ queryKey: ['watched-episodes'] }),
+    queryClient.invalidateQueries({ queryKey: ['show-progress'] }),
+  ]);
+}
+
 export function useTrackingLookup(targets: readonly TrackingLookupTarget[]) {
   const batches = buildTrackingLookupBatches(targets);
   const lookupKey = batches.flatMap((batch) =>
@@ -79,14 +97,7 @@ export function useCreateTracking() {
       media_type: MediaType;
       status: TrackingStatus;
     }) => apiRequest<TrackingItem>('/tracking', { method: 'POST', body: data }),
-    onSuccess: async () => {
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['tracking'] }),
-        queryClient.invalidateQueries({ queryKey: ['stats'] }),
-        queryClient.invalidateQueries({ queryKey: ['discovery'] }),
-        queryClient.invalidateQueries({ queryKey: calendarKeys.all }),
-      ]);
-    },
+    onSuccess: () => invalidateTrackingState(queryClient),
   });
 }
 
@@ -103,14 +114,7 @@ export function useUpdateTracking() {
       review?: string | null;
       is_favorite?: boolean;
     }) => apiRequest<TrackingItem>(`/tracking/${id}`, { method: 'PATCH', body: data }),
-    onSuccess: async () => {
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['tracking'] }),
-        queryClient.invalidateQueries({ queryKey: ['stats'] }),
-        queryClient.invalidateQueries({ queryKey: ['discovery'] }),
-        queryClient.invalidateQueries({ queryKey: calendarKeys.all }),
-      ]);
-    },
+    onSuccess: () => invalidateTrackingState(queryClient),
   });
 }
 
@@ -119,14 +123,7 @@ export function useDeleteTracking() {
   return useMutation({
     mutationFn: (id: string) =>
       apiRequest(`/tracking/${id}`, { method: 'DELETE' }),
-    onSuccess: async () => {
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['tracking'] }),
-        queryClient.invalidateQueries({ queryKey: ['stats'] }),
-        queryClient.invalidateQueries({ queryKey: ['discovery'] }),
-        queryClient.invalidateQueries({ queryKey: calendarKeys.all }),
-      ]);
-    },
+    onSuccess: () => invalidateTrackingState(queryClient),
   });
 }
 

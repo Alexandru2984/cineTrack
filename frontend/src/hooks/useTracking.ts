@@ -41,6 +41,14 @@ function invalidateTrackingState(
     queryClient.invalidateQueries({ queryKey: ['activity'] }),
     queryClient.invalidateQueries({ queryKey: ['discovery'] }),
     queryClient.invalidateQueries({ queryKey: ['calendar'] }),
+    // Moving a show to `completed` fills in the watch history for every aired
+    // episode server-side, so the episode list and the progress bars go stale
+    // on a plain status change too. These are keyed by show and only the one
+    // on screen is active, so invalidating the whole family costs a single
+    // refetch at most.
+    queryClient.invalidateQueries({ queryKey: ['watched-episodes'] }),
+    queryClient.invalidateQueries({ queryKey: ['show-watch-progress'] }),
+    queryClient.invalidateQueries({ queryKey: ['history'] }),
   ]);
 }
 
