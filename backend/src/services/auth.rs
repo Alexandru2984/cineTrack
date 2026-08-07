@@ -26,6 +26,10 @@ const EMAIL_CHANGE_COOLDOWN_SECONDS: i64 = 5 * 60;
 const LOGIN_FAILURE_LIMIT: i32 = 5;
 const LOGIN_FAILURE_WINDOW_SECONDS: i64 = 15 * 60;
 const LOGIN_LOCK_SECONDS: i64 = 15 * 60;
+/// A locked account is refused without hashing the submitted password, which
+/// would otherwise make the refusal measurably faster than a real verification
+/// and leak the lock state through timing. Roughly the cost of one Argon2 run.
+const LOGIN_LOCKED_RESPONSE_FLOOR: StdDuration = StdDuration::from_millis(250);
 
 /// Normalize an email for storage and lookup: trimmed and lowercased, so
 /// `Test@X.com ` and `test@x.com` resolve to the same account.
@@ -57,6 +61,12 @@ pub async fn register(
         return Err(AppError::BadRequest(
             "You must accept the Terms of Use and Community Guidelines".to_string(),
         ));
+    }
+    if !req.confirmed_minimum_age {
+        return Err(AppError::BadRequest(format!(
+            "You must confirm that you are at least {} years old",
+            crate::services::legal::MINIMUM_AGE_YEARS
+        )));
     }
 
     let email = normalize_email(&req.email);
@@ -141,11 +151,33 @@ pub async fn login(
     client: &ClientInfo,
     req: LoginRequest,
 ) -> Result<(AuthResponse, String), AppError> {
+    let respond_at = Instant::now() + LOGIN_LOCKED_RESPONSE_FLOOR;
     let email = normalize_email(&req.email);
     let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE email = $1")
         .bind(&email)
         .fetch_optional(pool)
         .await?;
+
+    // A locked account is refused before its password is examined, with the
+    // same generic error every other rejection uses. Checking after the hash
+    // comparison meant a locked account answered 401 for a wrong password and
+    // 429 for the right one, so an attacker could recognise the moment they
+    // guessed correctly and simply wait out the lock. Refusing first also
+    // keeps each attempt from spending an Argon2 run on a locked account.
+    if let Some(locked_candidate) = user
+        .as_ref()
+        .filter(|candidate| is_login_locked(candidate.login_locked_until))
+    {
+        // Extend the lock, otherwise it expires on schedule no matter how hard
+        // the account is being hammered and hands out fresh batches of guesses.
+        record_login_failure(pool, locked_candidate.id).await?;
+        crate::metrics::record_security_event(crate::metrics::SecurityEvent::LoginRejected);
+        tokio::time::sleep_until(respond_at).await;
+        return Err(AppError::Unauthorized(
+            "Invalid email or password".to_string(),
+        ));
+    }
+
     let password_hash = user
         .as_ref()
         .and_then(|candidate| candidate.password_hash.as_deref());
@@ -163,15 +195,6 @@ pub async fn login(
     }
     let user =
         user.ok_or_else(|| AppError::Unauthorized("Invalid email or password".to_string()))?;
-
-    if user
-        .login_locked_until
-        .is_some_and(|locked_until| locked_until > Utc::now())
-    {
-        return Err(AppError::TooManyRequests(
-            "Too many failed sign-in attempts. Try again later.".to_string(),
-        ));
-    }
 
     // Second factor: only revealed after the password is confirmed, so it never
     // discloses whether an address has 2FA before credentials are correct.
@@ -550,11 +573,22 @@ pub async fn reset_password(
         .bind(stored.id)
         .execute(&mut *tx)
         .await?;
-    sqlx::query("UPDATE users SET password_hash = $2, updated_at = NOW() WHERE id = $1")
-        .bind(stored.user_id)
-        .bind(&new_hash)
-        .execute(&mut *tx)
-        .await?;
+    // Clearing the sign-in lock is what keeps lock extension safe: proving
+    // control of the inbox is the way back in for someone an attacker has
+    // deliberately kept locked out, so the lock can never become permanent.
+    sqlx::query(
+        "UPDATE users
+         SET password_hash = $2,
+             login_failed_attempts = 0,
+             login_last_failed_at = NULL,
+             login_locked_until = NULL,
+             updated_at = NOW()
+         WHERE id = $1",
+    )
+    .bind(stored.user_id)
+    .bind(&new_hash)
+    .execute(&mut *tx)
+    .await?;
     sqlx::query(
         "UPDATE refresh_tokens SET revoked_at = NOW() WHERE user_id = $1 AND revoked_at IS NULL",
     )
@@ -910,11 +944,22 @@ pub async fn require_verified_email(pool: &PgPool, user_id: Uuid) -> Result<(), 
 const TOTP_ISSUER: &str = "Văzute";
 const RECOVERY_CODE_COUNT: usize = 10;
 
+/// Whether a stored lock timestamp is still in force.
+fn is_login_locked(locked_until: Option<chrono::DateTime<Utc>>) -> bool {
+    locked_until.is_some_and(|until| until > Utc::now())
+}
+
 async fn record_login_failure(pool: &PgPool, user_id: Uuid) -> Result<bool, AppError> {
     let locked = sqlx::query_scalar::<_, bool>(
+        // An attempt against an account that is already locked still counts:
+        // it holds the counter at the cap so the lock below is pushed forward.
+        // Skipping those rows let an attacker collect a fresh batch of guesses
+        // every time the original lock expired, indefinitely.
         "WITH next_attempt AS (
             SELECT id,
                 CASE
+                    WHEN login_locked_until IS NOT NULL AND login_locked_until > NOW()
+                    THEN LEAST(login_failed_attempts + 1, $3)
                     WHEN login_last_failed_at IS NULL
                       OR login_last_failed_at < NOW() - ($2 * INTERVAL '1 second')
                     THEN 1
@@ -922,7 +967,6 @@ async fn record_login_failure(pool: &PgPool, user_id: Uuid) -> Result<bool, AppE
                 END AS attempts
             FROM users
             WHERE id = $1
-              AND (login_locked_until IS NULL OR login_locked_until <= NOW())
             FOR UPDATE
         )
         UPDATE users AS target

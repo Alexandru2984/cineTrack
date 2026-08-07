@@ -396,7 +396,8 @@ async fn register_unverified_user(
             "username": username,
             "email": email,
             "password": password,
-            "accepted_terms": true
+            "accepted_terms": true,
+            "confirmed_minimum_age": true
         }))
         .peer_addr(peer_addr())
         .to_request();
@@ -540,6 +541,46 @@ async fn test_register_requires_explicit_terms_acceptance() {
         .await
         .unwrap();
     assert_eq!(user_count, 0);
+}
+
+/// The age attestation is a separate gate from accepting the Terms: direct
+/// messages and public profiles put this service above the GDPR Art. 8 consent
+/// age, and Play Console asks for the same declaration. Omitting the field is
+/// refused as firmly as answering it with `false`, so an outdated client cannot
+/// create accounts that never made the statement.
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn test_registration_requires_the_minimum_age_attestation() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+
+    for age_field in [None, Some(json!(false))] {
+        let mut payload = json!({
+            "username": "toyoung",
+            "email": "toyoung@example.com",
+            "password": "Pass1234",
+            "accepted_terms": true
+        });
+        if let Some(value) = age_field {
+            payload["confirmed_minimum_age"] = value;
+        }
+        let req = actix_test::TestRequest::post()
+            .uri("/api/auth/register")
+            .set_json(payload)
+            .peer_addr(peer_addr())
+            .to_request();
+        assert_eq!(actix_test::call_service(&app, req).await.status(), 400);
+    }
+
+    let user_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        user_count, 0,
+        "an account was created without the attestation"
+    );
 }
 
 #[actix_web::test]
@@ -1147,24 +1188,41 @@ async fn moderation_queue_requires_database_role_two_factor_and_append_only_audi
         .to_request();
     assert_eq!(actix_test::call_service(&app, dismiss).await.status(), 200);
 
+    // An appeal reopens a decided report for a second look, which is what the
+    // Community Guidelines commit to. It goes back to review rather than
+    // straight to the opposite outcome.
     let reopen = actix_test::TestRequest::patch()
         .uri(&format!("/api/moderation/reports/{report_id}"))
         .insert_header(("Authorization", format!("Bearer {moderator_token}")))
         .set_json(json!({
             "status": "reviewing",
-            "note": "Attempt to rewrite a final decision"
+            "note": "Reopened after the reported member appealed"
         }))
         .peer_addr(peer_addr())
         .to_request();
-    assert_eq!(actix_test::call_service(&app, reopen).await.status(), 409);
+    assert_eq!(actix_test::call_service(&app, reopen).await.status(), 200);
 
+    // Flipping a decision directly to its opposite is still refused.
+    let flip = actix_test::TestRequest::patch()
+        .uri(&format!("/api/moderation/reports/{report_id}"))
+        .insert_header(("Authorization", format!("Bearer {moderator_token}")))
+        .set_json(json!({
+            "status": "reviewing",
+            "note": "No-op transition onto the current status"
+        }))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, flip).await.status(), 409);
+
+    // Reopening adds to the record instead of rewriting it: the dismissal and
+    // the reopening both survive, so an appeal can be reconstructed.
     let audit_count: i64 =
         sqlx::query_scalar("SELECT COUNT(*) FROM moderation_audit_log WHERE report_id = $1")
             .bind(Uuid::parse_str(report_id).unwrap())
             .fetch_one(&pool)
             .await
             .unwrap();
-    assert_eq!(audit_count, 2);
+    assert_eq!(audit_count, 3);
     assert!(
         sqlx::query("UPDATE moderation_audit_log SET note = 'tampered' WHERE report_id = $1",)
             .bind(Uuid::parse_str(report_id).unwrap())
@@ -1200,7 +1258,7 @@ async fn moderation_queue_requires_database_role_two_factor_and_append_only_audi
     .fetch_one(&pool)
     .await
     .unwrap();
-    assert_eq!(detached_actor_count, 2);
+    assert_eq!(detached_actor_count, 3);
 }
 
 #[actix_web::test]
@@ -1259,7 +1317,8 @@ async fn test_mobile_auth_returns_rotating_tokens_without_cookies() {
             "username": "mobileauth",
             "email": "mobileauth@example.com",
             "password": "Pass1234",
-            "accepted_terms": true
+            "accepted_terms": true,
+            "confirmed_minimum_age": true
         }))
         .peer_addr(peer_addr())
         .to_request();
@@ -1346,7 +1405,8 @@ async fn test_mobile_logout_revokes_a_token_rotated_during_logout() {
             "username": "logoutrotation",
             "email": "logoutrotation@example.com",
             "password": "Pass1234",
-            "accepted_terms": true
+            "accepted_terms": true,
+            "confirmed_minimum_age": true
         }))
         .peer_addr(peer_addr())
         .to_request();
@@ -1394,7 +1454,8 @@ async fn test_mobile_session_list_identifies_current_refresh_token() {
             "username": "mobilesessions",
             "email": "mobilesessions@example.com",
             "password": "Pass1234",
-            "accepted_terms": true
+            "accepted_terms": true,
+            "confirmed_minimum_age": true
         }))
         .peer_addr(peer_addr())
         .to_request();
@@ -1474,7 +1535,8 @@ async fn test_register_duplicate_email() {
             "username": "user2",
             "email": "dup@example.com",
             "password": "Pass1234",
-            "accepted_terms": true
+            "accepted_terms": true,
+            "confirmed_minimum_age": true
         }))
         .peer_addr(peer_addr())
         .to_request();
@@ -1510,7 +1572,8 @@ async fn test_register_duplicate_username_is_case_insensitive() {
             "username": "caseuser",
             "email": "case-two@example.com",
             "password": "Pass1234",
-            "accepted_terms": true
+            "accepted_terms": true,
+            "confirmed_minimum_age": true
         }))
         .peer_addr(peer_addr())
         .to_request();
@@ -1537,7 +1600,8 @@ async fn test_register_weak_password() {
             "username": "testuser",
             "email": "test@example.com",
             "password": "password",
-            "accepted_terms": true
+            "accepted_terms": true,
+            "confirmed_minimum_age": true
         }))
         .peer_addr(peer_addr())
         .to_request();
@@ -1559,7 +1623,8 @@ async fn test_register_short_password() {
             "username": "testuser",
             "email": "test@example.com",
             "password": "Aa1",
-            "accepted_terms": true
+            "accepted_terms": true,
+            "confirmed_minimum_age": true
         }))
         .peer_addr(peer_addr())
         .to_request();
@@ -2451,12 +2516,15 @@ async fn test_account_login_throttle_survives_ips_and_resets_after_success() {
     assert_eq!(failed_attempts, 5);
     assert!(locked);
 
+    // The correct password must be refused exactly like a wrong one while the
+    // account is locked. Answering 429 here used to tell an attacker that the
+    // guess had landed, turning the lock into a confirmation channel.
     let (status, _) = login_json(
         &app,
         json!({ "email": "throttled@example.com", "password": "Pass1234" }),
     )
     .await;
-    assert_eq!(status, 429);
+    assert_eq!(status, 401);
 
     sqlx::query(
         "UPDATE users SET login_locked_until = NOW() - INTERVAL '1 second' WHERE email = $1",
@@ -2479,6 +2547,152 @@ async fn test_account_login_throttle_survives_ips_and_resets_after_success() {
             .await
             .unwrap();
     assert_eq!(failed_attempts, 0);
+}
+
+/// A locked account must answer identically whether or not the submitted
+/// password is the real one. Any difference lets an attacker brute-force
+/// through the lock and recognise the hit, then simply wait for it to expire.
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn test_locked_account_does_not_reveal_a_correct_password() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    register_user(&app, "oracle", "oracle@example.com", "Pass1234").await;
+
+    for _ in 0..5 {
+        login_json(
+            &app,
+            json!({ "email": "oracle@example.com", "password": "WrongPass9" }),
+        )
+        .await;
+    }
+
+    let (wrong_status, wrong_body) = login_json(
+        &app,
+        json!({ "email": "oracle@example.com", "password": "WrongPass9" }),
+    )
+    .await;
+    let (correct_status, correct_body) = login_json(
+        &app,
+        json!({ "email": "oracle@example.com", "password": "Pass1234" }),
+    )
+    .await;
+
+    assert_eq!(wrong_status, 401);
+    assert_eq!(
+        correct_status, wrong_status,
+        "status leaked the right password"
+    );
+    assert_eq!(
+        correct_body["error"], wrong_body["error"],
+        "error message leaked the right password"
+    );
+}
+
+/// Attempts made while locked have to push the lock further out. Without that
+/// the lock expires on its original schedule and hands the attacker a fresh
+/// batch of guesses every window, forever.
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn test_attempts_during_a_lock_extend_it() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    register_user(&app, "extend", "extend@example.com", "Pass1234").await;
+
+    for _ in 0..5 {
+        login_json(
+            &app,
+            json!({ "email": "extend@example.com", "password": "WrongPass9" }),
+        )
+        .await;
+    }
+    let first: chrono::DateTime<chrono::Utc> =
+        sqlx::query_scalar("SELECT login_locked_until FROM users WHERE email = $1")
+            .bind("extend@example.com")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+
+    // Move the lock close to expiry, then knock again.
+    sqlx::query(
+        "UPDATE users SET login_locked_until = NOW() + INTERVAL '5 seconds' WHERE email = $1",
+    )
+    .bind("extend@example.com")
+    .execute(&pool)
+    .await
+    .unwrap();
+    let (status, _) = login_json(
+        &app,
+        json!({ "email": "extend@example.com", "password": "WrongPass9" }),
+    )
+    .await;
+    assert_eq!(status, 401);
+
+    let extended: chrono::DateTime<chrono::Utc> =
+        sqlx::query_scalar("SELECT login_locked_until FROM users WHERE email = $1")
+            .bind("extend@example.com")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(
+        extended > chrono::Utc::now() + chrono::Duration::minutes(10),
+        "the lock was not pushed forward: {extended} (originally {first})"
+    );
+}
+
+/// Because a lock can be extended indefinitely, proving control of the inbox
+/// has to release it — otherwise anyone could keep a victim permanently out.
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn test_password_reset_releases_the_sign_in_lock() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (_, _, user_id) = register_user(&app, "locked", "locked@example.com", "Pass1234").await;
+    let user_id = Uuid::parse_str(&user_id).unwrap();
+
+    for _ in 0..5 {
+        login_json(
+            &app,
+            json!({ "email": "locked@example.com", "password": "WrongPass9" }),
+        )
+        .await;
+    }
+
+    let token = cinetrack::utils::jwt::generate_refresh_token();
+    sqlx::query(
+        "INSERT INTO password_reset_tokens (user_id, token_hash, expires_at)
+         VALUES ($1, $2, NOW() + INTERVAL '1 hour')",
+    )
+    .bind(user_id)
+    .bind(cinetrack::utils::jwt::hash_refresh_token(&token))
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/auth/password/reset")
+        .set_json(json!({ "token": token, "new_password": "NewPass5678" }))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 200);
+
+    let locked_until: Option<chrono::DateTime<chrono::Utc>> =
+        sqlx::query_scalar("SELECT login_locked_until FROM users WHERE email = $1")
+            .bind("locked@example.com")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(locked_until.is_none(), "reset left the account locked");
+
+    let (status, _) = login_json(
+        &app,
+        json!({ "email": "locked@example.com", "password": "NewPass5678" }),
+    )
+    .await;
+    assert_eq!(status, 200, "the user could not sign in after resetting");
 }
 
 // ── Forgot / Reset Password Tests ─────────────────────────────

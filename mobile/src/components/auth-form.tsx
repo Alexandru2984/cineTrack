@@ -48,6 +48,7 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
   const [secondFactorMode, setSecondFactorMode] = useState<SecondFactorMode>('authenticator');
   const [secondFactorCode, setSecondFactorCode] = useState('');
   const [acceptedTerms, setAcceptedTerms] = useState(false);
+  const [confirmedAge, setConfirmedAge] = useState(false);
   const isRegister = mode === 'register';
 
   const submit = async () => {
@@ -73,6 +74,10 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
       setError(t('auth.acceptTermsRequired'));
       return;
     }
+    if (isRegister && !confirmedAge) {
+      setError(t('auth.confirmAgeRequired'));
+      return;
+    }
 
     if (!isRegister && mfaRequired) {
       const validationError = validateSecondFactorInput(t, secondFactorMode, secondFactorCode);
@@ -85,7 +90,13 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
     setPending(true);
     try {
       if (isRegister) {
-        await registerSession(username, normalizedEmail, password, acceptedTerms);
+        await registerSession(
+          username,
+          normalizedEmail,
+          password,
+          acceptedTerms,
+          confirmedAge,
+        );
       } else {
         await loginSession(
           normalizedEmail,
@@ -329,6 +340,34 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
                     {t('auth.communityGuidelines')}
                   </AppText>
                   .
+                </AppText>
+              </View>
+            ) : null}
+
+            {isRegister ? (
+              <View style={styles.termsRow}>
+                <Pressable
+                  testID="auth-confirm-age"
+                  accessibilityRole="checkbox"
+                  accessibilityLabel={t('auth.confirmAge')}
+                  accessibilityState={{ checked: confirmedAge }}
+                  hitSlop={4}
+                  onPress={() => {
+                    setConfirmedAge((confirmed) => !confirmed);
+                    setError(null);
+                  }}
+                  style={[
+                    styles.checkboxTouch,
+                    {
+                      borderColor: confirmedAge ? theme.primary : theme.border,
+                      backgroundColor: confirmedAge ? theme.primary : theme.elevated,
+                    },
+                  ]}
+                >
+                  {confirmedAge ? <Check color="#FFFFFF" size={18} strokeWidth={3} /> : null}
+                </Pressable>
+                <AppText variant="caption" muted style={styles.termsCopy}>
+                  {t('auth.confirmAge')}
                 </AppText>
               </View>
             ) : null}

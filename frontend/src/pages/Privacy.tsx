@@ -56,6 +56,11 @@ export default function PrivacyPage() {
             <li>{t('privacy.provider7')}</li>
           </ul>
           <p>{t('privacy.providerNote')}</p>
+          <p>{t('privacy.transfers')}</p>
+        </PolicySection>
+
+        <PolicySection title={t('privacy.s8Title')} icon={<Database className="h-5 w-5" />}>
+          <p>{t('privacy.cookies')}</p>
         </PolicySection>
 
         <PolicySection title={t('privacy.s5Title')} icon={<Trash2 className="h-5 w-5" />}>

@@ -146,7 +146,11 @@ test('blocks path-unsafe usernames before registration reaches the API', async (
   await username.fill('bad user');
   await page.getByLabel('Email').fill('safe@example.com');
   await page.getByLabel('Password').fill('Password1');
-  await page.getByRole('checkbox').check();
+  // Tick every consent box, whatever the form currently asks for, so the
+  // username stays the only thing standing between this page and the API.
+  for (const consent of await page.getByRole('checkbox').all()) {
+    await consent.check();
+  }
   await page.getByRole('button', { name: 'Create account' }).click();
 
   expect(await username.evaluate((input) => input.checkValidity())).toBe(false);

@@ -66,6 +66,7 @@ export const en = {
     termsOfUse: 'Terms of Use',
     acceptTermsAnd: 'and',
     communityGuidelines: 'Community Guidelines',
+    confirmAge: 'I confirm that I am at least 16 years old.',
     haveAccount: 'Already have an account?',
     resetPassword: 'Reset password',
     forgotSubtitle: "Enter your email and we'll send you a reset link",
@@ -458,14 +459,14 @@ export const en = {
     dismiss: 'Dismiss',
   },
   legal: {
-    effective: 'Effective and last updated: August 5, 2026',
+    effective: 'Effective and last updated: August 6, 2026',
     contactTitle: 'Questions, reports, and appeals',
     termsTitle: 'Terms of Use',
     termsIntro:
       'These Terms govern access to Văzute. Creating an account or accepting an updated version forms an agreement between you and the service operator.',
     terms1Title: 'Eligibility and accounts',
     terms1Body:
-      'You must be at least 13 years old and legally able to use the service. Provide accurate account information, protect your credentials, and tell us promptly if you believe your account has been compromised. You are responsible for activity performed through your account.',
+      'You must be at least 16 years old and legally able to use the service, and you confirm this when you create an account. Văzute offers direct messages, public profiles and free-text fields, so it is not intended for children; 16 is the highest age a member state may set under GDPR Art. 8 and is the threshold Romania applies. An account we learn belongs to someone younger is closed and its data deleted. Provide accurate account information, protect your credentials, and tell us promptly if you believe your account has been compromised. You are responsible for activity performed through your account.',
     terms2Title: 'The service',
     terms2Body:
       'Văzute provides movie and television tracking, calendars, statistics, lists, and social features. Features may change, be interrupted, or be withdrawn. We aim for reliable operation but do not promise uninterrupted availability or that catalog and release information is always complete or current.',
@@ -516,7 +517,7 @@ export const en = {
       'Report content or accounts you reasonably believe violate these rules and choose the closest reason. Do not file coordinated, retaliatory, duplicate, or knowingly false reports. Blocking is available for personal safety and should immediately stop direct social interaction between the two accounts.',
     guidelines7Title: 'Enforcement and appeals',
     guidelines7Body:
-      'Responses are based on context, severity, history, and risk. They may include warnings, content removal, feature limits, suspension, or account termination. Serious illegal material may be preserved or reported where required. Include the account name and relevant context when requesting a review.',
+      'Responses are based on context, severity, history, and risk. They may include warnings, content removal, feature limits, suspension, or account termination. Serious illegal material may be preserved or reported where required. Whoever is affected by a decision — the person acted against and the person who reported — may contest it by writing to the contact address in these documents within six months of being informed, stating the account name and why the decision looks wrong. A person, not an automated system, reviews every appeal and answers in writing, normally within 14 days; where the review finds the decision was wrong it is reversed and any restriction is lifted. Reports and decisions are recorded so an appeal can be reconstructed. This route is free, and it does not remove the right to go to a court or to an out-of-court dispute settlement body.',
     guidelines8Title: 'Use direct messages responsibly',
     guidelines8Body:
       'A mutual follow is permission to open the messaging feature, not permission to harass, pressure, threaten, sexualize, scam, or send repeated unwanted contact. Stop when asked, never share another person’s private messages without a lawful reason, and use block and report for unsafe contact. Do not send secrets because messages are not end-to-end encrypted.',
@@ -614,7 +615,7 @@ export const en = {
   },
   privacy: {
     title: 'Privacy policy',
-    effective: 'Effective and last updated: August 5, 2026',
+    effective: 'Effective and last updated: August 6, 2026',
     s1Title: 'Who is responsible',
     s1Pre: 'Văzute is operated by Dragne Alexandru Mihai. Questions and privacy requests can be sent to',
     s2Title: 'Data we process',
@@ -639,6 +640,9 @@ export const en = {
     provider6: 'Have I Been Pwned is queried when a password is created or changed. Văzute sends only the first five hexadecimal characters of the password SHA-1 hash, with response padding; the password and full hash are never sent.',
     provider7: 'Google Drive stores an off-site copy of each disaster-recovery backup. The archive is encrypted by Văzute before upload, and the separate Age decryption key is not sent to Google.',
     providerNote: 'Personal data may also be disclosed when required by law or necessary to protect users and the service. It is not shared for behavioral advertising.',
+    transfers: 'Several of these providers operate outside the European Economic Area, mainly in the United States, so using them involves an international transfer under Chapter V of the GDPR. Each transfer relies on the European Commission Standard Contractual Clauses included in that provider’s data-processing terms, or on the provider’s active certification under the EU-US Data Privacy Framework where it holds one, together with the technical measures described in this policy such as encryption in transit and at rest. A copy of the safeguards applying to a specific provider can be requested at the contact address above.',
+    s8Title: 'Cookies and local storage',
+    cookies: 'Văzute uses one cookie: a strictly necessary, HttpOnly cookie that carries the session refresh token so a signed-in session survives a page reload. It is not used for advertising, profiling, or cross-site tracking, and it is cleared on sign-out. Because it is strictly necessary for a service the user explicitly requested, it needs no consent banner. Cloudflare Web Analytics measures traffic without cookies and without a device identifier. Local storage holds interface preferences such as theme and language, and the mobile app additionally stores an encrypted offline cache; neither is used for tracking.',
     s5Title: 'Retention and deletion',
     retention1: 'Account and viewing data is retained while the account exists. Direct messages are retained while both participant accounts exist; deleting either participant account deletes the shared message history from the active service. A confirmed account deletion also removes the live account, sessions, profile avatar, library, history, lists, reviews, social relationships, notifications, and security activity. Blocking records are removed with either account. Active safety reports remain until they are resolved; resolved reports, including reported-message evidence snapshots and append-only moderation decisions, are retained for up to two years for safety, accountability, appeals, and legal claims, with deleted account references detached where possible. Expired authentication artifacts are pruned automatically when no longer needed for active session-family replay detection; consumed or revoked artifacts receive a short forensic window of at most seven days. The owner-visible security timeline is limited to 200 events per account and events expire after 90 days. Daily disaster-recovery backups are retained for at most 14 days, so deleted records may remain inaccessible in a backup until that backup expires. Web access logs are rotated daily and retained for up to 14 days. Mobile diagnostic reports stay only in size-limited rotating server logs and are not stored in the application database. Shared media metadata that is not linked to an account may remain cached. Disabling release alerts removes the registered device from Văzute; completed or permanently failed delivery records are removed after 30 days.',
     retention2Pre: 'Use the',
@@ -647,7 +651,7 @@ export const en = {
     s6Title: 'Your choices and rights',
     rights: 'Account settings allow users to correct profile information, control profile visibility, review security activity, manage sessions, export a portable JSON copy of their account data in the mobile app, disable release alerts, and delete the account. System notification settings provide an additional platform-level control. Depending on local law, users may also request access, correction, restriction, portability, objection, or deletion by contacting the address above. EEA users may lodge a complaint with their local data-protection authority.',
     s7Title: 'Security, children, and changes',
-    security: 'Văzute uses HTTPS, hashed passwords and tokens, restricted database roles, request validation, rate limits, and encrypted-at-rest infrastructure. No internet service can guarantee absolute security. Văzute is not directed to children under 13 and does not knowingly collect their personal data. Material policy changes will be reflected on this page with a new effective date.',
+    security: 'Văzute uses HTTPS, hashed passwords and tokens, restricted database roles, request validation, rate limits, and encrypted-at-rest infrastructure. No internet service can guarantee absolute security. Văzute is not directed to children under 16 and does not knowingly collect their personal data. Material policy changes will be reflected on this page with a new effective date.',
   },
   settings: {
     title: 'Settings',

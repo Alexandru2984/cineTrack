@@ -11,6 +11,7 @@ export function useRegister() {
       email: string;
       password: string;
       accepted_terms: boolean;
+      confirmed_minimum_age: boolean;
     }) => {
       const res = await api.post<AuthResponse>('/auth/register', data);
       return res.data;

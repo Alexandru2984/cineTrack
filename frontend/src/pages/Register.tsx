@@ -11,14 +11,22 @@ export default function RegisterPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [acceptedTerms, setAcceptedTerms] = useState(false);
+  const [confirmedAge, setConfirmedAge] = useState(false);
   const register = useRegister();
   const navigate = useNavigate();
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    register.mutate({ username, email, password, accepted_terms: acceptedTerms }, {
-      onSuccess: () => navigate('/'),
-    });
+    register.mutate(
+      {
+        username,
+        email,
+        password,
+        accepted_terms: acceptedTerms,
+        confirmed_minimum_age: confirmedAge,
+      },
+      { onSuccess: () => navigate('/') },
+    );
   };
 
   return (
@@ -71,6 +79,17 @@ export default function RegisterPage() {
               .
             </span>
           </label>
+
+          <label className="flex cursor-pointer items-start gap-3 text-sm leading-5 text-[hsl(var(--muted-foreground))]">
+            <input
+              type="checkbox"
+              checked={confirmedAge}
+              onChange={(event) => setConfirmedAge(event.target.checked)}
+              required
+              className="mt-0.5 h-4 w-4 shrink-0 accent-[hsl(var(--primary))]"
+            />
+            <span>{t('auth.confirmAge')}</span>
+          </label>
           <div>
             <label htmlFor="register-email" className="block text-sm font-medium mb-1">{t('auth.email')}</label>
             <input
@@ -107,7 +126,7 @@ export default function RegisterPage() {
 
           <button
             type="submit"
-            disabled={register.isPending || !acceptedTerms}
+            disabled={register.isPending || !acceptedTerms || !confirmedAge}
             className="w-full rounded-md bg-[hsl(var(--primary))] py-2 text-sm font-medium text-[hsl(var(--primary-foreground))] hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-2"
           >
             {register.isPending && <Loader2 className="h-4 w-4 animate-spin" />}

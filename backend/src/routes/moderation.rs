@@ -146,11 +146,18 @@ async fn list_reports(
     }))
 }
 
+/// A decided report can be reopened for review. The Community Guidelines
+/// promise that a contested decision is looked at again by a person and
+/// reversed when it was wrong, and that promise needs a way to act on it.
+/// Reopening never rewrites history: every transition appends its own row to
+/// `moderation_audit_log`, so the original decision stays on the record next
+/// to the one that revisited it.
 fn transition_allowed(old_status: &str, new_status: &str) -> bool {
     matches!(
         (old_status, new_status),
         ("open", "reviewing" | "actioned" | "dismissed")
             | ("reviewing", "open" | "actioned" | "dismissed")
+            | ("actioned" | "dismissed", "reviewing")
     )
 }
 
@@ -265,12 +272,22 @@ mod tests {
     use super::*;
 
     #[test]
-    fn final_reports_cannot_be_reopened_or_rewritten() {
+    fn a_decided_report_reopens_only_through_review() {
         assert!(transition_allowed("open", "reviewing"));
         assert!(transition_allowed("reviewing", "open"));
         assert!(transition_allowed("open", "actioned"));
-        assert!(!transition_allowed("actioned", "reviewing"));
+
+        // An appeal reopens a decided report, which is what makes the promise
+        // in the Community Guidelines actionable.
+        assert!(transition_allowed("actioned", "reviewing"));
+        assert!(transition_allowed("dismissed", "reviewing"));
+
+        // But only through review: a decision is never flipped straight to the
+        // opposite outcome, and never silently dropped back into the queue.
+        assert!(!transition_allowed("actioned", "dismissed"));
+        assert!(!transition_allowed("dismissed", "actioned"));
         assert!(!transition_allowed("dismissed", "open"));
+        assert!(!transition_allowed("actioned", "open"));
         assert!(!transition_allowed("open", "open"));
     }
 }
