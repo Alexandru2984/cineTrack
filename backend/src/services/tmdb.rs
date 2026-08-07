@@ -1489,6 +1489,41 @@ impl TmdbService {
             .await?;
         }
 
+        // Drop episodes TMDB has since stopped listing. Upserting alone leaves a
+        // season that was renumbered or split carrying its old rows forever, and
+        // those phantoms count against the user: they can never be watched, so
+        // they inflate the progress denominator and hold back the completed
+        // badge. An empty response is treated as a provider hiccup rather than a
+        // deletion, and anything a user has actually touched is left in place for
+        // deliberate reconciliation rather than silently taking their history
+        // with it.
+        if !tmdb_episodes.episodes.is_empty() {
+            let live_numbers: Vec<i32> = tmdb_episodes
+                .episodes
+                .iter()
+                .map(|ep| ep.episode_number)
+                .collect();
+            let pruned = sqlx::query(
+                r#"DELETE FROM episodes e
+                WHERE e.season_id = $1
+                  AND e.episode_number <> ALL($2)
+                  AND NOT EXISTS (SELECT 1 FROM watch_history w WHERE w.episode_id = e.id)
+                  AND NOT EXISTS (SELECT 1 FROM episode_plans p WHERE p.episode_id = e.id)
+                  AND NOT EXISTS (SELECT 1 FROM episode_reactions r WHERE r.episode_id = e.id)"#,
+            )
+            .bind(season.id)
+            .bind(&live_numbers)
+            .execute(&mut *tx)
+            .await?
+            .rows_affected();
+            if pruned > 0 {
+                log::info!(
+                    "Dropped {pruned} stale episode(s) for TMDB id {} season {season_number}",
+                    media.tmdb_id
+                );
+            }
+        }
+
         sqlx::query("UPDATE seasons SET episodes_cached_at = NOW() WHERE id = $1")
             .bind(season.id)
             .execute(&mut *tx)
