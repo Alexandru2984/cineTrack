@@ -1,13 +1,9 @@
 import { ShieldCheck } from 'lucide-react-native';
 import { useState } from 'react';
-import {
-  Linking,
-  Modal,
-  SafeAreaView,
-  ScrollView,
-  StyleSheet,
-  View,
-} from 'react-native';
+import { Linking, Modal, ScrollView, StyleSheet, View } from 'react-native';
+// React Native's own SafeAreaView is a plain View on Android, which left the
+// accept button sitting under the system navigation bar.
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { AppButton } from '@/components/app-button';
 import { AppText } from '@/components/app-text';
