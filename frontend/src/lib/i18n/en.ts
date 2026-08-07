@@ -799,6 +799,19 @@ export const en = {
     mobileTitle: 'Delete in the mobile app',
     mobileBody:
       'Open Profile, choose Account settings, then Delete my account. The app requires the current password and a final destructive confirmation.',
+    partialTitle: 'Delete data without closing the account',
+    partialBody:
+      'Personal data can be removed piece by piece while the account stays open. Sign in on the web or in the mobile app, then use the control next to the item itself:',
+    partialLibrary:
+      'Library and history — remove a show or film from the library, or clear individual watched episodes.',
+    partialLists:
+      'Lists and plans — delete a whole list, remove a single entry from one, unschedule a planned episode, or withdraw a reaction.',
+    partialProfile:
+      'Profile and connections — remove the profile picture, unfollow someone, cancel a follow request, or unblock a member.',
+    partialSessions:
+      'Devices and feeds — sign out an individual device from Settings, or delete the calendar feed link.',
+    partialRetention:
+      'Anything removed this way disappears from the service straight away and leaves disaster-recovery backups within 14 days. Movie and television metadata is shared catalogue data rather than personal data, so it stays. A request can also be sent to the address below.',
     deletedTitle: 'What is deleted',
     deletedBody:
       'The live profile, email, credentials, sessions, avatar, library, watch history, ratings, reviews, custom lists, episode plans, imports, follows, and notifications are removed. Disaster-recovery backups expire within 14 days. Shared movie and television metadata that is not linked to the account may remain cached.',

@@ -1,4 +1,4 @@
-import { CheckCircle2, LogIn, Mail, ShieldCheck, Trash2 } from 'lucide-react';
+import { CheckCircle2, ListChecks, LogIn, Mail, ShieldCheck, Trash2 } from 'lucide-react';
 import { Link } from 'react-router';
 import { loginPathFor } from '@/lib/navigation';
 import { useAuthStore } from '@/store/auth';
@@ -51,6 +51,25 @@ export default function AccountDeletionPage() {
         </h2>
         <p className="mt-3 text-sm leading-6 text-[hsl(var(--muted-foreground))]">
           {t('accountDeletion.mobileBody')}
+        </p>
+      </section>
+
+      <section className="border-b border-[hsl(var(--border))] py-8" aria-labelledby="partial-deletion-heading">
+        <h2 id="partial-deletion-heading" className="flex items-center gap-2 text-lg font-semibold">
+          <ListChecks className="h-5 w-5 text-amber-600 dark:text-amber-400" aria-hidden="true" />
+          {t('accountDeletion.partialTitle')}
+        </h2>
+        <p className="mt-3 text-sm leading-6 text-[hsl(var(--muted-foreground))]">
+          {t('accountDeletion.partialBody')}
+        </p>
+        <ul className="mt-4 flex list-disc flex-col gap-2 pl-5 text-sm leading-6 text-[hsl(var(--muted-foreground))]">
+          <li>{t('accountDeletion.partialLibrary')}</li>
+          <li>{t('accountDeletion.partialLists')}</li>
+          <li>{t('accountDeletion.partialProfile')}</li>
+          <li>{t('accountDeletion.partialSessions')}</li>
+        </ul>
+        <p className="mt-4 text-sm leading-6 text-[hsl(var(--muted-foreground))]">
+          {t('accountDeletion.partialRetention')}
         </p>
       </section>
 
