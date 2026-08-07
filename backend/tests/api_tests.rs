@@ -6376,6 +6376,121 @@ async fn test_warm_episode_cache_avoids_upstream_request() {
 
 #[actix_web::test]
 #[ignore = "requires test DB"]
+async fn test_refreshing_a_season_drops_episodes_tmdb_no_longer_lists() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let upstream = actix_web::rt::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let mut request = vec![0_u8; 4096];
+        let read = stream.read(&mut request).await.unwrap();
+        let request = String::from_utf8_lossy(&request[..read]);
+        assert!(request.starts_with("GET /tv/993010/season/1?"));
+        // The season was renumbered upstream and now holds two episodes.
+        let body = r#"{
+            "episodes": [
+                {"episode_number": 1, "name": "First", "air_date": "2026-01-01"},
+                {"episode_number": 2, "name": "Second", "air_date": "2026-01-08"}
+            ]
+        }"#;
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        stream.write_all(response.as_bytes()).await.unwrap();
+    });
+
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let mut config = test_config();
+    config.tmdb_base_url = format!("http://{address}");
+    let app = actix_test::init_service(create_app_with_config(pool.clone(), config)).await;
+    let (token, _, user_id) =
+        register_user(&app, "staleeps", "staleeps@example.com", "Pass1234").await;
+    let user_id = Uuid::parse_str(&user_id).unwrap();
+
+    let media_id = sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO media (tmdb_id, media_type, title)
+        VALUES (993010, 'tv', 'Renumbered Show')
+        RETURNING id"#,
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    // No `episodes_cached_at`, so the request below refreshes from upstream.
+    let season_id = sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO seasons (media_id, season_number, name, episode_count)
+        VALUES ($1, 1, 'Season 1', 4)
+        RETURNING id"#,
+    )
+    .bind(media_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    for number in 1..=4 {
+        sqlx::query(
+            r#"INSERT INTO episodes (season_id, episode_number, name, air_date)
+            VALUES ($1, $2, $3, '2026-01-01')"#,
+        )
+        .bind(season_id)
+        .bind(number)
+        .bind(format!("Episode {number}"))
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+
+    // Episode 3 is gone upstream too, but the user watched it. Their history
+    // outranks the catalog, so it has to survive the sweep; only the untouched
+    // episode 4 may go.
+    let watched_id = sqlx::query_scalar::<_, Uuid>(
+        "SELECT id FROM episodes WHERE season_id = $1 AND episode_number = 3",
+    )
+    .bind(season_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO watch_history (user_id, media_id, episode_id, watched_at) VALUES ($1, $2, $3, NOW())",
+    )
+    .bind(user_id)
+    .bind(media_id)
+    .bind(watched_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let req = actix_test::TestRequest::get()
+        .uri(&format!("/api/media/{media_id}/seasons/1/episodes"))
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+
+    let remaining = sqlx::query_scalar::<_, i32>(
+        "SELECT episode_number FROM episodes WHERE season_id = $1 ORDER BY episode_number",
+    )
+    .bind(season_id)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(remaining, vec![1, 2, 3]);
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM watch_history WHERE user_id = $1")
+            .bind(user_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+        1
+    );
+    upstream.await.unwrap();
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
 async fn test_stale_episode_cache_survives_upstream_failure() {
     let pool = setup_pool().await;
     clean_db(&pool).await;
