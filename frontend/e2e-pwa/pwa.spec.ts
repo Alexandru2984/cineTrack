@@ -120,6 +120,10 @@ test('publishes the Android app-link association', async ({ request }) => {
         namespace: 'android_app',
         package_name: 'com.micutu.vazute',
         sha256_cert_fingerprints: [
+          // Play re-signs every bundle with its own key, so this one is what
+          // store installs actually present. The upload key below only covers
+          // builds installed directly.
+          '6B:01:CD:93:4F:E4:09:F9:B6:70:71:5C:9F:D5:77:51:CB:6B:7C:8E:F4:C5:65:86:35:17:FB:6B:DA:42:CD:5C',
           '25:24:D5:B1:54:25:45:1E:00:1C:6B:8E:65:A4:F5:19:58:E5:B0:A3:4C:A5:35:0A:41:58:BD:7A:10:63:60:0F',
         ],
       },
