@@ -37,6 +37,7 @@ const AccountDeletionPage = lazy(() => import('@/pages/AccountDeletion'));
 const TermsPage = lazy(() => import('@/pages/Terms'));
 const CommunityGuidelinesPage = lazy(() => import('@/pages/CommunityGuidelines'));
 const ModerationPage = lazy(() => import('@/pages/Moderation'));
+const NotFoundPage = lazy(() => import('@/pages/NotFound'));
 
 function PageLoader() {
   return (
@@ -134,6 +135,9 @@ export default function App() {
               <Route path="/lists" element={<ProtectedRoute><ListsPage /></ProtectedRoute>} />
               <Route path="/lists/:id" element={<ListDetailPage />} />
               <Route path="/moderation" element={<ProtectedRoute><ModerationPage /></ProtectedRoute>} />
+              {/* Anything unmatched rendered nothing at all, so a mistyped
+                  address showed a blank page under the navbar. */}
+              <Route path="*" element={<NotFoundPage />} />
             </Routes>
           </Suspense>
         </ErrorBoundary>

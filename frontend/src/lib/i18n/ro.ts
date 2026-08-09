@@ -902,4 +902,10 @@ export const ro: Dictionary = {
     disable: 'Dezactivează',
     error: 'Nu s-a putut actualiza feedul de calendar',
   },
+  notFound: {
+    title: 'Pagina nu există',
+    body: 'Adresa aceasta nu duce nicăieri. Poate a fost scrisă greșit sau pagina pe care o indica nu mai există.',
+    home: 'Mergi la început',
+    search: 'Caută un titlu',
+  },
 };
