@@ -1,0 +1,21 @@
+# Served by this app rather than the host's shared robots.txt, which twenty-one
+# sites on the same machine share and which therefore cannot name a sitemap
+# belonging to any one of them.
+
+User-agent: *
+Allow: /
+
+# Single-use links that arrive by email. They carry a token, lead nowhere once
+# used, and have no business in an index.
+Disallow: /reset-password
+Disallow: /verify-email
+Disallow: /confirm-email-change
+
+# Commercial SEO crawlers, excluded here as they were in the shared file.
+User-agent: AhrefsBot
+Disallow: /
+
+User-agent: SemrushBot
+Disallow: /
+
+Sitemap: https://vazute.micutu.com/sitemap.xml
