@@ -898,6 +898,12 @@ export const en = {
     disable: 'Disable',
     error: 'Could not update the calendar feed',
   },
+  notFound: {
+    title: 'Page not found',
+    body: 'This address does not lead anywhere. It may have been mistyped, or the page it pointed to is gone.',
+    home: 'Go home',
+    search: 'Search for a title',
+  },
 };
 
 export type Dictionary = typeof en;
