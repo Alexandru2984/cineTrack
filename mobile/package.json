@@ -56,7 +56,7 @@
     "start": "expo start",
     "android": "expo run:android",
     "ios": "expo run:ios",
-    "audit:high": "npm audit --audit-level=high",
+    "audit:high": "python3 scripts/check_audit_exceptions.py",
     "lint": "expo lint",
     "typecheck": "tsc --noEmit",
     "test": "jest --runInBand",
