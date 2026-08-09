@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Only pages a signed-out visitor can actually read belong here. Everything
+  behind authentication redirects to the login page, so listing it would offer
+  a crawler nothing but a redirect, and the transactional pages (password
+  reset, email confirmation) are single-use links rather than content.
+
+  Shared lists are public but user-owned and private by default, so they are
+  deliberately left out of the site's own sitemap.
+
+  No lastmod: a hand-maintained date that drifts is worse than none, because a
+  crawler that learns the dates are wrong stops trusting them.
+-->
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>https://vazute.micutu.com/</loc>
+  </url>
+  <url>
+    <loc>https://vazute.micutu.com/login</loc>
+  </url>
+  <url>
+    <loc>https://vazute.micutu.com/register</loc>
+  </url>
+  <url>
+    <loc>https://vazute.micutu.com/about</loc>
+  </url>
+  <url>
+    <loc>https://vazute.micutu.com/privacy</loc>
+  </url>
+  <url>
+    <loc>https://vazute.micutu.com/terms</loc>
+  </url>
+  <url>
+    <loc>https://vazute.micutu.com/community-guidelines</loc>
+  </url>
+  <url>
+    <loc>https://vazute.micutu.com/account-deletion</loc>
+  </url>
+</urlset>

@@ -9,6 +9,7 @@ import { MobileTabBar } from '@/components/MobileTabBar';
 import { EmailVerificationBanner } from '@/components/EmailVerificationBanner';
 import { TermsAcceptanceGate } from '@/components/TermsAcceptanceGate';
 import { loginPathFor, safeReturnTo } from '@/lib/navigation';
+import { useCanonicalUrl } from '@/hooks/useCanonicalUrl';
 
 const LoginPage = lazy(() => import('@/pages/Login'));
 const RegisterPage = lazy(() => import('@/pages/Register'));
@@ -70,6 +71,8 @@ export default function App() {
   const location = useLocation();
   const authStatus = useAuthStore((state) => state.status);
   const authenticated = authStatus === 'authenticated';
+
+  useCanonicalUrl();
 
   useEffect(() => {
     void bootstrapSession();
