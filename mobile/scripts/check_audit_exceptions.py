@@ -81,10 +81,18 @@ def audit_findings() -> dict[tuple[str, str], str]:
         text=True,
         cwd=MOBILE,
     )
+    # Anything unexpected here has to fail the build. A gate that cannot read
+    # the audit must not conclude there is nothing to report.
     if not result.stdout.strip():
         raise SystemExit(f"npm audit produced no output: {result.stderr.strip()}")
 
-    report = json.loads(result.stdout)
+    try:
+        report = json.loads(result.stdout)
+    except json.JSONDecodeError as error:
+        raise SystemExit(
+            f"npm audit did not return JSON ({error}); "
+            f"first bytes were {result.stdout[:120]!r}"
+        ) from error
     findings: dict[tuple[str, str], str] = {}
     for vulnerability in report.get("vulnerabilities", {}).values():
         for via in vulnerability.get("via", []):

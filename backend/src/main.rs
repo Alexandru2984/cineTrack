@@ -11,7 +11,7 @@ use cinetrack::{
     middleware::request_id::{current_request_id, request_id},
     routes,
     services::catalog_hydration::{hydrate_popular_catalog, HydrationOptions},
-    services::catalog_repair::repair_stale_catalog_episodes,
+    services::catalog_repair::{repair_stale_catalog_episodes, CatalogRepairOptions},
     services::email::EmailService,
     services::password_breach::BreachChecker,
     services::push::{dispatch_release_pushes, ExpoPushService},
@@ -217,25 +217,29 @@ async fn main() -> std::io::Result<()> {
     }
 
     if matches!(mode, RunMode::RepairCatalog) {
-        let request_delay = Duration::from_millis(u64::from(bounded_env_u32(
-            "CATALOG_REPAIR_DELAY_MS",
-            250,
-            100,
-            5_000,
-        )?));
+        let options = CatalogRepairOptions {
+            budget: bounded_env_u32("CATALOG_REPAIR_BUDGET", 200, 1, 2_000)?,
+            request_delay: Duration::from_millis(u64::from(bounded_env_u32(
+                "CATALOG_REPAIR_DELAY_MS",
+                250,
+                100,
+                5_000,
+            )?)),
+        };
         let tmdb_service = TmdbService::new(&config);
-        let summary = repair_stale_catalog_episodes(&pool, &tmdb_service, request_delay)
+        let summary = repair_stale_catalog_episodes(&pool, &tmdb_service, options)
             .await
             .map_err(|error| {
                 log::error!("Catalog repair failed: {error}");
                 std::io::Error::other("catalog repair failed")
             })?;
         log::info!(
-            "Catalog repair complete: selected={} refreshed={} episodes_removed={} failures={}",
+            "Catalog repair complete: selected={} refreshed={} episodes_removed={} failures={} locked={}",
             summary.seasons_selected,
             summary.seasons_refreshed,
             summary.episodes_removed,
             summary.failures,
+            summary.skipped_locked,
         );
         return Ok(());
     }

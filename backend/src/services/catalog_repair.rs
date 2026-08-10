@@ -14,12 +14,23 @@ use sqlx::PgPool;
 use crate::errors::AppError;
 use crate::services::tmdb::TmdbService;
 
+/// Distinct from the hydration, release-schedule and push locks so those jobs
+/// stay independent of this one.
+const CATALOG_REPAIR_ADVISORY_LOCK: i64 = 0x5641_5a55_5445_5250;
+
+#[derive(Clone, Copy, Debug)]
+pub struct CatalogRepairOptions {
+    pub budget: u32,
+    pub request_delay: Duration,
+}
+
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct CatalogRepairSummary {
     pub seasons_selected: u64,
     pub seasons_refreshed: u64,
     pub episodes_removed: u64,
     pub failures: u64,
+    pub skipped_locked: bool,
 }
 
 /// Seasons carrying more episodes than the provider says the season has.
@@ -29,6 +40,8 @@ pub struct CatalogRepairSummary {
 /// is opened. A gap between the two is exactly the drift this repairs. It will
 /// miss a season whose count is equally stale, which is why this is a sweep to
 /// run occasionally rather than a correctness guarantee.
+///
+/// Worst drift first, so a capped run spends its budget where it matters most.
 const CANDIDATES: &str = r#"
     SELECT m.tmdb_id, s.season_number, c.actual - s.episode_count AS surplus
     FROM seasons s
@@ -38,15 +51,39 @@ const CANDIDATES: &str = r#"
     WHERE m.media_type = 'tv'
       AND s.episode_count IS NOT NULL
       AND c.actual > s.episode_count
-    ORDER BY c.actual - s.episode_count DESC
+    ORDER BY c.actual - s.episode_count DESC, m.tmdb_id, s.season_number
+    LIMIT $1
 "#;
 
 pub async fn repair_stale_catalog_episodes(
     pool: &PgPool,
     tmdb: &TmdbService,
-    request_delay: Duration,
+    options: CatalogRepairOptions,
 ) -> Result<CatalogRepairSummary, AppError> {
+    if options.budget == 0 {
+        return Err(AppError::BadRequest(
+            "Catalog repair budget must be positive".to_string(),
+        ));
+    }
+
+    // Every candidate costs one upstream request against the key the whole
+    // application shares, so two overlapping runs would double that load for no
+    // benefit. The lock is transaction-scoped, so it is released on every return
+    // path including provider and database errors.
+    let mut lock_transaction = pool.begin().await?;
+    let acquired = sqlx::query_scalar::<_, bool>("SELECT pg_try_advisory_xact_lock($1)")
+        .bind(CATALOG_REPAIR_ADVISORY_LOCK)
+        .fetch_one(&mut *lock_transaction)
+        .await?;
+    if !acquired {
+        return Ok(CatalogRepairSummary {
+            skipped_locked: true,
+            ..CatalogRepairSummary::default()
+        });
+    }
+
     let candidates = sqlx::query_as::<_, (i32, i32, i64)>(CANDIDATES)
+        .bind(i64::from(options.budget))
         .fetch_all(pool)
         .await?;
 
@@ -94,7 +131,7 @@ pub async fn repair_stale_catalog_episodes(
         }
 
         // The provider is a shared resource and this sweep is never urgent.
-        tokio::time::sleep(request_delay).await;
+        tokio::time::sleep(options.request_delay).await;
     }
 
     Ok(summary)
