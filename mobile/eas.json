@@ -41,5 +41,13 @@
         "EXPO_UPDATES_ENABLED": "false"
       }
     }
+  },
+  "submit": {
+    "production": {
+      "android": {
+        "track": "internal",
+        "releaseStatus": "draft"
+      }
+    }
   }
 }
