@@ -42,3 +42,10 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# Firebase config for Android push. Not committed: this repository is public,
+# and the build gets the file from an EAS environment variable instead.
+google-services.json
+# Firebase service account keys. These are real credentials and never belong
+# in the repository, under any name.
+*firebase-adminsdk*.json
