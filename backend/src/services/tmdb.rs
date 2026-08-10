@@ -1400,7 +1400,10 @@ impl TmdbService {
         .await
     }
 
-    async fn refresh_season_episodes(
+    /// Refresh regardless of how fresh the cache is. The maintenance sweep in
+    /// `catalog_repair` needs this: a season whose episodes went stale upstream
+    /// still looks cached, so the ordinary age check would skip it forever.
+    pub(crate) async fn refresh_season_episodes(
         &self,
         pool: &PgPool,
         media: &Media,

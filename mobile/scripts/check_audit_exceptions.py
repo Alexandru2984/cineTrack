@@ -30,9 +30,18 @@ AUDIT_LEVEL = "high"
 # image-size parses the project's own icon, splash and adaptive-icon files
 # inside Metro while the bundle is built. The inputs are repository assets, not
 # anything a user or attacker can supply, and the package ships no code into the
-# APK or AAB. The impact is a hung build, not a compromised app. Every published
-# version is affected and the package has had no release since April 2025, so
-# there is nothing to upgrade to.
+# APK or AAB. The impact is a hung build, not a compromised app.
+#
+# More than that, the vulnerable code is unreachable here. Both advisories are
+# in the ICNS, JXL and HEIF decoders, and Metro picks a decoder by file type;
+# assets/ holds three PNG files and the repository contains no image in any of
+# those three formats. Re-check that if artwork is ever added:
+#     find . -path ./node_modules -prune -o \
+#          \( -iname '*.icns' -o -iname '*.jxl' -o -iname '*.heic' \) -print
+#
+# There is nothing to upgrade to either. GitHub reports no patched version, the
+# advisories cover every release, and the package has not been published since
+# April 2025.
 ACCEPTED = {
     ("image-size", "GHSA-w3rx-r6r6-pgpr"): (
         "1.2.1",
@@ -72,10 +81,18 @@ def audit_findings() -> dict[tuple[str, str], str]:
         text=True,
         cwd=MOBILE,
     )
+    # Anything unexpected here has to fail the build. A gate that cannot read
+    # the audit must not conclude there is nothing to report.
     if not result.stdout.strip():
         raise SystemExit(f"npm audit produced no output: {result.stderr.strip()}")
 
-    report = json.loads(result.stdout)
+    try:
+        report = json.loads(result.stdout)
+    except json.JSONDecodeError as error:
+        raise SystemExit(
+            f"npm audit did not return JSON ({error}); "
+            f"first bytes were {result.stdout[:120]!r}"
+        ) from error
     findings: dict[tuple[str, str], str] = {}
     for vulnerability in report.get("vulnerabilities", {}).values():
         for via in vulnerability.get("via", []):

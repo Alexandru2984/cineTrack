@@ -1,6 +1,7 @@
 pub mod auth;
 pub mod catalog;
 pub mod catalog_hydration;
+pub mod catalog_repair;
 pub mod community_safety;
 pub mod completion;
 pub mod discovery;
