@@ -11,6 +11,7 @@ use cinetrack::{
     middleware::request_id::{current_request_id, request_id},
     routes,
     services::catalog_hydration::{hydrate_popular_catalog, HydrationOptions},
+    services::catalog_repair::repair_stale_catalog_episodes,
     services::email::EmailService,
     services::password_breach::BreachChecker,
     services::push::{dispatch_release_pushes, ExpoPushService},
@@ -33,6 +34,7 @@ enum RunMode {
     Serve,
     HydrateCatalog,
     SyncReleaseSchedules,
+    RepairCatalog,
     Migrate,
     CheckConfig,
     CheckSmtp,
@@ -113,13 +115,14 @@ async fn main() -> std::io::Result<()> {
         [argument] if argument == "--healthcheck" => return run_healthcheck(),
         [argument] if argument == "--hydrate-catalog" => RunMode::HydrateCatalog,
         [argument] if argument == "--sync-release-schedules" => RunMode::SyncReleaseSchedules,
+        [argument] if argument == "--repair-catalog" => RunMode::RepairCatalog,
         [argument] if argument == "--migrate" => RunMode::Migrate,
         [argument] if argument == "--check-config" => RunMode::CheckConfig,
         [argument] if argument == "--check-smtp" => RunMode::CheckSmtp,
         _ => {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
-                "supported arguments are --healthcheck, --hydrate-catalog, --sync-release-schedules, --migrate, --check-config and --check-smtp",
+                "supported arguments are --healthcheck, --hydrate-catalog, --sync-release-schedules, --repair-catalog, --migrate, --check-config and --check-smtp",
             ));
         }
     };
@@ -210,6 +213,30 @@ async fn main() -> std::io::Result<()> {
                 "catalog hydration stopped after a provider failure",
             ));
         }
+        return Ok(());
+    }
+
+    if matches!(mode, RunMode::RepairCatalog) {
+        let request_delay = Duration::from_millis(u64::from(bounded_env_u32(
+            "CATALOG_REPAIR_DELAY_MS",
+            250,
+            100,
+            5_000,
+        )?));
+        let tmdb_service = TmdbService::new(&config);
+        let summary = repair_stale_catalog_episodes(&pool, &tmdb_service, request_delay)
+            .await
+            .map_err(|error| {
+                log::error!("Catalog repair failed: {error}");
+                std::io::Error::other("catalog repair failed")
+            })?;
+        log::info!(
+            "Catalog repair complete: selected={} refreshed={} episodes_removed={} failures={}",
+            summary.seasons_selected,
+            summary.seasons_refreshed,
+            summary.episodes_removed,
+            summary.failures,
+        );
         return Ok(());
     }
 
