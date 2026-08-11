@@ -24,7 +24,8 @@ pub struct RegisterRequest {
     pub username: String,
     #[validate(
         length(max = 254, message = "Email must be at most 254 characters"),
-        email(message = "Invalid email address")
+        email(message = "Invalid email address"),
+        custom(function = "validate_deliverable_email")
     )]
     pub email: String,
     #[validate(
@@ -37,6 +38,50 @@ pub struct RegisterRequest {
     /// profiles and free-text fields put this service above the GDPR Art. 8
     /// consent age, so the account cannot be created without it.
     pub confirmed_minimum_age: bool,
+}
+
+/// Domains the standards permanently reserve for documentation and testing.
+///
+/// RFC 2606 reserves the three second-level names, RFC 6761 the four top-level
+/// ones. None of them has, or can ever have, a mail server: every message sent
+/// to one is a bounce, charged against the sending domain's reputation.
+///
+/// A closed list defined by a standard, unlike a list of disposable-mail
+/// providers, which is an endless race nobody wins.
+const RESERVED_EMAIL_DOMAINS: &[&str] = &["example.com", "example.net", "example.org"];
+const RESERVED_EMAIL_TLDS: &[&str] = &[".test", ".example", ".invalid", ".localhost", ".local"];
+
+/// Refuse an address that provably cannot receive mail.
+///
+/// Accounts on these domains have reached production: `testuser123@example.com`
+/// signed up and its verification mail could only ever bounce. Each one spends
+/// deliverability that real users then pay for.
+///
+/// Applied where an address must be reachable for the account to work — signing
+/// up, and changing an address. Deliberately not applied to signing in or to
+/// password resets: an existing account must not become unusable because the
+/// rules tightened, and a reset has to answer identically for every address, or
+/// the difference reveals which ones exist.
+fn validate_deliverable_email(email: &str) -> Result<(), validator::ValidationError> {
+    let Some((_, domain)) = email.rsplit_once('@') else {
+        // Malformed, which the `email` validator on the same field reports.
+        return Ok(());
+    };
+    let domain = domain.trim().trim_end_matches('.').to_ascii_lowercase();
+
+    let reserved = RESERVED_EMAIL_DOMAINS
+        .iter()
+        .any(|name| domain == *name || domain.ends_with(&format!(".{name}")))
+        || RESERVED_EMAIL_TLDS
+            .iter()
+            .any(|tld| domain.ends_with(tld) || domain == tld.trim_start_matches('.'));
+
+    if reserved {
+        let mut err = validator::ValidationError::new("undeliverable_email");
+        err.message = Some("That email domain cannot receive mail".into());
+        return Err(err);
+    }
+    Ok(())
 }
 
 fn validate_password_strength(password: &str) -> Result<(), validator::ValidationError> {
@@ -235,7 +280,8 @@ pub struct ChangeEmailRequest {
     pub current_password: String,
     #[validate(
         length(max = 254, message = "Email must be at most 254 characters"),
-        email(message = "Invalid email address")
+        email(message = "Invalid email address"),
+        custom(function = "validate_deliverable_email")
     )]
     pub new_email: String,
     #[validate(length(max = 64, message = "Two-factor code is too long"))]
@@ -373,7 +419,7 @@ mod tests {
     fn test_register_valid() {
         let req = RegisterRequest {
             username: "testuser".to_string(),
-            email: "test@example.com".to_string(),
+            email: "test@mailbox.dev".to_string(),
             password: "SecurePass1".to_string(),
             accepted_terms: true,
             confirmed_minimum_age: true,
@@ -386,7 +432,7 @@ mod tests {
         assert!(
             serde_json::from_value::<RegisterRequest>(serde_json::json!({
                 "username": "testuser",
-                "email": "test@example.com",
+                "email": "test@mailbox.dev",
                 "password": "SecurePass1",
                 "accepted_terms": true,
                 "confirmed_minimum_age": true,
@@ -395,7 +441,7 @@ mod tests {
             .is_err()
         );
         assert!(serde_json::from_value::<LoginRequest>(serde_json::json!({
-            "email": "test@example.com",
+            "email": "test@mailbox.dev",
             "password": "SecurePass1",
             "remember_me": true
         }))
@@ -410,7 +456,7 @@ mod tests {
         );
         assert!(
             serde_json::from_value::<ForgotPasswordRequest>(serde_json::json!({
-                "email": "test@example.com",
+                "email": "test@mailbox.dev",
                 "redirect_url": "https://attacker.invalid"
             }))
             .is_err()
@@ -446,7 +492,7 @@ mod tests {
     fn test_register_username_too_short() {
         let req = RegisterRequest {
             username: "ab".to_string(),
-            email: "test@example.com".to_string(),
+            email: "test@mailbox.dev".to_string(),
             password: "SecurePass1".to_string(),
             accepted_terms: true,
             confirmed_minimum_age: true,
@@ -458,7 +504,7 @@ mod tests {
     fn test_register_username_too_long() {
         let req = RegisterRequest {
             username: "a".repeat(51),
-            email: "test@example.com".to_string(),
+            email: "test@mailbox.dev".to_string(),
             password: "SecurePass1".to_string(),
             accepted_terms: true,
             confirmed_minimum_age: true,
@@ -470,7 +516,7 @@ mod tests {
     fn test_register_blank_username_rejected() {
         let req = RegisterRequest {
             username: "   ".to_string(),
-            email: "test@example.com".to_string(),
+            email: "test@mailbox.dev".to_string(),
             password: "SecurePass1".to_string(),
             accepted_terms: true,
             confirmed_minimum_age: true,
@@ -494,7 +540,7 @@ mod tests {
     fn test_register_password_too_short() {
         let req = RegisterRequest {
             username: "testuser".to_string(),
-            email: "test@example.com".to_string(),
+            email: "test@mailbox.dev".to_string(),
             password: "Short1".to_string(),
             accepted_terms: true,
             confirmed_minimum_age: true,
@@ -506,7 +552,7 @@ mod tests {
     fn test_register_password_too_long() {
         let req = RegisterRequest {
             username: "testuser".to_string(),
-            email: "test@example.com".to_string(),
+            email: "test@mailbox.dev".to_string(),
             password: format!("{}1", "a".repeat(128)),
             accepted_terms: true,
             confirmed_minimum_age: true,
@@ -518,7 +564,7 @@ mod tests {
     fn test_register_password_no_digit_fails_custom() {
         let req = RegisterRequest {
             username: "testuser".to_string(),
-            email: "test@example.com".to_string(),
+            email: "test@mailbox.dev".to_string(),
             password: "OnlyLettersHere".to_string(),
             accepted_terms: true,
             confirmed_minimum_age: true,
@@ -530,7 +576,7 @@ mod tests {
     fn test_register_password_no_letter_fails_custom() {
         let req = RegisterRequest {
             username: "testuser".to_string(),
-            email: "test@example.com".to_string(),
+            email: "test@mailbox.dev".to_string(),
             password: "123456789".to_string(),
             accepted_terms: true,
             confirmed_minimum_age: true,
@@ -542,7 +588,7 @@ mod tests {
     fn test_register_username_boundary_3_chars() {
         let req = RegisterRequest {
             username: "abc".to_string(),
-            email: "test@example.com".to_string(),
+            email: "test@mailbox.dev".to_string(),
             password: "SecurePass1".to_string(),
             accepted_terms: true,
             confirmed_minimum_age: true,
@@ -554,7 +600,7 @@ mod tests {
     fn test_register_username_boundary_50_chars() {
         let req = RegisterRequest {
             username: "a".repeat(50),
-            email: "test@example.com".to_string(),
+            email: "test@mailbox.dev".to_string(),
             password: "SecurePass1".to_string(),
             accepted_terms: true,
             confirmed_minimum_age: true,
@@ -566,7 +612,7 @@ mod tests {
     fn test_register_password_boundary_8_chars() {
         let req = RegisterRequest {
             username: "testuser".to_string(),
-            email: "test@example.com".to_string(),
+            email: "test@mailbox.dev".to_string(),
             password: "Abcdef1x".to_string(), // exactly 8
             accepted_terms: true,
             confirmed_minimum_age: true,
@@ -626,7 +672,7 @@ mod tests {
     fn change_email_requires_a_real_address_and_a_password() {
         let valid = ChangeEmailRequest {
             current_password: "SecurePass1".to_string(),
-            new_email: "new@example.com".to_string(),
+            new_email: "new@mailbox.dev".to_string(),
             totp_code: None,
         };
         assert!(valid.validate().is_ok());
@@ -634,7 +680,7 @@ mod tests {
         // No password means a stolen session alone could move the address.
         let no_password = ChangeEmailRequest {
             current_password: String::new(),
-            new_email: "new@example.com".to_string(),
+            new_email: "new@mailbox.dev".to_string(),
             totp_code: None,
         };
         assert!(no_password.validate().is_err());
@@ -648,7 +694,7 @@ mod tests {
 
         let too_long = ChangeEmailRequest {
             current_password: "SecurePass1".to_string(),
-            new_email: format!("{}@example.com", "a".repeat(250)),
+            new_email: format!("{}@mailbox.dev", "a".repeat(250)),
             totp_code: None,
         };
         assert!(too_long.validate().is_err());
@@ -659,7 +705,7 @@ mod tests {
         assert!(
             serde_json::from_value::<ChangeEmailRequest>(serde_json::json!({
                 "current_password": "SecurePass1",
-                "new_email": "new@example.com",
+                "new_email": "new@mailbox.dev",
                 "email_verified": true
             }))
             .is_err()
@@ -685,5 +731,70 @@ mod tests {
             new_password: "SecurePass1".to_string(),
         };
         assert!(non_hex.validate().is_err());
+    }
+
+    /// Every address in this list bounced against the production sending domain
+    /// before the check existed, or is reserved by the same standards as the
+    /// ones that did. A bounce costs deliverability that real users then pay
+    /// for, so the account is refused rather than the mail wasted.
+    #[test]
+    fn registration_refuses_domains_that_cannot_receive_mail() {
+        for address in [
+            "testuser123@example.com",
+            "someone@example.net",
+            "someone@example.org",
+            "wsprobe_1786230837@example.test",
+            "someone@mail.example.com",
+            "someone@anything.invalid",
+            "someone@dev.localhost",
+            "someone@printer.local",
+            "SOMEONE@EXAMPLE.COM",
+            "someone@example.com.",
+        ] {
+            assert!(
+                validate_deliverable_email(address).is_err(),
+                "{address} should have been refused"
+            );
+        }
+    }
+
+    /// The list is closed and comes from the standards. Anything else is a real
+    /// domain someone might genuinely use, including ones that merely look like
+    /// test addresses.
+    #[test]
+    fn registration_accepts_addresses_that_can_receive_mail() {
+        for address in [
+            "hans@gmx.de",
+            "someone@gmail.com",
+            "someone@ex.com",
+            "someone@examples.com",
+            "someone@example.company",
+            "someone@testing.dev",
+            "play-review@micutu.com",
+            "no-at-sign-here",
+        ] {
+            assert!(
+                validate_deliverable_email(address).is_ok(),
+                "{address} should have been accepted"
+            );
+        }
+    }
+
+    /// Signing in and asking for a reset must not consult the list. An account
+    /// created before it existed has to stay usable, and a reset that answered
+    /// differently for reserved domains would confirm which addresses exist.
+    #[test]
+    fn signing_in_and_resetting_ignore_the_reserved_list() {
+        let login = LoginRequest {
+            email: "testuser123@example.com".into(),
+            password: "whatever123".into(),
+            totp_code: None,
+        };
+        assert!(login.validate().is_ok());
+
+        let forgot = ForgotPasswordRequest {
+            email: "testuser123@example.com".into(),
+        };
+        assert!(forgot.validate().is_ok());
     }
 }

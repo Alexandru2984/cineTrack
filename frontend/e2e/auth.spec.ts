@@ -10,7 +10,7 @@ import { test, expect, type Page } from '@playwright/test';
 const TEST_USER = {
   id: '00000000-0000-0000-0000-000000000001',
   username: 'e2euser',
-  email: 'e2e@example.com',
+  email: 'e2e@mailbox.dev',
   avatar_url: null,
   bio: null,
   is_public: true,
@@ -104,7 +104,7 @@ test('publishes privacy controls and returns to account deletion after login', a
       json: { access_token: 'access-1', token_type: 'Bearer', expires_in: 3600, user: TEST_USER },
     })
   );
-  await page.getByLabel('Email').fill('e2e@example.com');
+  await page.getByLabel('Email').fill('e2e@mailbox.dev');
   await page.getByLabel('Password').fill('Password1');
   await page.getByRole('button', { name: 'Sign in' }).click();
 
@@ -126,7 +126,7 @@ test('shows an error message on invalid credentials', async ({ page }) => {
   );
 
   await page.goto('/login');
-  await page.getByLabel('Email').fill('e2e@example.com');
+  await page.getByLabel('Email').fill('e2e@mailbox.dev');
   await page.getByLabel('Password').fill('WrongPass1');
   await page.getByRole('button', { name: 'Sign in' }).click();
 
@@ -144,7 +144,7 @@ test('blocks path-unsafe usernames before registration reaches the API', async (
   await page.goto('/register');
   const username = page.getByLabel('Username');
   await username.fill('bad user');
-  await page.getByLabel('Email').fill('safe@example.com');
+  await page.getByLabel('Email').fill('safe@mailbox.dev');
   await page.getByLabel('Password').fill('Password1');
   // Tick every consent box, whatever the form currently asks for, so the
   // username stays the only thing standing between this page and the API.
@@ -167,7 +167,7 @@ test('logs in and lands on the dashboard', async ({ page }) => {
   );
 
   await page.goto('/login');
-  await page.getByLabel('Email').fill('e2e@example.com');
+  await page.getByLabel('Email').fill('e2e@mailbox.dev');
   await page.getByLabel('Password').fill('Password1');
   await page.getByRole('button', { name: 'Sign in' }).click();
 
@@ -845,7 +845,7 @@ test('forgot password shows a uniform confirmation', async ({ page }) => {
   );
 
   await page.goto('/forgot-password');
-  await page.getByLabel('Email').fill('whoever@example.com');
+  await page.getByLabel('Email').fill('whoever@mailbox.dev');
   await page.getByRole('button', { name: 'Send reset link' }).click();
 
   await expect(page.getByText(/reset link is on its way/i)).toBeVisible();
