@@ -1,3 +1,5 @@
+import { File, UploadType } from 'expo-file-system';
+
 import { API_BASE_URL } from '@/lib/config';
 
 const REQUEST_TIMEOUT_MS = 15_000;
@@ -14,8 +16,19 @@ export class ApiError extends Error {
     public readonly status: number,
     /** Parsed error body, so callers can read flags such as two_factor_required. */
     public readonly payload?: unknown,
+    /**
+     * The failure this wraps, when it wraps one.
+     *
+     * Without it a rejected request is indistinguishable from every other
+     * rejected request, and the reason is gone for good. That cost days on the
+     * avatar upload: the native layer reported precisely why it could not build
+     * the request, and both this class and the fetch polyfill above it threw
+     * that away, leaving a message about connectivity for a failure that never
+     * touched the network.
+     */
+    options?: { cause?: unknown },
   ) {
-    super(message);
+    super(message, options);
     this.name = 'ApiError';
   }
 }
@@ -45,6 +58,14 @@ export interface RawRequestOptions {
 interface RawMultipartRequestOptions {
   headers?: Record<string, string>;
   signal?: AbortSignal;
+}
+
+/** One file, and the multipart field the server reads it from. */
+export interface MultipartFile {
+  /** A `file://` URI. The file must exist when the upload starts. */
+  uri: string;
+  fieldName: string;
+  mimeType: string;
 }
 
 export function withQuery(
@@ -107,9 +128,11 @@ async function request<T>(
       throw new ApiError(
         callerSignal?.aborted ? 'The request was cancelled' : 'The request timed out',
         0,
+        undefined,
+        { cause: error },
       );
     }
-    throw new ApiError('Could not connect to Văzute', 0);
+    throw new ApiError('Could not connect to Văzute', 0, undefined, { cause: error });
   } finally {
     clearTimeout(timeout);
     callerSignal?.removeEventListener('abort', abortFromCaller);
@@ -139,7 +162,12 @@ export function rawRequest<T>(
   );
 }
 
-export function rawMultipartRequest<T>(
+/**
+ * The original `fetch` upload path, kept only for the multi-file import.
+ *
+ * See `rawMultipartRequest` for why single-file uploads no longer use it.
+ */
+export function rawFormDataRequest<T>(
   path: string,
   form: FormData,
   options: RawMultipartRequestOptions = {},
@@ -157,6 +185,72 @@ export function rawMultipartRequest<T>(
     options.signal,
     UPLOAD_TIMEOUT_MS,
   );
+}
+
+/**
+ * Upload one file as a multipart request, natively.
+ *
+ * `fetch` with a `FormData` carrying a `{ uri }` part is the documented React
+ * Native way to do this, and it is the way that did not work here: the native
+ * networking module refused to assemble the body and reported why, then
+ * whatwg-fetch replaced that with a bare "Network request failed" and this
+ * module replaced it again with a connection message. Nothing ever reached the
+ * server, and nothing ever reached a log.
+ *
+ * expo-file-system streams the file from native code instead, so there is no
+ * FormData translation to go wrong and a failure arrives with its reason
+ * attached.
+ */
+export async function rawMultipartRequest<T>(
+  path: string,
+  file: MultipartFile,
+  options: RawMultipartRequestOptions = {},
+): Promise<T> {
+  if (options.signal?.aborted) {
+    throw new ApiError('The request was cancelled', 0);
+  }
+
+  let result: { status: number; body: string };
+  try {
+    result = await new File(file.uri).upload(`${API_BASE_URL}${path}`, {
+      httpMethod: 'POST',
+      uploadType: UploadType.MULTIPART,
+      fieldName: file.fieldName,
+      mimeType: file.mimeType,
+      headers: {
+        Accept: 'application/json',
+        ...options.headers,
+      },
+    });
+  } catch (error) {
+    if (options.signal?.aborted) {
+      throw new ApiError('The request was cancelled', 0, undefined, { cause: error });
+    }
+    throw new ApiError('Could not connect to Văzute', 0, undefined, { cause: error });
+  }
+
+  let payload: unknown = undefined;
+  if (result.body) {
+    try {
+      payload = JSON.parse(result.body);
+    } catch {
+      payload = undefined;
+    }
+  }
+
+  if (result.status < 200 || result.status >= 300) {
+    const message =
+      typeof payload === 'object' && payload !== null && 'message' in payload
+        ? (payload as ErrorPayload).message
+        : undefined;
+    throw new ApiError(
+      message || `Request failed with status ${result.status}`,
+      result.status,
+      payload,
+    );
+  }
+
+  return payload as T;
 }
 
 export function getErrorMessage(error: unknown, fallback: string) {

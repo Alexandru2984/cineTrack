@@ -26,6 +26,15 @@ jest.mock('@/lib/api', () => ({
   apiRequest: jest.fn(),
 }));
 
+// The upload streams this file from native code, so the checks in avatar.ts
+// depend on what the file system reports about it.
+const mockFile = jest.fn();
+jest.mock('expo-file-system', () => ({
+  File: function (uri: string) {
+    return mockFile(uri);
+  },
+}));
+
 const mockPicker = jest.mocked(ImagePicker.launchImageLibraryAsync);
 const mockUpload = jest.mocked(apiMultipartRequest);
 
@@ -39,6 +48,7 @@ describe('mobile avatar upload', () => {
       width: 1024,
       height: 768,
     });
+    mockFile.mockReturnValue({ exists: true, size: 40_000 });
   });
 
   it('uses the one-image system picker and strips metadata through JPEG re-encoding', async () => {
@@ -107,6 +117,27 @@ describe('mobile avatar upload', () => {
       avatar_url: 'https://vazute.micutu.com/api/assets/avatar.jpg',
     });
     await expect(uploadAvatar(file)).rejects.toThrow('Avatar URL must use HTTPS');
-    expect(mockUpload).toHaveBeenCalledWith('/users/me/avatar', expect.any(FormData));
+    expect(mockUpload).toHaveBeenCalledWith('/users/me/avatar', {
+      uri: 'file:///cache/avatar.jpg',
+      fieldName: 'avatar',
+      mimeType: 'image/jpeg',
+    });
+  });
+
+  // The upload opens this path natively. A file that is missing or empty fails
+  // there without ever reaching the network, which is indistinguishable from
+  // losing connectivity unless it is caught here first.
+  it.each([
+    ['missing', { exists: false, size: 0 }, 'no longer on disk'],
+    ['empty', { exists: true, size: 0 }, 'is empty'],
+  ])('refuses to upload a %s prepared file', async (_label, info, message) => {
+    mockPicker.mockResolvedValueOnce({
+      canceled: false,
+      assets: [{ uri: 'file:///photo.heic', width: 2000, height: 2000, type: 'image' }],
+    } as never);
+    mockFile.mockReturnValue(info);
+
+    await expect(pickAndPrepareAvatar()).rejects.toThrow(message);
+    expect(mockUpload).not.toHaveBeenCalled();
   });
 });
