@@ -50,6 +50,50 @@ pub struct SecurityActivityResponse {
     pub created_at: DateTime<Utc>,
 }
 
+/// How long a familiar device stays quiet between sign-in alerts.
+const FAMILIAR_DEVICE_QUIET_HOURS: i64 = 24;
+
+/// Whether a successful sign-in is worth mailing the account owner about.
+///
+/// Every sign-in used to send one. A single day of testing produced seven
+/// identical mails to one mailbox, which is both most of this domain's outbound
+/// volume and the reason nobody reads the alert — a warning that arrives after
+/// every ordinary login carries no information when it matters.
+///
+/// A device is judged by its user agent, the only stable thing recorded here.
+/// IP addresses move constantly on mobile networks, so requiring a familiar one
+/// would mail on nearly every login and change nothing. That does mean a
+/// takeover from a device presenting the same user agent goes unannounced for a
+/// day, which is why the quiet period exists rather than silence: a sustained
+/// intrusion still surfaces, once a day, in an inbox where it can be noticed.
+///
+/// Call this after the sign-in has been recorded; the row for the sign-in being
+/// judged is expected to be present and is not counted against itself.
+pub async fn is_sign_in_worth_reporting(
+    pool: &PgPool,
+    user_id: Uuid,
+    user_agent: Option<&str>,
+) -> Result<bool, AppError> {
+    let (device_seen_before, reported_recently): (bool, bool) = sqlx::query_as(
+        "SELECT
+            count(*) FILTER (
+                WHERE user_agent IS NOT DISTINCT FROM $2::varchar
+            ) > 1 AS device_seen_before,
+            count(*) FILTER (
+                WHERE created_at > now() - make_interval(hours => $3::int)
+            ) > 1 AS reported_recently
+         FROM security_activity
+         WHERE user_id = $1 AND event_type = 'login_succeeded'",
+    )
+    .bind(user_id)
+    .bind(user_agent)
+    .bind(FAMILIAR_DEVICE_QUIET_HOURS as i32)
+    .fetch_one(pool)
+    .await?;
+
+    Ok(!device_seen_before || !reported_recently)
+}
+
 /// Append one event inside the caller's transaction and enforce the per-user
 /// cap before that transaction commits. There is intentionally no update path.
 pub async fn record_in_transaction(

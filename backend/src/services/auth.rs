@@ -259,7 +259,19 @@ pub async fn login(
     let recipient = user.email.clone();
     let user_agent = client.user_agent.clone();
     let ip_address = client.ip_address.clone();
+    let pool = pool.clone();
+    let user_id = user.id;
     actix_web::rt::spawn(async move {
+        // Deciding this off the request path keeps a slow query from delaying
+        // the sign-in, and a failure here must not suppress the alert: when the
+        // check cannot run, send it.
+        let worth_reporting =
+            security_activity::is_sign_in_worth_reporting(&pool, user_id, user_agent.as_deref())
+                .await
+                .unwrap_or(true);
+        if !worth_reporting {
+            return;
+        }
         email_service
             .send_new_login_alert(&recipient, user_agent.as_deref(), ip_address.as_deref())
             .await;

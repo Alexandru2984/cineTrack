@@ -10162,3 +10162,81 @@ async fn test_rate_limited_wiring_resolves_every_route_class() {
 
     pool.close().await;
 }
+
+/// Every successful sign-in used to send its own mail. One day of automated
+/// testing produced seven identical ones to a single mailbox, which was most of
+/// the sending domain's outbound volume and the reason the alert stopped being
+/// read. It now fires for an unfamiliar device, and otherwise no more than once
+/// a day, so a sustained intrusion still surfaces without burying itself.
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn test_sign_in_alerts_skip_familiar_devices() {
+    let pool = setup_pool().await;
+    let user_id: Uuid = sqlx::query_scalar(
+        "INSERT INTO users (username, email, password_hash, email_verified)
+         VALUES ('signin_alerts', 'signin-alerts@example.com', 'unused', TRUE)
+         RETURNING id",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    let worth = |agent: &'static str| {
+        let pool = pool.clone();
+        async move {
+            cinetrack::services::security_activity::is_sign_in_worth_reporting(
+                &pool,
+                user_id,
+                Some(agent),
+            )
+            .await
+            .unwrap()
+        }
+    };
+    let record = |agent: &'static str, ago_hours: i64| {
+        let pool = pool.clone();
+        async move {
+            sqlx::query(
+                "INSERT INTO security_activity (user_id, event_type, user_agent, created_at)
+                 VALUES ($1, 'login_succeeded', $2, NOW() - make_interval(hours => $3::int))",
+            )
+            .bind(user_id)
+            .bind(agent)
+            .bind(ago_hours as i32)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+    };
+
+    // The first sign-in an account ever makes is always worth reporting.
+    record("okhttp/4.9.2", 0).await;
+    assert!(worth("okhttp/4.9.2").await);
+
+    // A second sign-in from the same device, minutes later, is not.
+    record("okhttp/4.9.2", 0).await;
+    assert!(!worth("okhttp/4.9.2").await);
+
+    // A device never seen before always is, however recently the account was
+    // used — that is the case the alert exists for.
+    record("Mozilla/5.0 (unfamiliar)", 0).await;
+    assert!(worth("Mozilla/5.0 (unfamiliar)").await);
+
+    // A familiar device goes quiet, but not silent: once the quiet period has
+    // passed with no other sign-in, the next one is reported again.
+    sqlx::query("DELETE FROM security_activity WHERE user_id = $1")
+        .bind(user_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    record("okhttp/4.9.2", 48).await;
+    record("okhttp/4.9.2", 0).await;
+    assert!(worth("okhttp/4.9.2").await);
+
+    sqlx::query("DELETE FROM users WHERE id = $1")
+        .bind(user_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    pool.close().await;
+}
