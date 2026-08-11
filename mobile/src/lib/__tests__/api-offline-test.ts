@@ -1,11 +1,17 @@
-import { apiMultipartRequest, apiRequest } from '@/lib/api';
-import { ApiError, rawMultipartRequest, rawRequest } from '@/lib/http';
+import { apiFormDataRequest, apiMultipartRequest, apiRequest } from '@/lib/api';
+import {
+  ApiError,
+  rawFormDataRequest,
+  rawMultipartRequest,
+  rawRequest,
+} from '@/lib/http';
 import { currentSessionGeneration, refreshSession } from '@/lib/session';
 import { useAuthStore } from '@/store/auth';
 import type { User } from '@/types';
 
 jest.mock('@/lib/http', () => ({
   ...jest.requireActual('@/lib/http'),
+  rawFormDataRequest: jest.fn(),
   rawMultipartRequest: jest.fn(),
   rawRequest: jest.fn(),
 }));
@@ -27,6 +33,14 @@ const user: User = {
 
 const mockRawRequest = jest.mocked(rawRequest);
 const mockRawMultipartRequest = jest.mocked(rawMultipartRequest);
+const mockRawFormDataRequest = jest.mocked(rawFormDataRequest);
+
+/** What the avatar upload sends: one file, streamed natively. */
+const avatar = {
+  uri: 'file:///cache/ImageManipulator/prepared.jpg',
+  fieldName: 'avatar',
+  mimeType: 'image/jpeg',
+};
 const mockCurrentSessionGeneration = jest.mocked(currentSessionGeneration);
 const mockRefreshSession = jest.mocked(refreshSession);
 
@@ -53,7 +67,7 @@ describe('offline API guard', () => {
     useAuthStore.getState().setOfflineSession(user);
 
     await expect(
-      apiMultipartRequest('/import/tvtime', new FormData()),
+      apiMultipartRequest('/users/me/avatar', avatar),
     ).rejects.toMatchObject({
       status: 0,
       message: 'Connect to the internet to upload files',
@@ -63,19 +77,18 @@ describe('offline API guard', () => {
 
   it('refreshes an expired session before retrying a multipart upload', async () => {
     useAuthStore.getState().setSession('old-access-token', user);
-    const form = new FormData();
     mockRawMultipartRequest
       .mockRejectedValueOnce(new ApiError('Expired', 401))
-      .mockResolvedValueOnce({ job_id: 'job-id' });
+      .mockResolvedValueOnce({ avatar_url: 'https://example.test/a.jpg' });
     mockRefreshSession.mockResolvedValueOnce('new-access-token');
 
-    await expect(apiMultipartRequest('/import/tvtime', form)).resolves.toEqual({
-      job_id: 'job-id',
+    await expect(apiMultipartRequest('/users/me/avatar', avatar)).resolves.toEqual({
+      avatar_url: 'https://example.test/a.jpg',
     });
     expect(mockRawMultipartRequest).toHaveBeenNthCalledWith(
       1,
-      '/import/tvtime',
-      form,
+      '/users/me/avatar',
+      avatar,
       {
         headers: { Authorization: 'Bearer old-access-token' },
         signal: expect.anything(),
@@ -83,8 +96,8 @@ describe('offline API guard', () => {
     );
     expect(mockRawMultipartRequest).toHaveBeenNthCalledWith(
       2,
-      '/import/tvtime',
-      form,
+      '/users/me/avatar',
+      avatar,
       {
         headers: { Authorization: 'Bearer new-access-token' },
         signal: expect.anything(),
@@ -94,14 +107,14 @@ describe('offline API guard', () => {
 
   it('cancels an upload when its account signs out', async () => {
     useAuthStore.getState().setSession('access-token', user);
-    mockRawMultipartRequest.mockImplementationOnce(async (_path, _form, options) => {
+    mockRawMultipartRequest.mockImplementationOnce(async (_path, _file, options) => {
       useAuthStore.getState().clearSession();
       expect(options?.signal?.aborted).toBe(true);
       throw new ApiError('Cancelled', 0);
     });
 
     await expect(
-      apiMultipartRequest('/import/tvtime', new FormData()),
+      apiMultipartRequest('/users/me/avatar', avatar),
     ).rejects.toMatchObject({ status: 0 });
     expect(mockRefreshSession).not.toHaveBeenCalled();
   });

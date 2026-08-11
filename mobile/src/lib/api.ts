@@ -1,7 +1,9 @@
 import {
   ApiError,
+  rawFormDataRequest,
   rawMultipartRequest,
   rawRequest,
+  type MultipartFile,
   type RawRequestOptions,
 } from '@/lib/http';
 import { currentSessionGeneration, refreshSession } from '@/lib/session';
@@ -58,7 +60,41 @@ export async function apiRequest<T>(
   }
 }
 
-export async function apiMultipartRequest<T>(path: string, form: FormData): Promise<T> {
+/** Upload one file, streamed natively. See `rawMultipartRequest`. */
+export function apiMultipartRequest<T>(path: string, file: MultipartFile): Promise<T> {
+  return authenticatedUpload<T>((accessToken, signal) =>
+    rawMultipartRequest<T>(path, file, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      signal,
+    }),
+  );
+}
+
+/**
+ * Upload a multi-part form through `fetch`.
+ *
+ * Only the TV Time import needs this, because it sends three files in one
+ * request and the native uploader carries one. Treat it as suspect: it is the
+ * same mechanism that silently failed for avatars, and no import has ever been
+ * run in production, so nothing here has been proven to work.
+ */
+export function apiFormDataRequest<T>(path: string, form: FormData): Promise<T> {
+  return authenticatedUpload<T>((accessToken, signal) =>
+    rawFormDataRequest<T>(path, form, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      signal,
+    }),
+  );
+}
+
+/**
+ * Run an upload against the current session, refreshing the access token once
+ * on a 401 and abandoning the whole thing if the signed-in user changes while
+ * it is in flight.
+ */
+async function authenticatedUpload<T>(
+  send: (accessToken: string, signal: AbortSignal) => Promise<T>,
+): Promise<T> {
   const generation = currentSessionGeneration();
   const auth = useAuthStore.getState();
   if (auth.status === 'offline') {
@@ -76,15 +112,9 @@ export async function apiMultipartRequest<T>(path: string, form: FormData): Prom
     }
   });
 
-  const send = (accessToken: string) =>
-    rawMultipartRequest<T>(path, form, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-      signal: controller.signal,
-    });
-
   try {
     try {
-      const response = await send(auth.accessToken);
+      const response = await send(auth.accessToken, controller.signal);
       if (generation !== currentSessionGeneration()) {
         throw new ApiError('Session changed while the upload was in progress', 401);
       }
@@ -106,7 +136,7 @@ export async function apiMultipartRequest<T>(path: string, form: FormData): Prom
       ) {
         throw new ApiError('Session changed while the upload was in progress', 401);
       }
-      const response = await send(accessToken);
+      const response = await send(accessToken, controller.signal);
       if (generation !== currentSessionGeneration()) {
         throw new ApiError('Session changed while the upload was in progress', 401);
       }

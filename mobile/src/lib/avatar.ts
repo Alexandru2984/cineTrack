@@ -1,3 +1,4 @@
+import { File } from 'expo-file-system';
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
 import { z } from 'zod';
@@ -62,6 +63,18 @@ export async function pickAndPrepareAvatar(): Promise<PreparedAvatar | null> {
     throw new ApiError('The selected image could not be prepared', 400);
   }
 
+  // The upload reads this path from native code, where a missing or empty file
+  // fails without ever reaching the network — and, before the error cause was
+  // preserved, without saying so. Check it here, where the message can name
+  // what is actually wrong.
+  const prepared = new File(output.uri);
+  if (!prepared.exists) {
+    throw new ApiError('The prepared image is no longer on disk', 400);
+  }
+  if (!prepared.size) {
+    throw new ApiError('The prepared image is empty', 400);
+  }
+
   return {
     uri: output.uri,
     name: 'avatar.jpg',
@@ -70,16 +83,11 @@ export async function pickAndPrepareAvatar(): Promise<PreparedAvatar | null> {
 }
 
 export async function uploadAvatar(file: PreparedAvatar) {
-  const form = new FormData();
-  form.append(
-    'avatar',
-    {
-      uri: file.uri,
-      name: file.name,
-      type: file.mimeType,
-    } as unknown as Blob,
-  );
-  const payload = await apiMultipartRequest<unknown>('/users/me/avatar', form);
+  const payload = await apiMultipartRequest<unknown>('/users/me/avatar', {
+    uri: file.uri,
+    fieldName: 'avatar',
+    mimeType: file.mimeType,
+  });
   return avatarResponseSchema.parse(payload);
 }
 

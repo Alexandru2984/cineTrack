@@ -1,6 +1,6 @@
 import * as DocumentPicker from 'expo-document-picker';
 
-import { apiMultipartRequest, apiRequest } from '@/lib/api';
+import { apiFormDataRequest, apiRequest } from '@/lib/api';
 import { ApiError } from '@/lib/http';
 import {
   listTVTimeImportJobs,
@@ -14,12 +14,12 @@ jest.mock('expo-document-picker', () => ({
 }));
 
 jest.mock('@/lib/api', () => ({
-  apiMultipartRequest: jest.fn(),
+  apiFormDataRequest: jest.fn(),
   apiRequest: jest.fn(),
 }));
 
 const mockPicker = jest.mocked(DocumentPicker.getDocumentAsync);
-const mockMultipartRequest = jest.mocked(apiMultipartRequest);
+const mockMultipartRequest = jest.mocked(apiFormDataRequest);
 const mockApiRequest = jest.mocked(apiRequest);
 
 describe('TV Time mobile import', () => {

@@ -1,7 +1,7 @@
 import * as DocumentPicker from 'expo-document-picker';
 import { z } from 'zod';
 
-import { apiMultipartRequest, apiRequest } from '@/lib/api';
+import { apiFormDataRequest, apiRequest } from '@/lib/api';
 import { ApiError } from '@/lib/http';
 import type { ImportJob } from '@/types';
 
@@ -105,7 +105,7 @@ export async function startTVTimeImport(files: SelectedImportFiles) {
       } as unknown as Blob,
     );
   }
-  const payload = await apiMultipartRequest<unknown>('/import/tvtime', form);
+  const payload = await apiFormDataRequest<unknown>('/import/tvtime', form);
   return z.object({ job_id: z.string().uuid() }).parse(payload);
 }
 
