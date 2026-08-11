@@ -4,7 +4,7 @@ import { expect, test, type Page } from '@playwright/test';
 const USER = {
   id: '00000000-0000-4000-8000-000000000001',
   username: 'accessibility-user',
-  email: 'accessibility@example.com',
+  email: 'accessibility@mailbox.dev',
   avatar_url: null,
   bio: null,
   is_public: true,

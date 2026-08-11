@@ -221,7 +221,7 @@ async fn security_artifact_retention_preserves_active_refresh_families() {
 
     let user_id: Uuid = sqlx::query_scalar(
         "INSERT INTO users (username, email, password_hash, email_verified)
-         VALUES ('retention_user', 'retention@example.com', 'unused', TRUE)
+         VALUES ('retention_user', 'retention@mailbox.dev', 'unused', TRUE)
          RETURNING id",
     )
     .fetch_one(&pool)
@@ -282,7 +282,7 @@ async fn security_artifact_retention_preserves_active_refresh_families() {
     sqlx::query(
         r#"INSERT INTO email_change_tokens
             (user_id, new_email, token_hash, expires_at, consumed_at)
-        VALUES ($1, 'new-retention@example.com', 'retention-email-change',
+        VALUES ($1, 'new-retention@mailbox.dev', 'retention-email-change',
                 NOW() - INTERVAL '1 day', NULL)"#,
     )
     .bind(user_id)
@@ -481,7 +481,7 @@ async fn test_register_success() {
     let app = actix_test::init_service(create_app(pool.clone())).await;
 
     let (token, refresh, user_id) =
-        register_unverified_user(&app, "testuser", "test@example.com", "Pass1234").await;
+        register_unverified_user(&app, "testuser", "test@mailbox.dev", "Pass1234").await;
 
     assert!(!token.is_empty());
     assert!(!refresh.is_empty());
@@ -522,7 +522,7 @@ async fn test_register_requires_explicit_terms_acceptance() {
     for include_false_field in [false, true] {
         let mut payload = json!({
             "username": "termsrequired",
-            "email": "termsrequired@example.com",
+            "email": "termsrequired@mailbox.dev",
             "password": "Pass1234"
         });
         if include_false_field {
@@ -558,7 +558,7 @@ async fn test_registration_requires_the_minimum_age_attestation() {
     for age_field in [None, Some(json!(false))] {
         let mut payload = json!({
             "username": "toyoung",
-            "email": "toyoung@example.com",
+            "email": "toyoung@mailbox.dev",
             "password": "Pass1234",
             "accepted_terms": true
         });
@@ -590,7 +590,7 @@ async fn current_terms_gate_community_writes_until_acceptance() {
     clean_db(&pool).await;
     let app = actix_test::init_service(create_app(pool.clone())).await;
     let (access_token, _, user_id) =
-        register_unverified_user(&app, "legacyterms", "legacyterms@example.com", "Pass1234").await;
+        register_unverified_user(&app, "legacyterms", "legacyterms@mailbox.dev", "Pass1234").await;
     let user_id = Uuid::parse_str(&user_id).unwrap();
 
     sqlx::query(
@@ -653,9 +653,9 @@ async fn blocking_severs_relationships_and_hides_both_users() {
     clean_db(&pool).await;
     let app = actix_test::init_service(create_app(pool.clone())).await;
     let (blocker_token, _, blocker_id) =
-        register_unverified_user(&app, "blocker", "blocker@example.com", "Pass1234").await;
+        register_unverified_user(&app, "blocker", "blocker@mailbox.dev", "Pass1234").await;
     let (blocked_token, _, blocked_id) =
-        register_unverified_user(&app, "blocked", "blocked@example.com", "Pass1234").await;
+        register_unverified_user(&app, "blocked", "blocked@mailbox.dev", "Pass1234").await;
     let blocker_id = Uuid::parse_str(&blocker_id).unwrap();
     let blocked_id = Uuid::parse_str(&blocked_id).unwrap();
 
@@ -880,9 +880,9 @@ async fn reports_are_validated_deduplicated_and_snapshot_server_content() {
     clean_db(&pool).await;
     let app = actix_test::init_service(create_app(pool.clone())).await;
     let (reporter_token, _, reporter_id) =
-        register_unverified_user(&app, "reporter", "reporter@example.com", "Pass1234").await;
+        register_unverified_user(&app, "reporter", "reporter@mailbox.dev", "Pass1234").await;
     let (_, _, subject_id) =
-        register_unverified_user(&app, "subject", "subject@example.com", "Pass1234").await;
+        register_unverified_user(&app, "subject", "subject@mailbox.dev", "Pass1234").await;
     let reporter_id = Uuid::parse_str(&reporter_id).unwrap();
     let subject_id = Uuid::parse_str(&subject_id).unwrap();
     let list_id: Uuid = sqlx::query_scalar(
@@ -1055,18 +1055,18 @@ async fn moderation_queue_requires_database_role_two_factor_and_append_only_audi
     clean_db(&pool).await;
     let app = actix_test::init_service(create_app(pool.clone())).await;
     let (moderator_token, _, moderator_id) =
-        register_user(&app, "safetymod", "safetymod@example.com", "Pass1234").await;
+        register_user(&app, "safetymod", "safetymod@mailbox.dev", "Pass1234").await;
     let (reporter_token, _, reporter_id) = register_user(
         &app,
         "safetyreporter",
-        "safetyreporter@example.com",
+        "safetyreporter@mailbox.dev",
         "Pass1234",
     )
     .await;
     let (_, _, subject_id) = register_user(
         &app,
         "safetysubject",
-        "safetysubject@example.com",
+        "safetysubject@mailbox.dev",
         "Pass1234",
     )
     .await;
@@ -1268,10 +1268,10 @@ async fn report_submission_has_a_database_backed_daily_limit() {
     clean_db(&pool).await;
     let app = actix_test::init_service(create_app(pool.clone())).await;
     let (reporter_token, _, reporter_id) =
-        register_unverified_user(&app, "ratereporter", "ratereporter@example.com", "Pass1234")
+        register_unverified_user(&app, "ratereporter", "ratereporter@mailbox.dev", "Pass1234")
             .await;
     let (_, _, subject_id) =
-        register_unverified_user(&app, "ratesubject", "ratesubject@example.com", "Pass1234").await;
+        register_unverified_user(&app, "ratesubject", "ratesubject@mailbox.dev", "Pass1234").await;
     let reporter_id = Uuid::parse_str(&reporter_id).unwrap();
     let subject_id = Uuid::parse_str(&subject_id).unwrap();
 
@@ -1315,7 +1315,7 @@ async fn test_mobile_auth_returns_rotating_tokens_without_cookies() {
         .insert_header((header::USER_AGENT, "VazuteMobile/1.0 (integration test)"))
         .set_json(json!({
             "username": "mobileauth",
-            "email": "mobileauth@example.com",
+            "email": "mobileauth@mailbox.dev",
             "password": "Pass1234",
             "accepted_terms": true,
             "confirmed_minimum_age": true
@@ -1346,7 +1346,7 @@ async fn test_mobile_auth_returns_rotating_tokens_without_cookies() {
     let req = actix_test::TestRequest::post()
         .uri("/api/auth/mobile/login")
         .set_json(json!({
-            "email": "mobileauth@example.com",
+            "email": "mobileauth@mailbox.dev",
             "password": "Pass1234"
         }))
         .peer_addr(peer_addr())
@@ -1403,7 +1403,7 @@ async fn test_mobile_logout_revokes_a_token_rotated_during_logout() {
         .uri("/api/auth/mobile/register")
         .set_json(json!({
             "username": "logoutrotation",
-            "email": "logoutrotation@example.com",
+            "email": "logoutrotation@mailbox.dev",
             "password": "Pass1234",
             "accepted_terms": true,
             "confirmed_minimum_age": true
@@ -1452,7 +1452,7 @@ async fn test_mobile_session_list_identifies_current_refresh_token() {
         .insert_header((header::USER_AGENT, "VazuteMobile/first"))
         .set_json(json!({
             "username": "mobilesessions",
-            "email": "mobilesessions@example.com",
+            "email": "mobilesessions@mailbox.dev",
             "password": "Pass1234",
             "accepted_terms": true,
             "confirmed_minimum_age": true
@@ -1467,7 +1467,7 @@ async fn test_mobile_session_list_identifies_current_refresh_token() {
         .uri("/api/auth/mobile/login")
         .insert_header((header::USER_AGENT, "VazuteMobile/current"))
         .set_json(json!({
-            "email": "mobilesessions@example.com",
+            "email": "mobilesessions@mailbox.dev",
             "password": "Pass1234"
         }))
         .peer_addr(peer_addr())
@@ -1527,13 +1527,13 @@ async fn test_register_duplicate_email() {
     clean_db(&pool).await;
     let app = actix_test::init_service(create_app(pool.clone())).await;
 
-    register_user(&app, "user1", "dup@example.com", "Pass1234").await;
+    register_user(&app, "user1", "dup@mailbox.dev", "Pass1234").await;
 
     let req = actix_test::TestRequest::post()
         .uri("/api/auth/register")
         .set_json(json!({
             "username": "user2",
-            "email": "dup@example.com",
+            "email": "dup@mailbox.dev",
             "password": "Pass1234",
             "accepted_terms": true,
             "confirmed_minimum_age": true
@@ -1564,13 +1564,13 @@ async fn test_register_duplicate_username_is_case_insensitive() {
     clean_db(&pool).await;
     let app = actix_test::init_service(create_app(pool.clone())).await;
 
-    register_user(&app, "CaseUser", "case-one@example.com", "Pass1234").await;
+    register_user(&app, "CaseUser", "case-one@mailbox.dev", "Pass1234").await;
 
     let req = actix_test::TestRequest::post()
         .uri("/api/auth/register")
         .set_json(json!({
             "username": "caseuser",
-            "email": "case-two@example.com",
+            "email": "case-two@mailbox.dev",
             "password": "Pass1234",
             "accepted_terms": true,
             "confirmed_minimum_age": true
@@ -1598,7 +1598,7 @@ async fn test_register_weak_password() {
         .uri("/api/auth/register")
         .set_json(json!({
             "username": "testuser",
-            "email": "test@example.com",
+            "email": "test@mailbox.dev",
             "password": "password",
             "accepted_terms": true,
             "confirmed_minimum_age": true
@@ -1621,7 +1621,7 @@ async fn test_register_short_password() {
         .uri("/api/auth/register")
         .set_json(json!({
             "username": "testuser",
-            "email": "test@example.com",
+            "email": "test@mailbox.dev",
             "password": "Aa1",
             "accepted_terms": true,
             "confirmed_minimum_age": true
@@ -1640,8 +1640,8 @@ async fn test_login_success() {
     clean_db(&pool).await;
     let app = actix_test::init_service(create_app(pool.clone())).await;
 
-    register_user(&app, "testuser", "login@example.com", "Pass1234").await;
-    let (token, refresh) = login_user(&app, "login@example.com", "Pass1234").await;
+    register_user(&app, "testuser", "login@mailbox.dev", "Pass1234").await;
+    let (token, refresh) = login_user(&app, "login@mailbox.dev", "Pass1234").await;
 
     assert!(!token.is_empty());
     assert!(!refresh.is_empty());
@@ -1654,12 +1654,12 @@ async fn test_login_wrong_password() {
     clean_db(&pool).await;
     let app = actix_test::init_service(create_app(pool.clone())).await;
 
-    register_user(&app, "testuser", "wrong@example.com", "Pass1234").await;
+    register_user(&app, "testuser", "wrong@mailbox.dev", "Pass1234").await;
 
     let req = actix_test::TestRequest::post()
         .uri("/api/auth/login")
         .set_json(json!({
-            "email": "wrong@example.com",
+            "email": "wrong@mailbox.dev",
             "password": "WrongPass1"
         }))
         .peer_addr(peer_addr())
@@ -1679,7 +1679,7 @@ async fn test_login_nonexistent_user() {
     let req = actix_test::TestRequest::post()
         .uri("/api/auth/login")
         .set_json(json!({
-            "email": "nobody@example.com",
+            "email": "nobody@mailbox.dev",
             "password": "Pass1234"
         }))
         .peer_addr(peer_addr())
@@ -1696,7 +1696,7 @@ async fn test_me_authenticated() {
     clean_db(&pool).await;
     let app = actix_test::init_service(create_app(pool.clone())).await;
 
-    let (token, _, _) = register_user(&app, "meuser", "me@example.com", "Pass1234").await;
+    let (token, _, _) = register_user(&app, "meuser", "me@mailbox.dev", "Pass1234").await;
 
     let req = actix_test::TestRequest::get()
         .uri("/api/auth/me")
@@ -1709,7 +1709,7 @@ async fn test_me_authenticated() {
 
     let body: Value = actix_test::read_body_json(resp).await;
     assert_eq!(body["username"], "meuser");
-    assert_eq!(body["email"], "me@example.com");
+    assert_eq!(body["email"], "me@mailbox.dev");
 }
 
 #[actix_web::test]
@@ -1736,7 +1736,7 @@ async fn test_refresh_token_rotation() {
     let app = actix_test::init_service(create_app(pool.clone())).await;
 
     let (_, refresh, _) =
-        register_user(&app, "refreshuser", "refresh@example.com", "Pass1234").await;
+        register_user(&app, "refreshuser", "refresh@mailbox.dev", "Pass1234").await;
 
     let req = actix_test::TestRequest::post()
         .uri("/api/auth/refresh")
@@ -1764,7 +1764,7 @@ async fn test_cookie_refresh_requires_allowed_origin() {
     clean_db(&pool).await;
     let app = actix_test::init_service(create_app(pool.clone())).await;
 
-    let (_, refresh, _) = register_user(&app, "originuser", "origin@example.com", "Pass1234").await;
+    let (_, refresh, _) = register_user(&app, "originuser", "origin@mailbox.dev", "Pass1234").await;
     let cookie = format!("{REFRESH_COOKIE_NAME}={refresh}");
 
     let req = actix_test::TestRequest::post()
@@ -1794,7 +1794,7 @@ async fn test_refresh_old_token_invalid() {
     clean_db(&pool).await;
     let app = actix_test::init_service(create_app(pool.clone())).await;
 
-    let (_, refresh, _) = register_user(&app, "oldref", "oldref@example.com", "Pass1234").await;
+    let (_, refresh, _) = register_user(&app, "oldref", "oldref@mailbox.dev", "Pass1234").await;
 
     // Use refresh token once
     let req = actix_test::TestRequest::post()
@@ -1826,7 +1826,7 @@ async fn test_logout_invalidates_refresh_token() {
     clean_db(&pool).await;
     let app = actix_test::init_service(create_app(pool.clone())).await;
 
-    let (_, refresh, _) = register_user(&app, "logoutuser", "logout@example.com", "Pass1234").await;
+    let (_, refresh, _) = register_user(&app, "logoutuser", "logout@mailbox.dev", "Pass1234").await;
 
     // Logout
     let req = actix_test::TestRequest::post()
@@ -1854,7 +1854,7 @@ async fn test_change_password_success() {
     clean_db(&pool).await;
     let app = actix_test::init_service(create_app(pool.clone())).await;
 
-    let (token, _, _) = register_user(&app, "pwuser", "pw@example.com", "Pass1234").await;
+    let (token, _, _) = register_user(&app, "pwuser", "pw@mailbox.dev", "Pass1234").await;
 
     let req = actix_test::TestRequest::patch()
         .uri("/api/auth/password")
@@ -1866,7 +1866,7 @@ async fn test_change_password_success() {
     assert_eq!(resp.status(), 200);
     let password_event_count: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM security_activity
-         WHERE user_id = (SELECT id FROM users WHERE email = 'pw@example.com')
+         WHERE user_id = (SELECT id FROM users WHERE email = 'pw@mailbox.dev')
            AND event_type = 'password_changed'",
     )
     .fetch_one(&pool)
@@ -1877,14 +1877,14 @@ async fn test_change_password_success() {
     // Old password no longer works
     let req = actix_test::TestRequest::post()
         .uri("/api/auth/login")
-        .set_json(json!({ "email": "pw@example.com", "password": "Pass1234" }))
+        .set_json(json!({ "email": "pw@mailbox.dev", "password": "Pass1234" }))
         .peer_addr(peer_addr())
         .to_request();
     let resp = actix_test::call_service(&app, req).await;
     assert_eq!(resp.status(), 401);
 
     // New password works
-    login_user(&app, "pw@example.com", "NewPass5678").await;
+    login_user(&app, "pw@mailbox.dev", "NewPass5678").await;
 }
 
 #[actix_web::test]
@@ -1894,7 +1894,7 @@ async fn test_change_password_wrong_current_rejected() {
     clean_db(&pool).await;
     let app = actix_test::init_service(create_app(pool.clone())).await;
 
-    let (token, _, _) = register_user(&app, "pwuser2", "pw2@example.com", "Pass1234").await;
+    let (token, _, _) = register_user(&app, "pwuser2", "pw2@mailbox.dev", "Pass1234").await;
 
     let req = actix_test::TestRequest::patch()
         .uri("/api/auth/password")
@@ -1913,7 +1913,7 @@ async fn test_change_password_revokes_refresh_tokens() {
     clean_db(&pool).await;
     let app = actix_test::init_service(create_app(pool.clone())).await;
 
-    let (token, refresh, _) = register_user(&app, "pwuser3", "pw3@example.com", "Pass1234").await;
+    let (token, refresh, _) = register_user(&app, "pwuser3", "pw3@mailbox.dev", "Pass1234").await;
 
     let req = actix_test::TestRequest::patch()
         .uri("/api/auth/password")
@@ -1941,8 +1941,8 @@ async fn test_change_password_invalidates_existing_reset_token() {
     clean_db(&pool).await;
     let app = actix_test::init_service(create_app(pool.clone())).await;
 
-    let (token, _, _) = register_user(&app, "pwreset", "pwreset@example.com", "Pass1234").await;
-    let reset_token = insert_reset_token(&pool, "pwreset@example.com", true).await;
+    let (token, _, _) = register_user(&app, "pwreset", "pwreset@mailbox.dev", "Pass1234").await;
+    let reset_token = insert_reset_token(&pool, "pwreset@mailbox.dev", true).await;
 
     let req = actix_test::TestRequest::patch()
         .uri("/api/auth/password")
@@ -2011,7 +2011,7 @@ async fn test_email_verification_flow() {
     let app = actix_test::init_service(create_app(pool.clone())).await;
 
     let (access, _, _) =
-        register_unverified_user(&app, "verifyme", "verify@example.com", "Pass1234").await;
+        register_unverified_user(&app, "verifyme", "verify@mailbox.dev", "Pass1234").await;
 
     // A new account starts unverified and has a pending token row.
     assert!(!fetch_email_verified(&app, &access).await);
@@ -2019,13 +2019,13 @@ async fn test_email_verification_flow() {
         "SELECT COUNT(*) FROM email_verification_tokens
          WHERE user_id = (SELECT id FROM users WHERE email = $1)",
     )
-    .bind("verify@example.com")
+    .bind("verify@mailbox.dev")
     .fetch_one(&pool)
     .await
     .unwrap();
     assert_eq!(pending, 1);
 
-    let raw = set_known_verification_token(&pool, "verify@example.com").await;
+    let raw = set_known_verification_token(&pool, "verify@mailbox.dev").await;
 
     // Confirming with the token flips the flag.
     let req = actix_test::TestRequest::post()
@@ -2064,9 +2064,9 @@ async fn test_unverified_accounts_cannot_publish_or_use_social_and_two_factor() 
     let app = actix_test::init_service(create_app(pool.clone())).await;
 
     let (unverified_access, _, _) =
-        register_unverified_user(&app, "unverified", "unverified@example.com", "Pass1234").await;
+        register_unverified_user(&app, "unverified", "unverified@mailbox.dev", "Pass1234").await;
     let (verified_access, _, verified_id) =
-        register_user(&app, "verifiedpeer", "verifiedpeer@example.com", "Pass1234").await;
+        register_user(&app, "verifiedpeer", "verifiedpeer@mailbox.dev", "Pass1234").await;
 
     let req = actix_test::TestRequest::post()
         .uri("/api/users/unverified/follow")
@@ -2123,7 +2123,7 @@ async fn test_unverified_accounts_cannot_publish_or_use_social_and_two_factor() 
     let resp = actix_test::call_service(&app, req).await;
     assert_eq!(resp.status(), 201);
 
-    let verification_token = set_known_verification_token(&pool, "unverified@example.com").await;
+    let verification_token = set_known_verification_token(&pool, "unverified@mailbox.dev").await;
     let req = actix_test::TestRequest::post()
         .uri("/api/auth/email/verify")
         .set_json(json!({ "token": verification_token }))
@@ -2244,7 +2244,7 @@ async fn test_two_factor_enable_login_and_recovery() {
     clean_db(&pool).await;
     let app = actix_test::init_service(create_app(pool.clone())).await;
 
-    let (access, _, _) = register_user(&app, "mfauser", "mfa@example.com", "Pass1234").await;
+    let (access, _, _) = register_user(&app, "mfauser", "mfa@mailbox.dev", "Pass1234").await;
 
     // Setup requires the account password: a stolen token alone cannot enroll.
     let req = actix_test::TestRequest::post()
@@ -2272,11 +2272,11 @@ async fn test_two_factor_enable_login_and_recovery() {
         .starts_with("otpauth://totp/"));
     assert!(body["secret"].as_str().unwrap().len() >= 16);
 
-    let secret = totp_secret_bytes(&pool, "mfa@example.com").await;
+    let secret = totp_secret_bytes(&pool, "mfa@mailbox.dev").await;
 
     // Simulate a pre-encryption pending enrollment. Activation must migrate it.
     sqlx::query("UPDATE users SET totp_secret = $2 WHERE email = $1")
-        .bind("mfa@example.com")
+        .bind("mfa@mailbox.dev")
         .bind(hex::encode(&secret))
         .execute(&pool)
         .await
@@ -2307,7 +2307,7 @@ async fn test_two_factor_enable_login_and_recovery() {
     let first_recovery = recovery[0].as_str().unwrap().to_string();
     let stored_after_enable: String =
         sqlx::query_scalar("SELECT totp_secret FROM users WHERE email = $1")
-            .bind("mfa@example.com")
+            .bind("mfa@mailbox.dev")
             .fetch_one(&pool)
             .await
             .unwrap();
@@ -2326,7 +2326,7 @@ async fn test_two_factor_enable_login_and_recovery() {
     // Password alone no longer logs in: the challenge flag appears.
     let (status, body) = login_json(
         &app,
-        json!({ "email": "mfa@example.com", "password": "Pass1234" }),
+        json!({ "email": "mfa@mailbox.dev", "password": "Pass1234" }),
     )
     .await;
     assert_eq!(status, 401);
@@ -2335,13 +2335,13 @@ async fn test_two_factor_enable_login_and_recovery() {
     // Simulate an enabled legacy account, then race the same TOTP twice. The
     // database counter must let exactly one login consume the time step.
     sqlx::query("UPDATE users SET totp_secret = $2, totp_last_used_step = NULL WHERE email = $1")
-        .bind("mfa@example.com")
+        .bind("mfa@mailbox.dev")
         .bind(hex::encode(&secret))
         .execute(&pool)
         .await
         .unwrap();
     let login_payload = json!({
-        "email": "mfa@example.com",
+        "email": "mfa@mailbox.dev",
         "password": "Pass1234",
         "totp_code": next_totp_code(&secret)
     });
@@ -2354,7 +2354,7 @@ async fn test_two_factor_enable_login_and_recovery() {
     assert_eq!(statuses.iter().filter(|status| **status == 401).count(), 1);
     let stored_after_login: String =
         sqlx::query_scalar("SELECT totp_secret FROM users WHERE email = $1")
-            .bind("mfa@example.com")
+            .bind("mfa@mailbox.dev")
             .fetch_one(&pool)
             .await
             .unwrap();
@@ -2364,7 +2364,7 @@ async fn test_two_factor_enable_login_and_recovery() {
     let (status, _) = login_json(
         &app,
         json!({
-            "email": "mfa@example.com",
+            "email": "mfa@mailbox.dev",
             "password": "Pass1234",
             "totp_code": first_recovery
         }),
@@ -2374,7 +2374,7 @@ async fn test_two_factor_enable_login_and_recovery() {
     let (status, body) = login_json(
         &app,
         json!({
-            "email": "mfa@example.com",
+            "email": "mfa@mailbox.dev",
             "password": "Pass1234",
             "totp_code": first_recovery
         }),
@@ -2397,7 +2397,7 @@ async fn test_two_factor_enable_login_and_recovery() {
             "/api/auth/email/change",
             json!({
                 "current_password": "Pass1234",
-                "new_email": "mfa-next@example.com"
+                "new_email": "mfa-next@mailbox.dev"
             }),
         ),
         (
@@ -2445,7 +2445,7 @@ async fn test_two_factor_enable_login_and_recovery() {
     // replay protection. Reset only the test fixture's counter so a current
     // authenticator code can prove the successful sensitive-action path.
     sqlx::query("UPDATE users SET totp_last_used_step = NULL WHERE email = $1")
-        .bind("mfa@example.com")
+        .bind("mfa@mailbox.dev")
         .execute(&pool)
         .await
         .unwrap();
@@ -2465,7 +2465,7 @@ async fn test_two_factor_enable_login_and_recovery() {
     assert_eq!(resp.status(), 200);
     let credential_events: Vec<String> = sqlx::query_scalar(
         "SELECT event_type FROM security_activity
-         WHERE user_id = (SELECT id FROM users WHERE email = 'mfa@example.com')
+         WHERE user_id = (SELECT id FROM users WHERE email = 'mfa@mailbox.dev')
            AND event_type IN ('two_factor_enabled', 'two_factor_disabled')
          ORDER BY created_at",
     )
@@ -2482,7 +2482,7 @@ async fn test_two_factor_enable_login_and_recovery() {
 
     let (status, _) = login_json(
         &app,
-        json!({ "email": "mfa@example.com", "password": "Pass1234" }),
+        json!({ "email": "mfa@mailbox.dev", "password": "Pass1234" }),
     )
     .await;
     assert_eq!(status, 200);
@@ -2494,12 +2494,12 @@ async fn test_account_login_throttle_survives_ips_and_resets_after_success() {
     let pool = setup_pool().await;
     clean_db(&pool).await;
     let app = actix_test::init_service(create_app(pool.clone())).await;
-    register_user(&app, "throttled", "throttled@example.com", "Pass1234").await;
+    register_user(&app, "throttled", "throttled@mailbox.dev", "Pass1234").await;
 
     for _ in 0..5 {
         let (status, _) = login_json(
             &app,
-            json!({ "email": "throttled@example.com", "password": "WrongPass9" }),
+            json!({ "email": "throttled@mailbox.dev", "password": "WrongPass9" }),
         )
         .await;
         assert_eq!(status, 401);
@@ -2509,7 +2509,7 @@ async fn test_account_login_throttle_survives_ips_and_resets_after_success() {
         "SELECT login_failed_attempts, login_locked_until > NOW()
          FROM users WHERE email = $1",
     )
-    .bind("throttled@example.com")
+    .bind("throttled@mailbox.dev")
     .fetch_one(&pool)
     .await
     .unwrap();
@@ -2521,7 +2521,7 @@ async fn test_account_login_throttle_survives_ips_and_resets_after_success() {
     // guess had landed, turning the lock into a confirmation channel.
     let (status, _) = login_json(
         &app,
-        json!({ "email": "throttled@example.com", "password": "Pass1234" }),
+        json!({ "email": "throttled@mailbox.dev", "password": "Pass1234" }),
     )
     .await;
     assert_eq!(status, 401);
@@ -2529,20 +2529,20 @@ async fn test_account_login_throttle_survives_ips_and_resets_after_success() {
     sqlx::query(
         "UPDATE users SET login_locked_until = NOW() - INTERVAL '1 second' WHERE email = $1",
     )
-    .bind("throttled@example.com")
+    .bind("throttled@mailbox.dev")
     .execute(&pool)
     .await
     .unwrap();
     let (status, _) = login_json(
         &app,
-        json!({ "email": "throttled@example.com", "password": "Pass1234" }),
+        json!({ "email": "throttled@mailbox.dev", "password": "Pass1234" }),
     )
     .await;
     assert_eq!(status, 200);
 
     let failed_attempts: i32 =
         sqlx::query_scalar("SELECT login_failed_attempts FROM users WHERE email = $1")
-            .bind("throttled@example.com")
+            .bind("throttled@mailbox.dev")
             .fetch_one(&pool)
             .await
             .unwrap();
@@ -2558,24 +2558,24 @@ async fn test_locked_account_does_not_reveal_a_correct_password() {
     let pool = setup_pool().await;
     clean_db(&pool).await;
     let app = actix_test::init_service(create_app(pool.clone())).await;
-    register_user(&app, "oracle", "oracle@example.com", "Pass1234").await;
+    register_user(&app, "oracle", "oracle@mailbox.dev", "Pass1234").await;
 
     for _ in 0..5 {
         login_json(
             &app,
-            json!({ "email": "oracle@example.com", "password": "WrongPass9" }),
+            json!({ "email": "oracle@mailbox.dev", "password": "WrongPass9" }),
         )
         .await;
     }
 
     let (wrong_status, wrong_body) = login_json(
         &app,
-        json!({ "email": "oracle@example.com", "password": "WrongPass9" }),
+        json!({ "email": "oracle@mailbox.dev", "password": "WrongPass9" }),
     )
     .await;
     let (correct_status, correct_body) = login_json(
         &app,
-        json!({ "email": "oracle@example.com", "password": "Pass1234" }),
+        json!({ "email": "oracle@mailbox.dev", "password": "Pass1234" }),
     )
     .await;
 
@@ -2599,18 +2599,18 @@ async fn test_attempts_during_a_lock_extend_it() {
     let pool = setup_pool().await;
     clean_db(&pool).await;
     let app = actix_test::init_service(create_app(pool.clone())).await;
-    register_user(&app, "extend", "extend@example.com", "Pass1234").await;
+    register_user(&app, "extend", "extend@mailbox.dev", "Pass1234").await;
 
     for _ in 0..5 {
         login_json(
             &app,
-            json!({ "email": "extend@example.com", "password": "WrongPass9" }),
+            json!({ "email": "extend@mailbox.dev", "password": "WrongPass9" }),
         )
         .await;
     }
     let first: chrono::DateTime<chrono::Utc> =
         sqlx::query_scalar("SELECT login_locked_until FROM users WHERE email = $1")
-            .bind("extend@example.com")
+            .bind("extend@mailbox.dev")
             .fetch_one(&pool)
             .await
             .unwrap();
@@ -2619,20 +2619,20 @@ async fn test_attempts_during_a_lock_extend_it() {
     sqlx::query(
         "UPDATE users SET login_locked_until = NOW() + INTERVAL '5 seconds' WHERE email = $1",
     )
-    .bind("extend@example.com")
+    .bind("extend@mailbox.dev")
     .execute(&pool)
     .await
     .unwrap();
     let (status, _) = login_json(
         &app,
-        json!({ "email": "extend@example.com", "password": "WrongPass9" }),
+        json!({ "email": "extend@mailbox.dev", "password": "WrongPass9" }),
     )
     .await;
     assert_eq!(status, 401);
 
     let extended: chrono::DateTime<chrono::Utc> =
         sqlx::query_scalar("SELECT login_locked_until FROM users WHERE email = $1")
-            .bind("extend@example.com")
+            .bind("extend@mailbox.dev")
             .fetch_one(&pool)
             .await
             .unwrap();
@@ -2650,13 +2650,13 @@ async fn test_password_reset_releases_the_sign_in_lock() {
     let pool = setup_pool().await;
     clean_db(&pool).await;
     let app = actix_test::init_service(create_app(pool.clone())).await;
-    let (_, _, user_id) = register_user(&app, "locked", "locked@example.com", "Pass1234").await;
+    let (_, _, user_id) = register_user(&app, "locked", "locked@mailbox.dev", "Pass1234").await;
     let user_id = Uuid::parse_str(&user_id).unwrap();
 
     for _ in 0..5 {
         login_json(
             &app,
-            json!({ "email": "locked@example.com", "password": "WrongPass9" }),
+            json!({ "email": "locked@mailbox.dev", "password": "WrongPass9" }),
         )
         .await;
     }
@@ -2681,7 +2681,7 @@ async fn test_password_reset_releases_the_sign_in_lock() {
 
     let locked_until: Option<chrono::DateTime<chrono::Utc>> =
         sqlx::query_scalar("SELECT login_locked_until FROM users WHERE email = $1")
-            .bind("locked@example.com")
+            .bind("locked@mailbox.dev")
             .fetch_one(&pool)
             .await
             .unwrap();
@@ -2689,7 +2689,7 @@ async fn test_password_reset_releases_the_sign_in_lock() {
 
     let (status, _) = login_json(
         &app,
-        json!({ "email": "locked@example.com", "password": "NewPass5678" }),
+        json!({ "email": "locked@mailbox.dev", "password": "NewPass5678" }),
     )
     .await;
     assert_eq!(status, 200, "the user could not sign in after resetting");
@@ -2727,12 +2727,12 @@ async fn test_forgot_password_always_ok() {
     clean_db(&pool).await;
     let app = actix_test::init_service(create_app(pool.clone())).await;
 
-    register_user(&app, "forgotuser", "forgot@example.com", "Pass1234").await;
+    register_user(&app, "forgotuser", "forgot@mailbox.dev", "Pass1234").await;
 
     // Existing email → 200
     let req = actix_test::TestRequest::post()
         .uri("/api/auth/password/forgot")
-        .set_json(json!({ "email": "forgot@example.com" }))
+        .set_json(json!({ "email": "forgot@mailbox.dev" }))
         .peer_addr(peer_addr())
         .to_request();
     let resp = actix_test::call_service(&app, req).await;
@@ -2743,7 +2743,7 @@ async fn test_forgot_password_always_ok() {
          FROM password_reset_tokens
          WHERE user_id = (SELECT id FROM users WHERE email = $1)",
     )
-    .bind("forgot@example.com")
+    .bind("forgot@mailbox.dev")
     .fetch_one(&pool)
     .await
     .expect("first reset token");
@@ -2751,7 +2751,7 @@ async fn test_forgot_password_always_ok() {
     // An immediate retry stays indistinguishable but reuses the active token.
     let req = actix_test::TestRequest::post()
         .uri("/api/auth/password/forgot")
-        .set_json(json!({ "email": "forgot@example.com" }))
+        .set_json(json!({ "email": "forgot@mailbox.dev" }))
         .peer_addr(peer_addr())
         .to_request();
     let resp = actix_test::call_service(&app, req).await;
@@ -2762,7 +2762,7 @@ async fn test_forgot_password_always_ok() {
          FROM password_reset_tokens
          WHERE user_id = (SELECT id FROM users WHERE email = $1)",
     )
-    .bind("forgot@example.com")
+    .bind("forgot@mailbox.dev")
     .fetch_one(&pool)
     .await
     .expect("second reset token");
@@ -2771,7 +2771,7 @@ async fn test_forgot_password_always_ok() {
     // Unknown email → still 200 (no user enumeration)
     let req = actix_test::TestRequest::post()
         .uri("/api/auth/password/forgot")
-        .set_json(json!({ "email": "nobody@example.com" }))
+        .set_json(json!({ "email": "nobody@mailbox.dev" }))
         .peer_addr(peer_addr())
         .to_request();
     let resp = actix_test::call_service(&app, req).await;
@@ -2784,7 +2784,7 @@ async fn test_concurrent_password_reset_requests_issue_one_token() {
     let pool = setup_pool().await;
     clean_db(&pool).await;
     let app = actix_test::init_service(create_app(pool.clone())).await;
-    register_user(&app, "reset-race", "reset-race@example.com", "Pass1234").await;
+    register_user(&app, "reset-race", "reset-race@mailbox.dev", "Pass1234").await;
 
     let config = test_config();
     let email_service = cinetrack::services::email::EmailService::new(&config);
@@ -2792,13 +2792,13 @@ async fn test_concurrent_password_reset_requests_issue_one_token() {
         &pool,
         &config,
         &email_service,
-        "reset-race@example.com",
+        "reset-race@mailbox.dev",
     );
     let second = cinetrack::services::auth::forgot_password(
         &pool,
         &config,
         &email_service,
-        "reset-race@example.com",
+        "reset-race@mailbox.dev",
     );
     let (first_result, second_result) = tokio::join!(first, second);
     first_result.expect("first request");
@@ -2809,7 +2809,7 @@ async fn test_concurrent_password_reset_requests_issue_one_token() {
          FROM password_reset_tokens
          WHERE user_id = (SELECT id FROM users WHERE email = $1)",
     )
-    .bind("reset-race@example.com")
+    .bind("reset-race@mailbox.dev")
     .fetch_one(&pool)
     .await
     .expect("token count");
@@ -2825,7 +2825,7 @@ async fn test_consumed_password_reset_token_can_be_reissued_immediately() {
     register_user(
         &app,
         "reset-reissue",
-        "reset-reissue@example.com",
+        "reset-reissue@mailbox.dev",
         "Pass1234",
     )
     .await;
@@ -2836,7 +2836,7 @@ async fn test_consumed_password_reset_token_can_be_reissued_immediately() {
         &pool,
         &config,
         &email_service,
-        "reset-reissue@example.com",
+        "reset-reissue@mailbox.dev",
     )
     .await
     .expect("first request");
@@ -2846,7 +2846,7 @@ async fn test_consumed_password_reset_token_can_be_reissued_immediately() {
          WHERE user_id = (SELECT id FROM users WHERE email = $1)
          RETURNING token_hash",
     )
-    .bind("reset-reissue@example.com")
+    .bind("reset-reissue@mailbox.dev")
     .fetch_one(&pool)
     .await
     .expect("consume first token");
@@ -2855,7 +2855,7 @@ async fn test_consumed_password_reset_token_can_be_reissued_immediately() {
         &pool,
         &config,
         &email_service,
-        "reset-reissue@example.com",
+        "reset-reissue@mailbox.dev",
     )
     .await
     .expect("second request");
@@ -2865,7 +2865,7 @@ async fn test_consumed_password_reset_token_can_be_reissued_immediately() {
              FROM password_reset_tokens
              WHERE user_id = (SELECT id FROM users WHERE email = $1)",
         )
-        .bind("reset-reissue@example.com")
+        .bind("reset-reissue@mailbox.dev")
         .fetch_one(&pool)
         .await
         .expect("reissued token");
@@ -2881,8 +2881,8 @@ async fn test_reset_password_success() {
     clean_db(&pool).await;
     let app = actix_test::init_service(create_app(pool.clone())).await;
 
-    register_user(&app, "resetuser", "reset@example.com", "Pass1234").await;
-    let token = insert_reset_token(&pool, "reset@example.com", true).await;
+    register_user(&app, "resetuser", "reset@mailbox.dev", "Pass1234").await;
+    let token = insert_reset_token(&pool, "reset@mailbox.dev", true).await;
 
     let req = actix_test::TestRequest::post()
         .uri("/api/auth/password/reset")
@@ -2893,7 +2893,7 @@ async fn test_reset_password_success() {
     assert_eq!(resp.status(), 200);
     let reset_event_count: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM security_activity
-         WHERE user_id = (SELECT id FROM users WHERE email = 'reset@example.com')
+         WHERE user_id = (SELECT id FROM users WHERE email = 'reset@mailbox.dev')
            AND event_type = 'password_reset'",
     )
     .fetch_one(&pool)
@@ -2904,14 +2904,14 @@ async fn test_reset_password_success() {
     // Old password rejected
     let req = actix_test::TestRequest::post()
         .uri("/api/auth/login")
-        .set_json(json!({ "email": "reset@example.com", "password": "Pass1234" }))
+        .set_json(json!({ "email": "reset@mailbox.dev", "password": "Pass1234" }))
         .peer_addr(peer_addr())
         .to_request();
     let resp = actix_test::call_service(&app, req).await;
     assert_eq!(resp.status(), 401);
 
     // New password works
-    login_user(&app, "reset@example.com", "NewPass5678").await;
+    login_user(&app, "reset@mailbox.dev", "NewPass5678").await;
 }
 
 #[actix_web::test]
@@ -2921,7 +2921,7 @@ async fn test_reset_password_invalid_token() {
     clean_db(&pool).await;
     let app = actix_test::init_service(create_app(pool.clone())).await;
 
-    register_user(&app, "badtoken", "badtoken@example.com", "Pass1234").await;
+    register_user(&app, "badtoken", "badtoken@mailbox.dev", "Pass1234").await;
 
     let req = actix_test::TestRequest::post()
         .uri("/api/auth/password/reset")
@@ -2939,8 +2939,8 @@ async fn test_reset_password_expired_token() {
     clean_db(&pool).await;
     let app = actix_test::init_service(create_app(pool.clone())).await;
 
-    register_user(&app, "expuser", "exp@example.com", "Pass1234").await;
-    let token = insert_reset_token(&pool, "exp@example.com", false).await;
+    register_user(&app, "expuser", "exp@mailbox.dev", "Pass1234").await;
+    let token = insert_reset_token(&pool, "exp@mailbox.dev", false).await;
 
     let req = actix_test::TestRequest::post()
         .uri("/api/auth/password/reset")
@@ -2958,8 +2958,8 @@ async fn test_reset_password_token_single_use() {
     clean_db(&pool).await;
     let app = actix_test::init_service(create_app(pool.clone())).await;
 
-    register_user(&app, "onceuser", "once@example.com", "Pass1234").await;
-    let token = insert_reset_token(&pool, "once@example.com", true).await;
+    register_user(&app, "onceuser", "once@mailbox.dev", "Pass1234").await;
+    let token = insert_reset_token(&pool, "once@mailbox.dev", true).await;
 
     // First use succeeds
     let req = actix_test::TestRequest::post()
@@ -2990,13 +2990,13 @@ async fn test_security_activity_is_owner_scoped_no_store_and_bounded() {
     let app = actix_test::init_service(create_app(pool.clone())).await;
 
     let (owner_access, _, owner_id) =
-        register_user(&app, "activity_owner", "activity@example.com", "Pass1234").await;
+        register_user(&app, "activity_owner", "activity@mailbox.dev", "Pass1234").await;
 
     let req = actix_test::TestRequest::post()
         .uri("/api/auth/login")
         .insert_header((header::USER_AGENT, "VazuteSecurityTest/1.0"))
         .set_json(json!({
-            "email": "activity@example.com",
+            "email": "activity@mailbox.dev",
             "password": "Pass1234"
         }))
         .peer_addr(peer_addr())
@@ -3031,7 +3031,7 @@ async fn test_security_activity_is_owner_scoped_no_store_and_bounded() {
     let (other_access, _, _) = register_user(
         &app,
         "activity_other",
-        "activity-other@example.com",
+        "activity-other@mailbox.dev",
         "Pass1234",
     )
     .await;
@@ -3055,7 +3055,7 @@ async fn test_security_activity_is_owner_scoped_no_store_and_bounded() {
     .execute(&pool)
     .await
     .unwrap();
-    let _ = login_user(&app, "activity@example.com", "Pass1234").await;
+    let _ = login_user(&app, "activity@mailbox.dev", "Pass1234").await;
     let retained: i64 =
         sqlx::query_scalar("SELECT COUNT(*) FROM security_activity WHERE user_id = $1")
             .bind(owner_id)
@@ -3103,8 +3103,8 @@ async fn test_list_sessions_shows_current() {
     let app = actix_test::init_service(create_app(pool.clone())).await;
 
     // Register, then log in again → two active sessions.
-    register_user(&app, "sessuser", "sess@example.com", "Pass1234").await;
-    let (token2, refresh2) = login_user(&app, "sess@example.com", "Pass1234").await;
+    register_user(&app, "sessuser", "sess@mailbox.dev", "Pass1234").await;
+    let (token2, refresh2) = login_user(&app, "sess@mailbox.dev", "Pass1234").await;
 
     let req = actix_test::TestRequest::get()
         .uri("/api/auth/sessions")
@@ -3131,8 +3131,8 @@ async fn test_revoke_one_session() {
     clean_db(&pool).await;
     let app = actix_test::init_service(create_app(pool.clone())).await;
 
-    register_user(&app, "revuser", "rev@example.com", "Pass1234").await;
-    let (token2, _) = login_user(&app, "rev@example.com", "Pass1234").await;
+    register_user(&app, "revuser", "rev@mailbox.dev", "Pass1234").await;
+    let (token2, _) = login_user(&app, "rev@mailbox.dev", "Pass1234").await;
 
     // Two sessions exist; grab one id.
     let req = actix_test::TestRequest::get()
@@ -3180,8 +3180,8 @@ async fn test_revoke_session_not_owned() {
     clean_db(&pool).await;
     let app = actix_test::init_service(create_app(pool.clone())).await;
 
-    let (token_a, _, _) = register_user(&app, "owner_s", "owner_s@example.com", "Pass1234").await;
-    let (token_b, _, _) = register_user(&app, "attacker_s", "att_s@example.com", "Pass1234").await;
+    let (token_a, _, _) = register_user(&app, "owner_s", "owner_s@mailbox.dev", "Pass1234").await;
+    let (token_b, _, _) = register_user(&app, "attacker_s", "att_s@mailbox.dev", "Pass1234").await;
 
     // A's session id
     let req = actix_test::TestRequest::get()
@@ -3221,8 +3221,8 @@ async fn test_logout_all_sessions() {
     clean_db(&pool).await;
     let app = actix_test::init_service(create_app(pool.clone())).await;
 
-    let (_, refresh1, _) = register_user(&app, "alluser", "all@example.com", "Pass1234").await;
-    let (token2, refresh2) = login_user(&app, "all@example.com", "Pass1234").await;
+    let (_, refresh1, _) = register_user(&app, "alluser", "all@mailbox.dev", "Pass1234").await;
+    let (token2, refresh2) = login_user(&app, "all@mailbox.dev", "Pass1234").await;
 
     let req = actix_test::TestRequest::post()
         .uri("/api/auth/sessions/logout-all")
@@ -3287,7 +3287,7 @@ async fn test_tracking_lookup_is_complete_beyond_first_list_page() {
     clean_db(&pool).await;
     let app = actix_test::init_service(create_app(pool.clone())).await;
     let (token, _, user_id) =
-        register_user(&app, "lookupuser", "lookup@example.com", "Pass1234").await;
+        register_user(&app, "lookupuser", "lookup@mailbox.dev", "Pass1234").await;
     let user_id = Uuid::parse_str(&user_id).unwrap();
     const TMDB_BASE: i32 = 1_310_000;
 
@@ -3344,7 +3344,7 @@ async fn test_tracking_status_transitions_only_record_completions() {
     clean_db(&pool).await;
     let app = actix_test::init_service(create_app(pool.clone())).await;
     let (token, _, user_id) =
-        register_user(&app, "trackmovie", "trackmovie@example.com", "Pass1234").await;
+        register_user(&app, "trackmovie", "trackmovie@mailbox.dev", "Pass1234").await;
     let user_id = Uuid::parse_str(&user_id).unwrap();
 
     let media_id = sqlx::query_scalar::<_, Uuid>(
@@ -3490,7 +3490,7 @@ async fn test_completing_show_records_cached_episodes_idempotently() {
     clean_db(&pool).await;
     let app = actix_test::init_service(create_app(pool.clone())).await;
     let (token, _, user_id) =
-        register_user(&app, "trackshow", "trackshow@example.com", "Pass1234").await;
+        register_user(&app, "trackshow", "trackshow@mailbox.dev", "Pass1234").await;
     let user_id = Uuid::parse_str(&user_id).unwrap();
 
     let media_id = sqlx::query_scalar::<_, Uuid>(
@@ -3644,7 +3644,7 @@ async fn test_history_lists_manual_rewatches_with_episode_context() {
     let (token, _, _) = register_user(
         &app,
         "historycontext",
-        "historycontext@example.com",
+        "historycontext@mailbox.dev",
         "Pass1234",
     )
     .await;
@@ -3713,7 +3713,7 @@ async fn test_persistent_storage_quotas_release_deleted_slots() {
     clean_db(&pool).await;
     let app = actix_test::init_service(create_app(pool.clone())).await;
     let (token, _, user_id) =
-        register_user(&app, "storagequota", "storagequota@example.com", "Pass1234").await;
+        register_user(&app, "storagequota", "storagequota@mailbox.dev", "Pass1234").await;
     let user_id = Uuid::parse_str(&user_id).unwrap();
     let tracking_max = cinetrack::services::quota::MAX_TRACKING_ITEMS_PER_USER;
     let history_max = cinetrack::services::quota::MAX_HISTORY_EVENTS_PER_USER;
@@ -3960,7 +3960,7 @@ async fn test_import_job_reservation_is_atomic() {
     clean_db(&pool).await;
     let app = actix_test::init_service(create_app(pool.clone())).await;
     let (token, _, user_id) =
-        register_user(&app, "importuser", "importuser@example.com", "Pass1234").await;
+        register_user(&app, "importuser", "importuser@mailbox.dev", "Pass1234").await;
     let user_id = Uuid::parse_str(&user_id).unwrap();
     sqlx::query("INSERT INTO import_jobs (user_id, status) VALUES ($1, 'completed')")
         .bind(user_id)
@@ -4037,7 +4037,7 @@ async fn test_wrapped_year_scoped_recap() {
     let app = actix_test::init_service(create_app(pool.clone())).await;
 
     let (token, _, user_id_str) =
-        register_user(&app, "wrapped", "wrapped@example.com", "Pass1234").await;
+        register_user(&app, "wrapped", "wrapped@mailbox.dev", "Pass1234").await;
     let user_id = Uuid::parse_str(&user_id_str).unwrap();
 
     let movie_id = sqlx::query_scalar::<_, Uuid>(
@@ -4122,7 +4122,7 @@ async fn test_stats_count_events_rewatches_and_completed_show_gaps() {
     clean_db(&pool).await;
     let app = actix_test::init_service(create_app(pool.clone())).await;
     let (token, _, user_id) =
-        register_user(&app, "statsuser", "statsuser@example.com", "Pass1234").await;
+        register_user(&app, "statsuser", "statsuser@mailbox.dev", "Pass1234").await;
     let user_id = Uuid::parse_str(&user_id).unwrap();
 
     let show_id = sqlx::query_scalar::<_, Uuid>(
@@ -4291,7 +4291,7 @@ async fn test_watch_providers_require_auth_and_serve_from_cache() {
     let resp = actix_test::call_service(&app, req).await;
     assert_eq!(resp.status(), 401);
 
-    let (token, _, _) = register_user(&app, "wpuser", "wp@example.com", "Pass1234").await;
+    let (token, _, _) = register_user(&app, "wpuser", "wp@mailbox.dev", "Pass1234").await;
 
     // Seed a fresh cache entry so the handler never contacts TMDB in tests.
     let payload = json!({
@@ -4388,7 +4388,7 @@ async fn test_media_search_uses_fresh_and_stale_provider_cache() {
     config.tmdb_timeout_seconds = 1;
     let app = actix_test::init_service(create_app_with_config(pool.clone(), config)).await;
     let (token, _, _) =
-        register_user(&app, "searchcache", "searchcache@example.com", "Pass1234").await;
+        register_user(&app, "searchcache", "searchcache@mailbox.dev", "Pass1234").await;
 
     let search = |uri: &'static str| {
         actix_test::TestRequest::get()
@@ -4553,7 +4553,7 @@ async fn test_media_search_does_not_let_fuzzy_catalog_results_hide_provider_matc
     let (token, _, _) = register_user(
         &app,
         "searchrelevance",
-        "searchrelevance@example.com",
+        "searchrelevance@mailbox.dev",
         "Pass1234",
     )
     .await;
@@ -4581,7 +4581,7 @@ async fn test_local_catalog_search_replaces_unavailable_provider() {
     config.tmdb_timeout_seconds = 1;
     let app = actix_test::init_service(create_app_with_config(pool.clone(), config)).await;
     let (token, _, _) =
-        register_user(&app, "localsearch", "localsearch@example.com", "Pass1234").await;
+        register_user(&app, "localsearch", "localsearch@mailbox.dev", "Pass1234").await;
     sqlx::query(
         r#"INSERT INTO media (tmdb_id, media_type, title, metadata_level)
         SELECT 620000 + value, 'movie', 'Offline Matrix ' || value, 'summary'
@@ -4690,7 +4690,7 @@ async fn test_local_discovery_personalizes_and_filters_catalog() {
     clean_db(&pool).await;
     let app = actix_test::init_service(create_app(pool.clone())).await;
     let (token, _, user_id) =
-        register_user(&app, "discoveryuser", "discovery@example.com", "Pass1234").await;
+        register_user(&app, "discoveryuser", "discovery@mailbox.dev", "Pass1234").await;
 
     sqlx::query(
         r#"INSERT INTO media
@@ -4825,7 +4825,7 @@ async fn test_local_discovery_personalizes_and_filters_catalog() {
     assert_eq!(popular_show_ids, [670004]);
 
     let (cold_token, _, _) =
-        register_user(&app, "newdiscovery", "newdiscovery@example.com", "Pass1234").await;
+        register_user(&app, "newdiscovery", "newdiscovery@mailbox.dev", "Pass1234").await;
     let cold_start = actix_test::call_service(
         &app,
         actix_test::TestRequest::get()
@@ -4902,7 +4902,7 @@ async fn test_summary_media_is_hydrated_before_detail_response() {
     let mut config = test_config();
     config.tmdb_base_url = format!("http://{address}");
     let app = actix_test::init_service(create_app_with_config(pool.clone(), config)).await;
-    let (token, _, _) = register_user(&app, "hydrate", "hydrate@example.com", "Pass1234").await;
+    let (token, _, _) = register_user(&app, "hydrate", "hydrate@mailbox.dev", "Pass1234").await;
 
     let req = actix_test::TestRequest::get()
         .uri("/api/media/630001?type=movie&language=ro-RO")
@@ -5008,7 +5008,7 @@ async fn test_browsing_tmdb_detail_persists_catalog_cache() {
     let (token, _, _) = register_user(
         &app,
         "readonlymedia",
-        "readonlymedia@example.com",
+        "readonlymedia@mailbox.dev",
         "Pass1234",
     )
     .await;
@@ -5102,7 +5102,7 @@ async fn test_orphan_media_pruner_preserves_references_and_active_imports() {
     clean_db(&pool).await;
     let app = actix_test::init_service(create_app(pool.clone())).await;
     let (_, _, user_id) =
-        register_user(&app, "cachepruner", "cachepruner@example.com", "Pass1234").await;
+        register_user(&app, "cachepruner", "cachepruner@mailbox.dev", "Pass1234").await;
     let user_id = Uuid::parse_str(&user_id).unwrap();
 
     let rows = sqlx::query_as::<_, (Uuid, i32)>(
@@ -5576,7 +5576,7 @@ async fn test_tracked_release_schedule_sync_persists_episodes_and_cadence() {
     clean_db(&pool).await;
     let user_id = sqlx::query_scalar::<_, Uuid>(
         r#"INSERT INTO users (username, email)
-        VALUES ('scheduleuser', 'schedule@example.com')
+        VALUES ('scheduleuser', 'schedule@mailbox.dev')
         RETURNING id"#,
     )
     .fetch_one(&pool)
@@ -5699,11 +5699,11 @@ async fn test_calendar_lists_new_and_regional_upcoming_releases() {
     clean_db(&pool).await;
     let app = actix_test::init_service(create_app(pool.clone())).await;
     let (token, _, user_id) =
-        register_user(&app, "calendar", "calendar@example.com", "Pass1234").await;
+        register_user(&app, "calendar", "calendar@mailbox.dev", "Pass1234").await;
     let (_, _, other_user_id) = register_user(
         &app,
         "othercalendar",
-        "othercalendar@example.com",
+        "othercalendar@mailbox.dev",
         "Pass1234",
     )
     .await;
@@ -5993,7 +5993,7 @@ async fn test_up_next_keeps_recent_activity_ahead_of_new_dormant_releases() {
     clean_db(&pool).await;
     let app = actix_test::init_service(create_app(pool.clone())).await;
     let (token, _, user_id) =
-        register_user(&app, "upnextorder", "upnextorder@example.com", "Pass1234").await;
+        register_user(&app, "upnextorder", "upnextorder@mailbox.dev", "Pass1234").await;
     let user_id = Uuid::parse_str(&user_id).unwrap();
     let today = chrono::Utc::now().date_naive();
 
@@ -6130,11 +6130,11 @@ async fn test_calendar_episode_actions_are_idempotent_and_owner_scoped() {
     clean_db(&pool).await;
     let app = actix_test::init_service(create_app(pool.clone())).await;
     let (token, _, user_id) =
-        register_user(&app, "episodeplan", "episodeplan@example.com", "Pass1234").await;
+        register_user(&app, "episodeplan", "episodeplan@mailbox.dev", "Pass1234").await;
     let (other_token, _, other_user_id) = register_user(
         &app,
         "episodeplanother",
-        "episodeplanother@example.com",
+        "episodeplanother@mailbox.dev",
         "Pass1234",
     )
     .await;
@@ -6332,7 +6332,7 @@ async fn test_warm_episode_cache_avoids_upstream_request() {
     clean_db(&pool).await;
     let app = actix_test::init_service(create_app(pool.clone())).await;
     let (token, _, _) =
-        register_user(&app, "episodecache", "episodecache@example.com", "Pass1234").await;
+        register_user(&app, "episodecache", "episodecache@mailbox.dev", "Pass1234").await;
 
     let media_id = sqlx::query_scalar::<_, Uuid>(
         r#"INSERT INTO media (tmdb_id, media_type, title)
@@ -6408,7 +6408,7 @@ async fn test_refreshing_a_season_drops_episodes_tmdb_no_longer_lists() {
     config.tmdb_base_url = format!("http://{address}");
     let app = actix_test::init_service(create_app_with_config(pool.clone(), config)).await;
     let (token, _, user_id) =
-        register_user(&app, "staleeps", "staleeps@example.com", "Pass1234").await;
+        register_user(&app, "staleeps", "staleeps@mailbox.dev", "Pass1234").await;
     let user_id = Uuid::parse_str(&user_id).unwrap();
 
     let media_id = sqlx::query_scalar::<_, Uuid>(
@@ -6501,7 +6501,7 @@ async fn test_stale_episode_cache_survives_upstream_failure() {
     let (token, _, _) = register_user(
         &app,
         "staleepisodes",
-        "staleepisodes@example.com",
+        "staleepisodes@mailbox.dev",
         "Pass1234",
     )
     .await;
@@ -6552,7 +6552,7 @@ async fn test_mark_episode_watched_is_idempotent_and_creates_tracking() {
     clean_db(&pool).await;
     let app = actix_test::init_service(create_app(pool.clone())).await;
     let (token, _, user_id) =
-        register_user(&app, "episodewatch", "episodewatch@example.com", "Pass1234").await;
+        register_user(&app, "episodewatch", "episodewatch@mailbox.dev", "Pass1234").await;
     let user_id = Uuid::parse_str(&user_id).unwrap();
 
     let media_id = sqlx::query_scalar::<_, Uuid>(
@@ -6662,7 +6662,7 @@ async fn test_bulk_episode_watch_is_idempotent_bounded_and_updates_progress() {
     clean_db(&pool).await;
     let app = actix_test::init_service(create_app(pool.clone())).await;
     let (token, _, user_id) =
-        register_user(&app, "bulkwatch", "bulkwatch@example.com", "Pass1234").await;
+        register_user(&app, "bulkwatch", "bulkwatch@mailbox.dev", "Pass1234").await;
     let user_id = Uuid::parse_str(&user_id).unwrap();
 
     let media_id = sqlx::query_scalar::<_, Uuid>(
@@ -6877,13 +6877,13 @@ async fn test_episode_detail_is_authenticated_and_user_scoped() {
     let (token, _, user_id) = register_user(
         &app,
         "episodedetail",
-        "episodedetail@example.com",
+        "episodedetail@mailbox.dev",
         "Pass1234",
     )
     .await;
     let user_id = Uuid::parse_str(&user_id).unwrap();
     let (other_token, _, _) =
-        register_user(&app, "episodeother", "episodeother@example.com", "Pass1234").await;
+        register_user(&app, "episodeother", "episodeother@mailbox.dev", "Pass1234").await;
 
     let media_id = sqlx::query_scalar::<_, Uuid>(
         r#"INSERT INTO media
@@ -6996,7 +6996,7 @@ async fn test_media_rejects_invalid_upstream_parameters() {
     clean_db(&pool).await;
     let app = actix_test::init_service(create_app(pool.clone())).await;
     let (token, _, _) =
-        register_user(&app, "mediaparams", "mediaparams@example.com", "Pass1234").await;
+        register_user(&app, "mediaparams", "mediaparams@mailbox.dev", "Pass1234").await;
 
     for uri in [
         "/api/media/-1?type=movie",
@@ -7022,7 +7022,7 @@ async fn test_public_profile_hides_email() {
     clean_db(&pool).await;
     let app = actix_test::init_service(create_app(pool.clone())).await;
 
-    register_user(&app, "pubuser", "pub@example.com", "Pass1234").await;
+    register_user(&app, "pubuser", "pub@mailbox.dev", "Pass1234").await;
 
     let req = actix_test::TestRequest::get()
         .uri("/api/users/pubuser")
@@ -7047,7 +7047,7 @@ async fn test_profile_lookup_is_case_insensitive() {
     clean_db(&pool).await;
     let app = actix_test::init_service(create_app(pool.clone())).await;
 
-    register_user(&app, "CaseProfile", "case-profile@example.com", "Pass1234").await;
+    register_user(&app, "CaseProfile", "case-profile@mailbox.dev", "Pass1234").await;
 
     let req = actix_test::TestRequest::get()
         .uri("/api/users/caseprofile")
@@ -7067,7 +7067,7 @@ async fn test_update_profile() {
     clean_db(&pool).await;
     let app = actix_test::init_service(create_app(pool.clone())).await;
 
-    let (token, _, _) = register_user(&app, "edituser", "edit@example.com", "Pass1234").await;
+    let (token, _, _) = register_user(&app, "edituser", "edit@mailbox.dev", "Pass1234").await;
 
     let req = actix_test::TestRequest::patch()
         .uri("/api/users/me")
@@ -7090,7 +7090,7 @@ async fn test_update_profile_rejects_direct_avatar_urls() {
     clean_db(&pool).await;
     let app = actix_test::init_service(create_app(pool.clone())).await;
 
-    let (token, _, _) = register_user(&app, "xssuser", "xss@example.com", "Pass1234").await;
+    let (token, _, _) = register_user(&app, "xssuser", "xss@mailbox.dev", "Pass1234").await;
 
     let req = actix_test::TestRequest::patch()
         .uri("/api/users/me")
@@ -7112,7 +7112,7 @@ async fn test_account_export_requires_password_and_excludes_credentials() {
     clean_db(&pool).await;
     let app = actix_test::init_service(create_app(pool.clone())).await;
     let (token, refresh_token, _) =
-        register_user(&app, "exportuser", "export@example.com", "Pass1234").await;
+        register_user(&app, "exportuser", "export@mailbox.dev", "Pass1234").await;
 
     let unauthenticated = actix_test::TestRequest::post()
         .uri("/api/users/me/export")
@@ -7164,7 +7164,7 @@ async fn test_account_export_requires_password_and_excludes_credentials() {
 
     let body: Value = actix_test::read_body_json(response).await;
     assert_eq!(body["format_version"], 4);
-    assert_eq!(body["account"]["email"], "export@example.com");
+    assert_eq!(body["account"]["email"], "export@mailbox.dev");
     assert_eq!(body["account"]["two_factor_enabled"], false);
     assert_eq!(
         body["account"]["terms_accepted_version"],
@@ -7185,7 +7185,7 @@ async fn test_account_export_requires_password_and_excludes_credentials() {
 
     let export_event_count: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM security_activity
-         WHERE user_id = (SELECT id FROM users WHERE email = 'export@example.com')
+         WHERE user_id = (SELECT id FROM users WHERE email = 'export@mailbox.dev')
            AND event_type = 'account_data_exported'",
     )
     .fetch_one(&pool)
@@ -7233,7 +7233,7 @@ async fn test_delete_account_wrong_password_rejected() {
     clean_db(&pool).await;
     let app = actix_test::init_service(create_app(pool.clone())).await;
 
-    let (token, _, _) = register_user(&app, "deluser", "del@example.com", "Pass1234").await;
+    let (token, _, _) = register_user(&app, "deluser", "del@mailbox.dev", "Pass1234").await;
 
     let req = actix_test::TestRequest::delete()
         .uri("/api/users/me")
@@ -7245,7 +7245,7 @@ async fn test_delete_account_wrong_password_rejected() {
     assert_eq!(resp.status(), 401);
 
     // Account still exists.
-    login_user(&app, "del@example.com", "Pass1234").await;
+    login_user(&app, "del@mailbox.dev", "Pass1234").await;
 }
 
 #[actix_web::test]
@@ -7255,7 +7255,7 @@ async fn test_delete_account_success() {
     clean_db(&pool).await;
     let app = actix_test::init_service(create_app(pool.clone())).await;
 
-    let (token, _, _) = register_user(&app, "goneuser", "gone@example.com", "Pass1234").await;
+    let (token, _, _) = register_user(&app, "goneuser", "gone@mailbox.dev", "Pass1234").await;
 
     let req = actix_test::TestRequest::delete()
         .uri("/api/users/me")
@@ -7269,7 +7269,7 @@ async fn test_delete_account_success() {
     // Login no longer works and the profile is gone.
     let req = actix_test::TestRequest::post()
         .uri("/api/auth/login")
-        .set_json(json!({ "email": "gone@example.com", "password": "Pass1234" }))
+        .set_json(json!({ "email": "gone@mailbox.dev", "password": "Pass1234" }))
         .peer_addr(peer_addr())
         .to_request();
     let resp = actix_test::call_service(&app, req).await;
@@ -7292,7 +7292,7 @@ async fn test_delete_account_keeps_account_when_stored_avatar_cannot_be_removed(
     let app = actix_test::init_service(create_app(pool.clone())).await;
 
     let (token, _, user_id) =
-        register_user(&app, "storedavatar", "storedavatar@example.com", "Pass1234").await;
+        register_user(&app, "storedavatar", "storedavatar@mailbox.dev", "Pass1234").await;
     let user_id = Uuid::parse_str(&user_id).unwrap();
     sqlx::query("UPDATE users SET avatar_url = $2 WHERE id = $1")
         .bind(user_id)
@@ -7310,7 +7310,7 @@ async fn test_delete_account_keeps_account_when_stored_avatar_cannot_be_removed(
     let resp = actix_test::call_service(&app, req).await;
     assert_eq!(resp.status(), 503);
 
-    login_user(&app, "storedavatar@example.com", "Pass1234").await;
+    login_user(&app, "storedavatar@mailbox.dev", "Pass1234").await;
 }
 
 // ── Follow System Tests ───────────────────────────────────────
@@ -7325,16 +7325,16 @@ async fn test_social_notifications_are_deduplicated_private_and_owner_scoped() {
     let (follower_token, _, follower_id) = register_user(
         &app,
         "notifyfollower",
-        "notifyfollower@example.com",
+        "notifyfollower@mailbox.dev",
         "Pass1234",
     )
     .await;
     let (owner_token, _, owner_id) =
-        register_user(&app, "notifyowner", "notifyowner@example.com", "Pass1234").await;
+        register_user(&app, "notifyowner", "notifyowner@mailbox.dev", "Pass1234").await;
     let (public_token, _, _) =
-        register_user(&app, "notifypublic", "notifypublic@example.com", "Pass1234").await;
+        register_user(&app, "notifypublic", "notifypublic@mailbox.dev", "Pass1234").await;
     let (second_owner_token, _, second_owner_id) =
-        register_user(&app, "notifysecond", "notifysecond@example.com", "Pass1234").await;
+        register_user(&app, "notifysecond", "notifysecond@mailbox.dev", "Pass1234").await;
 
     for (id, avatar) in [
         (&follower_id, "https://example.com/private-follower.jpg"),
@@ -7507,19 +7507,19 @@ async fn test_user_search_is_literal_paginated_and_privacy_safe() {
     let app = actix_test::init_service(create_app(pool.clone())).await;
 
     let (viewer_token, _, viewer_id) =
-        register_user(&app, "searchviewer", "searchviewer@example.com", "Pass1234").await;
+        register_user(&app, "searchviewer", "searchviewer@mailbox.dev", "Pass1234").await;
     let (_, _, public_id) =
-        register_user(&app, "alpha_public", "alpha_public@example.com", "Pass1234").await;
+        register_user(&app, "alpha_public", "alpha_public@mailbox.dev", "Pass1234").await;
     let (_, _, pending_id) = register_user(
         &app,
         "alpha_private",
-        "alpha_private@example.com",
+        "alpha_private@mailbox.dev",
         "Pass1234",
     )
     .await;
     let (friend_token, _, friend_id) =
-        register_user(&app, "alpha_friend", "alpha_friend@example.com", "Pass1234").await;
-    register_user(&app, "alphaxother", "alphaxother@example.com", "Pass1234").await;
+        register_user(&app, "alpha_friend", "alpha_friend@mailbox.dev", "Pass1234").await;
+    register_user(&app, "alphaxother", "alphaxother@mailbox.dev", "Pass1234").await;
 
     sqlx::query("UPDATE users SET avatar_url = $2, bio = $3 WHERE id = $1")
         .bind(Uuid::parse_str(&public_id).unwrap())
@@ -7643,13 +7643,13 @@ async fn test_activity_feed_only_includes_self_and_accepted_follows() {
     let app = actix_test::init_service(create_app(pool.clone())).await;
 
     let (viewer_token, _, viewer_id) =
-        register_user(&app, "feedviewer", "feedviewer@example.com", "Pass1234").await;
+        register_user(&app, "feedviewer", "feedviewer@mailbox.dev", "Pass1234").await;
     let (_, _, followed_id) =
-        register_user(&app, "feedfollowed", "feedfollowed@example.com", "Pass1234").await;
+        register_user(&app, "feedfollowed", "feedfollowed@mailbox.dev", "Pass1234").await;
     let (_, _, pending_id) =
-        register_user(&app, "feedpending", "feedpending@example.com", "Pass1234").await;
+        register_user(&app, "feedpending", "feedpending@mailbox.dev", "Pass1234").await;
     let (_, _, stranger_id) =
-        register_user(&app, "feedstranger", "feedstranger@example.com", "Pass1234").await;
+        register_user(&app, "feedstranger", "feedstranger@mailbox.dev", "Pass1234").await;
 
     sqlx::query("UPDATE users SET is_public = false WHERE id = $1")
         .bind(Uuid::parse_str(&pending_id).unwrap())
@@ -7800,9 +7800,9 @@ async fn test_follow_and_unfollow() {
     let app = actix_test::init_service(create_app(pool.clone())).await;
 
     let (token_a, _, user_a_id) =
-        register_user(&app, "follower", "follower@example.com", "Pass1234").await;
+        register_user(&app, "follower", "follower@mailbox.dev", "Pass1234").await;
     let (token_b, _, _user_b_id) =
-        register_user(&app, "followed", "followed@example.com", "Pass1234").await;
+        register_user(&app, "followed", "followed@mailbox.dev", "Pass1234").await;
 
     sqlx::query("UPDATE users SET is_public = false, avatar_url = $2, bio = $3 WHERE id = $1")
         .bind(Uuid::parse_str(&user_a_id).unwrap())
@@ -7880,13 +7880,13 @@ async fn test_profile_connection_lists_enforce_privacy_and_blocks() {
     let app = actix_test::init_service(create_app(pool.clone())).await;
 
     let (_owner_token, _, owner_id) =
-        register_user(&app, "privateowner", "owner@example.com", "Pass1234").await;
+        register_user(&app, "privateowner", "owner@mailbox.dev", "Pass1234").await;
     let (viewer_token, _, viewer_id) =
-        register_user(&app, "approvedviewer", "viewer@example.com", "Pass1234").await;
+        register_user(&app, "approvedviewer", "viewer@mailbox.dev", "Pass1234").await;
     let (stranger_token, _, _stranger_id) =
-        register_user(&app, "stranger", "stranger@example.com", "Pass1234").await;
+        register_user(&app, "stranger", "stranger@mailbox.dev", "Pass1234").await;
     let (_connection_token, _, connection_id) =
-        register_user(&app, "privatefriend", "friend@example.com", "Pass1234").await;
+        register_user(&app, "privatefriend", "friend@mailbox.dev", "Pass1234").await;
 
     let owner_id = Uuid::parse_str(&owner_id).unwrap();
     let viewer_id = Uuid::parse_str(&viewer_id).unwrap();
@@ -7987,11 +7987,11 @@ async fn test_private_follow_request_requires_owner_approval() {
     let app = actix_test::init_service(create_app(pool.clone())).await;
 
     let (follower_token, _, follower_id) =
-        register_user(&app, "requester", "requester@example.com", "Pass1234").await;
+        register_user(&app, "requester", "requester@mailbox.dev", "Pass1234").await;
     let (owner_token, _, _) =
-        register_user(&app, "privateuser", "private@example.com", "Pass1234").await;
+        register_user(&app, "privateuser", "private@mailbox.dev", "Pass1234").await;
     let (other_token, _, _) =
-        register_user(&app, "otheruser", "other@example.com", "Pass1234").await;
+        register_user(&app, "otheruser", "other@mailbox.dev", "Pass1234").await;
 
     let req = actix_test::TestRequest::patch()
         .uri("/api/users/me")
@@ -8126,9 +8126,9 @@ async fn test_making_profile_public_accepts_pending_requests() {
     let app = actix_test::init_service(create_app(pool.clone())).await;
 
     let (follower_token, _, follower_id) =
-        register_user(&app, "autofollower", "autofollower@example.com", "Pass1234").await;
+        register_user(&app, "autofollower", "autofollower@mailbox.dev", "Pass1234").await;
     let (owner_token, _, owner_id) =
-        register_user(&app, "autoowner", "autoowner@example.com", "Pass1234").await;
+        register_user(&app, "autoowner", "autoowner@mailbox.dev", "Pass1234").await;
 
     sqlx::query("UPDATE users SET is_public = false WHERE id = $1")
         .bind(Uuid::parse_str(&owner_id).unwrap())
@@ -8192,7 +8192,7 @@ async fn test_social_relationship_quotas_are_atomic_and_bound_pending_requests()
     let app = actix_test::init_service(create_app(pool.clone())).await;
 
     let (token, _, user_id) =
-        register_user(&app, "socialquota", "socialquota@example.com", "Pass1234").await;
+        register_user(&app, "socialquota", "socialquota@mailbox.dev", "Pass1234").await;
     let user_id = Uuid::parse_str(&user_id).unwrap();
     let relationship_max = cinetrack::services::quota::MAX_SOCIAL_RELATIONSHIPS_PER_USER;
     let pending_max = cinetrack::services::quota::MAX_PENDING_FOLLOW_REQUESTS_PER_USER;
@@ -8200,7 +8200,7 @@ async fn test_social_relationship_quotas_are_atomic_and_bound_pending_requests()
 
     sqlx::query(
         r#"INSERT INTO users (username, email, email_verified, is_public)
-        SELECT 'socialtarget' || value, 'socialtarget' || value || '@example.com', TRUE, TRUE
+        SELECT 'socialtarget' || value, 'socialtarget' || value || '@mailbox.dev', TRUE, TRUE
         FROM generate_series(1, $1::bigint) AS value"#,
     )
     .bind(seeded_user_count)
@@ -8291,7 +8291,7 @@ async fn test_social_relationship_quotas_are_atomic_and_bound_pending_requests()
     assert_eq!(outgoing_count, relationship_max);
 
     let (_, _, owner_id) =
-        register_user(&app, "pendingowner", "pendingowner@example.com", "Pass1234").await;
+        register_user(&app, "pendingowner", "pendingowner@mailbox.dev", "Pass1234").await;
     let owner_id = Uuid::parse_str(&owner_id).unwrap();
     sqlx::query("UPDATE users SET is_public = false WHERE id = $1")
         .bind(owner_id)
@@ -8311,7 +8311,7 @@ async fn test_social_relationship_quotas_are_atomic_and_bound_pending_requests()
     .unwrap();
 
     let (requester_token, _, _) =
-        register_user(&app, "newrequester", "newrequester@example.com", "Pass1234").await;
+        register_user(&app, "newrequester", "newrequester@mailbox.dev", "Pass1234").await;
     let req = actix_test::TestRequest::post()
         .uri("/api/users/pendingowner/follow")
         .insert_header(("Authorization", format!("Bearer {requester_token}")))
@@ -8331,13 +8331,13 @@ async fn test_direct_messages_enforce_relationships_idempotency_privacy_and_abus
     let app = actix_test::init_service(create_app(pool.clone())).await;
 
     let (alice_token, _, alice_id) =
-        register_user(&app, "messagealice", "messagealice@example.com", "Pass1234").await;
+        register_user(&app, "messagealice", "messagealice@mailbox.dev", "Pass1234").await;
     let (bob_token, _, bob_id) =
-        register_user(&app, "messagebob", "messagebob@example.com", "Pass1234").await;
+        register_user(&app, "messagebob", "messagebob@mailbox.dev", "Pass1234").await;
     let (stranger_token, _, _) = register_user(
         &app,
         "messagestranger",
-        "messagestranger@example.com",
+        "messagestranger@mailbox.dev",
         "Pass1234",
     )
     .await;
@@ -8600,11 +8600,11 @@ async fn test_direct_message_daily_quota_ignores_expired_rows() {
     let app = actix_test::init_service(create_app(pool.clone())).await;
 
     let (sender_token, _, sender_id) =
-        register_user(&app, "quotasender", "quotasender@example.com", "Pass1234").await;
+        register_user(&app, "quotasender", "quotasender@mailbox.dev", "Pass1234").await;
     let (_, _, recipient_id) = register_user(
         &app,
         "quotarecipient",
-        "quotarecipient@example.com",
+        "quotarecipient@mailbox.dev",
         "Pass1234",
     )
     .await;
@@ -8685,7 +8685,7 @@ async fn test_create_list() {
     clean_db(&pool).await;
     let app = actix_test::init_service(create_app(pool.clone())).await;
 
-    let (token, _, _) = register_user(&app, "listuser", "list@example.com", "Pass1234").await;
+    let (token, _, _) = register_user(&app, "listuser", "list@mailbox.dev", "Pass1234").await;
 
     let req = actix_test::TestRequest::post()
         .uri("/api/lists")
@@ -8711,7 +8711,7 @@ async fn test_list_full_owner_flow_and_public_visibility() {
     let pool = setup_pool().await;
     clean_db(&pool).await;
     let app = actix_test::init_service(create_app(pool.clone())).await;
-    let (token, _, _) = register_user(&app, "listflow", "listflow@example.com", "Pass1234").await;
+    let (token, _, _) = register_user(&app, "listflow", "listflow@mailbox.dev", "Pass1234").await;
     let media_id = sqlx::query_scalar::<_, Uuid>(
         r#"INSERT INTO media (tmdb_id, media_type, title)
         VALUES (1200001, 'movie', 'List Flow Movie')
@@ -8822,7 +8822,7 @@ async fn test_lists_are_private_by_default_and_quota_bound() {
     clean_db(&pool).await;
     let app = actix_test::init_service(create_app(pool.clone())).await;
     let (token, _, user_id) =
-        register_user(&app, "listquota", "listquota@example.com", "Pass1234").await;
+        register_user(&app, "listquota", "listquota@mailbox.dev", "Pass1234").await;
     let user_id = Uuid::parse_str(&user_id).unwrap();
 
     let req = actix_test::TestRequest::post()
@@ -8916,8 +8916,8 @@ async fn test_list_idor_protection() {
     clean_db(&pool).await;
     let app = actix_test::init_service(create_app(pool.clone())).await;
 
-    let (token_a, _, _) = register_user(&app, "owner", "owner@example.com", "Pass1234").await;
-    let (token_b, _, _) = register_user(&app, "attacker", "attacker@example.com", "Pass1234").await;
+    let (token_a, _, _) = register_user(&app, "owner", "owner@mailbox.dev", "Pass1234").await;
+    let (token_b, _, _) = register_user(&app, "attacker", "attacker@mailbox.dev", "Pass1234").await;
 
     // User A creates a private list
     let req = actix_test::TestRequest::post()
@@ -8956,7 +8956,7 @@ async fn test_list_name_too_long_rejected() {
     clean_db(&pool).await;
     let app = actix_test::init_service(create_app(pool.clone())).await;
 
-    let (token, _, _) = register_user(&app, "longlist", "longlist@example.com", "Pass1234").await;
+    let (token, _, _) = register_user(&app, "longlist", "longlist@mailbox.dev", "Pass1234").await;
 
     let req = actix_test::TestRequest::post()
         .uri("/api/lists")
@@ -8997,7 +8997,7 @@ async fn test_client_error_reports_require_auth_and_validate_payloads() {
     let (token, _, _) = register_user(
         &app,
         "crashreporter",
-        "crashreporter@example.com",
+        "crashreporter@mailbox.dev",
         "Pass1234",
     )
     .await;
@@ -9070,7 +9070,7 @@ async fn test_push_device_registration_and_secret_revocation() {
     assert_eq!(actix_test::call_service(&app, req).await.status(), 401);
 
     let (access_token, _, user_id) =
-        register_user(&app, "pushdevice", "pushdevice@example.com", "Pass1234").await;
+        register_user(&app, "pushdevice", "pushdevice@mailbox.dev", "Pass1234").await;
     let req = actix_test::TestRequest::put()
         .uri("/api/push/devices")
         .insert_header(("Authorization", format!("Bearer {access_token}")))
@@ -9115,7 +9115,7 @@ async fn test_push_device_registration_and_secret_revocation() {
 
     // A token claimed by another account/installation must not inherit queued content.
     let (second_access_token, _, second_user_id) =
-        register_user(&app, "pushdevice2", "pushdevice2@example.com", "Pass1234").await;
+        register_user(&app, "pushdevice2", "pushdevice2@mailbox.dev", "Pass1234").await;
     let replacement_secret = "ef".repeat(32);
     let req = actix_test::TestRequest::put()
         .uri("/api/push/devices")
@@ -9204,7 +9204,7 @@ async fn test_release_push_outbox_is_local_personalized_and_idempotent() {
     clean_db(&pool).await;
     let user_id = sqlx::query_scalar::<_, Uuid>(
         "INSERT INTO users (username, email)
-         VALUES ('pushoutbox', 'pushoutbox@example.com') RETURNING id",
+         VALUES ('pushoutbox', 'pushoutbox@mailbox.dev') RETURNING id",
     )
     .fetch_one(&pool)
     .await
@@ -9447,7 +9447,7 @@ async fn test_exploit_jwt_alg_none_is_rejected() {
     let app = actix_test::init_service(create_app(pool.clone())).await;
 
     let (_, _, user_id) =
-        register_user(&app, "algnone", "algnone@example.com", "Passw0rd123").await;
+        register_user(&app, "algnone", "algnone@mailbox.dev", "Passw0rd123").await;
 
     // base64url without padding, written out rather than pulling in a crate
     // just to forge one token.
@@ -9505,7 +9505,7 @@ async fn test_exploit_mass_assignment_on_register_is_refused() {
         .peer_addr(peer_addr())
         .set_json(json!({
             "username": "massassign",
-            "email": "massassign@example.com",
+            "email": "massassign@mailbox.dev",
             "password": "Passw0rd123",
             "accepted_terms": true,
             // None of these may be honoured.
@@ -9523,7 +9523,7 @@ async fn test_exploit_mass_assignment_on_register_is_refused() {
     );
 
     let created = sqlx::query_scalar::<_, i64>("SELECT count(*) FROM users WHERE email = $1")
-        .bind("massassign@example.com")
+        .bind("massassign@mailbox.dev")
         .fetch_one(&pool)
         .await
         .expect("count query");
@@ -9535,7 +9535,7 @@ async fn test_exploit_mass_assignment_on_register_is_refused() {
     // And the ordinary path still leaves the privileged columns at their safe
     // defaults, which is the property the rejection is protecting.
     let (_, _, user_id) =
-        register_unverified_user(&app, "plainreg", "plainreg@example.com", "Pass1234").await;
+        register_unverified_user(&app, "plainreg", "plainreg@mailbox.dev", "Pass1234").await;
     let row = sqlx::query_as::<_, (bool, bool)>(
         "SELECT email_verified, is_public FROM users WHERE id = $1",
     )
@@ -9559,9 +9559,9 @@ async fn test_exploit_cannot_touch_another_users_tracking() {
     let app = actix_test::init_service(create_app(pool.clone())).await;
 
     let (victim_token, _, _) =
-        register_user(&app, "victimtr", "victimtr@example.com", "Passw0rd123").await;
+        register_user(&app, "victimtr", "victimtr@mailbox.dev", "Passw0rd123").await;
     let (attacker_token, _, _) =
-        register_user(&app, "attacktr", "attacktr@example.com", "Passw0rd123").await;
+        register_user(&app, "attacktr", "attacktr@mailbox.dev", "Passw0rd123").await;
 
     // Tracking resolves against the local catalogue; seed it so the request
     // does not depend on an upstream lookup.
@@ -9633,7 +9633,7 @@ async fn test_exploit_sql_metacharacters_are_treated_as_data() {
     clean_db(&pool).await;
     let app = actix_test::init_service(create_app(pool.clone())).await;
 
-    let (token, _, _) = register_user(&app, "sqluser", "sqluser@example.com", "Passw0rd123").await;
+    let (token, _, _) = register_user(&app, "sqluser", "sqluser@mailbox.dev", "Passw0rd123").await;
 
     let payload = "'; DROP TABLE users; --";
     let req = actix_test::TestRequest::post()
@@ -9672,13 +9672,13 @@ async fn test_exploit_password_brute_force_locks_the_account() {
     clean_db(&pool).await;
     let app = actix_test::init_service(create_app(pool.clone())).await;
 
-    register_user(&app, "bruteme", "bruteme@example.com", "Pass1234").await;
+    register_user(&app, "bruteme", "bruteme@mailbox.dev", "Pass1234").await;
 
     for attempt in 1..=5 {
         let req = actix_test::TestRequest::post()
             .uri("/api/auth/login")
             .peer_addr(peer_addr())
-            .set_json(json!({ "email": "bruteme@example.com", "password": "WrongPass9" }))
+            .set_json(json!({ "email": "bruteme@mailbox.dev", "password": "WrongPass9" }))
             .to_request();
         let resp = actix_test::call_service(&app, req).await;
         assert_eq!(
@@ -9691,7 +9691,7 @@ async fn test_exploit_password_brute_force_locks_the_account() {
     let locked_until = sqlx::query_scalar::<_, Option<chrono::DateTime<chrono::Utc>>>(
         "SELECT login_locked_until FROM users WHERE email = $1",
     )
-    .bind("bruteme@example.com")
+    .bind("bruteme@mailbox.dev")
     .fetch_one(&pool)
     .await
     .expect("user row");
@@ -9704,7 +9704,7 @@ async fn test_exploit_password_brute_force_locks_the_account() {
     let req = actix_test::TestRequest::post()
         .uri("/api/auth/login")
         .peer_addr(peer_addr())
-        .set_json(json!({ "email": "bruteme@example.com", "password": "Pass1234" }))
+        .set_json(json!({ "email": "bruteme@mailbox.dev", "password": "Pass1234" }))
         .to_request();
     let resp = actix_test::call_service(&app, req).await;
     assert_ne!(
@@ -9725,7 +9725,7 @@ async fn test_exploit_totp_code_cannot_be_replayed_at_login() {
     clean_db(&pool).await;
     let app = actix_test::init_service(create_app(pool.clone())).await;
 
-    let (access, _, _) = register_user(&app, "replayer", "replayer@example.com", "Pass1234").await;
+    let (access, _, _) = register_user(&app, "replayer", "replayer@mailbox.dev", "Pass1234").await;
 
     let req = actix_test::TestRequest::post()
         .uri("/api/auth/2fa/setup")
@@ -9735,7 +9735,7 @@ async fn test_exploit_totp_code_cannot_be_replayed_at_login() {
         .to_request();
     assert_eq!(actix_test::call_service(&app, req).await.status(), 200);
 
-    let secret = totp_secret_bytes(&pool, "replayer@example.com").await;
+    let secret = totp_secret_bytes(&pool, "replayer@mailbox.dev").await;
 
     let req = actix_test::TestRequest::post()
         .uri("/api/auth/2fa/enable")
@@ -9752,7 +9752,7 @@ async fn test_exploit_totp_code_cannot_be_replayed_at_login() {
             .uri("/api/auth/login")
             .peer_addr(peer_addr())
             .set_json(json!({
-                "email": "replayer@example.com",
+                "email": "replayer@mailbox.dev",
                 "password": "Pass1234",
                 "totp_code": code
             }))
@@ -9825,7 +9825,7 @@ async fn test_finished_show_completes_when_the_last_episode_is_watched() {
     let app = actix_test::init_service(create_app(pool.clone())).await;
 
     let (token, _, user_id) =
-        register_user(&app, "completer", "completer@example.com", "Pass1234").await;
+        register_user(&app, "completer", "completer@mailbox.dev", "Pass1234").await;
     let user_id = Uuid::parse_str(&user_id).unwrap();
     let media_id = seed_finished_show(&pool, 992001, "Ended", 3).await;
 
@@ -9897,7 +9897,7 @@ async fn test_returning_show_stays_watching_when_caught_up() {
     let app = actix_test::init_service(create_app(pool.clone())).await;
 
     let (token, _, user_id) =
-        register_user(&app, "caughtup", "caughtup@example.com", "Pass1234").await;
+        register_user(&app, "caughtup", "caughtup@mailbox.dev", "Pass1234").await;
     let user_id = Uuid::parse_str(&user_id).unwrap();
     let media_id = seed_finished_show(&pool, 992002, "Returning Series", 2).await;
 
@@ -9952,8 +9952,8 @@ async fn test_episode_reactions_require_having_watched_and_aggregate() {
     let app = actix_test::init_service(create_app(pool.clone())).await;
 
     let (viewer, _, viewer_id) =
-        register_user(&app, "reactor", "reactor@example.com", "Pass1234").await;
-    let (other, _, _) = register_user(&app, "reactor2", "reactor2@example.com", "Pass1234").await;
+        register_user(&app, "reactor", "reactor@mailbox.dev", "Pass1234").await;
+    let (other, _, _) = register_user(&app, "reactor2", "reactor2@mailbox.dev", "Pass1234").await;
     let viewer_id = Uuid::parse_str(&viewer_id).unwrap();
 
     let media_id = seed_finished_show(&pool, 993001, "Ended", 1).await;

@@ -28,7 +28,7 @@ function sql(statement: string): string {
 
 function uniqueAccount() {
   const id = randomUUID().replaceAll('-', '').slice(0, 20);
-  return { username: `rx${id}`, email: `rx${id}@example.com`, password: PASSWORD };
+  return { username: `rx${id}`, email: `rx${id}@mailbox.dev`, password: PASSWORD };
 }
 
 async function registerAndVerify(page: Page, acct: ReturnType<typeof uniqueAccount>) {

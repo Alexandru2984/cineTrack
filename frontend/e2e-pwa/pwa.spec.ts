@@ -3,7 +3,7 @@ import { expect, test, type Page } from '@playwright/test';
 const TEST_USER = {
   id: '00000000-0000-0000-0000-000000000001',
   username: 'pwa_user',
-  email: 'pwa@example.com',
+  email: 'pwa@mailbox.dev',
   avatar_url: null,
   bio: null,
   is_public: true,

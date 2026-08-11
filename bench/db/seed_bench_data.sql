@@ -30,7 +30,7 @@ WHERE id <> :user_id
 INSERT INTO users (username, email, is_public, email_verified)
 SELECT
   'bench-bg-' || lpad(n::text, 2, '0'),
-  'bench-bg-' || lpad(n::text, 2, '0') || '@example.invalid',
+  'bench-bg-' || lpad(n::text, 2, '0') || '@mailbox.dev',
   FALSE,
   TRUE
 FROM generate_series(1, 30) AS n
@@ -39,24 +39,24 @@ ON CONFLICT DO NOTHING;
 DELETE FROM watch_history history
 USING users background
 WHERE history.user_id = background.id
-  AND background.email LIKE 'bench-bg-%@example.invalid';
+  AND background.email LIKE 'bench-bg-%@mailbox.dev';
 
 DELETE FROM user_media tracked
 USING users background
 WHERE tracked.user_id = background.id
-  AND background.email LIKE 'bench-bg-%@example.invalid';
+  AND background.email LIKE 'bench-bg-%@mailbox.dev';
 
 -- Reset the social fixture as well. Background accounts persist between runs,
 -- so leaving their old relationships or messages behind would make inbox
 -- latency and unread counts depend on how often the benchmark was executed.
 DELETE FROM direct_messages message
 USING users background
-WHERE background.email LIKE 'bench-bg-%@example.invalid'
+WHERE background.email LIKE 'bench-bg-%@mailbox.dev'
   AND (message.sender_id = background.id OR message.recipient_id = background.id);
 
 DELETE FROM follows relationship
 USING users background
-WHERE background.email LIKE 'bench-bg-%@example.invalid'
+WHERE background.email LIKE 'bench-bg-%@mailbox.dev'
   AND (
     relationship.follower_id = background.id
     OR relationship.following_id = background.id
@@ -68,11 +68,11 @@ WHERE background.email LIKE 'bench-bg-%@example.invalid'
 INSERT INTO follows (follower_id, following_id, status)
 SELECT :user_id, background.id, 'accepted'
 FROM users background
-WHERE background.email LIKE 'bench-bg-%@example.invalid'
+WHERE background.email LIKE 'bench-bg-%@mailbox.dev'
 UNION ALL
 SELECT background.id, :user_id, 'accepted'
 FROM users background
-WHERE background.email LIKE 'bench-bg-%@example.invalid'
+WHERE background.email LIKE 'bench-bg-%@mailbox.dev'
 ON CONFLICT (follower_id, following_id) DO UPDATE SET status = 'accepted';
 
 -- A ring of mutual background relationships supplies traffic that does not
@@ -85,7 +85,7 @@ WITH ordered AS (
     row_number() OVER (ORDER BY email) AS position,
     count(*) OVER () AS total
   FROM users
-  WHERE email LIKE 'bench-bg-%@example.invalid'
+  WHERE email LIKE 'bench-bg-%@mailbox.dev'
 ), pairs AS (
   SELECT source.id AS source_id, destination.id AS destination_id
   FROM ordered source
@@ -107,7 +107,7 @@ ON CONFLICT (follower_id, following_id) DO UPDATE SET status = 'accepted';
 WITH peers AS (
   SELECT id, row_number() OVER (ORDER BY email) AS position
   FROM users
-  WHERE email LIKE 'bench-bg-%@example.invalid'
+  WHERE email LIKE 'bench-bg-%@mailbox.dev'
 ), generated AS (
   SELECT
     CASE WHEN sequence % 2 = 0 THEN :user_id ELSE peer.id END AS sender_id,
@@ -140,7 +140,7 @@ WITH ordered AS (
     row_number() OVER (ORDER BY email) AS position,
     count(*) OVER () AS total
   FROM users
-  WHERE email LIKE 'bench-bg-%@example.invalid'
+  WHERE email LIKE 'bench-bg-%@mailbox.dev'
 ), pairs AS (
   SELECT source.id AS source_id, destination.id AS destination_id, source.position
   FROM ordered source
@@ -261,7 +261,7 @@ CROSS JOIN LATERAL (
     ELSE 'on_hold'
   END AS status
 ) st
-WHERE background.email LIKE 'bench-bg-%@example.invalid'
+WHERE background.email LIKE 'bench-bg-%@mailbox.dev'
   AND m.tmdb_id BETWEEN 9000001 AND 9000320;
 
 -- Episode watches spread across three years so the heatmap, streaks and the
@@ -318,7 +318,7 @@ WITH pool AS (
 ), others AS (
   SELECT id
   FROM users
-  WHERE email LIKE 'bench-bg-%@example.invalid'
+  WHERE email LIKE 'bench-bg-%@mailbox.dev'
   ORDER BY email
 )
 INSERT INTO watch_history (user_id, media_id, episode_id, watched_at)
