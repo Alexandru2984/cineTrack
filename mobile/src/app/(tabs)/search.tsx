@@ -158,6 +158,11 @@ export default function SearchScreen() {
               />
             </View>
             <SegmentedControl value={type} options={typeOptions} onChange={setType} />
+            {/* The add button is a bare "+" over a poster, which says nothing
+                about where the title ends up. Spell it out once, here. */}
+            <AppText variant="caption" muted>
+              {t('search.watchlistHint')}
+            </AppText>
             {debouncedQuery.length >= 2 && search.data ? (
               <AppText variant="caption" muted>
                 {t('search.results', { count: formatNumber(totalResults) })}

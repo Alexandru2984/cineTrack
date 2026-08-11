@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { renderHook, waitFor } from '@testing-library/react-native';
 import type { ReactNode } from 'react';
 
-import { useUpdateTracking } from '@/hooks/use-tracking';
+import { useUpdateTracking, useWatchlistPreview } from '@/hooks/use-tracking';
 
 const mockApiRequest = jest.fn();
 
@@ -51,6 +51,53 @@ describe('useUpdateTracking', () => {
     expect(keys).toContain('tracking');
 
     invalidate.mockRestore();
+    client.clear();
+    client.unmount();
+  });
+});
+
+describe('useWatchlistPreview', () => {
+  beforeEach(() => {
+    mockApiRequest.mockReset();
+    mockApiRequest.mockResolvedValue([]);
+  });
+
+  // The home shelf must ask for the saved titles and nothing else. A missing
+  // status turns it into "everything you track", which is the very confusion
+  // the shelf exists to remove.
+  it('requests only the plan_to_watch rows, bounded', async () => {
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false, gcTime: 0 } },
+    });
+
+    const { result } = await renderHook(() => useWatchlistPreview(12), {
+      wrapper: wrapper(client),
+    });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    const [path] = mockApiRequest.mock.calls[0] as [string];
+    expect(path).toContain('status=plan_to_watch');
+    expect(path).toContain('limit=12');
+
+    client.clear();
+    client.unmount();
+  });
+
+  // Every tracking mutation invalidates `['tracking']`. The shelf only stays
+  // current because its key starts there too.
+  it('keys the shelf under the tracking family so mutations refresh it', async () => {
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false, gcTime: 0 } },
+    });
+
+    const { result } = await renderHook(() => useWatchlistPreview(), {
+      wrapper: wrapper(client),
+    });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    const keys = client.getQueryCache().getAll().map((query) => query.queryKey);
+    expect(keys.some((key) => key[0] === 'tracking')).toBe(true);
+
     client.clear();
     client.unmount();
   });

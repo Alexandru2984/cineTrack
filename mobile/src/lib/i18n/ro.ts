@@ -176,6 +176,11 @@ export const ro: Dictionary = {
     forYou: 'Pentru tine',
     discover: 'Descoperă',
   },
+  watchlist: {
+    title: 'De văzut',
+    seeAll: 'Vezi tot',
+    seeAllLabel: 'Deschide lista completă de văzut',
+  },
   upNext: {
     title: 'Urmează',
     loading: 'Se încarcă episoadele următoare',
@@ -454,6 +459,7 @@ export const ro: Dictionary = {
     filterShows: 'Seriale',
     results: '{count} rezultate',
     addError: 'Titlul nu a putut fi adăugat',
+    watchlistHint: 'Apasă + pe un poster ca să îl salvezi în lista de văzut.',
     promptTitle: 'Caută în catalog',
     promptMessage: 'Introdu cel puțin două caractere.',
     searching: 'Se caută',

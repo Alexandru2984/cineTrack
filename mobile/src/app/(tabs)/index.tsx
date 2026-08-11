@@ -1,6 +1,7 @@
 import { router } from 'expo-router';
 import {
   Bell,
+  ChevronRight,
   Clock3,
   Film,
   ListVideo,
@@ -24,6 +25,7 @@ import { AppText } from '@/components/app-text';
 import { EmptyState, ErrorState, LoadingState } from '@/components/screen-state';
 import { EpisodeRow } from '@/components/episode-row';
 import { MediaTile } from '@/components/media-tile';
+import { Poster } from '@/components/poster';
 import { ScreenHeader } from '@/components/screen-header';
 import { radius, spacing } from '@/constants/theme';
 import {
@@ -36,9 +38,11 @@ import { useNotificationSummary } from '@/hooks/use-notifications';
 import { useMyStats } from '@/hooks/use-stats';
 import { useT } from '@/hooks/use-t';
 import { useTheme } from '@/hooks/use-theme';
+import { useWatchlistPreview } from '@/hooks/use-tracking';
 import { getErrorMessage } from '@/lib/http';
 import { elapsedSince, groupUpNext } from '@/lib/up-next';
 import { useAuthStore } from '@/store/auth';
+import type { TrackingItem } from '@/types';
 
 type Translate = ReturnType<typeof useT>;
 
@@ -64,12 +68,14 @@ export default function HomeScreen() {
   const upNext = useUpNext();
   const stats = useMyStats();
   const discovery = useDiscovery();
+  const watchlist = useWatchlistPreview();
   const notificationSummary = useNotificationSummary();
   const plan = useSetEpisodePlanned();
   const watched = useMarkCalendarEpisodeWatched();
   const refreshing =
     upNext.isRefetching ||
     stats.isRefetching ||
+    watchlist.isRefetching ||
     discovery.isRefetching;
   const unreadCount = notificationSummary.data?.unread_count ?? 0;
   const recommendations = useMemo(
@@ -82,11 +88,14 @@ export default function HomeScreen() {
     [upNext.data],
   );
 
+  const watchlistItems = watchlist.data ?? [];
+
   const refresh = () => {
     void Promise.all([
       upNext.refetch(),
       stats.refetch(),
       discovery.refetch(),
+      watchlist.refetch(),
       notificationSummary.refetch(),
     ]);
   };
@@ -238,6 +247,47 @@ export default function HomeScreen() {
           ) : null}
         </View>
 
+        {/*
+          Up next only covers shows already in progress, so a title someone
+          saved to watch later surfaced nowhere on this screen — not the movies,
+          which are never episodes, and not the shows with no history yet. A
+          tester reported exactly that: "is it possible to remember the what to
+          watch list?". It always was, under a filter chip in the library.
+        */}
+        {watchlistItems.length ? (
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <AppText variant="section">{t('watchlist.title')}</AppText>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={t('watchlist.seeAllLabel')}
+                onPress={() =>
+                  router.navigate({
+                    pathname: '/(tabs)/library',
+                    params: { status: 'plan_to_watch' },
+                  })
+                }
+                hitSlop={8}
+                style={({ pressed }) => [styles.seeAll, { opacity: pressed ? 0.7 : 1 }]}
+              >
+                <AppText variant="label" style={{ color: theme.primary }}>
+                  {t('watchlist.seeAll')}
+                </AppText>
+                <ChevronRight color={theme.primary} size={16} />
+              </Pressable>
+            </View>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.shelf}
+            >
+              {watchlistItems.map((item) => (
+                <WatchlistTile key={item.id} item={item} />
+              ))}
+            </ScrollView>
+          </View>
+        ) : null}
+
         {becauseYouWatched && becauseYouWatched.results.length ? (
           <View style={styles.section}>
             <AppText variant="section">
@@ -273,6 +323,35 @@ export default function HomeScreen() {
         ) : null}
       </ScrollView>
     </SafeAreaView>
+  );
+}
+
+/**
+ * A saved title has no TMDB payload behind it, only the tracking row, so this
+ * cannot reuse `MediaTile`. It matches its width to sit in the same shelf.
+ */
+function WatchlistTile({ item }: { item: TrackingItem }) {
+  const t = useT();
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={t('mediaCard.open', { title: item.title })}
+      onPress={() =>
+        router.push({
+          pathname: '/media/[id]',
+          params: { id: String(item.tmdb_id), type: item.media_type },
+        })
+      }
+      style={({ pressed }) => [styles.watchlistTile, { opacity: pressed ? 0.78 : 1 }]}
+    >
+      <Poster path={item.poster_path} width={132} height={198} />
+      <AppText variant="label" numberOfLines={2} style={styles.watchlistTitle}>
+        {item.title}
+      </AppText>
+      <AppText variant="caption" muted numberOfLines={1}>
+        {t(item.media_type === 'tv' ? 'mediaType.tv' : 'mediaType.movie')}
+      </AppText>
+    </Pressable>
   );
 }
 
@@ -405,6 +484,25 @@ const styles = StyleSheet.create({
   },
   section: {
     gap: spacing.md,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.md,
+  },
+  seeAll: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    minHeight: 32,
+  },
+  watchlistTile: {
+    width: 132,
+  },
+  watchlistTitle: {
+    marginTop: spacing.sm,
+    minHeight: 40,
   },
   upNextGroup: {
     gap: spacing.xs,
