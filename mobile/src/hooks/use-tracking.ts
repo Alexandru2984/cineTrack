@@ -89,6 +89,23 @@ export function useTrackingInfinite(status?: TrackingStatus, enabled = true) {
   });
 }
 
+/**
+ * The watchlist shelf on the home screen.
+ *
+ * Kept separate from `useTrackingInfinite` because that hook pages in hundreds
+ * of rows for a screen that lists them all, and a shelf shows a handful. The
+ * key stays under `['tracking']` so every existing invalidation reaches it.
+ */
+export function useWatchlistPreview(limit = 12) {
+  return useQuery({
+    queryKey: ['tracking', 'plan_to_watch', 'preview', limit],
+    queryFn: () =>
+      apiRequest<TrackingItem[]>(
+        withQuery('/tracking', { status: 'plan_to_watch', page: 1, limit }),
+      ),
+  });
+}
+
 export function useCreateTracking() {
   const queryClient = useQueryClient();
   return useMutation({

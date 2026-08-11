@@ -20,14 +20,33 @@ function googleServicesFile() {
   return fs.existsSync(local) ? local : undefined;
 }
 
+/**
+ * True for the builds people actually install: store releases and the internal
+ * APKs handed to testers. Development client builds and every local command are
+ * excluded, so nothing outside EAS needs the file to be present.
+ */
+function isInstallableBuild() {
+  return (
+    process.env.EAS_BUILD === 'true' &&
+    (process.env.EAS_BUILD_PROFILE === 'production' ||
+      process.env.EAS_BUILD_PROFILE === 'preview')
+  );
+}
+
 module.exports = ({ config }) => {
   const services = googleServicesFile();
 
-  // A production build without it still succeeds, and push then fails only on
-  // the device, long after anyone is watching the build log. Say so here.
-  if (!services && process.env.EAS_BUILD_PROFILE === 'production') {
-    console.warn(
-      'google-services.json is missing: this build cannot register for push notifications.',
+  // Version codes 8 through 12 all shipped without this file. Nothing failed:
+  // the build went green, the artifact installed, and push registration only
+  // died on the device, days later, with no trace back to the cause. Refusing
+  // to produce the artifact is the whole point — an installable build that
+  // cannot register for push is not worth the twenty minutes it takes to make.
+  if (!services && isInstallableBuild()) {
+    throw new Error(
+      'google-services.json is missing, so this build could not register for push ' +
+        'notifications. Upload it as the GOOGLE_SERVICES_JSON file variable in the ' +
+        `EAS "${process.env.EAS_BUILD_PROFILE}" environment ` +
+        '(eas env:set --name GOOGLE_SERVICES_JSON --type file), or keep a copy in mobile/.',
     );
   }
 

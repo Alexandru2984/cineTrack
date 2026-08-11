@@ -175,6 +175,11 @@ export const en = {
     forYou: 'For you',
     discover: 'Discover',
   },
+  watchlist: {
+    title: 'Watchlist',
+    seeAll: 'See all',
+    seeAllLabel: 'Open your full watchlist',
+  },
   upNext: {
     title: 'Up next',
     loading: 'Loading your next episodes',
@@ -451,6 +456,7 @@ export const en = {
     filterShows: 'TV shows',
     results: '{count} results',
     addError: 'Could not add this title',
+    watchlistHint: 'Tap + on a poster to save it to your watchlist.',
     promptTitle: 'Search your catalog',
     promptMessage: 'Enter at least two characters.',
     searching: 'Searching',

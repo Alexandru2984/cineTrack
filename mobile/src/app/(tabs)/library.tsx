@@ -1,4 +1,4 @@
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import {
   Check,
   Heart,
@@ -38,22 +38,40 @@ import type { TrackingItem, TrackingStatus } from '@/types';
 
 type LibraryFilter = 'all' | TrackingStatus;
 
+const FILTERS: readonly LibraryFilter[] = [
+  'all',
+  'watching',
+  'plan_to_watch',
+  'completed',
+  'on_hold',
+  'dropped',
+];
+
+/** Params arrive as strings from the URL, so anything unrecognised is dropped. */
+function requestedFilter(value: string | string[] | undefined): LibraryFilter | null {
+  const candidate = Array.isArray(value) ? value[0] : value;
+  return FILTERS.find((filter) => filter === candidate) ?? null;
+}
+
 export default function LibraryScreen() {
   const theme = useTheme();
   const t = useT();
-  const filterOptions = [
-    { value: 'all', label: t('common.all') },
-    { value: 'watching', label: t('status.watching') },
-    { value: 'plan_to_watch', label: t('status.plan_to_watch') },
-    { value: 'completed', label: t('status.completed') },
-    { value: 'on_hold', label: t('status.on_hold') },
-    { value: 'dropped', label: t('status.dropped') },
-  ] as const;
+  const filterOptions = FILTERS.map((value) => ({
+    value,
+    label: value === 'all' ? t('common.all') : t(`status.${value}`),
+  }));
   const statusOptions = filterOptions.slice(1) as readonly {
     value: TrackingStatus;
     label: string;
   }[];
-  const [filter, setFilter] = useState<LibraryFilter>('all');
+  // The route parameter is the filter, rather than a seed copied into local
+  // state. This tab stays mounted between visits, so seeded state would ignore
+  // every arrival after the first one, and keeping the two in step would mean
+  // syncing state to a prop inside an effect. One source of truth avoids both,
+  // and makes the current filter a link anyone can open.
+  const params = useLocalSearchParams<{ status?: string }>();
+  const filter = requestedFilter(params.status) ?? 'all';
+  const setFilter = (next: LibraryFilter) => router.setParams({ status: next });
   const [statusItem, setStatusItem] = useState<TrackingItem | null>(null);
   const [feedbackItem, setFeedbackItem] = useState<TrackingItem | null>(null);
   const tracking = useTrackingInfinite(filter === 'all' ? undefined : filter);
