@@ -43,9 +43,7 @@ yarn-error.*
 /ios
 /android
 
-# Firebase config for Android push. Not committed: this repository is public,
-# and the build gets the file from an EAS environment variable instead.
-google-services.json
 # Firebase service account keys. These are real credentials and never belong
-# in the repository, under any name.
+# in the repository, under any name. google-services.json is deliberately not
+# listed here: it ships inside every APK and holds nothing private.
 *firebase-adminsdk*.json
