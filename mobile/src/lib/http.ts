@@ -188,6 +188,20 @@ export function rawFormDataRequest<T>(
 }
 
 /**
+ * Say what actually went wrong with an upload.
+ *
+ * A rejected `fetch` carries nothing worth showing, which is why every other
+ * failure here becomes a sentence about connectivity. A native upload is not
+ * like that: it fails with a reason, and hiding it is how this path stayed
+ * broken and undiagnosable for weeks. Preserving the cause on the error object
+ * was not enough on its own — nothing displays it, so nothing reads it.
+ */
+function uploadFailureMessage(error: unknown): string {
+  const reason = error instanceof Error ? error.message.trim() : '';
+  return reason ? `The upload failed: ${reason}` : 'Could not connect to Văzute';
+}
+
+/**
  * Upload one file as a multipart request, natively.
  *
  * `fetch` with a `FormData` carrying a `{ uri }` part is the documented React
@@ -206,9 +220,15 @@ export async function rawMultipartRequest<T>(
   file: MultipartFile,
   options: RawMultipartRequestOptions = {},
 ): Promise<T> {
-  if (options.signal?.aborted) {
-    throw new ApiError('The request was cancelled', 0);
-  }
+  // Same shape as `request` above: one controller carries both the caller's
+  // cancellation and the timeout, so a native upload cannot outlive either. It
+  // has to be forwarded into the upload itself — checking it around the call
+  // would abandon the promise while the transfer kept running.
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), UPLOAD_TIMEOUT_MS);
+  const abortFromCaller = () => controller.abort();
+  options.signal?.addEventListener('abort', abortFromCaller, { once: true });
+  if (options.signal?.aborted) controller.abort();
 
   let result: { status: number; body: string };
   try {
@@ -217,16 +237,25 @@ export async function rawMultipartRequest<T>(
       uploadType: UploadType.MULTIPART,
       fieldName: file.fieldName,
       mimeType: file.mimeType,
+      signal: controller.signal,
       headers: {
         Accept: 'application/json',
         ...options.headers,
       },
     });
   } catch (error) {
-    if (options.signal?.aborted) {
-      throw new ApiError('The request was cancelled', 0, undefined, { cause: error });
+    if (controller.signal.aborted) {
+      throw new ApiError(
+        options.signal?.aborted ? 'The request was cancelled' : 'The request timed out',
+        0,
+        undefined,
+        { cause: error },
+      );
     }
-    throw new ApiError('Could not connect to Văzute', 0, undefined, { cause: error });
+    throw new ApiError(uploadFailureMessage(error), 0, undefined, { cause: error });
+  } finally {
+    clearTimeout(timeout);
+    options.signal?.removeEventListener('abort', abortFromCaller);
   }
 
   let payload: unknown = undefined;
