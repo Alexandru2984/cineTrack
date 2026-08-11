@@ -19,7 +19,7 @@ function escapeRegex(value: string) {
 
 function uniqueAccount() {
   const id = randomUUID().replaceAll('-', '').slice(0, 20);
-  return { username: `e2e${id}`, email: `e2e${id}@example.com`, password: PASSWORD };
+  return { username: `e2e${id}`, email: `e2e${id}@mailbox.dev`, password: PASSWORD };
 }
 
 async function registerViaUi(

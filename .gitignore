@@ -2,6 +2,17 @@
 .env
 .env.prod
 
+# Credentials handed over for a task and left in the working tree. Patterns, not
+# names: `google-services.json` was dropped in, staged by a `git add -A`, pushed,
+# and caught by the secret scanner rather than by anything here. Anything that
+# reads as a key belongs to the machine, never to the repository.
+*api_key*.txt
+*_key.json
+*credentials*.json
+*.pem
+*.p12
+*.keystore
+
 # Rust / Backend
 backend/target/
 

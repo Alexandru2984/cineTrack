@@ -123,7 +123,7 @@ SHOW_ID="$(docker exec -i "$(docker ps -qf publish=55433)" psql -U test_user -d 
 
 # A seeded mutual follower with a representative message history.
 MESSAGE_PEER="$(docker exec -i "$(docker ps -qf publish=55433)" psql -U test_user -d cinetrack_test -X -t -A \
-  -c "SELECT username FROM users WHERE email LIKE 'bench-bg-%@example.invalid' ORDER BY email LIMIT 1;")"
+  -c "SELECT username FROM users WHERE email LIKE 'bench-bg-%@mailbox.dev' ORDER BY email LIMIT 1;")"
 
 # ── API benchmark ───────────────────────────────────────────────
 if [[ "$RUN_API" == 1 ]]; then
