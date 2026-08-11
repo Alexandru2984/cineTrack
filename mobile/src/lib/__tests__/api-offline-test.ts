@@ -119,6 +119,24 @@ describe('offline API guard', () => {
     expect(mockRefreshSession).not.toHaveBeenCalled();
   });
 
+  // The import still goes through fetch, because it sends three files at once.
+  // It shares the session handling and nothing else, so the two paths cannot
+  // drift into each other unnoticed.
+  it('sends the multi-file import through the form-data path', async () => {
+    useAuthStore.getState().setSession('access-token', user);
+    const form = new FormData();
+    mockRawFormDataRequest.mockResolvedValueOnce({ job_id: 'job-id' });
+
+    await expect(apiFormDataRequest('/import/tvtime', form)).resolves.toEqual({
+      job_id: 'job-id',
+    });
+    expect(mockRawFormDataRequest).toHaveBeenCalledWith('/import/tvtime', form, {
+      headers: { Authorization: 'Bearer access-token' },
+      signal: expect.anything(),
+    });
+    expect(mockRawMultipartRequest).not.toHaveBeenCalled();
+  });
+
   it('does not retry a request after the active account changes', async () => {
     useAuthStore.getState().setSession('old-access-token', user);
     mockRawRequest.mockRejectedValueOnce(new ApiError('Expired', 401));
