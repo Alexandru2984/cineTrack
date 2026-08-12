@@ -100,7 +100,7 @@ export default function RegisterPage() {
               onChange={(e) => setEmail(e.target.value)}
               required
               className="w-full rounded-md border border-[hsl(var(--input))] bg-transparent px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[hsl(var(--ring))]"
-              placeholder="you@example.com"
+              placeholder="you@mailbox.dev"
             />
           </div>
           <div>

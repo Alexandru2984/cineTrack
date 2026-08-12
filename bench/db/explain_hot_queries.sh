@@ -204,12 +204,12 @@ trap 'rm -f "$PLAN_LOG" "$REPORT"' EXIT
       WHERE
         (sender_id = '$USER_ID' AND recipient_id = (
           SELECT id FROM users
-          WHERE email LIKE 'bench-bg-%@example.invalid'
+          WHERE email LIKE 'bench-bg-%@mailbox.dev'
           ORDER BY email LIMIT 1
         ))
         OR (recipient_id = '$USER_ID' AND sender_id = (
           SELECT id FROM users
-          WHERE email LIKE 'bench-bg-%@example.invalid'
+          WHERE email LIKE 'bench-bg-%@mailbox.dev'
           ORDER BY email LIMIT 1
         ))
       ORDER BY created_at DESC, id DESC
