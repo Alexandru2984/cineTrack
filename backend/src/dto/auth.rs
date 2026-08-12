@@ -42,9 +42,11 @@ pub struct RegisterRequest {
 
 /// Domains the standards permanently reserve for documentation and testing.
 ///
-/// RFC 2606 reserves the three second-level names, RFC 6761 the four top-level
-/// ones. None of them has, or can ever have, a mail server: every message sent
-/// to one is a bounce, charged against the sending domain's reputation.
+/// RFC 2606 reserves the three second-level names, RFC 6761 four top-level ones
+/// (`.test`, `.example`, `.invalid`, `.localhost`), and RFC 6762 the mDNS
+/// `.local` suffix. None of them has, or can ever have, a mail server: every
+/// message sent to one is a bounce, charged against the sending domain's
+/// reputation.
 ///
 /// A closed list defined by a standard, unlike a list of disposable-mail
 /// providers, which is an endless race nobody wins.
