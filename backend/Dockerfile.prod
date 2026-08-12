@@ -15,6 +15,13 @@ RUN touch src/main.rs \
   && strip --strip-unneeded /app/target/release/cinetrack
 
 FROM gcr.io/distroless/cc-debian12:nonroot@sha256:66aa873a4a14fb164aa01296058efd8253744606d72715e45acface073359faa
+# Stamped so the running container can say which commit it was built from.
+# Without it there is no way to tell a current deployment from one that has been
+# left behind for days, which is exactly what happened: two days of backend
+# fixes sat on main while production ran the commit before them, and nobody
+# could see it because nothing recorded what was actually running.
+ARG GIT_REVISION=unknown
+LABEL org.opencontainers.image.revision="${GIT_REVISION}"
 COPY --from=builder --chown=nonroot:nonroot /app/target/release/cinetrack /usr/local/bin/cinetrack
 USER nonroot:nonroot
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \

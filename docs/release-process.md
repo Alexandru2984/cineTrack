@@ -40,6 +40,14 @@ Run the invariant locally:
 Every push to `main` runs GitHub CI. The repository has no GitHub Actions
 production-deploy workflow, so a green push alone cannot modify the VPS.
 
+That is deliberate: it keeps a compromised build action away from production.
+The cost is that forgetting to deploy is silent, which has already happened, so
+`scripts/check_deploy_drift.sh` runs hourly and reports how many deployable
+commits production is missing. `GIT_REVISION` below is what makes that check
+possible — an image built without it cannot say which commit it came from, and
+the check raises `CineTrackDeployRevisionUnknown` rather than assuming it is
+current.
+
 ## 2. Deploy the web and API manually
 
 Record the candidate commit and the currently deployed commit before starting.
@@ -50,7 +58,8 @@ copy its values into release notes.
 git rev-parse HEAD
 docker compose -f docker-compose.prod.yml --env-file .env.prod up -d db
 ./scripts/provision_db_role.sh .env.prod
-docker compose -f docker-compose.prod.yml --env-file .env.prod build backend frontend
+GIT_REVISION="$(git rev-parse HEAD)" \
+  docker compose -f docker-compose.prod.yml --env-file .env.prod build backend frontend
 docker compose -f docker-compose.prod.yml --env-file .env.prod \
   run --rm --no-deps backend /usr/local/bin/cinetrack --check-config
 docker compose -f docker-compose.prod.yml --env-file .env.prod \

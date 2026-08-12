@@ -42,6 +42,11 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile.prod
+      args:
+        # Stamps the image with the commit it came from, so the drift check can
+        # tell a current deployment from one left behind. Defaults to `unknown`,
+        # which the check reports rather than silently treating as up to date.
+        GIT_REVISION: "${GIT_REVISION:-unknown}"
     environment:
       APP_ENV: production
       APP_HOST: "${APP_HOST:-0.0.0.0}"
