@@ -62,6 +62,31 @@ groups:
           summary: CineTrack backup uses application R2 credentials
           description: Configure a least-privilege BACKUP_R2 credential set.
 
+      # Releases are run by hand on purpose — no CI job can reach this host, so
+      # a compromised build action cannot reach production either. The cost is
+      # that forgetting to deploy is invisible, and it already cost two days of
+      # backend fixes sitting on main while production ran without them. Twelve
+      # hours is long enough that a same-day release never trips this.
+      - alert: CineTrackProductionBehindMain
+        expr: cinetrack_deploy_pending_commits > 0
+        for: 12h
+        labels:
+          severity: warning
+        annotations:
+          summary: CineTrack production is behind main by {{ $value }} deployable commit(s)
+          description: Run the release in docs/release-process.md, or confirm the change is not meant to ship.
+
+      # Without the label the drift check cannot tell current from stale, and
+      # would otherwise report zero — the same silence this is meant to end.
+      - alert: CineTrackDeployRevisionUnknown
+        expr: cinetrack_deploy_revision_known == 0
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: CineTrack cannot tell which commit production is running
+          description: Deploy once with GIT_REVISION set so the image records its source commit.
+
   - name: cinetrack-backend
     rules:
       - alert: CineTrackBackendDown
