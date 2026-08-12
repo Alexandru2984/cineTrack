@@ -22,7 +22,7 @@ DELETE FROM user_media WHERE user_id = :user_id;
 -- planner selectivity from one run to the next.
 DELETE FROM users
 WHERE id <> :user_id
-  AND email ~ '^bench[0-9]+@example[.]com$';
+  AND email ~ '^bench[0-9]+@mailbox[.]dev$';
 
 -- A fresh disposable database contains only the account created by the
 -- benchmark runner. Seed fixed background accounts so the measured user is a

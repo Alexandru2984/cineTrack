@@ -90,7 +90,7 @@ export const en = {
     username: 'Username',
     usernamePlaceholder: 'your_username',
     email: 'Email',
-    emailPlaceholder: 'you@example.com',
+    emailPlaceholder: 'you@mailbox.dev',
     password: 'Password',
     passwordPlaceholder: 'Password',
     forgotPassword: 'Forgot password?',
