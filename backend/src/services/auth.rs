@@ -12,6 +12,7 @@ use crate::models::{
     EmailChangeToken, EmailVerificationToken, PasswordResetToken, RefreshToken, User,
 };
 use crate::services::email::EmailService;
+use crate::services::revocation;
 use crate::services::security_activity::{self, SecurityActivityKind};
 use crate::utils::{jwt, password, totp, totp_secret};
 
@@ -318,6 +319,11 @@ pub async fn refresh_token(
             .bind(stored.user_id)
             .execute(&mut *tx)
             .await?;
+        // Deleting the refresh rows stops the thief renewing, but the access
+        // token they already hold is what they are using right now. Cut it off
+        // in the same transaction, or the theft we just detected keeps working
+        // for another fifteen minutes.
+        revocation::revoke_user(&mut tx, stored.user_id).await?;
         tx.commit().await?;
         crate::metrics::record_security_event(crate::metrics::SecurityEvent::RefreshTokenReuse);
         return Err(AppError::Unauthorized(
@@ -350,8 +356,15 @@ pub async fn refresh_token(
         .await?
         .ok_or_else(|| AppError::Unauthorized("User not found".to_string()))?;
 
-    let access_token =
-        jwt::generate_access_token(user.id, &config.jwt_secret, config.jwt_expiry_minutes)?;
+    // Rotation issues a new token pair for the *same* session, so the access
+    // token keeps the family id. A fresh id per rotation would make a
+    // revocation recorded moments earlier miss the token that replaced it.
+    let access_token = jwt::generate_access_token(
+        user.id,
+        stored.family_id,
+        &config.jwt_secret,
+        config.jwt_expiry_minutes,
+    )?;
     let new_refresh_token = jwt::generate_refresh_token();
     let new_token_hash = jwt::hash_refresh_token(&new_refresh_token);
     let expires_at = Utc::now() + Duration::days(config.jwt_refresh_expiry_days);
@@ -403,6 +416,9 @@ pub async fn logout(pool: &PgPool, refresh_token: &str) -> Result<(), AppError> 
         .bind(family_id)
         .execute(&mut *tx)
         .await?;
+        // Only this session: signing out on one device must leave the others
+        // signed in.
+        revocation::revoke_sessions(&mut tx, &[family_id]).await?;
     }
     tx.commit().await?;
     Ok(())
@@ -448,6 +464,10 @@ pub async fn change_password(
     .bind(user_id)
     .execute(&mut *tx)
     .await?;
+    // Changing a password after a compromise has to end the attacker's access
+    // immediately. Revoking only the refresh tokens would leave whatever access
+    // token they already hold working until it expired.
+    revocation::revoke_user(&mut tx, user_id).await?;
     security_activity::record_in_transaction(
         &mut tx,
         user_id,
@@ -607,6 +627,9 @@ pub async fn reset_password(
     .bind(stored.user_id)
     .execute(&mut *tx)
     .await?;
+    // A reset is the recovery path for an account someone else controls, so it
+    // has to take the access tokens too, not just the refresh tokens.
+    revocation::revoke_user(&mut tx, stored.user_id).await?;
     security_activity::record_in_transaction(
         &mut tx,
         stored.user_id,
@@ -1414,24 +1437,32 @@ async fn issue_token_pair(
     user: &User,
     activity_kind: SecurityActivityKind,
 ) -> Result<(String, String), AppError> {
-    let access_token =
-        jwt::generate_access_token(user.id, &config.jwt_secret, config.jwt_expiry_minutes)?;
     let refresh_token = jwt::generate_refresh_token();
     let token_hash = jwt::hash_refresh_token(&refresh_token);
     let expires_at = Utc::now() + Duration::days(config.jwt_refresh_expiry_days);
 
     let mut tx = pool.begin().await?;
-    sqlx::query(
+    // The row is inserted before the access token is minted, because the access
+    // token has to carry this session's identity and the database assigns it.
+    let family_id = sqlx::query_scalar::<_, Uuid>(
         "INSERT INTO refresh_tokens (user_id, token_hash, expires_at, user_agent, ip_address, last_used_at)
-         VALUES ($1, $2, $3, $4, $5, NOW())",
+         VALUES ($1, $2, $3, $4, $5, NOW())
+         RETURNING family_id",
     )
     .bind(user.id)
     .bind(&token_hash)
     .bind(expires_at)
     .bind(&client.user_agent)
     .bind(&client.ip_address)
-    .execute(&mut *tx)
+    .fetch_one(&mut *tx)
     .await?;
+
+    let access_token = jwt::generate_access_token(
+        user.id,
+        family_id,
+        &config.jwt_secret,
+        config.jwt_expiry_minutes,
+    )?;
 
     cap_active_refresh_tokens(&mut *tx, user.id).await?;
     security_activity::record_in_transaction(
@@ -1520,18 +1551,23 @@ pub async fn revoke_session(
     session_id: Uuid,
 ) -> Result<(), AppError> {
     let mut tx = pool.begin().await?;
-    let result = sqlx::query(
+    // `session_id` addresses one refresh_tokens row, but revocation addresses
+    // the family that row belongs to — that is the identity the access token
+    // carries, and the one that survives rotation.
+    let family_id = sqlx::query_scalar::<_, Uuid>(
         "UPDATE refresh_tokens SET revoked_at = NOW()
-         WHERE id = $1 AND user_id = $2 AND revoked_at IS NULL",
+         WHERE id = $1 AND user_id = $2 AND revoked_at IS NULL
+         RETURNING family_id",
     )
     .bind(session_id)
     .bind(user_id)
-    .execute(&mut *tx)
+    .fetch_optional(&mut *tx)
     .await?;
 
-    if result.rows_affected() == 0 {
+    let Some(family_id) = family_id else {
         return Err(AppError::NotFound("Session not found".to_string()));
-    }
+    };
+    revocation::revoke_sessions(&mut tx, &[family_id]).await?;
     security_activity::record_in_transaction(
         &mut tx,
         user_id,
@@ -1560,6 +1596,13 @@ pub async fn logout_all_sessions(
     .bind(user_id)
     .execute(&mut *tx)
     .await?;
+    // "Sign out everywhere" is the control someone reaches for when they think
+    // an account is compromised, so it uses the account-wide cutoff rather than
+    // enumerating sessions. The cutoff refuses every access token this account
+    // issued, which is strictly more complete: enumerating would miss a session
+    // whose refresh row cap_active_refresh_tokens has already deleted, leaving
+    // no id to name while its access token is still alive.
+    revocation::revoke_user(&mut tx, user_id).await?;
     security_activity::record_in_transaction(
         &mut tx,
         user_id,

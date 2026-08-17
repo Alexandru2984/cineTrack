@@ -9,6 +9,7 @@
 //!
 //! Run with: cargo bench --bench hot_paths
 
+use cinetrack::services::revocation;
 use cinetrack::utils::{jwt, password, totp};
 use criterion::{criterion_group, criterion_main, Criterion};
 use std::hint::black_box;
@@ -108,15 +109,38 @@ fn bench_password_params(c: &mut Criterion) {
 fn bench_jwt(c: &mut Criterion) {
     let mut group = c.benchmark_group("jwt");
     let user_id = Uuid::new_v4();
-    let token = jwt::generate_access_token(user_id, SECRET, 15).expect("token");
+    let session_id = Uuid::new_v4();
+    let token = jwt::generate_access_token(user_id, session_id, SECRET, 15).expect("token");
 
     group.bench_function("sign access token", |b| {
-        b.iter(|| jwt::generate_access_token(black_box(user_id), black_box(SECRET), 15).unwrap());
+        b.iter(|| {
+            jwt::generate_access_token(
+                black_box(user_id),
+                black_box(session_id),
+                black_box(SECRET),
+                15,
+            )
+            .unwrap()
+        });
     });
 
     // Runs on every authenticated request, so it is the one to watch.
     group.bench_function("validate access token", |b| {
         b.iter(|| jwt::validate_token(black_box(&token), black_box(SECRET)).unwrap());
+    });
+
+    // The revocation lookup that now follows every validation. It reads a
+    // process-global map behind a shared lock, so this is the number that says
+    // whether instant revocation costs anything measurable per request.
+    group.bench_function("revocation lookup (miss)", |b| {
+        let issued_at = chrono::Utc::now().timestamp();
+        b.iter(|| {
+            revocation::is_revoked(
+                black_box(session_id),
+                black_box(user_id),
+                black_box(issued_at),
+            )
+        });
     });
 
     group.bench_function("generate refresh token", |b| {

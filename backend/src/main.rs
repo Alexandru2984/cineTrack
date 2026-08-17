@@ -348,6 +348,22 @@ async fn main() -> std::io::Result<()> {
         Err(error) => log::error!("Failed to prune security artifacts at startup: {error}"),
     }
     cinetrack::services::retention::start_security_artifact_pruner(pool.clone());
+    // Rebuild the access-token revocation cache before the listener binds. If
+    // this ran after, or not at all, a restart would silently un-revoke every
+    // session revoked in the preceding hour — precisely when an operator is
+    // most likely to be restarting, which is right after an incident. Fail the
+    // startup rather than serve with a cache that quietly says "nothing is
+    // revoked".
+    let live_revocations = cinetrack::services::revocation::load(&pool)
+        .await
+        .map_err(|error| {
+            log::error!("Failed to load access-token revocations: {error}");
+            std::io::Error::other("failed to load access-token revocations")
+        })?;
+    if live_revocations > 0 {
+        log::info!("Loaded {live_revocations} live access-token revocation(s)");
+    }
+    cinetrack::services::revocation::start_pruner(pool.clone());
     if let Err(error) = metrics::refresh_moderation_queue(&pool).await {
         log::error!("Failed to initialize moderation queue metrics: {error}");
     }

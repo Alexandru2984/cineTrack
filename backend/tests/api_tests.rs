@@ -206,6 +206,10 @@ async fn clean_db(pool: &PgPool) {
         .execute(pool)
         .await
         .ok();
+    sqlx::query("DELETE FROM access_token_revocations")
+        .execute(pool)
+        .await
+        .ok();
     sqlx::query("DELETE FROM oauth_accounts")
         .execute(pool)
         .await
@@ -438,6 +442,21 @@ async fn register_user(
         .expect("mark test user verified");
     pool.close().await;
     session
+}
+
+/// Resolve the `refresh_tokens` row id behind a raw refresh token.
+///
+/// Tests that revoke a specific session need to name one deterministically.
+/// Reading `/api/auth/sessions` and taking an element by index does not: the
+/// ordering is by last use, and `current` is derived from the refresh cookie,
+/// which these requests deliberately do not send.
+async fn session_id_for_refresh_token(pool: &PgPool, refresh_token: &str) -> String {
+    sqlx::query_scalar::<_, Uuid>("SELECT id FROM refresh_tokens WHERE token_hash = $1")
+        .bind(cinetrack::utils::jwt::hash_refresh_token(refresh_token))
+        .fetch_one(pool)
+        .await
+        .expect("a refresh token row for the given token")
+        .to_string()
 }
 
 async fn login_user(
@@ -3131,20 +3150,16 @@ async fn test_revoke_one_session() {
     clean_db(&pool).await;
     let app = actix_test::init_service(create_app(pool.clone())).await;
 
-    register_user(&app, "revuser", "rev@mailbox.dev", "Pass1234").await;
+    let (_, refresh1, _) = register_user(&app, "revuser", "rev@mailbox.dev", "Pass1234").await;
     let (token2, _) = login_user(&app, "rev@mailbox.dev", "Pass1234").await;
 
-    // Two sessions exist; grab one id.
-    let req = actix_test::TestRequest::get()
-        .uri("/api/auth/sessions")
-        .insert_header(("Authorization", format!("Bearer {token2}")))
-        .peer_addr(peer_addr())
-        .to_request();
-    let body: Value = actix_test::read_body_json(actix_test::call_service(&app, req).await).await;
-    let session_id = body.as_array().unwrap()[0]["id"]
-        .as_str()
-        .unwrap()
-        .to_string();
+    // Target the *first* session specifically, not whichever the listing
+    // happens to return first. Revoking a session now also refuses its access
+    // token, so revoking the caller's own session would make every later
+    // request in this test a 401 and the assertions would stop meaning
+    // anything. `current` cannot be used to tell them apart here: it is derived
+    // from the refresh cookie, which these requests do not send.
+    let session_id = session_id_for_refresh_token(&pool, &refresh1).await;
 
     // Revoke it.
     let req = actix_test::TestRequest::delete()
@@ -3243,14 +3258,199 @@ async fn test_logout_all_sessions() {
         assert_eq!(resp.status(), 401);
     }
 
-    // No active sessions remain.
+    // And so is the access token that performed the sign-out. This is the
+    // property "sign out everywhere" is named for: before access-token
+    // revocation existed, this same request answered 200 with an empty session
+    // list, because the token stayed valid until it expired on its own.
     let req = actix_test::TestRequest::get()
         .uri("/api/auth/sessions")
         .insert_header(("Authorization", format!("Bearer {token2}")))
         .peer_addr(peer_addr())
         .to_request();
-    let body: Value = actix_test::read_body_json(actix_test::call_service(&app, req).await).await;
-    assert_eq!(body.as_array().unwrap().len(), 0);
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 401);
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn revoking_one_session_refuses_only_that_sessions_access_token() {
+    // Revocation has to be precise in both directions: the revoked device
+    // loses access at once, and every other device the account is signed in on
+    // carries on working. A control that signs you out everywhere when you meant
+    // to remove one phone is one nobody uses.
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+
+    let (first_token, first_refresh, _) =
+        register_user(&app, "sessrev", "sessrev@mailbox.dev", "Pass1234").await;
+    let (second_token, _) = login_user(&app, "sessrev@mailbox.dev", "Pass1234").await;
+
+    // The session belonging to the first sign-in, so the token being revoked is
+    // not the one making the request.
+    let target = session_id_for_refresh_token(&pool, &first_refresh).await;
+
+    let req = actix_test::TestRequest::delete()
+        .uri(&format!("/api/auth/sessions/{target}"))
+        .insert_header(("Authorization", format!("Bearer {second_token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 200);
+
+    // The revoked device is out immediately.
+    let req = actix_test::TestRequest::get()
+        .uri("/api/auth/me")
+        .insert_header(("Authorization", format!("Bearer {first_token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 401);
+
+    // The device that did the revoking is untouched.
+    let req = actix_test::TestRequest::get()
+        .uri("/api/auth/me")
+        .insert_header(("Authorization", format!("Bearer {second_token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 200);
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn changing_a_password_refuses_access_tokens_issued_before_it() {
+    // The reason someone changes a password mid-incident is to end somebody
+    // else's access. Revoking only refresh tokens left the intruder's access
+    // token working for the rest of its lifetime.
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+
+    let (stale_token, _, _) = register_user(&app, "pwrev", "pwrev@mailbox.dev", "Pass1234").await;
+    let (active_token, _) = login_user(&app, "pwrev@mailbox.dev", "Pass1234").await;
+
+    let req = actix_test::TestRequest::patch()
+        .uri("/api/auth/password")
+        .insert_header(("Authorization", format!("Bearer {active_token}")))
+        .set_json(json!({
+            "current_password": "Pass1234",
+            "new_password": "Pass5678"
+        }))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 200);
+
+    // Every access token the account held, including the one that made the
+    // change, is refused. A password change signs the whole account out.
+    for token in [stale_token, active_token] {
+        let req = actix_test::TestRequest::get()
+            .uri("/api/auth/me")
+            .insert_header(("Authorization", format!("Bearer {token}")))
+            .peer_addr(peer_addr())
+            .to_request();
+        assert_eq!(actix_test::call_service(&app, req).await.status(), 401);
+    }
+
+    // Signing in again with the new password works, and its token is accepted:
+    // the account-wide cutoff must not outlive the tokens it was meant to cut.
+    let (fresh_token, _) = login_user(&app, "pwrev@mailbox.dev", "Pass5678").await;
+    let req = actix_test::TestRequest::get()
+        .uri("/api/auth/me")
+        .insert_header(("Authorization", format!("Bearer {fresh_token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 200);
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn rotating_a_session_keeps_its_identity_so_revocation_still_reaches_it() {
+    // The access token carries the refresh family, not the individual refresh
+    // token. If rotation minted a new identity, a token refreshed after a
+    // revocation was recorded would slip past the check — which is exactly the
+    // move an attacker holding a stolen refresh token would make.
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+
+    let (_, refresh, _) = register_user(&app, "rotrev", "rotrev@mailbox.dev", "Pass1234").await;
+
+    // Rotate once: new access token, same session.
+    let req = actix_test::TestRequest::post()
+        .uri("/api/auth/refresh")
+        .set_json(json!({ "refresh_token": refresh }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let rotated_refresh = refresh_cookie_from_response(&resp);
+    let body: Value = actix_test::read_body_json(resp).await;
+    let rotated_token = body["access_token"].as_str().unwrap().to_string();
+
+    // Signing out with the rotated refresh token ends the session.
+    let req = actix_test::TestRequest::post()
+        .uri("/api/auth/logout")
+        .set_json(json!({ "refresh_token": rotated_refresh }))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 200);
+
+    // The access token issued by that rotation is refused too.
+    let req = actix_test::TestRequest::get()
+        .uri("/api/auth/me")
+        .insert_header(("Authorization", format!("Bearer {rotated_token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 401);
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn revocations_survive_a_process_restart() {
+    // The cache is in-process, so without the table behind it a restart would
+    // silently un-revoke everything revoked in the preceding hour — at exactly
+    // the moment an operator is most likely to restart, which is right after
+    // handling an incident. Simulate the restart by clearing the cache and
+    // rebuilding it from the database, which is what startup does.
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+
+    let (token, _, _) = register_user(&app, "restartrev", "restart@mailbox.dev", "Pass1234").await;
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/auth/sessions/logout-all")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 200);
+
+    cinetrack::services::revocation::clear_cache_for_test();
+    // With the cache empty and nothing reloaded, the token would be accepted
+    // again — the exact regression this test exists to catch.
+    let req = actix_test::TestRequest::get()
+        .uri("/api/auth/me")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(
+        actix_test::call_service(&app, req).await.status(),
+        200,
+        "precondition: an empty cache accepts the token, so the reload below is what matters"
+    );
+
+    let loaded = cinetrack::services::revocation::load(&pool)
+        .await
+        .expect("reload revocations");
+    assert!(loaded > 0, "the revocation must have been persisted");
+
+    let req = actix_test::TestRequest::get()
+        .uri("/api/auth/me")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 401);
+
+    // Leave the shared cache clean for whatever test runs next.
+    cinetrack::services::revocation::clear_cache_for_test();
 }
 
 // ── Access Control Tests ──────────────────────────────────────

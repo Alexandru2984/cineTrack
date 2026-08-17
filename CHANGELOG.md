@@ -39,6 +39,17 @@ and release versions follow semantic versioning.
 
 ### Security
 
+- Signing out, revoking a session, changing or resetting a password, and
+  refresh-token reuse detection now take effect immediately. Previously they
+  revoked only the refresh token, leaving an already-issued access token usable
+  for the rest of its lifetime — up to fifteen minutes after the owner had
+  deliberately cut off access. Access tokens carry a session identifier that is
+  checked against a durable revocation record on every authenticated request.
+  Access tokens issued before this change stop working when it is deployed;
+  both clients recover automatically by refreshing.
+- Credential files are audited by permission mode, not only by whether they are
+  gitignored, closing a gap that left a live object-storage key world-readable
+  on a host shared with unrelated services.
 - Blocking is enforced server-side across profiles, follows, activity, lists,
   notifications, and reports rather than being only a client-side filter.
 - Report snapshots are bounded and moderator decisions require a recorded note.
