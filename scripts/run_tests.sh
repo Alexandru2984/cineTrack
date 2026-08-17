@@ -160,6 +160,11 @@ scripts/tests/alertmanager_config_test.sh
 scripts/tests/calendar_feed_log_safety_test.sh
 scripts/tests/edge_security_config_test.sh
 scripts/tests/deployment_hardening_test.sh
+scripts/tests/secret_hygiene_test.sh
+# Unlike the contract test above, this audits the real tree. It only means
+# something where the secrets actually live, so a missing .env.prod (a fresh
+# clone, a CI runner) is not a failure — the checker simply finds nothing.
+scripts/check_secret_hygiene.sh
 docker run --rm --volume "$ROOT_DIR:$ROOT_DIR:ro" --workdir "$ROOT_DIR" \
   rhysd/actionlint:1.7.7@sha256:1d74bfc9fd1963af8f89a7c22afaaafd42f49aad711a09951d02cb996398f61d \
   -color
