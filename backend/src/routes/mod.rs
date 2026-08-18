@@ -3,6 +3,7 @@ pub mod auth;
 pub mod calendar;
 pub mod client_errors;
 pub mod csp_report;
+pub mod encryption;
 pub mod events;
 pub mod health;
 pub mod history;
@@ -35,6 +36,7 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
         web::scope("/api")
             .configure(health::configure)
             .configure(events::configure)
+            .configure(encryption::configure)
             .configure(auth::configure)
             // assets before users: the exact /users/me/avatar resource must match
             // before the greedy /users scope claims the prefix.
@@ -79,6 +81,7 @@ pub fn configure_with_rate_limits(
             .wrap(RateLimit::new(shared_rate_limiter))
             .configure(health::configure)
             .configure(events::configure)
+            .configure(encryption::configure)
             .configure(|cfg| auth::configure_rate_limited(cfg, auth_rate_limiter))
             .configure(assets::configure)
             .configure(users::configure)

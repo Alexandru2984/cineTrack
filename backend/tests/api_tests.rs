@@ -6165,6 +6165,214 @@ async fn test_calendar_lists_new_and_regional_upcoming_releases() {
     assert_eq!(us_upcoming["items"][0]["release_type"], 3);
 }
 
+// ── End-to-end encryption key directory ───────────────────────
+
+/// A syntactically valid publish payload. Values are fixtures, not real keys:
+/// the server validates shape and stores bytes, and every cryptographic meaning
+/// belongs to the clients.
+fn publish_keys_body(fingerprint: &str) -> Value {
+    json!({
+        "exchange_public_key": "aa".repeat(32),
+        "signing_public_key": "bb".repeat(32),
+        "key_fingerprint": fingerprint,
+        "password_wrapped_key": "cc".repeat(64),
+        "password_kdf_salt": "dd".repeat(16),
+        "password_kdf": { "memory_kib": 19456, "iterations": 2, "parallelism": 1 },
+        "recovery_wrapped_key": "ee".repeat(64),
+        "recovery_kdf_salt": "ff".repeat(16),
+    })
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn encryption_keys_publish_and_are_readable_by_a_peer() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (owner_token, _, _) =
+        register_user(&app, "keyowner", "keyowner@mailbox.dev", "Pass1234").await;
+    let (peer_token, _, _) =
+        register_user(&app, "keypeer", "keypeer@mailbox.dev", "Pass1234").await;
+
+    // Before publishing, the account knows it has no keys — this is what a
+    // client uses to tell first-time setup from restoring a backup.
+    let req = actix_test::TestRequest::get()
+        .uri("/api/encryption/keys")
+        .insert_header(("Authorization", format!("Bearer {owner_token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let body: Value = actix_test::call_and_read_body_json(&app, req).await;
+    assert_eq!(body["has_keys"], false);
+
+    let fingerprint = "1".repeat(64);
+    let req = actix_test::TestRequest::put()
+        .uri("/api/encryption/keys")
+        .insert_header(("Authorization", format!("Bearer {owner_token}")))
+        .set_json(publish_keys_body(&fingerprint))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let body: Value = actix_test::read_body_json(resp).await;
+    assert_eq!(body["generation"], 1);
+
+    // A peer can read the public half in order to encrypt to this account.
+    let req = actix_test::TestRequest::get()
+        .uri("/api/encryption/keys/keyowner")
+        .insert_header(("Authorization", format!("Bearer {peer_token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let body: Value = actix_test::call_and_read_body_json(&app, req).await;
+    assert_eq!(body["exchange_public_key"], "aa".repeat(32));
+    assert_eq!(body["key_fingerprint"], fingerprint);
+    // The private half is never part of a peer response.
+    assert!(body.get("password_wrapped_key").is_none());
+    assert!(body.get("recovery_wrapped_key").is_none());
+
+    // Publishing again rotates, and the generation is what lets a peer notice a
+    // cached key has been replaced.
+    let req = actix_test::TestRequest::put()
+        .uri("/api/encryption/keys")
+        .insert_header(("Authorization", format!("Bearer {owner_token}")))
+        .set_json(publish_keys_body(&"2".repeat(64)))
+        .peer_addr(peer_addr())
+        .to_request();
+    let body: Value = actix_test::call_and_read_body_json(&app, req).await;
+    assert_eq!(body["generation"], 2);
+
+    // Publishing is security-relevant, so it appears in the owner's timeline.
+    let req = actix_test::TestRequest::get()
+        .uri("/api/auth/security-activity")
+        .insert_header(("Authorization", format!("Bearer {owner_token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let activity: Value = actix_test::call_and_read_body_json(&app, req).await;
+    let kinds: Vec<&str> = activity
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|entry| entry["event_type"].as_str())
+        .collect();
+    assert!(
+        kinds.contains(&"encryption_keys_published"),
+        "key publication should be visible to the owner: {kinds:?}"
+    );
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn a_key_backup_is_returned_only_to_its_owner() {
+    // The backup is opaque, but it is still the material an attacker needs in
+    // order to attack the password offline. It must never leave the account.
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (owner_token, _, _) =
+        register_user(&app, "backupowner", "backupowner@mailbox.dev", "Pass1234").await;
+    let (other_token, _, _) =
+        register_user(&app, "backupother", "backupother@mailbox.dev", "Pass1234").await;
+
+    let req = actix_test::TestRequest::put()
+        .uri("/api/encryption/keys")
+        .insert_header(("Authorization", format!("Bearer {owner_token}")))
+        .set_json(publish_keys_body(&"3".repeat(64)))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 200);
+
+    let req = actix_test::TestRequest::get()
+        .uri("/api/encryption/keys/backup")
+        .insert_header(("Authorization", format!("Bearer {owner_token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let body: Value = actix_test::call_and_read_body_json(&app, req).await;
+    assert_eq!(body["password_wrapped_key"], "cc".repeat(64));
+    assert_eq!(body["password_kdf"]["memory_kib"], 19456);
+
+    // Another account has its own (absent) backup, never this one's.
+    let req = actix_test::TestRequest::get()
+        .uri("/api/encryption/keys/backup")
+        .insert_header(("Authorization", format!("Bearer {other_token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 404);
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn a_blocked_account_cannot_be_found_in_the_key_directory() {
+    // A blocked peer is invisible everywhere else. The key directory must not
+    // become the one endpoint that confirms the account still exists.
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (blocker_token, _, _) =
+        register_user(&app, "keyblocker", "keyblocker@mailbox.dev", "Pass1234").await;
+    let (blocked_token, _, _) =
+        register_user(&app, "keyblocked", "keyblocked@mailbox.dev", "Pass1234").await;
+
+    let req = actix_test::TestRequest::put()
+        .uri("/api/encryption/keys")
+        .insert_header(("Authorization", format!("Bearer {blocked_token}")))
+        .set_json(publish_keys_body(&"4".repeat(64)))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 200);
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/users/keyblocked/block")
+        .insert_header(("Authorization", format!("Bearer {blocker_token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert!(actix_test::call_service(&app, req)
+        .await
+        .status()
+        .is_success());
+
+    let req = actix_test::TestRequest::get()
+        .uri("/api/encryption/keys/keyblocked")
+        .insert_header(("Authorization", format!("Bearer {blocker_token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(
+        actix_test::call_service(&app, req).await.status(),
+        404,
+        "the key directory leaked a blocked account"
+    );
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn weak_key_backup_parameters_are_refused() {
+    // The KDF floor is what keeps a stolen copy of the backup table expensive
+    // to attack offline. A client asking for less is refused, not trusted.
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (token, _, _) = register_user(&app, "weakkdf", "weakkdf@mailbox.dev", "Pass1234").await;
+
+    let mut body = publish_keys_body(&"5".repeat(64));
+    body["password_kdf"] = json!({ "memory_kib": 1024, "iterations": 1, "parallelism": 1 });
+
+    let req = actix_test::TestRequest::put()
+        .uri("/api/encryption/keys")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .set_json(body)
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 400);
+
+    // And nothing was stored: a rejected publish must not leave a directory
+    // entry whose backup never arrived.
+    let req = actix_test::TestRequest::get()
+        .uri("/api/encryption/keys")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let status: Value = actix_test::call_and_read_body_json(&app, req).await;
+    assert_eq!(status["has_keys"], false);
+}
+
 #[actix_web::test]
 #[ignore = "requires test DB"]
 async fn an_announced_season_with_no_episodes_is_not_a_gap() {
