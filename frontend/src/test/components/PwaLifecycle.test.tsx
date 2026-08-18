@@ -1,14 +1,35 @@
 import { fireEvent, render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { PwaProvider, PwaStatus } from '@/components/PwaLifecycle';
 import { isIosInstallPlatform } from '@/lib/pwa';
 
+/** Captures what PwaProvider passes to useRegisterSW, so the registration
+ *  callbacks can be driven directly. */
+interface CapturedRegisterOptions {
+  onRegisteredSW?: (url: string, registration?: unknown) => void;
+}
+
+interface RegisterState {
+  options: CapturedRegisterOptions | null;
+  setNeedRefresh: ReturnType<typeof vi.fn>;
+  needRefresh: boolean;
+}
+
+const registerState: RegisterState = {
+  options: null,
+  setNeedRefresh: vi.fn(),
+  needRefresh: false,
+};
+
 vi.mock('virtual:pwa-register/react', () => ({
-  useRegisterSW: () => ({
-    offlineReady: [false, vi.fn()],
-    needRefresh: [false, vi.fn()],
-    updateServiceWorker: vi.fn(),
-  }),
+  useRegisterSW: (options: Record<string, unknown>) => {
+    registerState.options = options as CapturedRegisterOptions;
+    return {
+      offlineReady: [false, vi.fn()],
+      needRefresh: [registerState.needRefresh, registerState.setNeedRefresh],
+      updateServiceWorker: vi.fn(),
+    };
+  },
 }));
 
 function statusProps() {
@@ -99,5 +120,77 @@ describe('native PWA installation', () => {
     window.dispatchEvent(event);
 
     expect(event.defaultPrevented).toBe(false);
+  });
+});
+
+describe('PwaProvider update discovery', () => {
+  // Reset here rather than inside the helper: assigning null in the same
+  // function body narrows the field for every later read, and the mock
+  // repopulates it from a scope the checker cannot follow.
+  beforeEach(() => {
+    registerState.options = null;
+    registerState.setNeedRefresh = vi.fn();
+  });
+
+  function mountWithRegistration() {
+    const update = vi.fn().mockResolvedValue(undefined);
+    render(<PwaProvider><div /></PwaProvider>);
+    expect(registerState.options).not.toBeNull();
+    registerState.options?.onRegisteredSW?.('/sw.js', { update });
+    return update;
+  }
+
+  it('asks for a new build on a timer, so an open tab does not run a stale one', () => {
+    // A worker only looks for a new version when the browser asks it to, which
+    // in practice means a full navigation. Without this, a deployed fix never
+    // reaches a tab that stays open — the failure that sent a user looking for
+    // a button that had already shipped.
+    vi.useFakeTimers();
+    const update = mountWithRegistration();
+    expect(update).not.toHaveBeenCalled();
+
+    vi.advanceTimersByTime(30 * 60 * 1000);
+    expect(update).toHaveBeenCalledOnce();
+
+    vi.advanceTimersByTime(30 * 60 * 1000);
+    expect(update).toHaveBeenCalledTimes(2);
+    vi.useRealTimers();
+  });
+
+  it('asks again when the tab returns to the foreground', () => {
+    // Phones restore an app from the background without reloading it, so
+    // foregrounding is the moment a user is most likely to be waiting on a fix.
+    const update = mountWithRegistration();
+
+    document.dispatchEvent(new Event('visibilitychange'));
+    expect(update).toHaveBeenCalledOnce();
+  });
+
+  it('does not ask while offline', () => {
+    const onLine = vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false);
+    const update = mountWithRegistration();
+
+    document.dispatchEvent(new Event('visibilitychange'));
+    expect(update).not.toHaveBeenCalled();
+    onLine.mockRestore();
+  });
+
+  it('treats dismissing the banner as a snooze, not a silence', () => {
+    // Dismissing used to suppress the prompt for the rest of the session, so a
+    // stray tap meant staying on a superseded build indefinitely.
+    vi.useFakeTimers();
+    registerState.needRefresh = true;
+    registerState.setNeedRefresh = vi.fn();
+    render(<PwaProvider><div /></PwaProvider>);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
+    expect(registerState.setNeedRefresh).toHaveBeenCalledWith(false);
+
+    registerState.setNeedRefresh.mockClear();
+    vi.advanceTimersByTime(10 * 60 * 1000);
+    expect(registerState.setNeedRefresh).toHaveBeenCalledWith(true);
+
+    registerState.needRefresh = false;
+    vi.useRealTimers();
   });
 });
