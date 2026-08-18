@@ -447,8 +447,23 @@ export interface UpNextEpisode extends CalendarEpisode {
   last_watched_at: string;
 }
 
+/** A started show whose next episode cannot be named yet, because a season at
+ *  or before it has not been fetched from the provider. Reported separately so
+ *  the queue stays silent rather than offering a later episode as if it were
+ *  next. */
+export interface UpNextAwaitingCatalog {
+  media_id: string;
+  tmdb_id: number;
+  title: string;
+  poster_path: string | null;
+  missing_season_number: number;
+  last_watched_at: string;
+}
+
 export interface UpNextResponse {
   items: UpNextEpisode[];
+  /** Optional: a backend older than this field omits it. */
+  awaiting_catalog?: UpNextAwaitingCatalog[];
 }
 
 export type UpcomingItemKind = 'episode' | 'movie';

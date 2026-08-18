@@ -38,6 +38,14 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
                 "/tv/{tmdb_id}/seasons/{season_number}/episodes/{episode_number}/watched",
                 web::post().to(mark_episode_watched),
             )
+            // The exact inverse of the POST above. Addressed by episode rather
+            // than by history id, because that is what a client showing an
+            // episode list actually holds; making it look up a row id first
+            // would be a round trip to learn something the server can resolve.
+            .route(
+                "/tv/{tmdb_id}/seasons/{season_number}/episodes/{episode_number}/watched",
+                web::delete().to(unmark_episode_watched),
+            )
             .route("/{id}", web::delete().to(delete_history)),
     );
 }
@@ -671,6 +679,78 @@ async fn mark_episode_watched(
     })))
 }
 
+/// Remove an episode from watched history.
+///
+/// Deletes every history entry for that episode, not just the newest one, so
+/// the result matches what the caller asked for: "I have not watched this."
+/// Leaving an older entry behind would keep the episode ticked while claiming
+/// to have unticked it. Imported rewatches are entries too, so the count is
+/// returned rather than assumed to be one.
+///
+/// Idempotent: unmarking an episode that is not marked answers 200 with a zero
+/// count. A double tap, or a retry after a dropped connection, is not an error.
+async fn unmark_episode_watched(
+    pool: web::Data<PgPool>,
+    req: HttpRequest,
+    path: web::Path<(i32, i32, i32)>,
+) -> Result<HttpResponse, AppError> {
+    let user_id = require_auth(&req).await?;
+    let (tmdb_id, season_number, episode_number) = path.into_inner();
+    validate_episode_path(tmdb_id, season_number, Some(episode_number))?;
+
+    // Resolve against what is already cached. Unmarking must never reach out to
+    // the provider: the episode is in the user's history, so it exists locally,
+    // and a viewer undoing a mistake should not wait on a third party.
+    let target = sqlx::query_as::<_, (Uuid, Uuid)>(
+        r#"SELECT media.id, episodes.id
+        FROM media
+        JOIN seasons ON seasons.media_id = media.id
+        JOIN episodes ON episodes.season_id = seasons.id
+        WHERE media.tmdb_id = $1
+          AND media.media_type = 'tv'
+          AND seasons.season_number = $2
+          AND episodes.episode_number = $3"#,
+    )
+    .bind(tmdb_id)
+    .bind(season_number)
+    .bind(episode_number)
+    .fetch_optional(pool.get_ref())
+    .await?;
+
+    let Some((media_id, episode_id)) = target else {
+        return Err(AppError::NotFound("Episode not found".to_string()));
+    };
+
+    let mut tx = pool.begin().await?;
+    quota::lock_history_writes(&mut tx, user_id).await?;
+    let removed = sqlx::query("DELETE FROM watch_history WHERE user_id = $1 AND episode_id = $2")
+        .bind(user_id)
+        .bind(episode_id)
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+    tx.commit().await?;
+
+    if removed > 0 {
+        crate::services::completion::demote_show_if_not_fully_watched_best_effort(
+            pool.get_ref(),
+            user_id,
+            media_id,
+        )
+        .await;
+        log::info!(
+            "audit: episode unmarked user_id={user_id} tmdb_id={tmdb_id} \
+             season={season_number} episode={episode_number} removed={removed}"
+        );
+    }
+
+    Ok(HttpResponse::Ok().json(serde_json::json!({
+        "removed_count": removed,
+        "media_id": media_id,
+        "episode_id": episode_id,
+    })))
+}
+
 async fn delete_history(
     pool: web::Data<PgPool>,
     req: HttpRequest,
@@ -681,16 +761,31 @@ async fn delete_history(
 
     let mut tx = pool.begin().await?;
     quota::lock_history_writes(&mut tx, user_id).await?;
-    let result = sqlx::query("DELETE FROM watch_history WHERE id = $1 AND user_id = $2")
-        .bind(history_id)
-        .bind(user_id)
-        .execute(&mut *tx)
-        .await?;
+    // `RETURNING media_id`, because the show's completion badge is derived from
+    // this history and has to be recomputed once the row is gone.
+    let media_id = sqlx::query_scalar::<_, Uuid>(
+        "DELETE FROM watch_history WHERE id = $1 AND user_id = $2 RETURNING media_id",
+    )
+    .bind(history_id)
+    .bind(user_id)
+    .fetch_optional(&mut *tx)
+    .await?;
 
-    if result.rows_affected() == 0 {
+    let Some(media_id) = media_id else {
         return Err(AppError::NotFound("History entry not found".to_string()));
-    }
+    };
     tx.commit().await?;
+
+    // Every path that records a watch already does this; the path that removes
+    // one did not, so a finished show kept claiming to be completed with an
+    // episode now unwatched. Best-effort and after the commit, matching the
+    // marking paths: the deletion has succeeded either way.
+    crate::services::completion::demote_show_if_not_fully_watched_best_effort(
+        pool.get_ref(),
+        user_id,
+        media_id,
+    )
+    .await;
 
     Ok(HttpResponse::Ok().json(serde_json::json!({"message": "Deleted"})))
 }

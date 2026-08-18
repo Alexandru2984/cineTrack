@@ -275,6 +275,29 @@ async fn main() -> std::io::Result<()> {
             summary.invalid,
             summary.skipped_locked,
         );
+        // Fill the season gaps that keep started shows out of Up Next. Runs
+        // after the schedule sync and before the pushes, on the same hourly
+        // job, so the queue converges within the hour instead of waiting for
+        // someone to open the missing season by hand.
+        let backfill = cinetrack::services::release_schedule::backfill_incomplete_seasons(
+            &pool,
+            &tmdb_service,
+            options,
+        )
+        .await
+        .map_err(|error| {
+            log::error!("Season backfill failed: {error}");
+            std::io::Error::other("season backfill failed")
+        })?;
+        log::info!(
+            "Season backfill complete: selected={} filled={} not_found={} failures={} locked={}",
+            backfill.selected,
+            backfill.filled,
+            backfill.not_found,
+            backfill.failures,
+            backfill.skipped_locked,
+        );
+
         let push_summary = dispatch_release_pushes(&pool, &ExpoPushService::new(&config))
             .await
             .map_err(|error| {

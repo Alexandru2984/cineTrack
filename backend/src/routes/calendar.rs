@@ -114,6 +114,115 @@ async fn new_episodes(
     Ok(HttpResponse::Ok().json(CalendarEpisodePage { items, next_cursor }))
 }
 
+/// The shared shape of a "next unwatched episode" candidate, and of the season
+/// cache behind it.
+///
+/// Both the queue query and the integrity query need these, and they have to
+/// agree exactly: if they disagree about what the candidate is, a show can be
+/// withheld and listed at the same time, or slip through both.
+macro_rules! up_next_ctes {
+    () => {
+        r#"WITH progress AS (
+    SELECT media_id, MAX(watched_at) AS last_watched_at
+    FROM watch_history
+    WHERE user_id = $1
+    GROUP BY media_id
+),
+-- How much of each season we actually hold. `episodes` is a lazily filled
+-- cache, so "no rows" means "never fetched", not "no episodes exist".
+season_cache AS (
+    SELECT
+        seasons.media_id,
+        seasons.season_number,
+        seasons.episode_count,
+        seasons.episodes_cached_at,
+        COUNT(episodes.id) AS cached_count
+    FROM seasons
+    LEFT JOIN episodes ON episodes.season_id = seasons.id
+    GROUP BY seasons.id
+),
+-- The earliest season we cannot reason about. A season counts as incomplete
+-- when it was never fetched, or when the provider says it has more episodes
+-- than we hold. Specials are excluded: season 0 is not part of the running
+-- order, so a gap there cannot hide the next episode.
+first_incomplete AS (
+    SELECT DISTINCT ON (media_id) media_id, season_number
+    FROM season_cache
+    WHERE season_number > 0
+      AND (
+          -- Never fetched at all. `episodes_cached_at` is deliberately not the
+          -- test: a season can hold episodes with no timestamp (older rows,
+          -- fixtures), and those are complete regardless of what the clock says.
+          cached_count = 0
+          OR (episode_count IS NOT NULL AND cached_count < episode_count)
+      )
+    ORDER BY media_id, season_number
+),
+next_ids AS (
+    SELECT DISTINCT ON (tracked.media_id)
+        tracked.media_id,
+        episodes.id AS episode_id,
+        seasons.season_number,
+        episodes.episode_number,
+        episodes.air_date,
+        progress.last_watched_at
+    FROM user_media tracked
+    JOIN media
+      ON media.id = tracked.media_id
+     AND media.media_type = 'tv'
+    -- Inner join, so a tracked show with nothing watched never appears.
+    JOIN progress ON progress.media_id = tracked.media_id
+    JOIN seasons ON seasons.media_id = media.id
+    JOIN episodes ON episodes.season_id = seasons.id
+    WHERE tracked.user_id = $1
+      AND tracked.status <> 'dropped'
+      AND episodes.air_date <= $2
+      AND ($3 OR seasons.season_number > 0)
+      AND NOT EXISTS (
+          SELECT 1 FROM watch_history history
+          WHERE history.user_id = $1 AND history.episode_id = episodes.id
+      )
+    ORDER BY
+        tracked.media_id,
+        seasons.season_number,
+        episodes.episode_number,
+        episodes.air_date,
+        episodes.id
+),
+-- A candidate is only trustworthy when nothing before it is missing. Two
+-- distinct failures are covered here, and only the first is obvious:
+--
+--   * a candidate exists, but an earlier season is incomplete, so the
+--     candidate is not really next (season one watched, season two never
+--     fetched, season three cached and offered up);
+--   * no candidate exists at all because every cached season is fully
+--     watched, while an unfetched season sits after them, so the show simply
+--     vanishes from the queue with no explanation.
+--
+-- `<=` rather than `<` on purpose: a partially cached season can be the
+-- candidate's own, holding later episodes while earlier ones are missing.
+withheld AS (
+    SELECT
+        tracked.media_id,
+        first_incomplete.season_number AS missing_season_number,
+        progress.last_watched_at
+    FROM user_media tracked
+    JOIN media
+      ON media.id = tracked.media_id
+     AND media.media_type = 'tv'
+    JOIN progress ON progress.media_id = tracked.media_id
+    JOIN first_incomplete ON first_incomplete.media_id = tracked.media_id
+    LEFT JOIN next_ids ON next_ids.media_id = tracked.media_id
+    WHERE tracked.user_id = $1
+      AND tracked.status <> 'dropped'
+      AND (
+          next_ids.media_id IS NULL
+          OR first_incomplete.season_number <= next_ids.season_number
+      )
+)"#
+    };
+}
+
 async fn up_next_episodes(
     pool: web::Data<PgPool>,
     req: HttpRequest,
@@ -127,43 +236,13 @@ async fn up_next_episodes(
         // activity order. Dormant shows remain available afterwards, ordered
         // by their newest next episode so fresh releases can revive a backlog
         // without crowding an actively watched show out of the bounded list.
-        r#"WITH progress AS (
-            SELECT media_id, MAX(watched_at) AS last_watched_at
-            FROM watch_history
-            WHERE user_id = $1
-            GROUP BY media_id
-        ),
-        next_ids AS (
-            SELECT DISTINCT ON (tracked.media_id)
-                tracked.media_id,
-                episodes.id AS episode_id,
-                seasons.season_number,
-                episodes.episode_number,
-                episodes.air_date,
-                progress.last_watched_at
-            FROM user_media tracked
-            JOIN media
-              ON media.id = tracked.media_id
-             AND media.media_type = 'tv'
-            -- Inner join, so a tracked show with nothing watched never appears.
-            JOIN progress ON progress.media_id = tracked.media_id
-            JOIN seasons ON seasons.media_id = media.id
-            JOIN episodes ON episodes.season_id = seasons.id
-            WHERE tracked.user_id = $1
-              AND tracked.status <> 'dropped'
-              AND episodes.air_date <= $2
-              AND ($3 OR seasons.season_number > 0)
-              AND NOT EXISTS (
-                  SELECT 1 FROM watch_history history
-                  WHERE history.user_id = $1 AND history.episode_id = episodes.id
-              )
-            ORDER BY
-                tracked.media_id,
-                seasons.season_number,
-                episodes.episode_number,
-                episodes.air_date,
-                episodes.id
-        ),
+        //
+        // Shows whose catalogue has a gap before the candidate are excluded
+        // and reported separately, so the queue never presents a later episode
+        // as if it were the next one.
+        concat!(
+            up_next_ctes!(),
+            r#",
         prioritized AS (
             SELECT
                 next_ids.media_id,
@@ -182,6 +261,10 @@ async fn up_next_episodes(
             LEFT JOIN episode_plans plans
               ON plans.user_id = $1
              AND plans.episode_id = next_ids.episode_id
+            WHERE NOT EXISTS (
+                SELECT 1 FROM withheld
+                WHERE withheld.media_id = next_ids.media_id
+            )
         ),
         selected AS (
             SELECT *
@@ -217,7 +300,8 @@ async fn up_next_episodes(
             CASE WHEN selected.queue_priority < 2 THEN selected.last_watched_at END DESC,
             CASE WHEN selected.queue_priority = 2 THEN selected.air_date END DESC,
             selected.last_watched_at DESC,
-            selected.episode_id DESC"#,
+            selected.episode_id DESC"#
+        ),
     )
     .bind(user_id)
     .bind(params.today)
@@ -227,7 +311,40 @@ async fn up_next_episodes(
     .fetch_all(pool.get_ref())
     .await?;
 
-    Ok(HttpResponse::Ok().json(UpNextResponse { items }))
+    // Deliberately a second round trip against the same CTEs rather than one
+    // query returning both shapes: the alternative is a union of two unrelated
+    // row types padded with nulls, and every future column has to be added to
+    // both halves in the right position or the whole thing silently mis-parses.
+    let awaiting_catalog = sqlx::query_as::<_, UpNextAwaitingCatalog>(concat!(
+        up_next_ctes!(),
+        r#"
+        SELECT
+            withheld.media_id,
+            media.tmdb_id,
+            media.title,
+            media.poster_path,
+            withheld.missing_season_number,
+            withheld.last_watched_at
+        FROM withheld
+        JOIN media ON media.id = withheld.media_id
+        ORDER BY withheld.last_watched_at DESC, withheld.media_id
+        LIMIT $4"#
+    ))
+    .bind(user_id)
+    .bind(params.today)
+    .bind(params.include_specials)
+    .bind(params.limit)
+    .fetch_all(pool.get_ref())
+    .await?;
+
+    // Nothing is enqueued here on purpose. Which seasons are missing is already
+    // a fact about `seasons` and `episodes`, so a request queue would be a
+    // second copy of it, free to drift. The hourly release-schedule worker
+    // reads the same condition and fills the gaps; this endpoint stays a read.
+    Ok(HttpResponse::Ok().json(UpNextResponse {
+        items,
+        awaiting_catalog,
+    }))
 }
 
 async fn upcoming_releases(

@@ -87,3 +87,75 @@ pub async fn complete_show_if_fully_watched_best_effort(
         );
     }
 }
+
+/// Undo the promotion when an episode stops being watched.
+///
+/// The counterpart to [`complete_show_if_fully_watched`], and it was missing:
+/// every path that records a watch recomputed the badge, while the path that
+/// removes one did not. Deleting a history entry from a finished show therefore
+/// left it claiming to be completed with an episode now unwatched — visible in
+/// the library, in statistics, and in the profile, with no way to correct it
+/// short of re-watching the episode.
+///
+/// `completed_at` has to be cleared in the same statement: a CHECK constraint
+/// ties the date to the status, so demoting without clearing it fails the write.
+///
+/// Returns whether the row was demoted.
+pub async fn demote_show_if_not_fully_watched(
+    pool: &PgPool,
+    user_id: Uuid,
+    media_id: Uuid,
+) -> Result<bool, sqlx::Error> {
+    let demoted = sqlx::query(
+        r#"
+        UPDATE user_media um
+        SET status = 'watching',
+            completed_at = NULL,
+            updated_at = NOW()
+        FROM media m
+        WHERE um.user_id = $1
+          AND um.media_id = $2
+          AND m.id = um.media_id
+          AND m.media_type = 'tv'
+          AND um.status = 'completed'
+          -- Mirrors the promotion test exactly, including counting an undated
+          -- episode as aired. If the two drifted apart, a show could sit in a
+          -- state neither of them would move it out of.
+          AND EXISTS (
+              SELECT 1 FROM seasons s
+              JOIN episodes e ON e.season_id = s.id
+              WHERE s.media_id = m.id
+                AND s.season_number > 0
+                AND (e.air_date IS NULL OR e.air_date <= CURRENT_DATE)
+                AND NOT EXISTS (
+                    SELECT 1 FROM watch_history wh
+                    WHERE wh.user_id = um.user_id AND wh.episode_id = e.id
+                )
+          )
+        "#,
+    )
+    .bind(user_id)
+    .bind(media_id)
+    .execute(pool)
+    .await?
+    .rows_affected();
+
+    if demoted > 0 {
+        log::info!("tracking: show reopened user_id={user_id} media_id={media_id}");
+    }
+    Ok(demoted > 0)
+}
+
+/// Same check, never propagating an error: correcting the badge must not turn a
+/// successful deletion into a failed request.
+pub async fn demote_show_if_not_fully_watched_best_effort(
+    pool: &PgPool,
+    user_id: Uuid,
+    media_id: Uuid,
+) {
+    if let Err(error) = demote_show_if_not_fully_watched(pool, user_id, media_id).await {
+        log::error!(
+            "tracking: failed to reopen show user_id={user_id} media_id={media_id}: {error}"
+        );
+    }
+}

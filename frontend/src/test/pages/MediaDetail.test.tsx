@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   useShowWatchProgress: vi.fn(),
   createTracking: vi.fn(),
   markEpisodeWatched: vi.fn(),
+  unmarkEpisodeWatched: vi.fn(),
   markSeasonWatched: vi.fn(),
   markEpisodesWatchedThrough: vi.fn(),
   useTrackingLookup: vi.fn(),
@@ -66,6 +67,11 @@ vi.mock('@/hooks/useTracking', () => ({
   useTrackingLookup: (...args: unknown[]) => mocks.useTrackingLookup(...args),
   useMarkEpisodeWatched: () => ({
     mutate: mocks.markEpisodeWatched,
+    isPending: false,
+    error: null,
+  }),
+  useUnmarkEpisodeWatched: () => ({
+    mutate: mocks.unmarkEpisodeWatched,
     isPending: false,
     error: null,
   }),
@@ -148,7 +154,12 @@ describe('MediaDetail episode tracking', () => {
 
     const seasonOne = screen.getByRole('tab', { name: /Season 1/ });
     expect(seasonOne).toHaveAttribute('aria-selected', 'true');
-    expect(screen.getByTitle('Watched')).toBeDisabled();
+    // A watched episode stays actionable: the control is a toggle, so its
+    // tooltip names what a click would do rather than restating the state.
+    // It used to be disabled, which left no way to undo a mistap.
+    const watchedToggle = screen.getByTitle('Remove from watched');
+    expect(watchedToggle).toBeEnabled();
+    expect(watchedToggle).toHaveAttribute('aria-pressed', 'true');
 
     await user.click(screen.getByRole('tab', { name: /Season 2/ }));
     expect(mocks.useEpisodes).toHaveBeenLastCalledWith('1399', 2);
@@ -159,6 +170,26 @@ describe('MediaDetail episode tracking', () => {
       seasonNumber: 2,
       episodeNumber: 2,
     });
+  });
+
+  it('unmarks a watched episode after confirmation', async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(screen.getByTitle('Remove from watched'));
+    // Confirmed rather than immediate: the control sits in a scrollable list on
+    // touch, where a stray tap would otherwise discard a watch record.
+    expect(mocks.unmarkEpisodeWatched).not.toHaveBeenCalled();
+
+    await user.click(
+      screen.getByRole('button', { name: 'Remove from watched' }),
+    );
+    // Second argument is the mutation's onSuccess wiring, which closes the
+    // dialog; only the payload is this test's business.
+    expect(mocks.unmarkEpisodeWatched).toHaveBeenCalledWith(
+      { tmdbId: 1399, seasonNumber: 1, episodeNumber: 1 },
+      expect.anything(),
+    );
   });
 
   it('offers to mark previous episodes when the selected episode leaves gaps', async () => {

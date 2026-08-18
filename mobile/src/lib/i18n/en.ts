@@ -181,6 +181,8 @@ export const en = {
     seeAllLabel: 'Open your full watchlist',
   },
   upNext: {
+    awaitingHeading: 'Checking for new episodes',
+    awaitingSeason: 'Fetching season {season} before showing what is next',
     title: 'Up next',
     loading: 'Loading your next episodes',
     loadError: 'Your queue could not be loaded',
