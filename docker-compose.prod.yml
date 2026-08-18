@@ -162,6 +162,9 @@ services:
       context: ./frontend
       dockerfile: Dockerfile.prod
       args:
+        # Same default as the backend: an image built without it reports
+        # `unknown` rather than silently passing as current.
+        GIT_REVISION: "${GIT_REVISION:-unknown}"
         VITE_API_URL: ${VITE_API_URL}
         VITE_USE_R2_IMAGES: "${VITE_USE_R2_IMAGES:-false}"
     read_only: true
