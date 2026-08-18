@@ -99,6 +99,30 @@ docker compose --profile ops -f docker-compose.prod.yml --env-file .env.prod \
 docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
 ```
 
+### The nginx vhost is a separate artifact
+
+`nginx/vazute.micutu.com.conf` is not in any image. Compose will not install it,
+so a release that changes it is only half deployed until it is copied to the
+host by hand — and the symptom is subtle: the site stays up and serves the new
+bundle while the edge behaves as it did before.
+
+That is not hypothetical. The release that introduced the event stream shipped
+its `proxy_buffering off` in the repository and left the running vhost
+unchanged, so the stream would have worked while delivering in batches.
+
+```bash
+# Nothing here is destructive until `cp`, and `nginx -t` runs before reload, so
+# a bad config is refused rather than loaded.
+sudo cp /etc/nginx/sites-available/vazute.micutu.com \
+  "/etc/nginx/sites-available/vazute.micutu.com.bak.$(date -u +%Y%m%dT%H%M%SZ)"
+sudo cp nginx/vazute.micutu.com.conf /etc/nginx/sites-available/vazute.micutu.com
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+`scripts/check_deploy_drift.sh` reports this as the `nginx` artifact, so
+forgetting it now surfaces hourly rather than at the next time somebody happens
+to run the local gate.
+
 The migration job must succeed before application containers are replaced.
 After deployment, verify container health, the public health endpoint, and the
 main authenticated flows:
@@ -107,7 +131,16 @@ main authenticated flows:
 docker compose -f docker-compose.prod.yml --env-file .env.prod ps
 curl --fail --silent --show-error https://vazute.micutu.com/api/health
 curl --fail --silent --show-error https://vazute.micutu.com/.well-known/security.txt
+
+# Confirm every artifact actually moved. Both images carry the commit they were
+# built from, and the check compares each against the paths that affect it —
+# reading one image's label to speak for all three was wrong in both directions
+# and produced an alert that could not be cleared.
+scripts/check_deploy_drift.sh
 ```
+
+A silent run means backend, frontend and nginx are all current. Anything it
+prints names the artifact still to deploy.
 
 Check login, token refresh, search, tracking, Up Next, settings, reporting, and
 the moderator queue with dedicated non-production accounts. Keep the previous
