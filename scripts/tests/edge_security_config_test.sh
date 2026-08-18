@@ -104,6 +104,28 @@ for path in ("/api/img/", "/api/assets/"):
     )
 PY
 
+# The event stream is long-lived, so it needs buffering off and a read timeout
+# above the backend's keepalive. Both are easy to lose in a later edit, and the
+# symptom is subtle: pushes still arrive, just batched and late.
+python3 - "$VHOST" <<'PY'
+import pathlib
+import re
+import sys
+
+text = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
+block = re.search(r"location = /api/events \{(?P<body>.*?)\n    \}", text, re.DOTALL)
+assert block is not None, "the /api/events location is missing"
+body = block.group("body")
+assert "proxy_buffering off;" in body, "buffering would batch every pushed event"
+assert "proxy_cache off;" in body, "the event stream must never be cached"
+
+timeout = re.search(r"proxy_read_timeout (\d+)s;", body)
+assert timeout is not None, "the event stream has no read timeout of its own"
+# The backend emits a keepalive comment every 25s; a shorter read timeout
+# would cut healthy idle streams.
+assert int(timeout.group(1)) > 25, "read timeout is below the backend keepalive"
+PY
+
 # On the production host, make configuration drift fail the local operations
 # gate. GitHub runners do not have the host file, so CI still validates the
 # repository copy and the invariant checks above.

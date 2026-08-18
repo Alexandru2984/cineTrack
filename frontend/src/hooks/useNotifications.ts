@@ -97,7 +97,8 @@ export function useNotificationSummary(enabled = true) {
     queryKey: notificationKeys.summary,
     queryFn: () => fetchNotifications(SUMMARY_LIMIT),
     enabled,
-    refetchInterval: 30_000,
+    // See the note in useMessages: a slow fallback behind the event stream.
+    refetchInterval: 120_000,
   });
 }
 

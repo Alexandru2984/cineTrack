@@ -415,6 +415,10 @@ async fn send_message(
         message.id,
         peer.id
     );
+    // Wake the recipient's open clients so they refetch, instead of finding out
+    // on their next ten-second poll. After the commit: a signal for a message
+    // that did not land would be a phantom.
+    crate::services::events::publish(peer.id, crate::services::events::UserEvent::MessagesChanged);
     Ok(HttpResponse::Created()
         .insert_header(("Cache-Control", "no-store"))
         .insert_header(("Pragma", "no-cache"))
@@ -460,6 +464,14 @@ async fn mark_thread_read(
     .execute(pool.get_ref())
     .await?
     .rows_affected();
+
+    if updated_count > 0 {
+        // The reader's own other devices are showing a stale unread badge.
+        crate::services::events::publish(
+            user_id,
+            crate::services::events::UserEvent::MessagesChanged,
+        );
+    }
 
     Ok(HttpResponse::Ok()
         .insert_header(("Cache-Control", "no-store"))

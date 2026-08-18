@@ -6,6 +6,7 @@ import { bootstrapSession } from '@/lib/api';
 import { Navbar } from '@/components/Navbar';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { MobileTabBar } from '@/components/MobileTabBar';
+import { EventStream } from '@/components/EventStream';
 import { EmailVerificationBanner } from '@/components/EmailVerificationBanner';
 import { TermsAcceptanceGate } from '@/components/TermsAcceptanceGate';
 import { loginPathFor, safeReturnTo } from '@/lib/navigation';
@@ -142,6 +143,7 @@ export default function App() {
           </Suspense>
         </ErrorBoundary>
       </main>
+      {authenticated && <EventStream />}
       {authenticated && <MobileTabBar />}
     </div>
   );
