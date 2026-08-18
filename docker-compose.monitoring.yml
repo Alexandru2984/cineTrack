@@ -25,7 +25,11 @@ services:
   prometheus:
     image: prom/prometheus:v3.13.2@sha256:508729e0e2d18e11fd742a5a5ca70e557b940a93948c3c95fd0123a6fd538b69
     restart: unless-stopped
-    user: nobody
+    # Same arrangement as Alertmanager: keep the image's unprivileged user so it
+    # still owns its data volume, and add the host group that owns the rendered
+    # scrape credential. That file is mode 640, so Prometheus can read it
+    # without it becoming world-readable on a host shared with other services.
+    user: "nobody:${METRICS_GID:-1001}"
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.path=/prometheus
@@ -44,6 +48,8 @@ services:
     volumes:
       - ./ops/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./ops/prometheus/cinetrack-alerts.yml:/etc/prometheus/rules/cinetrack-alerts.yml:ro
+      # Created by scripts/render_metrics_token.sh from METRICS_BEARER_TOKEN.
+      - ./ops/prometheus/metrics_token.generated:/etc/prometheus/secrets/metrics_token:ro
       - prometheus_data:/prometheus
     depends_on: [alertmanager]
     deploy:

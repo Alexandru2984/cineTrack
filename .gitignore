@@ -50,3 +50,4 @@ bench/results/
 bench-summary.json
 ops/alertmanager/alertmanager.generated.yml
 ops/alertmanager/smtp_password.generated
+ops/prometheus/metrics_token.generated

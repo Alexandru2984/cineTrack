@@ -369,6 +369,9 @@ jobs:
       - name: Validate Alertmanager config permissions
         run: scripts/tests/alertmanager_config_test.sh
 
+      - name: Validate metrics scrape credential wiring
+        run: scripts/tests/metrics_scrape_auth_test.sh
+
       - name: Validate calendar feed log redaction
         run: scripts/tests/calendar_feed_log_safety_test.sh
 

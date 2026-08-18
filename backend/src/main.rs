@@ -7,6 +7,7 @@ use std::time::Duration;
 
 use cinetrack::{
     config, db, metrics,
+    middleware::metrics_auth::require_metrics_token,
     middleware::rate_limit::RateLimitConfig,
     middleware::request_id::{current_request_id, request_id},
     routes,
@@ -469,6 +470,11 @@ async fn main() -> std::io::Result<()> {
                     .exclude_regex(CALENDAR_FEED_LOG_EXCLUDE_REGEX),
             )
             .wrap(prometheus.clone())
+            // Registered after the metrics middleware, so it is the outermost
+            // layer and sees a /metrics request before that middleware answers
+            // it. Wrapped the other way round, the scrape endpoint would reply
+            // before the guard ever ran.
+            .wrap(actix_middleware::from_fn(require_metrics_token))
             .app_data(json_cfg)
             .app_data(web::Data::new(pool.clone()))
             .app_data(web::Data::new(config.clone()))

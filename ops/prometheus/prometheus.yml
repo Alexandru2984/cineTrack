@@ -28,6 +28,13 @@ scrape_configs:
   # up{job="cinetrack-backend"}, so renaming this silently disables it.
   - job_name: cinetrack-backend
     metrics_path: /metrics
+    # The backend requires a bearer token on /metrics. The credential lives in
+    # a file written by scripts/render_metrics_token.sh rather than inline,
+    # so this config stays committable. If scrapes start returning 401 after a
+    # rotation, the file is stale — re-run that script and restart Prometheus.
+    authorization:
+      type: Bearer
+      credentials_file: /etc/prometheus/secrets/metrics_token
     static_configs:
       - targets: ["backend:8080"]
 

@@ -54,6 +54,35 @@ Record the candidate commit and the currently deployed commit before starting.
 Use the production environment file already present on the host; never print or
 copy its values into release notes.
 
+### One-time prerequisite: the metrics scrape credential
+
+`METRICS_BEARER_TOKEN` is **required in production**. Compose refuses to
+interpolate without it and `--check-config` refuses to load, so a deploy that
+skips this fails before anything is replaced rather than quietly starting an
+unauthenticated `/metrics`. Do this once, before the first deploy that includes
+access-token revocation:
+
+```bash
+printf 'METRICS_BEARER_TOKEN=%s\n' "$(openssl rand -hex 32)" >> .env.prod
+scripts/render_metrics_token.sh
+scripts/check_secret_hygiene.sh
+```
+
+Then recreate Prometheus so it picks up the credential file; until both sides
+agree, scrapes return 401 and `CineTrackBackendDown` will fire:
+
+```bash
+docker compose -f docker-compose.monitoring.yml --env-file .env.prod \
+  up -d --force-recreate prometheus
+curl --fail --silent --show-error \
+  --header "Authorization: Bearer $(grep -oP '(?<=^METRICS_BEARER_TOKEN=).*' .env.prod)" \
+  http://127.0.0.1:8090/metrics | head -1
+```
+
+The same `curl` without the header must answer `401`.
+
+### Deploy
+
 ```bash
 git rev-parse HEAD
 docker compose -f docker-compose.prod.yml --env-file .env.prod up -d db

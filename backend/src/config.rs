@@ -44,6 +44,9 @@ pub struct Config {
     /// Defaults on in production, off in development/test so offline runs and the
     /// integration suite are not tied to a third-party lookup.
     pub breached_password_check: bool,
+    /// Bearer token the Prometheus scraper must present to read `/metrics`.
+    /// Required in production; absent in development leaves the endpoint open.
+    pub metrics_bearer_token: Option<String>,
     pub r2: Option<R2Config>,
 }
 
@@ -179,12 +182,57 @@ impl Config {
             expo_push_access_token,
             expo_push_timeout_seconds: bounded_env("EXPO_PUSH_TIMEOUT_SECONDS", 15_u64, 1, 60),
             breached_password_check: bool_env("BREACHED_PASSWORD_CHECK", is_production),
+            metrics_bearer_token: metrics_bearer_token(is_production),
             r2: R2Config::from_env(is_production),
         }
     }
 
     pub fn is_production(&self) -> bool {
         self.app_env == "production"
+    }
+
+    /// A configuration with every field set to a safe test value, for tests to
+    /// take and adjust.
+    ///
+    /// Not `#[cfg(test)]`, because the PostgreSQL integration suite is a
+    /// separate crate and needs it too. It exists because the alternative —
+    /// spelling out the whole struct at each test site — meant that adding one
+    /// field broke several unrelated files, which is exactly the pressure that
+    /// makes people reach for a default value instead of thinking about what a
+    /// new security-relevant setting should be.
+    #[doc(hidden)]
+    pub fn for_test() -> Self {
+        Self {
+            app_env: "test".to_string(),
+            app_host: "127.0.0.1".to_string(),
+            app_port: 0,
+            frontend_url: "http://localhost:5173".to_string(),
+            database_url: "postgres://example".to_string(),
+            jwt_secret: "test_secret_must_be_64_chars_long_so_we_pad_it_here_abcdefghijklmnopq"
+                .to_string(),
+            totp_encryption_key: [0x42; 32],
+            jwt_expiry_minutes: 15,
+            jwt_refresh_expiry_days: 30,
+            tmdb_api_key: "fake".to_string(),
+            tmdb_read_access_token: None,
+            tmdb_base_url: "https://api.themoviedb.org/3".to_string(),
+            tmdb_image_base_url: "https://image.tmdb.org/t/p".to_string(),
+            tmdb_timeout_seconds: 10,
+            cors_allowed_origins: vec!["http://localhost:5173".to_string()],
+            rate_limit_rps: 10,
+            rate_limit_burst: 50,
+            smtp_host: None,
+            smtp_port: 587,
+            smtp_username: None,
+            smtp_password: None,
+            smtp_from: "CineTrack <noreply@localhost>".to_string(),
+            smtp_timeout_seconds: 15,
+            expo_push_access_token: None,
+            expo_push_timeout_seconds: 15,
+            breached_password_check: false,
+            metrics_bearer_token: None,
+            r2: None,
+        }
     }
 }
 
@@ -198,6 +246,50 @@ fn parse_totp_encryption_key(value: &str) -> [u8; 32] {
     decoded
         .try_into()
         .expect("validated TOTP encryption key length")
+}
+
+/// The scrape credential for `/metrics`.
+///
+/// Required in production and refused if weak. The endpoint is served on the
+/// application's own port, which on a shared host means any neighbouring
+/// process can read it; "nginx does not proxy it" stops being a boundary as
+/// soon as something else on the box is curious. Development and test leave it
+/// unset, which keeps a local scrape working without ceremony.
+fn metrics_bearer_token(is_production: bool) -> Option<String> {
+    let token = env::var("METRICS_BEARER_TOKEN")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+
+    match token {
+        Some(token) => {
+            assert!(
+                (32..=512).contains(&token.len()),
+                "METRICS_BEARER_TOKEN must be 32-512 bytes"
+            );
+            assert!(
+                !token
+                    .bytes()
+                    .any(|byte| byte.is_ascii_control() || byte.is_ascii_whitespace()),
+                "METRICS_BEARER_TOKEN must not contain whitespace or control characters"
+            );
+            if is_production {
+                let unique_bytes = token.bytes().collect::<HashSet<_>>().len();
+                assert!(
+                    unique_bytes >= 16,
+                    "METRICS_BEARER_TOKEN must be generated randomly in production"
+                );
+            }
+            Some(token)
+        }
+        None => {
+            assert!(
+                !is_production,
+                "METRICS_BEARER_TOKEN must be set in production; generate one with `openssl rand -hex 32`"
+            );
+            None
+        }
+    }
 }
 
 fn validate_app_env(value: String) -> String {

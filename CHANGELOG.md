@@ -50,6 +50,11 @@ and release versions follow semantic versioning.
 - Credential files are audited by permission mode, not only by whether they are
   gitignored, closing a gap that left a live object-storage key world-readable
   on a host shared with unrelated services.
+- The Prometheus scrape endpoint requires a bearer token. It was previously
+  protected only by not being proxied, which is not a boundary on a host that
+  publishes the application port beside unrelated services. `METRICS_BEARER_TOKEN`
+  is required in production; see `docs/release-process.md` for the one-time
+  setup a deploy needs before it will start.
 - Blocking is enforced server-side across profiles, follows, activity, lists,
   notifications, and reports rather than being only a client-side filter.
 - Report snapshots are bounded and moderator decisions require a recorded note.
