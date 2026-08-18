@@ -6167,6 +6167,102 @@ async fn test_calendar_lists_new_and_regional_upcoming_releases() {
 
 #[actix_web::test]
 #[ignore = "requires test DB"]
+async fn an_announced_season_with_no_episodes_is_not_a_gap() {
+    // A season announced before it is scheduled reports zero episodes, and we
+    // hold zero of them. That is a complete answer, not a missing one.
+    //
+    // Treating it as a gap withheld every caught-up show that has a next season
+    // announced, parking it behind "fetching season N" forever — the episodes
+    // do not exist yet, so nothing would ever arrive to clear it.
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (token, _, user_id) =
+        register_user(&app, "announced", "announced@mailbox.dev", "Pass1234").await;
+    let user_id = Uuid::parse_str(&user_id).unwrap();
+    let today = chrono::Utc::now().date_naive();
+
+    let show_id = sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO media (tmdb_id, media_type, title)
+        VALUES (780040, 'tv', 'Renewed Series') RETURNING id"#,
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    // Season one: aired, fetched, one episode still unwatched.
+    let season_one = sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO seasons (media_id, season_number, episode_count, episodes_cached_at)
+        VALUES ($1, 1, 2, NOW()) RETURNING id"#,
+    )
+    .bind(show_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let watched_episode = sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO episodes (season_id, episode_number, name, air_date)
+        VALUES ($1, 1, 'Seen', $2) RETURNING id"#,
+    )
+    .bind(season_one)
+    .bind(today - chrono::Duration::days(20))
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO episodes (season_id, episode_number, name, air_date)
+        VALUES ($1, 2, 'Next', $2)"#,
+    )
+    .bind(season_one)
+    .bind(today - chrono::Duration::days(13))
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // Season two: renewed, not yet scheduled. Fetched, and genuinely empty.
+    sqlx::query(
+        r#"INSERT INTO seasons (media_id, season_number, episode_count, episodes_cached_at)
+        VALUES ($1, 2, 0, NOW())"#,
+    )
+    .bind(show_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    sqlx::query("INSERT INTO user_media (user_id, media_id, status) VALUES ($1, $2, 'watching')")
+        .bind(user_id)
+        .bind(show_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        r#"INSERT INTO watch_history (user_id, media_id, episode_id, watched_at)
+        VALUES ($1, $2, $3, NOW())"#,
+    )
+    .bind(user_id)
+    .bind(show_id)
+    .bind(watched_episode)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let req = actix_test::TestRequest::get()
+        .uri(&format!("/api/calendar/up-next?today={today}&limit=10"))
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let body: Value = actix_test::call_and_read_body_json(&app, req).await;
+
+    assert!(
+        body["awaiting_catalog"].as_array().unwrap().is_empty(),
+        "an announced empty season was mistaken for a missing one: {body}"
+    );
+    assert_eq!(body["items"].as_array().unwrap().len(), 1);
+    assert_eq!(body["items"][0]["season_number"], 1);
+    assert_eq!(body["items"][0]["episode_number"], 2);
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
 async fn unmarking_an_episode_reopens_a_completed_show() {
     // Marking recomputed the completion badge on every path; removing a watch
     // recomputed nothing. A finished show therefore kept claiming to be

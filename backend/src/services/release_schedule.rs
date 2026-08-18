@@ -85,9 +85,10 @@ const SEASON_BACKFILL_CANDIDATES: &str = r#"
      AND tracked.status <> 'dropped'
     WHERE season_cache.season_number > 0
       AND (
-          -- Never fetched at all; see the matching note in routes/calendar.rs
-          -- for why the cache timestamp is not the test.
-          season_cache.cached_count = 0
+          -- See the matching note in routes/calendar.rs: the cache timestamp is
+          -- not the test, and `episode_count = 0` is a real answer rather than
+          -- a missing one.
+          (season_cache.episode_count IS NULL AND season_cache.cached_count = 0)
           OR (
               season_cache.episode_count IS NOT NULL
               AND season_cache.cached_count < season_cache.episode_count

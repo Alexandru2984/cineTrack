@@ -150,10 +150,18 @@ first_incomplete AS (
     FROM season_cache
     WHERE season_number > 0
       AND (
-          -- Never fetched at all. `episodes_cached_at` is deliberately not the
-          -- test: a season can hold episodes with no timestamp (older rows,
-          -- fixtures), and those are complete regardless of what the clock says.
-          cached_count = 0
+          -- Never fetched, and the provider has not told us how many episodes
+          -- to expect. `episodes_cached_at` is deliberately not the test: a
+          -- season can hold episodes with no timestamp (older rows, fixtures)
+          -- and is complete regardless of what the clock says.
+          (episode_count IS NULL AND cached_count = 0)
+          -- Or we hold fewer than the provider says exist.
+          --
+          -- `episode_count = 0` is a real answer, not a missing one: a season
+          -- announced before it is scheduled reports zero episodes, and holding
+          -- zero of them is complete. Treating it as a gap left every show with
+          -- an announced next season permanently stuck behind "fetching season
+          -- N", waiting for episodes that do not exist yet.
           OR (episode_count IS NOT NULL AND cached_count < episode_count)
       )
     ORDER BY media_id, season_number
