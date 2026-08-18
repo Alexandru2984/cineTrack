@@ -20,7 +20,7 @@ import { getApiErrorMessage } from '@/lib/api';
 import { formatRuntime, getPosterUrl } from '@/lib/utils';
 import { useT } from '@/hooks/useT';
 import { useLocaleStore } from '@/store/locale';
-import type { CalendarEpisode, UpNextEpisode } from '@/types';
+import type { CalendarEpisode, UpNextAwaitingCatalog, UpNextEpisode } from '@/types';
 
 type Translate = (key: string, params?: Record<string, string | number>) => string;
 
@@ -53,12 +53,58 @@ function airDateLabel(t: Translate, tag: string, value: string): string {
   }).format(new Date(`${value}T12:00:00`));
 }
 
+/** A show held back from the queue while its catalogue is completed.
+ *
+ *  Deliberately not a skeleton or a silent omission: the viewer is told which
+ *  season is being fetched, so a show that vanishes for an hour is explained
+ *  rather than mysterious, and they can still reach it by tapping through. */
+function AwaitingCatalogRow({
+  show,
+  t,
+}: {
+  show: UpNextAwaitingCatalog;
+  t: Translate;
+}) {
+  return (
+    <div className="flex items-center gap-3 py-3">
+      <Link
+        to={`/media/${show.tmdb_id}?type=tv`}
+        className="shrink-0"
+        aria-label={show.title}
+      >
+        <img
+          src={getPosterUrl(show.poster_path, 'w154')}
+          alt=""
+          loading="lazy"
+          className="h-16 w-11 rounded object-cover"
+        />
+      </Link>
+      <div className="min-w-0 flex-1">
+        <Link
+          to={`/media/${show.tmdb_id}?type=tv`}
+          className="block truncate text-sm font-semibold hover:underline"
+        >
+          {show.title}
+        </Link>
+        <p className="mt-0.5 flex items-center gap-1.5 text-xs text-[hsl(var(--muted-foreground))]">
+          <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" />
+          {t('upNext.awaitingSeason', { season: show.missing_season_number })}
+        </p>
+      </div>
+    </div>
+  );
+}
+
 export function UpNextEpisodes() {
   const t = useT();
   const upNext = useUpNextEpisodes();
   const setPlanned = useSetEpisodePlanned();
   const markWatched = useMarkCalendarEpisodeWatched();
   const items = upNext.data?.items ?? [];
+  // Shows the backend deliberately refused to guess about. Absent on responses
+  // from a backend that predates the field, which is why it is defaulted here
+  // rather than assumed present.
+  const awaitingCatalog = upNext.data?.awaiting_catalog ?? [];
   const actionError = setPlanned.error ?? markWatched.error;
   // Headings only earn their space when there is something to tell apart; with
   // a single group the list speaks for itself.
@@ -115,7 +161,7 @@ export function UpNextEpisodes() {
             <RefreshCw className="h-4 w-4" aria-hidden="true" />
           </button>
         </div>
-      ) : items.length === 0 ? (
+      ) : items.length === 0 && awaitingCatalog.length === 0 ? (
         <div className="flex min-h-24 items-center gap-3 border-y border-[hsl(var(--border))] py-4">
           <CheckCircle2
             className="h-6 w-6 text-emerald-600 dark:text-emerald-400"
@@ -130,6 +176,18 @@ export function UpNextEpisodes() {
         </div>
       ) : (
         <div className="space-y-5">
+          {awaitingCatalog.length > 0 && (
+            <div>
+              <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-[hsl(var(--muted-foreground))]">
+                {t('upNext.awaitingHeading')}
+              </h3>
+              <div className="divide-y divide-[hsl(var(--border))] border-y border-[hsl(var(--border))]">
+                {awaitingCatalog.map((show) => (
+                  <AwaitingCatalogRow key={show.media_id} show={show} t={t} />
+                ))}
+              </div>
+            </div>
+          )}
           {groups.map((group) => (
             <div key={group.key}>
               {showHeadings && (

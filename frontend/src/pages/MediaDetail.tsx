@@ -3,6 +3,7 @@ import { useEpisodes, useMediaDetail, useSeasons } from '@/hooks/useMedia';
 import {
   useCreateTracking,
   useMarkEpisodeWatched,
+  useUnmarkEpisodeWatched,
   useMarkEpisodesWatchedThrough,
   useMarkSeasonWatched,
   useShowWatchProgress,
@@ -50,6 +51,13 @@ type WatchConfirmation =
       kind: 'season';
       season: Season;
       unwatchedCount: number;
+    }
+  // Unmarking is confirmed too, and for a different reason than marking: the
+  // control sits in a scrollable list on touch, where a stray tap on a green
+  // tick silently throws away a watch record.
+  | {
+      kind: 'unwatch';
+      episode: Episode;
     };
 
 function episodeCode(seasonNumber: number, episodeNumber: number): string {
@@ -97,6 +105,7 @@ export default function MediaDetail() {
   const tracking = useTrackingLookup(media?.tmdb_id, mediaType);
   const createTracking = useCreateTracking();
   const markEpisodeWatched = useMarkEpisodeWatched();
+  const unmarkEpisodeWatched = useUnmarkEpisodeWatched();
   const markSeasonWatched = useMarkSeasonWatched();
   const markEpisodesWatchedThrough = useMarkEpisodesWatchedThrough();
   const [statusSelection, setStatusSelection] = useState<{
@@ -169,6 +178,10 @@ export default function MediaDetail() {
         && !watchedEpisodeSet.has(candidate.episode_number),
     ).length;
     return earlierSeasonCount + earlierCurrentSeasonCount;
+  };
+
+  const handleEpisodeUnwatch = (episode: Episode) => {
+    setWatchConfirmation({ kind: 'unwatch', episode });
   };
 
   const handleEpisodeWatch = (episode: Episode) => {
@@ -411,12 +424,25 @@ export default function MediaDetail() {
                           </div>
                           <button
                             type="button"
-                            title={watched ? t('media.watched') : t('media.markWatched')}
-                            disabled={watched || markEpisodeWatched.isPending || bulkWatchPending}
-                            onClick={() => handleEpisodeWatch(episode)}
+                            // A real toggle. This used to be `disabled` once
+                            // watched, which made marking a one-way action:
+                            // there was no way back from a mistap anywhere in
+                            // the web client.
+                            aria-pressed={watched}
+                            title={watched ? t('media.unmarkWatched') : t('media.markWatched')}
+                            disabled={
+                              markEpisodeWatched.isPending
+                              || unmarkEpisodeWatched.isPending
+                              || bulkWatchPending
+                            }
+                            onClick={() =>
+                              watched
+                                ? handleEpisodeUnwatch(episode)
+                                : handleEpisodeWatch(episode)
+                            }
                             className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-md border transition-colors sm:w-32 sm:gap-2 ${
                               watched
-                                ? 'border-emerald-600 text-emerald-600'
+                                ? 'border-emerald-600 text-emerald-600 hover:border-[hsl(var(--destructive))] hover:text-[hsl(var(--destructive))]'
                                 : 'border-[hsl(var(--border))] hover:border-[hsl(var(--primary))] hover:text-[hsl(var(--primary))]'
                             } disabled:cursor-default disabled:opacity-70`}
                           >
@@ -442,7 +468,11 @@ export default function MediaDetail() {
         <WatchConfirmationDialog
           confirmation={watchConfirmation}
           seasonNumber={selectedSeason}
-          pending={markEpisodeWatched.isPending || bulkWatchPending}
+          pending={
+            markEpisodeWatched.isPending
+            || unmarkEpisodeWatched.isPending
+            || bulkWatchPending
+          }
           onClose={() => setWatchConfirmation(null)}
           onOnlyEpisode={() => {
             if (watchConfirmation.kind !== 'episode') return;
@@ -458,6 +488,17 @@ export default function MediaDetail() {
           onEpisodeAndPrevious={() => {
             if (watchConfirmation.kind !== 'episode') return;
             markEpisodesWatchedThrough.mutate(
+              {
+                tmdbId: media.tmdb_id,
+                seasonNumber: selectedSeason,
+                episodeNumber: watchConfirmation.episode.episode_number,
+              },
+              { onSuccess: () => setWatchConfirmation(null) },
+            );
+          }}
+          onUnwatch={() => {
+            if (watchConfirmation.kind !== 'unwatch') return;
+            unmarkEpisodeWatched.mutate(
               {
                 tmdbId: media.tmdb_id,
                 seasonNumber: selectedSeason,
@@ -501,6 +542,7 @@ function WatchConfirmationDialog({
   onOnlyEpisode,
   onEpisodeAndPrevious,
   onSeason,
+  onUnwatch,
 }: {
   confirmation: WatchConfirmation;
   seasonNumber: number;
@@ -509,6 +551,7 @@ function WatchConfirmationDialog({
   onOnlyEpisode: () => void;
   onEpisodeAndPrevious: () => void;
   onSeason: () => void;
+  onUnwatch: () => void;
 }) {
   const t = useT();
   useEffect(() => {
@@ -527,7 +570,7 @@ function WatchConfirmationDialog({
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [onClose, pending]);
 
-  const episodeLabel = confirmation.kind === 'episode'
+  const episodeLabel = confirmation.kind === 'episode' || confirmation.kind === 'unwatch'
     ? episodeCode(seasonNumber, confirmation.episode.episode_number)
     : null;
 
@@ -547,7 +590,9 @@ function WatchConfirmationDialog({
         <div className="flex items-start justify-between gap-4">
           <div>
             <h2 id="watch-confirmation-title" className="text-lg font-semibold">
-              {confirmation.kind === 'episode'
+              {confirmation.kind === 'unwatch'
+                ? t('media.unmarkCodeWatched', { code: episodeLabel ?? '' })
+                : confirmation.kind === 'episode'
                 ? t('media.markCodeWatched', { code: episodeLabel ?? '' })
                 : t('media.markSeasonNameWatched', {
                     name:
@@ -556,7 +601,9 @@ function WatchConfirmationDialog({
                   })}
             </h2>
             <p className="mt-2 text-sm leading-relaxed text-[hsl(var(--muted-foreground))]">
-              {confirmation.kind === 'episode'
+              {confirmation.kind === 'unwatch'
+                ? t('media.unmarkHint')
+                : confirmation.kind === 'episode'
                 ? confirmation.previousUnwatchedCount === 1
                   ? t('media.earlierUnwatchedOne')
                   : t('media.earlierUnwatchedMany', { count: confirmation.previousUnwatchedCount })
@@ -586,7 +633,17 @@ function WatchConfirmationDialog({
           >
             {t('common.cancel')}
           </button>
-          {confirmation.kind === 'episode' ? (
+          {confirmation.kind === 'unwatch' ? (
+            <button
+              type="button"
+              autoFocus
+              disabled={pending}
+              onClick={onUnwatch}
+              className="h-10 rounded-md bg-[hsl(var(--destructive))] px-4 text-sm font-semibold text-[hsl(var(--destructive-foreground))] hover:opacity-90 disabled:opacity-50"
+            >
+              {t('media.unmarkWatched')}
+            </button>
+          ) : confirmation.kind === 'episode' ? (
             <>
               <button
                 type="button"

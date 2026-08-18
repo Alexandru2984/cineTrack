@@ -330,6 +330,9 @@ export const en = {
     activityPrivate: 'This activity is private. An accepted follow request is required.',
   },
   media: {
+    unmarkWatched: 'Remove from watched',
+    unmarkCodeWatched: 'Remove {code} from watched?',
+    unmarkHint: 'This deletes the watch record for this episode, including any imported rewatches. You can mark it again at any time.',
     notFound: 'Media not found',
     overview: 'Overview',
     customList: 'Custom list',
@@ -435,6 +438,8 @@ export const en = {
     saving: 'Saving...',
   },
   upNext: {
+    awaitingHeading: 'Checking for new episodes',
+    awaitingSeason: 'Fetching season {season} before showing what is next',
     title: 'Up Next',
     continueWatching: 'Continue watching',
     pickBackUp: 'Pick back up',

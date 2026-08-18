@@ -229,6 +229,32 @@ export function useMarkEpisodeWatched() {
   });
 }
 
+/** Undo a watch. Mirrors useMarkEpisodeWatched, including the cache
+ *  invalidation, so the episode list, the season progress and Up Next all
+ *  settle on the same answer. */
+export function useUnmarkEpisodeWatched() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      tmdbId,
+      seasonNumber,
+      episodeNumber,
+    }: {
+      tmdbId: number;
+      seasonNumber: number;
+      episodeNumber: number;
+    }) => {
+      const res = await api.delete<{ removed_count: number }>(
+        `/history/tv/${tmdbId}/seasons/${seasonNumber}/episodes/${episodeNumber}/watched`,
+      );
+      return res.data;
+    },
+    onSuccess: (_data, variables) => {
+      invalidateEpisodeWatchState(qc, variables.tmdbId);
+    },
+  });
+}
+
 export function useMarkSeasonWatched() {
   const qc = useQueryClient();
   return useMutation({

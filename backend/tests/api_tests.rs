@@ -6167,6 +6167,374 @@ async fn test_calendar_lists_new_and_regional_upcoming_releases() {
 
 #[actix_web::test]
 #[ignore = "requires test DB"]
+async fn unmarking_an_episode_reopens_a_completed_show() {
+    // Marking recomputed the completion badge on every path; removing a watch
+    // recomputed nothing. A finished show therefore kept claiming to be
+    // completed with an episode now unwatched, and the only way back was to
+    // watch it again.
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (token, _, user_id) =
+        register_user(&app, "unwatcher", "unwatcher@mailbox.dev", "Pass1234").await;
+    let user_id = Uuid::parse_str(&user_id).unwrap();
+    let today = chrono::Utc::now().date_naive();
+
+    // A show TMDB reports as finished, so the completion badge can apply.
+    let show_id = sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO media (tmdb_id, media_type, title, status)
+        VALUES (780030, 'tv', 'Finished Series', 'Ended')
+        RETURNING id"#,
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let season_id = sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO seasons (media_id, season_number, episode_count, episodes_cached_at)
+        VALUES ($1, 1, 2, NOW()) RETURNING id"#,
+    )
+    .bind(show_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    for episode_number in 1..=2 {
+        sqlx::query(
+            r#"INSERT INTO episodes (season_id, episode_number, name, air_date)
+            VALUES ($1, $2, 'Episode', $3)"#,
+        )
+        .bind(season_id)
+        .bind(episode_number)
+        .bind(today - chrono::Duration::days(30))
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+    sqlx::query("INSERT INTO user_media (user_id, media_id, status) VALUES ($1, $2, 'watching')")
+        .bind(user_id)
+        .bind(show_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    // Watch both episodes; the show is promoted to completed.
+    for episode_number in 1..=2 {
+        let req = actix_test::TestRequest::post()
+            .uri(&format!(
+                "/api/history/tv/780030/seasons/1/episodes/{episode_number}/watched"
+            ))
+            .insert_header(("Authorization", format!("Bearer {token}")))
+            .peer_addr(peer_addr())
+            .to_request();
+        // 201 for a watch that did not exist; the endpoint answers 200 only
+        // when it is repeating an earlier one.
+        assert_eq!(actix_test::call_service(&app, req).await.status(), 201);
+    }
+    let status = sqlx::query_scalar::<_, String>(
+        "SELECT status FROM user_media WHERE user_id = $1 AND media_id = $2",
+    )
+    .bind(user_id)
+    .bind(show_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        status, "completed",
+        "precondition: the show should be completed"
+    );
+
+    // Now unmark one episode.
+    let req = actix_test::TestRequest::delete()
+        .uri("/api/history/tv/780030/seasons/1/episodes/2/watched")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let body: Value = actix_test::read_body_json(resp).await;
+    assert_eq!(body["removed_count"], 1);
+
+    // The episode is no longer watched, and the show no longer claims to be
+    // finished. `completed_at` must be cleared with it: a CHECK constraint ties
+    // the date to the status, so leaving it would have failed the write.
+    let (status, completed_at) = sqlx::query_as::<_, (String, Option<chrono::NaiveDate>)>(
+        "SELECT status, completed_at FROM user_media WHERE user_id = $1 AND media_id = $2",
+    )
+    .bind(user_id)
+    .bind(show_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(status, "watching");
+    assert_eq!(completed_at, None);
+
+    let req = actix_test::TestRequest::get()
+        .uri("/api/history/tv/780030/seasons/1/episodes")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let watched: Value = actix_test::call_and_read_body_json(&app, req).await;
+    assert_eq!(watched.as_array().unwrap(), &[serde_json::json!(1)]);
+
+    // Unmarking again is not an error: a double tap, or a retry after a dropped
+    // connection, answers 200 with nothing removed.
+    let req = actix_test::TestRequest::delete()
+        .uri("/api/history/tv/780030/seasons/1/episodes/2/watched")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let body: Value = actix_test::read_body_json(resp).await;
+    assert_eq!(body["removed_count"], 0);
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn unmarking_an_episode_is_scoped_to_the_caller() {
+    // The endpoint addresses an episode, not a history row id, so ownership is
+    // not implied by the path. Another account's watch must survive.
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (owner_token, _, owner_id) =
+        register_user(&app, "watchowner", "watchowner@mailbox.dev", "Pass1234").await;
+    let (other_token, _, _) =
+        register_user(&app, "watchother", "watchother@mailbox.dev", "Pass1234").await;
+    let owner_id = Uuid::parse_str(&owner_id).unwrap();
+    let today = chrono::Utc::now().date_naive();
+
+    let show_id = sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO media (tmdb_id, media_type, title, status)
+        VALUES (780031, 'tv', 'Shared Series', 'Ended') RETURNING id"#,
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let season_id = sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO seasons (media_id, season_number, episode_count, episodes_cached_at)
+        VALUES ($1, 1, 1, NOW()) RETURNING id"#,
+    )
+    .bind(show_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO episodes (season_id, episode_number, name, air_date)
+        VALUES ($1, 1, 'Only', $2)"#,
+    )
+    .bind(season_id)
+    .bind(today - chrono::Duration::days(10))
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO user_media (user_id, media_id, status) VALUES ($1, $2, 'watching')")
+        .bind(owner_id)
+        .bind(show_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/history/tv/780031/seasons/1/episodes/1/watched")
+        .insert_header(("Authorization", format!("Bearer {owner_token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 201);
+
+    // The other account unmarks the same episode: allowed, but it removes
+    // nothing, because it has nothing of its own to remove.
+    let req = actix_test::TestRequest::delete()
+        .uri("/api/history/tv/780031/seasons/1/episodes/1/watched")
+        .insert_header(("Authorization", format!("Bearer {other_token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let body: Value = actix_test::call_and_read_body_json(&app, req).await;
+    assert_eq!(body["removed_count"], 0);
+
+    let still_watched = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM watch_history WHERE user_id = $1 AND media_id = $2",
+    )
+    .bind(owner_id)
+    .bind(show_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        still_watched, 1,
+        "another account erased the owner's history"
+    );
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn up_next_withholds_a_show_whose_earlier_season_is_not_cached() {
+    // The Silo case, exactly as it happened in production.
+    //
+    // Season one was fetched and watched. The hourly release worker then cached
+    // season three, because that is the one currently airing. Season two had
+    // never been opened, so it existed as a row with no episodes. The queue
+    // picked the lowest *cached* unwatched episode and confidently answered
+    // "season three, episode one" — and the viewer watched it, out of order.
+    //
+    // The queue may not name an episode while a season before it is missing.
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (token, _, user_id) =
+        register_user(&app, "gapviewer", "gapviewer@mailbox.dev", "Pass1234").await;
+    let user_id = Uuid::parse_str(&user_id).unwrap();
+    let today = chrono::Utc::now().date_naive();
+
+    let show_id = sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO media (tmdb_id, media_type, title)
+        VALUES (780020, 'tv', 'Gapped Series')
+        RETURNING id"#,
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    // Season one: fetched, and every episode watched.
+    let season_one = sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO seasons (media_id, season_number, episode_count, episodes_cached_at)
+        VALUES ($1, 1, 2, NOW()) RETURNING id"#,
+    )
+    .bind(show_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    for episode_number in 1..=2 {
+        let episode_id = sqlx::query_scalar::<_, Uuid>(
+            r#"INSERT INTO episodes (season_id, episode_number, name, air_date)
+            VALUES ($1, $2, 'Watched', $3) RETURNING id"#,
+        )
+        .bind(season_one)
+        .bind(episode_number)
+        .bind(today - chrono::Duration::days(400))
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            r#"INSERT INTO watch_history (user_id, media_id, episode_id, watched_at)
+            VALUES ($1, $2, $3, NOW())"#,
+        )
+        .bind(user_id)
+        .bind(show_id)
+        .bind(episode_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+
+    // Season two: the provider says it has episodes; we hold none of them.
+    sqlx::query(
+        r#"INSERT INTO seasons (media_id, season_number, episode_count, episodes_cached_at)
+        VALUES ($1, 2, 10, NULL)"#,
+    )
+    .bind(show_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // Season three: fetched by the release worker, because it is airing now.
+    let season_three = sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO seasons (media_id, season_number, episode_count, episodes_cached_at)
+        VALUES ($1, 3, 1, NOW()) RETURNING id"#,
+    )
+    .bind(show_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let season_three_first = sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO episodes (season_id, episode_number, name, air_date)
+        VALUES ($1, 1, 'Spoiler', $2) RETURNING id"#,
+    )
+    .bind(season_three)
+    .bind(today - chrono::Duration::days(1))
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    sqlx::query("INSERT INTO user_media (user_id, media_id, status) VALUES ($1, $2, 'watching')")
+        .bind(user_id)
+        .bind(show_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let req = actix_test::TestRequest::get()
+        .uri(&format!("/api/calendar/up-next?today={today}&limit=10"))
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let body: Value = actix_test::call_and_read_body_json(&app, req).await;
+
+    // The season-three episode must not be offered.
+    let offered: Vec<&str> = body["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|item| item["episode_id"].as_str().unwrap())
+        .collect();
+    assert!(
+        !offered.contains(&season_three_first.to_string().as_str()),
+        "the queue offered a season-three episode while season two was missing: {offered:?}"
+    );
+
+    // Instead the show is reported as waiting on its catalogue, naming the gap.
+    let awaiting = body["awaiting_catalog"].as_array().unwrap();
+    assert_eq!(
+        awaiting.len(),
+        1,
+        "expected the show to be withheld: {body}"
+    );
+    assert_eq!(awaiting[0]["tmdb_id"], 780020);
+    assert_eq!(awaiting[0]["missing_season_number"], 2);
+
+    // Once season two is cached, the queue answers with its first episode.
+    let season_two = sqlx::query_scalar::<_, Uuid>(
+        "SELECT id FROM seasons WHERE media_id = $1 AND season_number = 2",
+    )
+    .bind(show_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    for episode_number in 1..=10 {
+        sqlx::query(
+            r#"INSERT INTO episodes (season_id, episode_number, name, air_date)
+            VALUES ($1, $2, 'Filled', $3)"#,
+        )
+        .bind(season_two)
+        .bind(episode_number)
+        .bind(today - chrono::Duration::days(200))
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+    sqlx::query("UPDATE seasons SET episodes_cached_at = NOW() WHERE id = $1")
+        .bind(season_two)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let req = actix_test::TestRequest::get()
+        .uri(&format!("/api/calendar/up-next?today={today}&limit=10"))
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let body: Value = actix_test::call_and_read_body_json(&app, req).await;
+
+    assert!(
+        body["awaiting_catalog"].as_array().unwrap().is_empty(),
+        "the gap is filled, so nothing should still be withheld: {body}"
+    );
+    assert_eq!(body["items"].as_array().unwrap().len(), 1);
+    assert_eq!(body["items"][0]["season_number"], 2);
+    assert_eq!(body["items"][0]["episode_number"], 1);
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
 async fn test_up_next_keeps_recent_activity_ahead_of_new_dormant_releases() {
     let pool = setup_pool().await;
     clean_db(&pool).await;

@@ -182,6 +182,8 @@ export const ro: Dictionary = {
     seeAllLabel: 'Deschide lista completă de văzut',
   },
   upNext: {
+    awaitingHeading: 'Se verifică episoadele',
+    awaitingSeason: 'Se aduce sezonul {season} înainte de a afișa ce urmează',
     title: 'Urmează',
     loading: 'Se încarcă episoadele următoare',
     loadError: 'Coada ta nu a putut fi încărcată',

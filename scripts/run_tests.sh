@@ -158,6 +158,8 @@ scripts/tests/backup_restore_test.sh
 scripts/tests/release_schedule_metrics_test.sh
 scripts/tests/alertmanager_config_test.sh
 scripts/tests/metrics_scrape_auth_test.sh
+scripts/tests/rust_audit_exceptions_test.sh
+scripts/tests/container_scan_exceptions_test.sh
 scripts/tests/calendar_feed_log_safety_test.sh
 scripts/tests/edge_security_config_test.sh
 scripts/tests/deployment_hardening_test.sh

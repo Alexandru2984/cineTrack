@@ -219,9 +219,33 @@ pub struct UpNextEpisode {
     pub last_watched_at: DateTime<Utc>,
 }
 
+/// A started show whose next episode cannot be named yet, because a season at
+/// or before it has not been fetched from the provider.
+///
+/// This exists so the queue can stay silent instead of guessing. The episode
+/// tables are a lazily filled cache, and picking the lowest *cached* unwatched
+/// episode quietly answers a different question than "what comes next" whenever
+/// a middle season is missing — it once sent a viewer from season one straight
+/// into season three and spoiled the show for them.
+#[derive(Debug, Serialize, sqlx::FromRow)]
+pub struct UpNextAwaitingCatalog {
+    pub media_id: Uuid,
+    pub tmdb_id: i32,
+    pub title: String,
+    pub poster_path: Option<String>,
+    /// The earliest season whose episodes are missing or incomplete. Shown to
+    /// the viewer so the wait is explained rather than mysterious.
+    pub missing_season_number: i32,
+    pub last_watched_at: DateTime<Utc>,
+}
+
 #[derive(Debug, Serialize)]
 pub struct UpNextResponse {
     pub items: Vec<UpNextEpisode>,
+    /// Shows deliberately withheld from `items` until their catalogue is
+    /// complete enough to answer honestly. A new field rather than a variant in
+    /// `items`, so clients already deployed keep parsing the response.
+    pub awaiting_catalog: Vec<UpNextAwaitingCatalog>,
 }
 
 #[derive(Debug, Serialize, sqlx::FromRow)]

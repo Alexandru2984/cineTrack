@@ -1,0 +1,18 @@
+# Accepted container-image vulnerabilities.
+#
+# Same discipline as backend/.cargo/audit.toml: an entry claims the vulnerable
+# code cannot run in this image, not that the finding is unimportant. Each names
+# what would make the claim false, and scripts/tests/container_scan_exceptions_test.sh
+# checks the claim against the build so it cannot outlive the facts.
+
+# CVE-2026-14456 — OpenSSL denial of service via unbounded memory.
+#
+# libssl3 ships inside gcr.io/distroless/cc-debian12 and Debian has published no
+# fixed version, so there is nothing to upgrade to. It is also never loaded: the
+# backend binary links neither libssl nor libcrypto, because every TLS path in
+# the crate graph is rustls — sqlx `tls-rustls`, reqwest `rustls-tls`, lettre
+# `tokio1-rustls-tls`. The only process in the image never opens the library.
+#
+# Revisit when Debian ships a fixed libssl3, or if any dependency switches to
+# native-tls or openssl-sys, which the guard test refuses.
+CVE-2026-14456

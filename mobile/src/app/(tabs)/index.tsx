@@ -66,6 +66,9 @@ export default function HomeScreen() {
   const t = useT();
   const user = useAuthStore((state) => state.user);
   const upNext = useUpNext();
+  // Shows the backend refused to guess about. Defaulted, because a response
+  // from a backend predating the field omits it entirely.
+  const awaitingCatalog = upNext.data?.awaiting_catalog ?? [];
   const stats = useMyStats();
   const discovery = useDiscovery();
   const watchlist = useWatchlistPreview();
@@ -197,8 +200,29 @@ export default function HomeScreen() {
               message={getErrorMessage(upNext.error, t('upNext.loadError'))}
               onRetry={() => void upNext.refetch()}
             />
-          ) : upNextGroups.length ? (
-            upNextGroups.map((group) => (
+          ) : upNextGroups.length || awaitingCatalog.length ? (
+            <>
+              {awaitingCatalog.length ? (
+                <View style={styles.upNextGroup}>
+                  <AppText variant="caption" muted>
+                    {t('upNext.awaitingHeading').toUpperCase()}
+                  </AppText>
+                  <View style={[styles.list, { borderTopColor: theme.border }]}>
+                    {awaitingCatalog.map((show) => (
+                      <View key={show.media_id} style={styles.awaitingRow}>
+                        <AppText numberOfLines={1}>{show.title}</AppText>
+                        <AppText variant="caption" muted>
+                          {t('upNext.awaitingSeason', {
+                            season: show.missing_season_number,
+                          })}
+                        </AppText>
+                      </View>
+                    ))}
+                  </View>
+                </View>
+              ) : null}
+              {
+upNextGroups.map((group) => (
               <View key={group.key} style={styles.upNextGroup}>
                 {upNextGroups.length > 1 ? (
                   <AppText variant="caption" muted>
@@ -230,7 +254,8 @@ export default function HomeScreen() {
                   ))}
                 </View>
               </View>
-            ))
+            ))}
+            </>
           ) : (
             <EmptyState
               icon={Search}
@@ -507,6 +532,7 @@ const styles = StyleSheet.create({
   upNextGroup: {
     gap: spacing.xs,
   },
+  awaitingRow: { paddingVertical: 12, gap: 2 },
   list: {
     borderTopWidth: StyleSheet.hairlineWidth,
   },

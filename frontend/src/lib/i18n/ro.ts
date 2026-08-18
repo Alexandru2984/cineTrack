@@ -332,6 +332,9 @@ export const ro: Dictionary = {
     activityPrivate: 'Această activitate este privată. Este necesară o cerere de urmărire acceptată.',
   },
   media: {
+    unmarkWatched: 'Scoate din vizionate',
+    unmarkCodeWatched: 'Scoți {code} din vizionate?',
+    unmarkHint: 'Se șterge înregistrarea de vizionare a acestui episod, inclusiv revizionările importate. Îl poți marca din nou oricând.',
     notFound: 'Media negăsit',
     overview: 'Prezentare',
     customList: 'Listă personalizată',
@@ -437,6 +440,8 @@ export const ro: Dictionary = {
     saving: 'Se salvează...',
   },
   upNext: {
+    awaitingHeading: 'Se verifică episoadele',
+    awaitingSeason: 'Se aduce sezonul {season} înainte de a afișa ce urmează',
     title: 'Urmează',
     continueWatching: 'Continuă vizionarea',
     pickBackUp: 'Reia de unde ai rămas',

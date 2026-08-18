@@ -31,6 +31,165 @@ pub struct ReleaseScheduleSummary {
     pub skipped_locked: bool,
 }
 
+const SEASON_BACKFILL_ADVISORY_LOCK: i64 = 0x5641_5a55_5445_5342;
+
+#[derive(Debug, Default, Eq, PartialEq)]
+pub struct SeasonBackfillSummary {
+    pub selected: usize,
+    pub filled: usize,
+    pub not_found: usize,
+    pub failures: usize,
+    pub skipped_locked: bool,
+}
+
+#[derive(Debug, FromRow)]
+struct SeasonBackfillCandidate {
+    media_id: Uuid,
+    tmdb_id: i32,
+    season_number: i32,
+}
+
+/// Seasons of started shows whose episodes were never fetched, or were fetched
+/// incompletely.
+///
+/// `refresh_tv_schedule` deliberately only touches the seasons near the current
+/// release schedule, which is right for its job and leaves older seasons empty
+/// forever. That gap is not cosmetic: `up-next` cannot name the next episode
+/// while a season before it is missing, so those shows are withheld from the
+/// queue until this fills them in.
+///
+/// Restricted to shows somebody is actually watching. A library holds seasons
+/// nobody will ever open — a twenty-season reality series among them — and
+/// fetching all of those would spend the whole provider budget on episodes that
+/// answer no question.
+const SEASON_BACKFILL_CANDIDATES: &str = r#"
+    WITH season_cache AS (
+        SELECT
+            seasons.media_id,
+            seasons.season_number,
+            seasons.episode_count,
+            seasons.episodes_cached_at,
+            COUNT(episodes.id) AS cached_count
+        FROM seasons
+        LEFT JOIN episodes ON episodes.season_id = seasons.id
+        GROUP BY seasons.id
+    )
+    SELECT DISTINCT
+        media.id AS media_id,
+        media.tmdb_id,
+        season_cache.season_number
+    FROM season_cache
+    JOIN media ON media.id = season_cache.media_id AND media.media_type = 'tv'
+    JOIN user_media tracked
+      ON tracked.media_id = media.id
+     AND tracked.status <> 'dropped'
+    WHERE season_cache.season_number > 0
+      AND (
+          -- Never fetched at all; see the matching note in routes/calendar.rs
+          -- for why the cache timestamp is not the test.
+          season_cache.cached_count = 0
+          OR (
+              season_cache.episode_count IS NOT NULL
+              AND season_cache.cached_count < season_cache.episode_count
+          )
+      )
+      -- Somebody has started this show, so the gap can actually block a queue.
+      AND EXISTS (
+          SELECT 1 FROM watch_history
+          WHERE watch_history.user_id = tracked.user_id
+            AND watch_history.media_id = media.id
+      )
+    ORDER BY media.id, season_cache.season_number
+    LIMIT $1
+"#;
+
+/// Fill the season gaps that keep started shows out of the Up Next queue.
+///
+/// Runs after the schedule sync in the same hourly job, so a viewer who marks a
+/// season watched sees the correct next episode within the hour rather than
+/// whenever they happen to open the season themselves.
+pub async fn backfill_incomplete_seasons(
+    pool: &PgPool,
+    tmdb: &TmdbService,
+    options: ReleaseScheduleOptions,
+) -> Result<SeasonBackfillSummary, AppError> {
+    if options.budget == 0 {
+        return Err(AppError::BadRequest(
+            "Season backfill budget must be positive".to_string(),
+        ));
+    }
+
+    let mut lock_transaction = pool.begin().await?;
+    let acquired = sqlx::query_scalar::<_, bool>("SELECT pg_try_advisory_xact_lock($1)")
+        .bind(SEASON_BACKFILL_ADVISORY_LOCK)
+        .fetch_one(&mut *lock_transaction)
+        .await?;
+    if !acquired {
+        return Ok(SeasonBackfillSummary {
+            skipped_locked: true,
+            ..SeasonBackfillSummary::default()
+        });
+    }
+
+    let candidates = sqlx::query_as::<_, SeasonBackfillCandidate>(SEASON_BACKFILL_CANDIDATES)
+        .bind(i64::from(options.budget))
+        .fetch_all(pool)
+        .await?;
+
+    let mut summary = SeasonBackfillSummary {
+        selected: candidates.len(),
+        ..SeasonBackfillSummary::default()
+    };
+
+    for (index, candidate) in candidates.iter().enumerate() {
+        if index > 0 && !options.request_delay.is_zero() {
+            tokio::time::sleep(options.request_delay).await;
+        }
+
+        let media = match sqlx::query_as::<_, Media>("SELECT * FROM media WHERE id = $1")
+            .bind(candidate.media_id)
+            .fetch_optional(pool)
+            .await?
+        {
+            Some(media) => media,
+            // Deleted between selection and now; nothing to fill.
+            None => continue,
+        };
+
+        match tmdb
+            .refresh_season_episodes(pool, &media, candidate.season_number)
+            .await
+        {
+            Ok(_) => summary.filled += 1,
+            // The provider has no such season. Common for a placeholder season
+            // row the show metadata announced before it existed; retrying every
+            // hour would be pointless, and it blocks nothing, because a season
+            // that does not exist cannot hide an episode.
+            Err(AppError::NotFound(_)) => {
+                summary.not_found += 1;
+                log::debug!(
+                    "season backfill: provider has no season tmdb_id={} season={}",
+                    candidate.tmdb_id,
+                    candidate.season_number
+                );
+            }
+            Err(error @ (AppError::DatabaseError(_) | AppError::InternalError(_))) => {
+                return Err(error);
+            }
+            Err(error) => {
+                summary.failures += 1;
+                log::warn!(
+                    "season backfill failed tmdb_id={} season={}: {error}",
+                    candidate.tmdb_id,
+                    candidate.season_number
+                );
+            }
+        }
+    }
+
+    Ok(summary)
+}
+
 #[derive(Debug, FromRow)]
 struct ReleaseScheduleCandidate {
     id: Uuid,

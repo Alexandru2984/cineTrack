@@ -1,0 +1,28 @@
+# Reviewed and accepted RustSec advisories.
+#
+# An entry here is a claim that the vulnerable code cannot be reached in this
+# deployment, not that the advisory is unimportant. Each one names the reason
+# and what would invalidate it. `scripts/tests/rust_audit_exceptions_test.sh`
+# checks the reasoning against the code, so an exception cannot quietly outlive
+# the facts it rests on.
+
+[advisories]
+ignore = [
+    # RUSTSEC-2026-0258 — h2: unbounded empty DATA frames (denial of service).
+    #
+    # Two versions are in the tree. h2 0.4 was updated to the patched 0.4.16.
+    # h2 0.3.27 comes from actix-http, and the advisory offers no fix on the 0.3
+    # line, so there is nothing to upgrade to short of actix-web 4 changing its
+    # own dependency.
+    #
+    # It is unreachable here. actix-web serves HTTP/2 only over a TLS bind with
+    # ALPN, or through an explicit h2c bind; `main.rs` uses a plain `.bind()`,
+    # which serves HTTP/1.x and nothing else. In front of it, nginx sets
+    # `proxy_http_version 1.1`, so the only client the backend ever has speaks
+    # HTTP/1.1 too. No connection reaches the h2 codec.
+    #
+    # Revisit if the server ever binds TLS or h2c, if nginx starts proxying with
+    # HTTP/2, or as soon as actix-http ships a release on patched h2 — whichever
+    # happens first. The guard test fails on the first two.
+    "RUSTSEC-2026-0258",
+]
