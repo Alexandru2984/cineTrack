@@ -70,7 +70,8 @@
     "minimatch@3.1.5": {
       "brace-expansion": "1.1.18"
     },
-    "uuid": "11.1.1"
+    "uuid": "11.1.1",
+    "nanoid": "3.3.18"
   },
   "engines": {
     "node": ">=22.13.0"
