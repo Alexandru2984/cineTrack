@@ -941,7 +941,16 @@ async fn follow_user(
             notifications::upsert(&mut tx, target.id, user_id, notifications::NEW_FOLLOWER).await?;
         }
     }
+    let notified_target = existing_status.as_deref() != Some(status.as_str());
     tx.commit().await?;
+
+    // After the commit, so a rolled-back follow cannot wake anybody.
+    if notified_target {
+        crate::services::events::publish(
+            target.id,
+            crate::services::events::UserEvent::NotificationsChanged,
+        );
+    }
 
     log::info!(
         "audit: follow relationship requested follower_id={user_id} following_id={} status={status}",
@@ -1224,6 +1233,10 @@ async fn accept_follow_request(
     )
     .await?;
     tx.commit().await?;
+    crate::services::events::publish(
+        follower_id,
+        crate::services::events::UserEvent::NotificationsChanged,
+    );
     log::info!("audit: follow request accepted follower_id={follower_id} following_id={user_id}");
     Ok(HttpResponse::Ok().json(serde_json::json!({"message": "Follow request accepted"})))
 }

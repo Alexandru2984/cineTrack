@@ -6,6 +6,7 @@ pub mod community_safety;
 pub mod completion;
 pub mod discovery;
 pub mod email;
+pub mod events;
 pub mod ical;
 pub mod importer;
 pub mod legal;

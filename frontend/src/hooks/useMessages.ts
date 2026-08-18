@@ -13,6 +13,13 @@ import type {
   MessageThread,
 } from '@/types';
 
+// Kept as a safety net rather than removed. The event stream is the primary
+// signal now, but SSE is the kind of thing a corporate proxy or a captive
+// portal quietly breaks, and a client that only listens would then look
+// permanently up to date while showing nothing new. A slow poll makes that
+// failure a delay instead of silence.
+const EVENT_STREAM_FALLBACK_MS = 120_000;
+
 const CONVERSATION_PAGE_SIZE = 30;
 const THREAD_PAGE_SIZE = 50;
 
@@ -36,7 +43,7 @@ export function useMessageSummary(enabled = true) {
       return response.data;
     },
     enabled,
-    refetchInterval: 30_000,
+    refetchInterval: EVENT_STREAM_FALLBACK_MS,
   });
 }
 
@@ -53,7 +60,7 @@ export function useMessageConversations(enabled = true) {
     getNextPageParam: (lastPage, pages) =>
       lastPage.length === CONVERSATION_PAGE_SIZE ? pages.length + 1 : undefined,
     enabled,
-    refetchInterval: 20_000,
+    refetchInterval: EVENT_STREAM_FALLBACK_MS,
   });
 }
 
@@ -80,7 +87,7 @@ export function useMessageThread(username: string) {
       return { before: firstMessage.created_at, beforeId: firstMessage.id };
     },
     enabled: Boolean(username),
-    refetchInterval: 10_000,
+    refetchInterval: EVENT_STREAM_FALLBACK_MS,
   });
 }
 
