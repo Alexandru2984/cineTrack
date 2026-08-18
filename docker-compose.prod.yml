@@ -70,6 +70,10 @@ services:
       RATE_LIMIT_REQUESTS_PER_SECOND: "${RATE_LIMIT_REQUESTS_PER_SECOND:-10}"
       RATE_LIMIT_BURST_SIZE: "${RATE_LIMIT_BURST_SIZE:-50}"
       BREACHED_PASSWORD_CHECK: "${BREACHED_PASSWORD_CHECK:-true}"
+      # Required in production: /metrics is on this container's own port, which
+      # is published on 127.0.0.1 next to unrelated services. `:?` so a missing
+      # value fails the deploy loudly instead of starting an open endpoint.
+      METRICS_BEARER_TOKEN: "${METRICS_BEARER_TOKEN:?METRICS_BEARER_TOKEN must be set}"
       SMTP_HOST: "${SMTP_HOST:-}"
       SMTP_PORT: "${SMTP_PORT:-587}"
       SMTP_USERNAME: "${SMTP_USERNAME:-}"

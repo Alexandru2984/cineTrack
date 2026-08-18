@@ -27,9 +27,10 @@ frontend/dist/
 # Docker volumes
 postgres_data/
 
-# IDE
+# IDE and agent tooling
 .vscode/
 .idea/
+.claude/
 *.swp
 *.swo
 
@@ -49,3 +50,4 @@ bench/results/
 bench-summary.json
 ops/alertmanager/alertmanager.generated.yml
 ops/alertmanager/smtp_password.generated
+ops/prometheus/metrics_token.generated

@@ -10,18 +10,25 @@ use crate::errors::AppError;
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Claims {
     pub sub: Uuid,
+    /// Session identity: the `family_id` of the refresh token this access token
+    /// was minted alongside. Constant across rotation, so it names the sign-in
+    /// rather than the individual token, which is what revocation needs to
+    /// address. See `services::revocation`.
+    pub sid: Uuid,
     pub exp: i64,
     pub iat: i64,
 }
 
 pub fn generate_access_token(
     user_id: Uuid,
+    session_id: Uuid,
     secret: &str,
     expiry_minutes: i64,
 ) -> Result<String, AppError> {
     let now = Utc::now();
     let claims = Claims {
         sub: user_id,
+        sid: session_id,
         iat: now.timestamp(),
         exp: (now + Duration::minutes(expiry_minutes)).timestamp(),
     };
@@ -38,6 +45,16 @@ pub fn validate_token(token: &str, secret: &str) -> Result<Claims, AppError> {
     let mut validation = Validation::new(Algorithm::HS256);
     validation.validate_exp = true;
     validation.leeway = 5;
+    // Only registered claims can be listed here; `sid` is a private claim and
+    // is enforced instead by `Claims::sid` being a plain `Uuid` rather than an
+    // `Option`, so a token without it fails to deserialize and is rejected.
+    //
+    // That is deliberate. Tokens minted before this claim existed stop
+    // validating at deploy, because the alternative — treating an absent `sid`
+    // as "not revocable, therefore allowed" — reopens the exact hole the claim
+    // closes, to anyone who simply strips it. The cost is one 401 per in-flight
+    // token, indistinguishable from an expired one, which both the web and
+    // mobile clients already answer by refreshing and retrying.
     validation.set_required_spec_claims(&["exp", "sub"]);
 
     let token_data = decode::<Claims>(
@@ -74,7 +91,9 @@ mod tests {
     #[test]
     fn test_generate_access_token_valid() {
         let user_id = Uuid::new_v4();
-        let token = generate_access_token(user_id, "test_secret_key_long_enough", 15).unwrap();
+        let token =
+            generate_access_token(user_id, Uuid::new_v4(), "test_secret_key_long_enough", 15)
+                .unwrap();
         assert!(!token.is_empty());
         // Should be a valid JWT (three dot-separated parts)
         assert_eq!(token.split('.').count(), 3);
@@ -84,15 +103,17 @@ mod tests {
     fn test_validate_token_accepts_valid() {
         let user_id = Uuid::new_v4();
         let secret = "test_secret_key_long_enough";
-        let token = generate_access_token(user_id, secret, 15).unwrap();
+        let session_id = Uuid::new_v4();
+        let token = generate_access_token(user_id, session_id, secret, 15).unwrap();
         let claims = validate_token(&token, secret).unwrap();
         assert_eq!(claims.sub, user_id);
+        assert_eq!(claims.sid, session_id);
     }
 
     #[test]
     fn test_validate_token_rejects_wrong_secret() {
         let user_id = Uuid::new_v4();
-        let token = generate_access_token(user_id, "secret_one", 15).unwrap();
+        let token = generate_access_token(user_id, Uuid::new_v4(), "secret_one", 15).unwrap();
         let result = validate_token(&token, "secret_two");
         assert!(result.is_err());
     }
@@ -102,7 +123,7 @@ mod tests {
         let user_id = Uuid::new_v4();
         let secret = "test_secret";
         // Create a token that expired one minute ago.
-        let token = generate_access_token(user_id, secret, -1).unwrap();
+        let token = generate_access_token(user_id, Uuid::new_v4(), secret, -1).unwrap();
         let result = validate_token(&token, secret);
         assert!(result.is_err());
     }
@@ -118,6 +139,7 @@ mod tests {
         let secret = "test_secret_key_long_enough";
         let claims = serde_json::json!({
             "sub": Uuid::new_v4(),
+            "sid": Uuid::new_v4(),
             "iat": Utc::now().timestamp(),
             "exp": "never"
         });
@@ -129,6 +151,68 @@ mod tests {
         .unwrap();
 
         assert!(validate_token(&token, secret).is_err());
+    }
+
+    #[test]
+    fn test_validate_token_rejects_a_missing_session_claim() {
+        // The revocation check is keyed on `sid`. A token without one cannot be
+        // revoked, so accepting it would hand anyone who strips the claim a
+        // credential that survives "sign out everywhere". Correctly signed and
+        // unexpired is not enough.
+        let secret = "test_secret_key_long_enough";
+        let claims = serde_json::json!({
+            "sub": Uuid::new_v4(),
+            "iat": Utc::now().timestamp(),
+            "exp": (Utc::now() + Duration::minutes(15)).timestamp(),
+        });
+        let token = encode(
+            &Header::default(),
+            &claims,
+            &EncodingKey::from_secret(secret.as_bytes()),
+        )
+        .unwrap();
+
+        assert!(validate_token(&token, secret).is_err());
+    }
+
+    #[test]
+    fn test_validate_token_rejects_a_malformed_session_claim() {
+        let secret = "test_secret_key_long_enough";
+        let claims = serde_json::json!({
+            "sub": Uuid::new_v4(),
+            "sid": "not-a-uuid",
+            "iat": Utc::now().timestamp(),
+            "exp": (Utc::now() + Duration::minutes(15)).timestamp(),
+        });
+        let token = encode(
+            &Header::default(),
+            &claims,
+            &EncodingKey::from_secret(secret.as_bytes()),
+        )
+        .unwrap();
+
+        assert!(validate_token(&token, secret).is_err());
+    }
+
+    #[test]
+    fn test_two_sessions_for_one_user_get_distinct_session_claims() {
+        // Revocation addresses sessions, so two sign-ins by the same account
+        // must be distinguishable — otherwise revoking one would revoke both.
+        let user_id = Uuid::new_v4();
+        let secret = "test_secret_key_long_enough";
+        let first = validate_token(
+            &generate_access_token(user_id, Uuid::new_v4(), secret, 15).unwrap(),
+            secret,
+        )
+        .unwrap();
+        let second = validate_token(
+            &generate_access_token(user_id, Uuid::new_v4(), secret, 15).unwrap(),
+            secret,
+        )
+        .unwrap();
+
+        assert_eq!(first.sub, second.sub);
+        assert_ne!(first.sid, second.sid);
     }
 
     #[test]
@@ -197,7 +281,7 @@ mod tests {
     fn test_token_claims_contain_correct_timestamps() {
         let user_id = Uuid::new_v4();
         let secret = "test_secret";
-        let token = generate_access_token(user_id, secret, 15).unwrap();
+        let token = generate_access_token(user_id, Uuid::new_v4(), secret, 15).unwrap();
         let claims = validate_token(&token, secret).unwrap();
         assert!(claims.iat > 0);
         assert!(claims.exp > claims.iat);

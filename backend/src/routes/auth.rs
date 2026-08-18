@@ -627,33 +627,7 @@ mod tests {
     fn test_config(app_env: &str) -> Config {
         Config {
             app_env: app_env.to_string(),
-            app_host: "127.0.0.1".to_string(),
-            app_port: 0,
-            frontend_url: "http://localhost:5173".to_string(),
-            database_url: "postgres://example".to_string(),
-            jwt_secret: "test_secret_must_be_64_chars_long_so_we_pad_it_here_abcdefghijklmnopq"
-                .to_string(),
-            totp_encryption_key: [0x42; 32],
-            jwt_expiry_minutes: 15,
-            jwt_refresh_expiry_days: 30,
-            tmdb_api_key: "fake".to_string(),
-            tmdb_read_access_token: None,
-            tmdb_base_url: "https://api.themoviedb.org/3".to_string(),
-            tmdb_image_base_url: "https://image.tmdb.org/t/p".to_string(),
-            tmdb_timeout_seconds: 10,
-            cors_allowed_origins: vec!["http://localhost:5173".to_string()],
-            rate_limit_rps: 10,
-            rate_limit_burst: 50,
-            smtp_host: None,
-            smtp_port: 587,
-            smtp_username: None,
-            smtp_password: None,
-            smtp_from: "CineTrack <noreply@localhost>".to_string(),
-            smtp_timeout_seconds: 15,
-            expo_push_access_token: None,
-            expo_push_timeout_seconds: 15,
-            breached_password_check: false,
-            r2: None,
+            ..Config::for_test()
         }
     }
 

@@ -369,6 +369,9 @@ jobs:
       - name: Validate Alertmanager config permissions
         run: scripts/tests/alertmanager_config_test.sh
 
+      - name: Validate metrics scrape credential wiring
+        run: scripts/tests/metrics_scrape_auth_test.sh
+
       - name: Validate calendar feed log redaction
         run: scripts/tests/calendar_feed_log_safety_test.sh
 
@@ -377,6 +380,12 @@ jobs:
 
       - name: Validate deployment isolation
         run: scripts/tests/deployment_hardening_test.sh
+
+      # Contract only. The audit itself is host-local — a runner's checkout has
+      # no .env.prod and no credential files, so running the checker here would
+      # pass vacuously and prove nothing. The operator runs it on the VPS.
+      - name: Validate secret hygiene checks
+        run: scripts/tests/secret_hygiene_test.sh
 
       - name: Validate Prometheus alert rules
         run: |

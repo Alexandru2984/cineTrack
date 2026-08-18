@@ -3,7 +3,27 @@ use uuid::Uuid;
 
 use crate::config::Config;
 use crate::errors::AppError;
+use crate::services::revocation;
 use crate::utils::jwt;
+
+/// Verify a decoded token against the revocation cache.
+///
+/// A valid signature only proves the token was minted by us; it says nothing
+/// about whether the session behind it still exists. Signing out, changing a
+/// password, or revoking a session must take effect now rather than whenever
+/// the token happens to expire, so every authenticated entry point runs this.
+///
+/// The lookup is in-process (see `services::revocation`), so this costs no
+/// query and nothing on the hot path.
+fn reject_revoked(claims: jwt::Claims) -> Result<Uuid, AppError> {
+    if revocation::is_revoked(claims.sid, claims.sub, claims.iat) {
+        // Deliberately indistinguishable from any other rejected token: a
+        // caller holding a revoked credential learns that it no longer works,
+        // not why, and not that the account still exists.
+        return Err(AppError::Unauthorized("Not authenticated".to_string()));
+    }
+    Ok(claims.sub)
+}
 
 pub fn extract_user_id(req: &HttpRequest) -> Result<Uuid, AppError> {
     req.extensions()
@@ -31,7 +51,7 @@ pub async fn validate_token_from_request(
         .ok_or_else(|| AppError::Unauthorized("Invalid Authorization format".to_string()))?;
 
     let claims = jwt::validate_token(token, &config.jwt_secret)?;
-    Ok(claims.sub)
+    reject_revoked(claims)
 }
 
 /// Middleware extractor: call this at the start of protected route handlers
@@ -51,7 +71,7 @@ pub async fn require_auth(req: &HttpRequest) -> Result<Uuid, AppError> {
         .ok_or_else(|| AppError::Unauthorized("Invalid Authorization format".to_string()))?;
 
     let claims = jwt::validate_token(token, &config.jwt_secret)?;
-    Ok(claims.sub)
+    reject_revoked(claims)
 }
 
 #[cfg(test)]
@@ -63,38 +83,17 @@ mod tests {
 
     fn test_config() -> Config {
         Config {
-            app_env: "test".to_string(),
-            app_host: "127.0.0.1".to_string(),
-            app_port: 8080,
-            frontend_url: "http://localhost:5173".to_string(),
-            database_url: "postgres://example".to_string(),
             jwt_secret: SECRET.to_string(),
-            totp_encryption_key: [0x42; 32],
-            jwt_expiry_minutes: 15,
-            jwt_refresh_expiry_days: 30,
-            tmdb_api_key: "fake".to_string(),
-            tmdb_read_access_token: None,
-            tmdb_base_url: "https://api.themoviedb.org/3".to_string(),
-            tmdb_image_base_url: "https://image.tmdb.org/t/p".to_string(),
-            tmdb_timeout_seconds: 10,
-            cors_allowed_origins: vec!["http://localhost:5173".to_string()],
-            rate_limit_rps: 10,
-            rate_limit_burst: 50,
-            smtp_host: None,
-            smtp_port: 587,
-            smtp_username: None,
-            smtp_password: None,
-            smtp_from: "CineTrack <noreply@localhost>".to_string(),
-            smtp_timeout_seconds: 15,
-            expo_push_access_token: None,
-            expo_push_timeout_seconds: 15,
-            breached_password_check: false,
-            r2: None,
+            ..Config::for_test()
         }
     }
 
     fn token_for(user_id: Uuid, expiry_minutes: i64) -> String {
-        jwt::generate_access_token(user_id, SECRET, expiry_minutes).unwrap()
+        jwt::generate_access_token(user_id, Uuid::new_v4(), SECRET, expiry_minutes).unwrap()
+    }
+
+    fn token_for_session(user_id: Uuid, session_id: Uuid) -> String {
+        jwt::generate_access_token(user_id, session_id, SECRET, 15).unwrap()
     }
 
     /// An HttpRequest carrying the config plus an optional Authorization
@@ -164,7 +163,9 @@ mod tests {
 
     #[actix_web::test]
     async fn require_auth_rejects_a_token_signed_with_another_secret() {
-        let foreign = jwt::generate_access_token(Uuid::new_v4(), "a_different_secret", 15).unwrap();
+        let foreign =
+            jwt::generate_access_token(Uuid::new_v4(), Uuid::new_v4(), "a_different_secret", 15)
+                .unwrap();
         let req = request_with_auth(Some(&format!("Bearer {foreign}")));
         assert!(require_auth(&req).await.is_err());
     }
@@ -207,6 +208,59 @@ mod tests {
             .insert_header(("Authorization", format!("Bearer {token}")))
             .to_http_request();
         assert!(require_auth(&req).await.is_err());
+    }
+
+    // ── revocation ──────────────────────────────────────────────
+
+    #[actix_web::test]
+    async fn require_auth_rejects_a_revoked_session() {
+        // The token is signed correctly and nowhere near expiry. The only
+        // reason to refuse it is that its session was revoked — which is the
+        // entire point: "sign out everywhere" has to mean now, not in fifteen
+        // minutes.
+        let user_id = Uuid::new_v4();
+        let session_id = Uuid::new_v4();
+        let token = token_for_session(user_id, session_id);
+
+        let before = request_with_auth(Some(&format!("Bearer {token}")));
+        assert_eq!(require_auth(&before).await.unwrap(), user_id);
+
+        revocation::revoke_session_in_memory(session_id);
+
+        let after = request_with_auth(Some(&format!("Bearer {token}")));
+        assert!(require_auth(&after).await.is_err());
+    }
+
+    #[actix_web::test]
+    async fn revoking_one_session_leaves_the_users_other_session_working() {
+        // Revoking a single device must not sign the account out everywhere.
+        let user_id = Uuid::new_v4();
+        let revoked_session = Uuid::new_v4();
+        let kept_session = Uuid::new_v4();
+        let revoked_token = token_for_session(user_id, revoked_session);
+        let kept_token = token_for_session(user_id, kept_session);
+
+        revocation::revoke_session_in_memory(revoked_session);
+
+        let revoked = request_with_auth(Some(&format!("Bearer {revoked_token}")));
+        let kept = request_with_auth(Some(&format!("Bearer {kept_token}")));
+        assert!(require_auth(&revoked).await.is_err());
+        assert_eq!(require_auth(&kept).await.unwrap(), user_id);
+    }
+
+    #[actix_web::test]
+    async fn validate_token_from_request_also_rejects_a_revoked_session() {
+        // Both entry points must apply the check; a gap in either is a bypass.
+        let session_id = Uuid::new_v4();
+        let token = token_for_session(Uuid::new_v4(), session_id);
+        revocation::revoke_session_in_memory(session_id);
+
+        let req = TestRequest::default()
+            .insert_header(("Authorization", format!("Bearer {token}")))
+            .to_srv_request();
+        assert!(validate_token_from_request(&req, &test_config())
+            .await
+            .is_err());
     }
 
     // ── validate_token_from_request ─────────────────────────────

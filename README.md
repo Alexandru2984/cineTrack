@@ -75,6 +75,7 @@ production/EAS procedure is documented in
 The application has been through multiple security audits. Key measures include:
 
 - **Authentication** — Short-lived JWT access tokens (15 min) with SHA-256 hashed refresh tokens, automatic rotation, and per-user token cap (max 5 sessions)
+- **Instant Session Revocation** — Access tokens carry a session identifier, so signing out, revoking a device, changing or resetting a password, and refresh-token reuse detection cut off access immediately rather than when the token happens to expire; revocations are persisted and reloaded at startup, so a restart cannot resurrect a revoked session
 - **Two-Factor Auth (TOTP)** — Optional RFC 6238 authenticator codes with AES-256-GCM encrypted secrets, one-use time-step replay protection, and SHA-256 hashed recovery codes; disabling requires the account password
 - **Breached-Password Rejection** — Register/change/reset check the password against Have I Been Pwned via k-anonymity (only a 5-char SHA-1 prefix leaves the server; fail-open)
 - **Email Verification** — One-time confirmation link on registration (hashed token, 24h TTL, resend cooldown); existing accounts grandfathered
@@ -95,7 +96,7 @@ The application has been through multiple security audits. Key measures include:
 - **Security Headers** — HSTS, X-Frame-Options (DENY), X-Content-Type-Options, Referrer-Policy, Permissions-Policy, and a same-origin-only script/connect Content-Security-Policy
 - **Container Security** — Both backend and frontend run as non-root users; Docker resource limits enforced
 - **Error Handling** — Internal errors (TMDB, JWT) sanitized before reaching client; no stack traces or implementation details leaked
-- **Secrets** — Cryptographically generated JWT secret (64 bytes) and DB password; `.env.prod` is `chmod 600` and `.gitignore`'d
+- **Secrets** — Cryptographically generated JWT secret (64 bytes) and DB password; `.env.prod` is `chmod 600` and `.gitignore`'d. `scripts/check_secret_hygiene.sh` audits every credential file on the host by permission mode, tracking status, and ignore rule — being gitignored is not the same as being unreadable
 
 ## Getting Started
 
