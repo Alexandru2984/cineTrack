@@ -20,6 +20,13 @@ import type {
   MessageThread,
 } from '@/types';
 
+// Kept as a safety net rather than removed. The event stream is the primary
+// signal now, but a captive portal or a restrictive mobile network can break a
+// long-lived connection without breaking ordinary requests — and a client that
+// only listens would then look permanently up to date while showing nothing
+// new. A slow poll makes that failure a delay instead of silence.
+const EVENT_STREAM_FALLBACK_MS = 120_000;
+
 export const messageKeys = {
   all: ['messages'] as const,
   summary: ['messages', 'summary'] as const,
@@ -34,7 +41,7 @@ export function useMessageSummary(enabled = true, poll = false) {
     queryFn: ({ signal }) =>
       apiRequest<MessageSummary>('/messages/summary', { signal }),
     enabled,
-    refetchInterval: poll ? 30_000 : false,
+    refetchInterval: poll ? EVENT_STREAM_FALLBACK_MS : false,
   });
 }
 
@@ -55,7 +62,7 @@ export function useMessageConversations(enabled = true) {
         ? pages.length + 1
         : undefined,
     enabled,
-    refetchInterval: enabled ? 20_000 : false,
+    refetchInterval: enabled ? EVENT_STREAM_FALLBACK_MS : false,
   });
 }
 
@@ -76,7 +83,8 @@ export function useMessageThread(username: string, enabled = true) {
     initialPageParam: null as MessageCursor | null,
     getNextPageParam: nextMessageCursor,
     enabled: enabled && username.length > 0,
-    refetchInterval: enabled && username.length > 0 ? 10_000 : false,
+    refetchInterval:
+      enabled && username.length > 0 ? EVENT_STREAM_FALLBACK_MS : false,
   });
 }
 

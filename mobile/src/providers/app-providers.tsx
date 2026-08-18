@@ -26,6 +26,7 @@ import {
 import { flushPendingLogoutRevocations, resumeOfflineSession } from '@/lib/session';
 import { useAuthStore } from '@/store/auth';
 import { useLocaleStore } from '@/store/locale';
+import { useEventStream } from '@/hooks/use-event-stream';
 
 function refreshReleaseNotifications() {
   void flushPendingLogoutRevocations().catch(() => undefined);
@@ -165,9 +166,17 @@ export function AppProviders({ children }: PropsWithChildren) {
             dehydrateOptions: queryDehydrateOptions,
           }}
         >
+          <EventStreamBridge />
           {children}
         </PersistQueryClientProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );
+}
+
+/** Renders nothing; exists so the event stream runs inside the query provider,
+ *  which is what supplies the client it invalidates. */
+function EventStreamBridge() {
+  useEventStream();
+  return null;
 }
