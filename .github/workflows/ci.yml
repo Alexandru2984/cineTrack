@@ -513,6 +513,13 @@ jobs:
           cargo audit
           cargo deny check --hide-inclusion-graph licenses sources bans
 
+      # Guards the ignore list `cargo audit` just honoured: each accepted
+      # advisory claims the vulnerable code is unreachable here, and those
+      # claims have to still be true.
+      - name: Validate audit exceptions
+        working-directory: .
+        run: scripts/tests/rust_audit_exceptions_test.sh
+
   container-security:
     name: Container Security
     timeout-minutes: 30
