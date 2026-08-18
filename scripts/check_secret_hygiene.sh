@@ -11,7 +11,9 @@
 #
 # The checks are deliberately about the *filesystem*, not about content:
 #
-#   1. mode      — group and other bits must be clear (0600/0400).
+#   1. mode      — group and other bits must be clear (0600/0400), except for
+#                  credentials rendered for a container to read, which may be
+#                  group-readable (0640) but never world-readable.
 #   2. tracked   — a secret must never be in the git index.
 #   3. ignored   — a secret must be matched by .gitignore, so a future
 #                  `git add -A` cannot stage it.
@@ -86,19 +88,36 @@ SECRET_PATTERNS=(
   '*.key'
 )
 
+# Credentials rendered from .env.prod for a container to read. These are held
+# to a deliberately weaker rule: other-bits clear, group-read allowed.
+#
+# Not laziness — a design constraint. Prometheus and Alertmanager run as
+# `nobody` with the host's METRICS_GID as a supplementary group, precisely so a
+# mode-640 file can be mounted in without the credential becoming world
+# readable. Demanding 0600 here would fail a correct deployment and, worse,
+# invite someone to "fix" it by widening the mode instead.
+#
+# The exposure that actually matters on a host shared with unrelated services
+# is the other-bits, and those are still checked.
+GROUP_READABLE_PATTERNS=(
+  '*.generated'
+)
+
 # Directories holding bulk personal data pulled in for a one-off task.
 PII_DIRS=(
   'tvtime_data'
 )
 
-# Build the find expression once: -name A -o -name B -o ...
-find_args=()
-for pattern in "${SECRET_PATTERNS[@]}"; do
-  if [[ ${#find_args[@]} -gt 0 ]]; then
-    find_args+=(-o)
-  fi
-  find_args+=(-name "$pattern")
-done
+# Build a find expression from a pattern list: -name A -o -name B -o ...
+build_find_args() {
+  find_args=()
+  for pattern in "$@"; do
+    if [[ ${#find_args[@]} -gt 0 ]]; then
+      find_args+=(-o)
+    fi
+    find_args+=(-name "$pattern")
+  done
+}
 
 # Generated trees are pruned rather than audited. `expo prebuild` writes
 # mobile/android and mobile/ios from scratch on every run, and android/app
@@ -107,17 +126,22 @@ done
 # machine with an Android SDK. Flagging its mode is noise that trains the
 # reader to skim past real findings. The real signing material is EAS-managed
 # and never lands in the work tree.
-mapfile -d '' -t secrets < <(
+find_secrets() {
   find "$ROOT" \
     \( -name .git -o -name node_modules -o -name target -o -name dist \
        -o -path "$ROOT/mobile/android" -o -path "$ROOT/mobile/ios" \
        -o -name .expo \) -prune -o \
     -type f \( "${find_args[@]}" \) -print0 2>/dev/null
-)
+}
+
+build_find_args "${SECRET_PATTERNS[@]}"
+mapfile -d '' -t secrets < <(find_secrets)
+build_find_args "${GROUP_READABLE_PATTERNS[@]}"
+mapfile -d '' -t group_readable_secrets < <(find_secrets)
 
 printf '=== Secret file hygiene (%s) ===\n' "$ROOT"
 
-if [[ ${#secrets[@]} -eq 0 ]]; then
+if [[ ${#secrets[@]} -eq 0 && ${#group_readable_secrets[@]} -eq 0 ]]; then
   pass "no secret-bearing files found"
 fi
 
@@ -129,30 +153,44 @@ if git -C "$ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   in_git_worktree=1
 fi
 
-for path in "${secrets[@]}"; do
-  relative="${path#"$ROOT"/}"
+# $1 = file, $2 = "owner" (0600) or "group" (0640) — how wide the mode may be.
+audit_secret_file() {
+  local path="$1" allow="$2"
+  local relative="${path#"$ROOT"/}"
+  local mode padded
 
-  # 1. Mode: nothing for group, nothing for other.
   mode="$(stat -c '%a' "$path")"
   # Zero-pad so a 3-digit and a 4-digit (setuid) mode compare the same way.
   printf -v padded '%04d' "$((10#$mode))"
-  if [[ "${padded:2:1}" != "0" || "${padded:3:1}" != "0" ]]; then
+
+  # The other-bits are the exposure that matters on a host shared with
+  # unrelated services, and they are refused in both classes.
+  if [[ "${padded:3:1}" != "0" ]]; then
+    fail "$relative is mode $mode — world readable"
+  elif [[ "$allow" == "owner" && "${padded:2:1}" != "0" ]]; then
     fail "$relative is mode $mode — readable beyond its owner (want 600)"
   else
     pass "$relative mode $mode"
   fi
 
   if [[ $in_git_worktree -eq 1 ]]; then
-    # 2. Tracked: a secret in the index is already shared with the remote.
+    # A secret in the index is already shared with the remote.
     if git -C "$ROOT" ls-files --error-unmatch -- "$relative" >/dev/null 2>&1; then
       fail "$relative is TRACKED by git — remove it from the index and rotate the value"
     fi
 
-    # 3. Ignored: without this, one `git add -A` stages it.
+    # Without an ignore rule, one `git add -A` stages it.
     if ! git -C "$ROOT" check-ignore -q -- "$relative"; then
       fail "$relative is not matched by .gitignore — a 'git add -A' would stage it"
     fi
   fi
+}
+
+for path in "${secrets[@]}"; do
+  audit_secret_file "$path" owner
+done
+for path in "${group_readable_secrets[@]}"; do
+  audit_secret_file "$path" group
 done
 
 # 4. Superseded copies of rotated secrets.

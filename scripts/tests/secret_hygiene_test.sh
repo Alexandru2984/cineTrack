@@ -90,6 +90,50 @@ status=0
 run_checker output --root "$repo" || status=$?
 check "0600 credential exits zero" "$status" "0"
 
+# ── Rendered container credentials may be group-readable, never world ───
+#
+# Prometheus and Alertmanager read their credentials as `nobody` plus the host
+# metrics group, so 0640 is the correct mode and demanding 0600 would fail a
+# working deployment. The other-bits are still the line that must not move.
+
+repo="$(new_repo generated)"
+printf '%s\n' '*.generated' >"$repo/.gitignore"
+printf 'secret-value' >"$repo/metrics_token.generated"
+
+chmod 640 "$repo/metrics_token.generated"
+status=0
+run_checker output --root "$repo" || status=$?
+check "a 0640 rendered credential is accepted" "$status" "0"
+case "$output" in
+  *"metrics_token.generated mode 640"*) printf 'ok    audits the rendered credential\n' ;;
+  *)
+    printf 'FAIL  rendered credential was not audited at all\n'
+    FAILURES=$((FAILURES + 1))
+    ;;
+esac
+
+chmod 644 "$repo/metrics_token.generated"
+status=0
+run_checker output --root "$repo" || status=$?
+check "a world-readable rendered credential is refused" "$status" "1"
+case "$output" in
+  *"world readable"*) printf 'ok    names the world-readable problem\n' ;;
+  *)
+    printf 'FAIL  did not name the world-readable problem\n'
+    FAILURES=$((FAILURES + 1))
+    ;;
+esac
+
+# The relaxation must not leak into the strict class: 0640 on an ordinary
+# secret is still too wide.
+repo="$(new_repo group-readable-secret)"
+printf 'secret-value\n' >"$repo/deploy.pem"
+chmod 640 "$repo/deploy.pem"
+printf '%s\n' '*.pem' >"$repo/.gitignore"
+status=0
+run_checker output --root "$repo" || status=$?
+check "a 0640 ordinary secret is still refused" "$status" "1"
+
 # ── A tracked secret must fail even at 0600 ─────────────────────────────
 
 repo="$(new_repo tracked)"
