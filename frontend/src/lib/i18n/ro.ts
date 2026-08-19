@@ -273,6 +273,48 @@ export const ro: Dictionary = {
     read: 'Citit',
     reportMessage: 'Raportează mesajul',
     reportTarget: 'mesajul de la @{username}',
+    encryptedPreview: 'Mesaj criptat',
+    lockedPreview: 'Blocat',
+    undecryptable: 'Acest mesaj nu poate fi deschis pe acest dispozitiv',
+    encryptedLabel: 'Criptat cap-coadă',
+    commitmentMismatch:
+      'Acest mesaj nu corespunde cu ceea ce a semnat expeditorul, deci nu poate fi raportat.',
+    privacyNoticeEncrypted:
+      'Mesajele din această conversație sunt criptate cap-coadă. Văzute le stochează, dar nu le poate citi. Un mesaj pe care îl raportezi este dezvăluit moderatorilor de către tine, și doar acel mesaj.',
+    encryptionRequired:
+      'Conversația este criptată, iar acest dispozitiv nu are cheia ta. Restaureaz-o pentru a trimite mesaje.',
+  },
+  encryption: {
+    setupTitle: 'Activează criptarea cap-coadă',
+    setupBody:
+      'Mesajele tale vor fi criptate pe dispozitiv și vor putea fi citite doar de tine și de persoana căreia îi scrii. Văzute le va stoca fără să le poată citi.',
+    setupAction: 'Activează criptarea',
+    password: 'Parola contului tău',
+    passwordHint:
+      'Folosită ca să-ți protejeze cheia, ca s-o poți restaura pe alt dispozitiv. Nu este trimisă nicăieri.',
+    working: 'Se lucrează…',
+    recoveryTitle: 'Salvează codul de recuperare',
+    recoveryBody:
+      'Codul îți restaurează mesajele dacă îți uiți parola. Se afișează o singură dată și nimeni altcineva nu are o copie — nici noi. Păstrează-l la loc sigur.',
+    recoveryConfirm: 'L-am salvat',
+    copy: 'Copiază',
+    copied: 'Copiat',
+    restoreTitle: 'Restaurează cheia de criptare',
+    restoreBody:
+      'Acest dispozitiv nu are încă cheia ta. Deblocheaz-o ca să citești și să trimiți mesaje.',
+    restoreWithPassword: 'Folosesc parola',
+    restoreWithCode: 'Folosesc codul de recuperare',
+    recoveryCode: 'Cod de recuperare',
+    restoreAction: 'Deblochează',
+    wrongSecret: 'Nu a deblocat cheia. Verifică și încearcă din nou.',
+    keyMismatch:
+      'Cheia ta a fost înlocuită pe alt dispozitiv. Activează criptarea din nou pentru a continua — mesajele mai vechi vor rămâne necitibile aici.',
+    unavailable:
+      'Acest browser nu poate stoca chei de criptare, deci mesajele criptate nu sunt disponibile aici. De obicei o fereastră privată cauzează asta.',
+    failed: 'Criptarea nu a putut fi activată',
+    safetyNumber: 'Număr de siguranță',
+    safetyNumberHint:
+      'Compară-l cu cealaltă persoană pe alt canal. Numere identice înseamnă că nimeni nu stă între voi.',
   },
   activity: {
     loadError: 'Activitatea nu a putut fi încărcată',

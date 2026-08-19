@@ -1,10 +1,8 @@
 /** Turning stored envelopes back into text, and text into envelopes.
  *
- *  The decryption cache is what makes this practical to call from render. An
- *  X25519 agreement per message is roughly a millisecond, which is nothing once
- *  and noticeable when a fifty-message thread re-renders on every keystroke in
- *  the composer. Messages are immutable, so a cache keyed by id can never be
- *  stale. */
+ *  Everything here is synchronous and pulls in the primitives, so this module
+ *  belongs to the messaging chunk rather than the initial route. The cache it
+ *  uses lives in `cache.ts` for exactly that reason. */
 import {
   decryptMessage,
   encryptMessage,
@@ -12,18 +10,11 @@ import {
   toHex,
   type IdentityKeyPair,
 } from '@/lib/crypto/core';
+import { lookup, remember, type DecryptedContent } from '@/lib/crypto/cache';
 import type { DirectMessage, MessageConversation, PeerPublicKeys } from '@/types';
 
-export interface DecryptedContent {
-  text: string;
-  /** Opens the sender's commitment. Held only in memory, and only so a report
-   *  can carry it: it is the difference between a moderator seeing text the
-   *  sender provably wrote and text the reporter typed. */
-  frankingKey: Uint8Array;
-  /** False when the sender encrypted one thing and committed to another. Such a
-   *  message cannot be reported, so saying so beats showing it as ordinary. */
-  commitmentVerified: boolean;
-}
+export { clearDecryptionCache } from '@/lib/crypto/cache';
+export type { DecryptedContent };
 
 export type MessageContent =
   | { kind: 'plain'; text: string }
@@ -31,29 +22,11 @@ export type MessageContent =
   | { kind: 'locked' }
   | { kind: 'undecryptable' };
 
-const cache = new Map<string, DecryptedContent>();
-/** Bounded so a long-lived tab scrolling years of history cannot grow without
- *  limit. Oldest-first eviction matches how threads are read. */
-const CACHE_LIMIT = 500;
-
-function remember(id: string, content: DecryptedContent) {
-  if (cache.size >= CACHE_LIMIT) {
-    const oldest = cache.keys().next();
-    if (!oldest.done) cache.delete(oldest.value);
-  }
-  cache.set(id, content);
-}
-
-/** Forget every decrypted message. Called on sign-out, so plaintext does not
- *  outlive the session in memory. */
-export function clearDecryptionCache() {
-  cache.clear();
-}
-
 interface Envelope {
   ciphertext?: string | null;
   nonce?: string | null;
   sender_ephemeral_key?: string | null;
+  sender_copy?: string | null;
   franking_commitment?: string | null;
 }
 
@@ -67,7 +40,7 @@ function decryptEnvelope(
   }
   if (!identity) return { kind: 'locked' };
 
-  const cached = cache.get(id);
+  const cached = lookup(id);
   if (cached) return { kind: 'encrypted', content: cached };
 
   try {
@@ -76,6 +49,7 @@ function decryptEnvelope(
         ciphertext: fromHex(envelope.ciphertext),
         nonce: fromHex(envelope.nonce),
         senderEphemeralKey: fromHex(envelope.sender_ephemeral_key),
+        senderCopy: envelope.sender_copy ? fromHex(envelope.sender_copy) : undefined,
         frankingCommitment: fromHex(envelope.franking_commitment ?? ''),
         // Verified by the server at report time, never here — a client holding
         // the signature could only mislead itself about having checked it.
@@ -119,6 +93,7 @@ export function readConversationPreview(
     ciphertext: conversation.last_message_ciphertext,
     nonce: conversation.last_message_nonce,
     sender_ephemeral_key: conversation.last_message_sender_ephemeral_key,
+    sender_copy: conversation.last_message_sender_copy,
     // A preview is not a report. Without the commitment the decryption still
     // succeeds; only `commitmentVerified` is meaningless, and nothing here
     // reads it.
@@ -130,6 +105,7 @@ export interface EncryptedPayload {
   ciphertext: string;
   nonce: string;
   sender_ephemeral_key: string;
+  sender_copy: string;
   franking_commitment: string;
   franking_signature: string;
 }
@@ -148,6 +124,7 @@ export function sealMessage(
   const envelope = encryptMessage(
     plaintext,
     fromHex(peer.exchange_public_key),
+    identity.exchangePublicKey,
     identity.signingPrivateKey,
     clientNonce,
   );
@@ -155,6 +132,7 @@ export function sealMessage(
     ciphertext: toHex(envelope.ciphertext),
     nonce: toHex(envelope.nonce),
     sender_ephemeral_key: toHex(envelope.senderEphemeralKey),
+    sender_copy: toHex(envelope.senderCopy ?? new Uint8Array()),
     franking_commitment: toHex(envelope.frankingCommitment),
     franking_signature: toHex(envelope.frankingSignature),
   };

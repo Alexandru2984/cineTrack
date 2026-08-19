@@ -451,6 +451,7 @@ export interface DirectMessage {
   ciphertext?: string | null;
   nonce?: string | null;
   sender_ephemeral_key?: string | null;
+  sender_copy?: string | null;
   franking_commitment?: string | null;
   read_at: string | null;
   created_at: string;
@@ -478,6 +479,7 @@ export interface MessageConversation {
   last_message_ciphertext?: string | null;
   last_message_nonce?: string | null;
   last_message_sender_ephemeral_key?: string | null;
+  last_message_sender_copy?: string | null;
   last_message_at: string;
   last_message_read_at: string | null;
   unread_count: number;

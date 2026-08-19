@@ -3,25 +3,18 @@
  *  Everything the server sees here is opaque to it: wrapped key material and
  *  the parameters needed to reproduce the wrapping key, never the key. */
 import api from '@/lib/api';
-import {
-  DEFAULT_KDF_COST,
-  SALT_BYTES,
-  deriveWrappingKey,
-  fingerprint as computeFingerprint,
-  fromHex,
-  generateIdentity,
-  generateRecoveryCode,
-  toHex,
-  unwrapIdentity,
-  wrapIdentity,
-  type IdentityKeyPair,
-  type KdfCost,
-} from '@/lib/crypto/core';
+// Loaded on demand. This module is reached from the initial route — the app
+// asks on startup whether this device holds keys — while the primitives it uses
+// are a third of a megabyte that only setting up or restoring actually needs.
+// Type-only imports are erased and cost nothing.
+import type { IdentityKeyPair, KdfCost } from '@/lib/crypto/core';
 import { loadIdentity, saveIdentity } from '@/lib/crypto/storage';
 import type { KeyBackup, KeyStatus, PeerPublicKeys } from '@/types';
 
-function randomSalt(): Uint8Array {
-  return crypto.getRandomValues(new Uint8Array(SALT_BYTES));
+const core = () => import('@/lib/crypto/core');
+
+function randomSalt(saltBytes: number): Uint8Array {
+  return crypto.getRandomValues(new Uint8Array(saltBytes));
 }
 
 function costFromApi(kdf: KeyBackup['password_kdf']): KdfCost {
@@ -49,12 +42,23 @@ export interface SetupResult {
  *  forgotten password is common and recoverable, and a password change would
  *  otherwise destroy the backup. The recovery code survives both. */
 export async function setupIdentity(userId: string, password: string): Promise<SetupResult> {
+  const {
+    DEFAULT_KDF_COST,
+    SALT_BYTES,
+    deriveWrappingKey,
+    fingerprint: computeFingerprint,
+    generateIdentity,
+    generateRecoveryCode,
+    toHex,
+    wrapIdentity,
+  } = await core();
+
   const identity = generateIdentity();
   const recoveryCode = generateRecoveryCode();
   const fingerprint = computeFingerprint(identity.exchangePublicKey, identity.signingPublicKey);
 
-  const passwordSalt = randomSalt();
-  const recoverySalt = randomSalt();
+  const passwordSalt = randomSalt(SALT_BYTES);
+  const recoverySalt = randomSalt(SALT_BYTES);
 
   await api.put('/encryption/keys', {
     exchange_public_key: toHex(identity.exchangePublicKey),
@@ -100,6 +104,13 @@ export async function restoreIdentity(
   secret: string,
   kind: 'password' | 'recovery',
 ): Promise<{ identity: IdentityKeyPair; fingerprint: string }> {
+  const {
+    deriveWrappingKey,
+    fingerprint: computeFingerprint,
+    fromHex,
+    unwrapIdentity,
+  } = await core();
+
   const [backup, status] = await Promise.all([
     api.get<KeyBackup>('/encryption/keys/backup').then((response) => response.data),
     api.get<KeyStatus>('/encryption/keys').then((response) => response.data),

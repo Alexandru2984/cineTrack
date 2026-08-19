@@ -7,6 +7,7 @@
 import { create } from 'zustand';
 
 import type { IdentityKeyPair } from '@/lib/crypto/core';
+import { clearDecryptionCache } from '@/lib/crypto/cache';
 import { forgetIdentity } from '@/lib/crypto/storage';
 
 export type EncryptionStatus =
@@ -28,9 +29,14 @@ interface EncryptionState {
   fingerprint: string | null;
   setIdentity: (identity: IdentityKeyPair, fingerprint: string) => void;
   setStatus: (status: EncryptionStatus) => void;
-  /** Drop the keys from memory and from this device. Called on sign-out:
-   *  leaving them behind would let whoever signs in next read the previous
-   *  account's messages. */
+  /** Drop the keys from memory, and optionally from this device.
+   *
+   *  Sign-out passes no user id, so the stored copy survives. That is
+   *  deliberate: records are keyed by user id and only ever loaded for the
+   *  signed-in account, so another person signing in on the same browser
+   *  cannot reach them — while the same person signing back in is not made to
+   *  retype a password to read their own history. Deleting the keys is for
+   *  when the user asks, which is a different action from signing out. */
   clear: (userId: string | null) => Promise<void>;
 }
 
@@ -42,6 +48,8 @@ export const useEncryptionStore = create<EncryptionState>((set) => ({
   setStatus: (status) => set({ status }),
   clear: async (userId) => {
     set({ identity: null, fingerprint: null, status: 'loading' });
+    // Plaintext decrypted this session must not outlive it in memory.
+    clearDecryptionCache();
     if (userId) await forgetIdentity(userId);
   },
 }));

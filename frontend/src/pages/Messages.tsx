@@ -4,12 +4,15 @@ import {
   ArrowLeft,
   Flag,
   Loader2,
+  Lock,
   MessageCircle,
   Send,
   ShieldAlert,
+  ShieldCheck,
   User,
 } from 'lucide-react';
 
+import { EncryptionGate } from '@/components/EncryptionGate';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
 import { ReportDialog } from '@/components/ReportDialog';
 import {
@@ -21,6 +24,13 @@ import {
 import { usePageTitle } from '@/hooks/usePageTitle';
 import { useT } from '@/hooks/useT';
 import { getApiErrorMessage } from '@/lib/api';
+import { toHex } from '@/lib/crypto/core';
+import {
+  readConversationPreview,
+  readMessage,
+  type MessageContent,
+} from '@/lib/crypto/messages';
+import { useEncryptionStore } from '@/store/encryption';
 import { useAuthStore } from '@/store/auth';
 import { useLocaleStore } from '@/store/locale';
 import type { DirectMessage, MessageConversation } from '@/types';
@@ -43,6 +53,27 @@ function messageTime(value: string, locale: 'en' | 'ro', includeDate = false) {
     hour: '2-digit',
     minute: '2-digit',
   }).format(new Date(value));
+}
+
+/** What to show for a message, in the four states one can be in.
+ *
+ *  Encrypted messages are the only ones whose text this client produces itself,
+ *  and the two failure states are kept distinct on purpose: "locked" is
+ *  something the user can fix by restoring their key, "undecryptable" is not. */
+function previewText(
+  content: MessageContent,
+  t: (key: string, params?: Record<string, string | number>) => string,
+): string {
+  switch (content.kind) {
+    case 'plain':
+      return content.text;
+    case 'encrypted':
+      return content.content.text;
+    case 'locked':
+      return t('messages.lockedPreview');
+    default:
+      return t('messages.encryptedPreview');
+  }
 }
 
 function ConversationAvatar({
@@ -80,9 +111,11 @@ function ConversationRow({
   locale: 'en' | 'ro';
   t: (key: string, params?: Record<string, string | number>) => string;
 }) {
-  const preview = conversation.last_message_sender_id === currentUserId
-    ? `${t('messages.you')}: ${conversation.last_message_body}`
-    : conversation.last_message_body;
+  const identity = useEncryptionStore((state) => state.identity);
+  const content = readConversationPreview(conversation, identity);
+  const text = previewText(content, t);
+  const preview =
+    conversation.last_message_sender_id === currentUserId ? `${t('messages.you')}: ${text}` : text;
 
   return (
     <Link
@@ -130,12 +163,14 @@ function ConversationRow({
 
 function MessageBubble({
   message,
+  content,
   own,
   locale,
   isLastOwn,
   onReport,
   t,
 }: {
+  content: MessageContent;
   message: DirectMessage;
   own: boolean;
   locale: 'en' | 'ro';
@@ -153,12 +188,26 @@ function MessageBubble({
               : 'rounded-bl-sm bg-[hsl(var(--muted))] text-[hsl(var(--foreground))]'
           }`}
         >
-          <p className="whitespace-pre-wrap break-words text-sm leading-5">{message.body}</p>
+          <p className="whitespace-pre-wrap break-words text-sm leading-5">
+            {content.kind === 'undecryptable' ? (
+              <span className="italic opacity-80">{t('messages.undecryptable')}</span>
+            ) : (
+              previewText(content, t)
+            )}
+          </p>
+          {content.kind === 'encrypted' && !content.content.commitmentVerified ? (
+            <p className="mt-1 text-[10px] leading-4 opacity-80">
+              {t('messages.commitmentMismatch')}
+            </p>
+          ) : null}
           <div
             className={`mt-1 flex items-center justify-end gap-1.5 text-[10px] ${
               own ? 'opacity-75' : 'text-[hsl(var(--muted-foreground))]'
             }`}
           >
+            {content.kind !== 'plain' ? (
+              <Lock className="h-2.5 w-2.5" aria-label={t('messages.encryptedLabel')} />
+            ) : null}
             <time dateTime={message.created_at} title={new Date(message.created_at).toLocaleString()}>
               {messageTime(message.created_at, locale)}
             </time>
@@ -192,6 +241,8 @@ function MessagesContent({ username }: { username: string }) {
   const t = useT();
   const locale = useLocaleStore((state) => state.locale);
   const currentUser = useAuthStore((state) => state.user);
+  const identity = useEncryptionStore((state) => state.identity);
+  const encryptionStatus = useEncryptionStore((state) => state.status);
   const conversations = useMessageConversations();
   const thread = useMessageThread(username);
   const sendMessage = useSendMessage();
@@ -242,6 +293,26 @@ function MessagesContent({ username }: { username: string }) {
       behavior,
     });
   }, [lastMessage]);
+
+  // True when anything in this thread arrived encrypted. Derived from the
+  // messages rather than from the peer's key, so the notice describes what the
+  // user is actually looking at instead of what a future message would be.
+  const threadIsEncrypted = messages.some((message) => message.body === null);
+
+  /** The evidence a report needs, for a message only this device can read.
+   *
+   *  Absent for a plaintext message, and absent — deliberately — for one that
+   *  could not be decrypted: a report without the key that opens the sender's
+   *  commitment would be refused, and offering the user a form that cannot
+   *  succeed is worse than refusing it here. */
+  const reportEvidence = (message: DirectMessage) => {
+    const content = readMessage(message, identity);
+    if (content.kind !== 'encrypted') return undefined;
+    return {
+      revealedPlaintext: content.content.text,
+      frankingKey: toHex(content.content.frankingKey),
+    };
+  };
 
   const submitMessage = (event?: FormEvent<HTMLFormElement>) => {
     event?.preventDefault();
@@ -401,6 +472,7 @@ function MessagesContent({ username }: { username: string }) {
                 <MessageBubble
                   key={message.id}
                   message={message}
+                  content={readMessage(message, identity)}
                   own={message.sender_id === currentUser?.id}
                   locale={locale}
                   isLastOwn={message.id === lastOwnMessageId}
@@ -409,6 +481,15 @@ function MessagesContent({ username }: { username: string }) {
                 />
               ))}
             </div>
+
+            {/* Above the composer rather than over the thread: whatever the
+                user has to do about their key, they should still be able to
+                read what is already readable while they do it. */}
+            {currentThread.can_message && encryptionStatus !== 'ready' ? (
+              <div className="shrink-0 border-t border-[hsl(var(--border))] p-3 sm:p-4">
+                <EncryptionGate />
+              </div>
+            ) : null}
 
             {currentThread.can_message ? (
               <form
@@ -465,8 +546,14 @@ function MessagesContent({ username }: { username: string }) {
                   </p>
                 ) : null}
                 <p className="mt-1 flex items-start gap-1.5 text-[10px] leading-4 text-[hsl(var(--muted-foreground))]">
-                  <ShieldAlert className="mt-0.5 h-3 w-3 shrink-0" aria-hidden="true" />
-                  {t('messages.privacyNotice')}
+                  {threadIsEncrypted ? (
+                    <ShieldCheck className="mt-0.5 h-3 w-3 shrink-0" aria-hidden="true" />
+                  ) : (
+                    <ShieldAlert className="mt-0.5 h-3 w-3 shrink-0" aria-hidden="true" />
+                  )}
+                  {threadIsEncrypted
+                    ? t('messages.privacyNoticeEncrypted')
+                    : t('messages.privacyNotice')}
                 </p>
               </form>
             ) : (
@@ -486,6 +573,7 @@ function MessagesContent({ username }: { username: string }) {
           targetType="message"
           targetId={reporting.id}
           targetLabel={t('messages.reportTarget', { username: currentThread.user.username })}
+          evidence={reportEvidence(reporting)}
           onClose={() => setReporting(null)}
         />
       ) : null}
