@@ -75,6 +75,10 @@ pub struct EncryptedEnvelope {
     pub ciphertext: String,
     pub nonce: String,
     pub sender_ephemeral_key: String,
+    /// The message key wrapped to the sender's own exchange key, so they can
+    /// read their own outbox. See the migration for why this is not optional
+    /// in practice even though the column allows NULL.
+    pub sender_copy: String,
     pub franking_commitment: String,
     pub franking_signature: String,
 }
@@ -84,6 +88,7 @@ pub struct DecodedEnvelope {
     pub ciphertext: Vec<u8>,
     pub nonce: Vec<u8>,
     pub sender_ephemeral_key: Vec<u8>,
+    pub sender_copy: Vec<u8>,
     pub franking_commitment: Vec<u8>,
     pub franking_signature: Vec<u8>,
 }
@@ -110,6 +115,7 @@ impl EncryptedEnvelope {
             ciphertext: field(&self.ciphertext, None)?,
             nonce: field(&self.nonce, Some(12))?,
             sender_ephemeral_key: field(&self.sender_ephemeral_key, Some(32))?,
+            sender_copy: field(&self.sender_copy, Some(48))?,
             franking_commitment: field(&self.franking_commitment, Some(32))?,
             franking_signature: field(&self.franking_signature, Some(64))?,
         })
@@ -216,6 +222,11 @@ pub struct DirectMessageResponse {
     #[sqlx(default)]
     #[serde(serialize_with = "serialize_optional_hex")]
     pub sender_ephemeral_key: Option<Vec<u8>>,
+    /// Meaningless to the recipient and essential to the sender: it is what
+    /// lets them read their own outbox.
+    #[sqlx(default)]
+    #[serde(serialize_with = "serialize_optional_hex")]
+    pub sender_copy: Option<Vec<u8>>,
     /// Returned so the recipient can check that what they decrypted is what the
     /// sender committed to. A mismatch means the message cannot be reported
     /// through the normal path, which is itself worth surfacing.
@@ -266,6 +277,9 @@ pub struct ConversationResponse {
     #[serde(serialize_with = "serialize_optional_hex")]
     #[sqlx(default)]
     pub last_message_sender_ephemeral_key: Option<Vec<u8>>,
+    #[serde(serialize_with = "serialize_optional_hex")]
+    #[sqlx(default)]
+    pub last_message_sender_copy: Option<Vec<u8>>,
     pub last_message_at: DateTime<Utc>,
     pub last_message_read_at: Option<DateTime<Utc>>,
     pub unread_count: i64,
@@ -308,6 +322,7 @@ mod tests {
             ciphertext: "11".repeat(64),
             nonce: "22".repeat(12),
             sender_ephemeral_key: "33".repeat(32),
+            sender_copy: "66".repeat(48),
             franking_commitment: "44".repeat(32),
             franking_signature: "55".repeat(64),
         }
@@ -372,6 +387,7 @@ mod tests {
             "ciphertext": "11".repeat(64),
             "nonce": "22".repeat(12),
             "sender_ephemeral_key": "33".repeat(32),
+            "sender_copy": "66".repeat(48),
             "franking_commitment": "44".repeat(32),
             "franking_signature": "55".repeat(64),
         }))
@@ -407,6 +423,7 @@ mod tests {
         for mutate in [
             |e: &mut EncryptedEnvelope| e.nonce = "22".repeat(11),
             |e: &mut EncryptedEnvelope| e.sender_ephemeral_key = "33".repeat(31),
+            |e: &mut EncryptedEnvelope| e.sender_copy = "66".repeat(47),
             |e: &mut EncryptedEnvelope| e.franking_commitment = "44".repeat(33),
             |e: &mut EncryptedEnvelope| e.franking_signature = "55".repeat(63),
             |e: &mut EncryptedEnvelope| e.ciphertext = "11".repeat(4),

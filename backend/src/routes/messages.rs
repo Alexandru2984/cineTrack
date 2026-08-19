@@ -187,6 +187,7 @@ async fn list_conversations(
             latest.ciphertext AS last_message_ciphertext,
             latest.nonce AS last_message_nonce,
             latest.sender_ephemeral_key AS last_message_sender_ephemeral_key,
+            latest.sender_copy AS last_message_sender_copy,
             latest.created_at AS last_message_at,
             latest.read_at AS last_message_read_at,
             latest.unread_count,
@@ -278,11 +279,11 @@ async fn get_thread(
     let messages = if let Some((before, before_id)) = cursor {
         sqlx::query_as::<_, DirectMessageResponse>(
             r#"SELECT id, sender_id, recipient_id, body,
-                       ciphertext, nonce, sender_ephemeral_key, franking_commitment,
+                       ciphertext, nonce, sender_ephemeral_key, sender_copy, franking_commitment,
                        read_at, created_at
             FROM (
                 SELECT id, sender_id, recipient_id, body,
-                       ciphertext, nonce, sender_ephemeral_key, franking_commitment,
+                       ciphertext, nonce, sender_ephemeral_key, sender_copy, franking_commitment,
                        read_at, created_at
                 FROM direct_messages
                 WHERE
@@ -304,11 +305,11 @@ async fn get_thread(
     } else {
         sqlx::query_as::<_, DirectMessageResponse>(
             r#"SELECT id, sender_id, recipient_id, body,
-                       ciphertext, nonce, sender_ephemeral_key, franking_commitment,
+                       ciphertext, nonce, sender_ephemeral_key, sender_copy, franking_commitment,
                        read_at, created_at
             FROM (
                 SELECT id, sender_id, recipient_id, body,
-                       ciphertext, nonce, sender_ephemeral_key, franking_commitment,
+                       ciphertext, nonce, sender_ephemeral_key, sender_copy, franking_commitment,
                        read_at, created_at
                 FROM direct_messages
                 WHERE
@@ -414,7 +415,7 @@ async fn send_message(
 
     let existing = sqlx::query_as::<_, DirectMessageResponse>(
         r#"SELECT id, sender_id, recipient_id, body,
-                       ciphertext, nonce, sender_ephemeral_key, franking_commitment,
+                       ciphertext, nonce, sender_ephemeral_key, sender_copy, franking_commitment,
                        read_at, created_at
         FROM direct_messages
         WHERE sender_id = $1 AND client_nonce = $2"#,
@@ -476,12 +477,12 @@ async fn send_message(
     let message = sqlx::query_as::<_, DirectMessageResponse>(
         r#"INSERT INTO direct_messages (
             sender_id, recipient_id, client_nonce, body,
-            ciphertext, nonce, sender_ephemeral_key,
+            ciphertext, nonce, sender_ephemeral_key, sender_copy,
             franking_commitment, franking_signature
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
         RETURNING id, sender_id, recipient_id, body,
-                  ciphertext, nonce, sender_ephemeral_key,
+                  ciphertext, nonce, sender_ephemeral_key, sender_copy,
                   franking_commitment, read_at, created_at"#,
     )
     .bind(sender_id)
@@ -491,6 +492,7 @@ async fn send_message(
     .bind(envelope.as_ref().map(|e| &e.ciphertext))
     .bind(envelope.as_ref().map(|e| &e.nonce))
     .bind(envelope.as_ref().map(|e| &e.sender_ephemeral_key))
+    .bind(envelope.as_ref().map(|e| &e.sender_copy))
     .bind(envelope.as_ref().map(|e| &e.franking_commitment))
     .bind(envelope.as_ref().map(|e| &e.franking_signature))
     .fetch_one(&mut *tx)

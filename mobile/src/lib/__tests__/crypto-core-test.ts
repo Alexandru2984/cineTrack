@@ -18,6 +18,42 @@ const CLIENT_NONCE = '3f2504e0-4f89-41d3-9a0c-0305e82c3301';
 const CHEAP_KDF = { memoryKib: 64, iterations: 1, parallelism: 1 };
 
 describe('message encryption', () => {
+  it('lets the sender read their own message', () => {
+    // Without this the sender's outbox is a column of padlocks after a reload:
+    // the ephemeral private key that sealed the message is gone, and the
+    // history lives on the server rather than on the device.
+    const alice = generateIdentity();
+    const bob = generateIdentity();
+    const plaintext = 'what I said to Bob';
+
+    const envelope = encryptMessage(
+      plaintext,
+      bob.exchangePublicKey,
+      alice.exchangePublicKey,
+      alice.signingPrivateKey,
+      CLIENT_NONCE,
+    );
+
+    expect(decryptMessage(envelope, alice.exchangePrivateKey).plaintext).toBe(plaintext);
+    expect(decryptMessage(envelope, bob.exchangePrivateKey).plaintext).toBe(plaintext);
+  });
+
+  it('keeps the message shut to everybody else, sender copy included', () => {
+    const alice = generateIdentity();
+    const bob = generateIdentity();
+    const eve = generateIdentity();
+
+    const envelope = encryptMessage(
+      'private',
+      bob.exchangePublicKey,
+      alice.exchangePublicKey,
+      alice.signingPrivateKey,
+      CLIENT_NONCE,
+    );
+
+    expect(() => decryptMessage(envelope, eve.exchangePrivateKey)).toThrow();
+  });
+
   it('round-trips a message between two identities', () => {
     const alice = generateIdentity();
     const bob = generateIdentity();
@@ -26,6 +62,7 @@ describe('message encryption', () => {
     const envelope = encryptMessage(
       plaintext,
       bob.exchangePublicKey,
+      alice.exchangePublicKey,
       alice.signingPrivateKey,
       CLIENT_NONCE,
     );
@@ -43,6 +80,7 @@ describe('message encryption', () => {
     const envelope = encryptMessage(
       plaintext,
       bob.exchangePublicKey,
+      alice.exchangePublicKey,
       alice.signingPrivateKey,
       CLIENT_NONCE,
     );
@@ -57,6 +95,7 @@ describe('message encryption', () => {
     const envelope = encryptMessage(
       'private',
       bob.exchangePublicKey,
+      alice.exchangePublicKey,
       alice.signingPrivateKey,
       CLIENT_NONCE,
     );
@@ -69,6 +108,7 @@ describe('message encryption', () => {
     const envelope = encryptMessage(
       'intact',
       bob.exchangePublicKey,
+      alice.exchangePublicKey,
       alice.signingPrivateKey,
       CLIENT_NONCE,
     );
@@ -83,6 +123,7 @@ describe('message encryption', () => {
     const envelope = encryptMessage(
       'what was sent',
       bob.exchangePublicKey,
+      alice.exchangePublicKey,
       alice.signingPrivateKey,
       CLIENT_NONCE,
     );

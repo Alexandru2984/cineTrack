@@ -25,6 +25,23 @@
  * therefore reaches the recipient and nobody else — which is what lets them
  * later prove to the server what was said, without the server ever being able
  * to read it. See `services/franking.rs` for the other half.
+ *
+ * # The sender's own copy
+ *
+ * An ephemeral key that only the recipient can complete has an awkward
+ * consequence: the sender cannot read what they sent. Their private ephemeral
+ * key is gone, and the history lives on the server, so their own outbox would
+ * be a column of padlocks after a reload. That is not a security property, it
+ * is a broken product.
+ *
+ * So the message key is also wrapped against the sender's own long-term key,
+ * using the same ephemeral private key while it still exists. The wrap travels
+ * with the message as `senderCopy`; the sender opens it later with the private
+ * half they keep. The recipient's path is untouched, and the server gains
+ * nothing — it holds one more sealed box it cannot open.
+ *
+ * The same nonce appears under both keys. That is safe precisely because they
+ * are different keys: GCM's requirement is uniqueness per key, not globally.
  */
 
 import { ed25519, x25519 } from '@noble/curves/ed25519.js';
@@ -92,6 +109,9 @@ export interface EncryptedMessage {
   ciphertext: Uint8Array;
   nonce: Uint8Array;
   senderEphemeralKey: Uint8Array;
+  /** The message key, sealed to the sender's own exchange key, so they can read
+   *  their own outbox. Absent on messages written before this existed. */
+  senderCopy?: Uint8Array;
   frankingCommitment: Uint8Array;
   frankingSignature: Uint8Array;
 }
@@ -166,6 +186,24 @@ export function fingerprint(exchangePublicKey: Uint8Array, signingPublicKey: Uin
   );
 }
 
+/** Unwrap the message key from the sender's copy, or null when this reader is
+ *  not the sender.
+ *
+ *  Distinguishing the two by trying is deliberate: the alternative is passing a
+ *  flag from the caller, and a caller that gets it wrong produces a message
+ *  that silently fails to open rather than one that opens the other way. */
+function openSenderCopy(
+  message: EncryptedMessage,
+  derivedKey: Uint8Array,
+): Uint8Array | null {
+  if (!message.senderCopy || message.senderCopy.length === 0) return null;
+  try {
+    return gcm(derivedKey, message.nonce).decrypt(message.senderCopy);
+  } catch {
+    return null;
+  }
+}
+
 function messageKey(sharedSecret: Uint8Array, ephemeralPublicKey: Uint8Array): Uint8Array {
   // The ephemeral public key is the HKDF salt, so two messages sharing a secret
   // still derive different keys, and a nonce is never reused under one key.
@@ -198,6 +236,7 @@ export function frankingSigningPayload(
 export function encryptMessage(
   plaintext: string,
   recipientExchangePublicKey: Uint8Array,
+  senderExchangePublicKey: Uint8Array,
   senderSigningPrivateKey: Uint8Array,
   clientNonce: string,
 ): EncryptedMessage {
@@ -215,10 +254,16 @@ export function encryptMessage(
   const nonce = randomBytes(NONCE_BYTES);
   const ciphertext = gcm(key, nonce).encrypt(payload);
 
+  // Wrapped while the ephemeral private key still exists. Afterwards nobody —
+  // including the sender — could produce this.
+  const senderShared = x25519.getSharedSecret(ephemeralPrivateKey, senderExchangePublicKey);
+  const senderCopy = gcm(messageKey(senderShared, senderEphemeralKey), nonce).encrypt(key);
+
   return {
     ciphertext,
     nonce,
     senderEphemeralKey,
+    senderCopy,
     frankingCommitment: commitment,
     frankingSignature: ed25519.sign(
       frankingSigningPayload(commitment, clientNonce),
@@ -229,10 +274,16 @@ export function encryptMessage(
 
 export function decryptMessage(
   message: EncryptedMessage,
-  recipientExchangePrivateKey: Uint8Array,
+  exchangePrivateKey: Uint8Array,
 ): DecryptedMessage {
-  const shared = x25519.getSharedSecret(recipientExchangePrivateKey, message.senderEphemeralKey);
-  const key = messageKey(shared, message.senderEphemeralKey);
+  const shared = x25519.getSharedSecret(exchangePrivateKey, message.senderEphemeralKey);
+  const derived = messageKey(shared, message.senderEphemeralKey);
+  // The same call serves both parties, because both hold a private key that
+  // completes the ephemeral agreement — the recipient reaching the message key
+  // directly, the sender reaching the wrapper around it. Trying the wrapper
+  // first would cost a failed GCM open on every received message, so the
+  // direct path is tried first and the wrapper is the fallback.
+  const key = openSenderCopy(message, derived) ?? derived;
   const payload = gcm(key, message.nonce).decrypt(message.ciphertext);
 
   const frankingKey = payload.slice(0, FRANKING_KEY_BYTES);

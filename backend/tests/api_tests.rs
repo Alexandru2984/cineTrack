@@ -6173,6 +6173,7 @@ fn encrypted_body(client_nonce: Uuid) -> Value {
         "ciphertext": "11".repeat(64),
         "nonce": "22".repeat(12),
         "sender_ephemeral_key": "33".repeat(32),
+        "sender_copy": "66".repeat(48),
         "franking_commitment": "44".repeat(32),
         "franking_signature": "55".repeat(64),
     })
@@ -6234,6 +6235,7 @@ async fn an_encrypted_message_round_trips_without_the_server_reading_it() {
     assert!(message["body"].is_null());
     assert_eq!(message["nonce"], "22".repeat(12));
     assert_eq!(message["sender_ephemeral_key"], "33".repeat(32));
+    assert_eq!(message["sender_copy"], "66".repeat(48));
     assert_eq!(message["franking_commitment"], "44".repeat(32));
     // The signature is the server's business alone; handing it to a client
     // would invite one to believe it had verified something it cannot.
@@ -6474,10 +6476,13 @@ async fn insert_franked_message(
     let franking_key = vec![42u8; 32];
     let commitment = cinetrack::services::franking::commit(&franking_key, plaintext).unwrap();
     let message_id = Uuid::new_v4();
+    // Signed over the client nonce, which is what a real sender knows: the row
+    // id does not exist until the INSERT. See `franking::signing_payload`.
+    let client_nonce = Uuid::new_v4();
     let signature = key_pair
         .sign(&cinetrack::services::franking::signing_payload(
             &commitment,
-            message_id,
+            client_nonce,
         ))
         .as_ref()
         .to_vec();
@@ -6516,11 +6521,12 @@ async fn insert_franked_message(
         r#"INSERT INTO direct_messages
             (id, sender_id, recipient_id, client_nonce, ciphertext, nonce,
              sender_ephemeral_key, franking_commitment, franking_signature)
-        VALUES ($1, $2, $3, gen_random_uuid(), $4, $5, $6, $7, $8)"#,
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)"#,
     )
     .bind(message_id)
     .bind(sender_id)
     .bind(recipient_id)
+    .bind(client_nonce)
     .bind(vec![9u8; 64])
     .bind(vec![8u8; 12])
     .bind(vec![7u8; 32])
