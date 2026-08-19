@@ -14,6 +14,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { AppButton } from '@/components/app-button';
+import { EncryptionGate } from '@/components/encryption-gate';
 import { AppText } from '@/components/app-text';
 import { ReportSheet } from '@/components/report-sheet';
 import { EmptyState, ErrorState, LoadingState } from '@/components/screen-state';
@@ -27,8 +28,11 @@ import {
 import { useT } from '@/hooks/use-t';
 import { useTheme } from '@/hooks/use-theme';
 import { messagePath, safePostAuthRedirect } from '@/lib/deep-links';
+import { readMessage, type MessageContent } from '@/lib/crypto/messages';
 import { formatDateTime } from '@/lib/format';
 import { getErrorMessage } from '@/lib/http';
+import { toHex } from '@/lib/crypto/core';
+import { useEncryptionStore } from '@/store/encryption';
 import {
   clampMessageBody,
   messageCharacterCount,
@@ -60,7 +64,24 @@ export default function MessageThreadScreen() {
   const [body, setBody] = useState('');
   const [retry, setRetry] = useState<MessageRetry | null>(null);
   const [reporting, setReporting] = useState<DirectMessage | null>(null);
+  const identity = useEncryptionStore((state) => state.identity);
+  const encryptionStatus = useEncryptionStore((state) => state.status);
   const lastReadRequest = useRef<string | null>(null);
+
+  /** The evidence a report needs, for a message only this device can read.
+   *
+   *  Absent for a plaintext message, and absent — deliberately — for one that
+   *  could not be decrypted: a report without the key that opens the sender's
+   *  commitment would be refused, and offering a form that cannot succeed is
+   *  worse than refusing it here. */
+  const reportEvidence = (message: DirectMessage) => {
+    const content = readMessage(message, identity);
+    if (content.kind !== 'encrypted') return undefined;
+    return {
+      revealedPlaintext: content.content.text,
+      frankingKey: toHex(content.content.frankingKey),
+    };
+  };
   const messages = useMemo(
     () => uniqueThreadMessages(thread.data?.pages ?? []),
     [thread.data],
@@ -228,6 +249,7 @@ export default function MessageThreadScreen() {
             return (
               <MessageBubble
                 message={item}
+                content={readMessage(item, identity)}
                 own={own}
                 isLastOwn={item.id === lastOwnMessageId}
                 onReport={() => setReporting(item)}
@@ -235,6 +257,15 @@ export default function MessageThreadScreen() {
             );
           }}
         />
+
+        {/* Above the composer rather than over the thread: whatever the user
+            has to do about their key, they should still be able to read what
+            is already readable while they do it. */}
+        {encryptionStatus !== 'ready' ? (
+          <View style={styles.gate}>
+            <EncryptionGate />
+          </View>
+        ) : null}
 
         <View style={[styles.composer, { borderTopColor: theme.border }]}>
           <View style={styles.inputCopy}>
@@ -285,6 +316,7 @@ export default function MessageThreadScreen() {
         <ReportSheet
           targetType="message"
           targetId={reporting.id}
+          evidence={reportEvidence(reporting)}
           targetLabel={t('messages.reportTarget', {
             username: currentThread.user.username,
           })}
@@ -295,13 +327,35 @@ export default function MessageThreadScreen() {
   );
 }
 
+/** What to show for a message, in the four states one can be in.
+ *
+ *  The two failure states are kept distinct on purpose: "locked" is something
+ *  the user can fix by restoring their key, "undecryptable" is not. */
+function previewText(
+  content: MessageContent,
+  t: (key: string, params?: Record<string, string | number>) => string,
+): string {
+  switch (content.kind) {
+    case 'plain':
+      return content.text;
+    case 'encrypted':
+      return content.content.text;
+    case 'locked':
+      return t('messages.lockedPreview');
+    default:
+      return t('messages.undecryptable');
+  }
+}
+
 function MessageBubble({
   message,
+  content,
   own,
   isLastOwn,
   onReport,
 }: {
   message: DirectMessage;
+  content: MessageContent;
   own: boolean;
   isLastOwn: boolean;
   onReport: () => void;
@@ -328,7 +382,12 @@ function MessageBubble({
           { backgroundColor: own ? theme.primary : theme.surface },
         ]}
       >
-        <AppText style={own ? styles.ownText : undefined}>{message.body}</AppText>
+        <AppText style={own ? styles.ownText : undefined}>{previewText(content, t)}</AppText>
+        {content.kind === 'encrypted' && !content.content.commitmentVerified ? (
+          <AppText variant="caption" style={own ? styles.ownMeta : { color: theme.mutedText }}>
+            {t('messages.commitmentMismatch')}
+          </AppText>
+        ) : null}
         <View style={styles.messageMeta}>
           <AppText
             variant="caption"
@@ -348,6 +407,7 @@ function MessageBubble({
 }
 
 const styles = StyleSheet.create({
+  gate: { paddingHorizontal: spacing.md, paddingBottom: spacing.sm },
   safeArea: { flex: 1 },
   peerHeader: {
     minHeight: 62,
