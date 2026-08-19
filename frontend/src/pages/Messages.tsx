@@ -21,10 +21,11 @@ import {
   useMessageThread,
   useSendMessage,
 } from '@/hooks/useMessages';
+import { usePeerKeys } from '@/hooks/useEncryption';
 import { usePageTitle } from '@/hooks/usePageTitle';
 import { useT } from '@/hooks/useT';
 import { getApiErrorMessage } from '@/lib/api';
-import { toHex } from '@/lib/crypto/core';
+import { safetyNumber, toHex } from '@/lib/crypto/core';
 import {
   readConversationPreview,
   readMessage,
@@ -250,6 +251,7 @@ function MessagesContent({ username }: { username: string }) {
   const [body, setBody] = useState('');
   const [retry, setRetry] = useState<{ body: string; nonce: string } | null>(null);
   const [reporting, setReporting] = useState<DirectMessage | null>(null);
+  const [showingSafetyNumber, setShowingSafetyNumber] = useState(false);
   const messageListRef = useRef<HTMLDivElement>(null);
   const lastVisibleMessageRef = useRef<string | null>(null);
   const lastReadRequestRef = useRef<string | null>(null);
@@ -293,6 +295,17 @@ function MessagesContent({ username }: { username: string }) {
       behavior,
     });
   }, [lastMessage]);
+
+  // Both fingerprints, combined into the one string the two people compare.
+  // Absent unless both sides have published keys, because there is nothing to
+  // compare until then and offering the check would imply a protection that is
+  // not in place.
+  const ownFingerprint = useEncryptionStore((state) => state.fingerprint);
+  const peerKeys = usePeerKeys(username, Boolean(username));
+  const safetyNumberValue =
+    ownFingerprint && peerKeys.data
+      ? safetyNumber(ownFingerprint, peerKeys.data.key_fingerprint)
+      : null;
 
   // True when anything in this thread arrived encrypted. Derived from the
   // messages rather than from the peer's key, so the notice describes what the
@@ -434,7 +447,31 @@ function MessagesContent({ username }: { username: string }) {
               >
                 {currentThread.user.username}
               </Link>
+              {safetyNumberValue ? (
+                <button
+                  type="button"
+                  onClick={() => setShowingSafetyNumber((showing) => !showing)}
+                  aria-expanded={showingSafetyNumber}
+                  aria-label={t('encryption.safetyNumber')}
+                  title={t('encryption.safetyNumber')}
+                  className="ml-auto flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-[hsl(var(--primary))] transition-colors hover:bg-[hsl(var(--accent))]"
+                >
+                  <ShieldCheck className="h-4 w-4" aria-hidden="true" />
+                </button>
+              ) : null}
             </header>
+
+            {safetyNumberValue && showingSafetyNumber ? (
+              <div className="shrink-0 border-b border-[hsl(var(--border))] bg-[hsl(var(--muted))]/40 px-4 py-3">
+                <p className="text-xs font-medium">{t('encryption.safetyNumber')}</p>
+                <p className="mt-1 select-all break-all font-mono text-sm tracking-wide">
+                  {safetyNumberValue}
+                </p>
+                <p className="mt-1 text-[11px] leading-4 text-[hsl(var(--muted-foreground))]">
+                  {t('encryption.safetyNumberHint')}
+                </p>
+              </div>
+            ) : null}
 
             <div
               ref={messageListRef}

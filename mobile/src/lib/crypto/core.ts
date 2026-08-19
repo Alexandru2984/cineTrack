@@ -186,6 +186,27 @@ export function fingerprint(exchangePublicKey: Uint8Array, signingPublicKey: Uin
   );
 }
 
+/** The number two people compare out loud to check nobody is between them.
+ *
+ *  Both fingerprints go in, sorted, so the two sides compute the same string
+ *  without having to agree on who is "first". Reading a different number to
+ *  each party would defeat the entire exercise.
+ *
+ *  Shown as 40 hex characters in groups of four. That is 160 bits, which is far
+ *  more than a comparison needs — an attacker would have to find a directory
+ *  substitution matching the digest, and the practical limit here is not the
+ *  arithmetic but how much a person will actually read aloud before giving up
+ *  and saying "yeah, looks right".
+ *
+ *  The server stores fingerprints but cannot vouch for them: it serves whatever
+ *  is in its own directory, and a substituted entry is exactly the attack this
+ *  detects. Comparing through another channel is what makes it meaningful. */
+export function safetyNumber(first: string, second: string): string {
+  const ordered = [first, second].sort();
+  const digest = toHex(sha256(encoder.encode(ordered.join(':'))));
+  return (digest.slice(0, 40).match(/.{1,4}/g) ?? []).join(' ');
+}
+
 /** Unwrap the message key from the sender's copy, or null when this reader is
  *  not the sender.
  *

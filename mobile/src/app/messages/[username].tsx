@@ -25,13 +25,14 @@ import {
   useMessageThread,
   useSendMessage,
 } from '@/hooks/use-messages';
+import { usePeerKeys } from '@/hooks/use-encryption';
 import { useT } from '@/hooks/use-t';
 import { useTheme } from '@/hooks/use-theme';
 import { messagePath, safePostAuthRedirect } from '@/lib/deep-links';
 import { readMessage, type MessageContent } from '@/lib/crypto/messages';
 import { formatDateTime } from '@/lib/format';
 import { getErrorMessage } from '@/lib/http';
-import { toHex } from '@/lib/crypto/core';
+import { safetyNumber, toHex } from '@/lib/crypto/core';
 import { useEncryptionStore } from '@/store/encryption';
 import {
   clampMessageBody,
@@ -66,7 +67,18 @@ export default function MessageThreadScreen() {
   const [reporting, setReporting] = useState<DirectMessage | null>(null);
   const identity = useEncryptionStore((state) => state.identity);
   const encryptionStatus = useEncryptionStore((state) => state.status);
+  const [showingSafetyNumber, setShowingSafetyNumber] = useState(false);
   const lastReadRequest = useRef<string | null>(null);
+
+  // Both fingerprints, combined into the one string the two people compare.
+  // Absent unless both sides have published keys: there is nothing to compare
+  // until then, and offering the check would imply a protection not in place.
+  const ownFingerprint = useEncryptionStore((state) => state.fingerprint);
+  const peerKeys = usePeerKeys(username, Boolean(username));
+  const safetyNumberValue =
+    ownFingerprint && peerKeys.data
+      ? safetyNumber(ownFingerprint, peerKeys.data.key_fingerprint)
+      : null;
 
   /** The evidence a report needs, for a message only this device can read.
    *
@@ -86,6 +98,11 @@ export default function MessageThreadScreen() {
     () => uniqueThreadMessages(thread.data?.pages ?? []),
     [thread.data],
   );
+
+  // True when anything in this thread arrived encrypted. Derived from the
+  // messages rather than from the peer's key, so the notice describes what the
+  // user is actually looking at instead of what a future message would be.
+  const threadIsEncrypted = messages.some((message) => message.body === null);
   const displayMessages = useMemo(() => [...messages].reverse(), [messages]);
   const currentThread = thread.data?.pages[0];
   const lastOwnMessageId = [...messages]
@@ -209,7 +226,33 @@ export default function MessageThreadScreen() {
         </Pressable>
 
         <View style={[styles.notice, { backgroundColor: theme.infoSoft }]}>
-          <AppText variant="caption">{t('messages.storedNotice')}</AppText>
+          <AppText variant="caption">
+            {threadIsEncrypted
+              ? t('messages.privacyNoticeEncrypted')
+              : t('messages.storedNotice')}
+          </AppText>
+          {safetyNumberValue ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={t('encryption.safetyNumber')}
+              accessibilityState={{ expanded: showingSafetyNumber }}
+              onPress={() => setShowingSafetyNumber((showing) => !showing)}
+            >
+              <AppText variant="caption" style={{ color: theme.primary }}>
+                {t('encryption.safetyNumber')}
+              </AppText>
+            </Pressable>
+          ) : null}
+          {safetyNumberValue && showingSafetyNumber ? (
+            <>
+              <AppText selectable style={styles.safetyNumber}>
+                {safetyNumberValue}
+              </AppText>
+              <AppText variant="caption" style={{ color: theme.mutedText }}>
+                {t('encryption.safetyNumberHint')}
+              </AppText>
+            </>
+          ) : null}
         </View>
 
         {!currentThread.can_message ? (
@@ -408,6 +451,7 @@ function MessageBubble({
 
 const styles = StyleSheet.create({
   gate: { paddingHorizontal: spacing.md, paddingBottom: spacing.sm },
+  safetyNumber: { fontFamily: 'monospace' },
   safeArea: { flex: 1 },
   peerHeader: {
     minHeight: 62,

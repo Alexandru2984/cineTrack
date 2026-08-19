@@ -68,6 +68,27 @@ vi.mock('@/store/locale', () => ({
     selector({ locale: 'en' }),
 }));
 
+// The page asks the directory whether the peer can be written to encrypted.
+// Mocked alongside the message hooks so this test stays about rendering a
+// thread rather than about query wiring; the encryption paths have their own
+// tests.
+vi.mock('@/hooks/useEncryption', () => ({
+  usePeerKeys: () => ({ data: null }),
+}));
+
+vi.mock('@/store/encryption', () => ({
+  useEncryptionStore: (
+    selector: (state: { identity: null; fingerprint: null; status: 'absent' }) => unknown,
+  ) => selector({ identity: null, fingerprint: null, status: 'absent' }),
+}));
+
+// Rendered whenever this device has no key. Stubbed so the setup form's own
+// buttons and inputs do not compete with the thread's in the queries below —
+// the gate has its own tests.
+vi.mock('@/components/EncryptionGate', () => ({
+  EncryptionGate: () => null,
+}));
+
 vi.mock('@/components/ReportDialog', () => ({
   ReportDialog: ({
     targetType,

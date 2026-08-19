@@ -10,6 +10,7 @@ import {
   fromHex,
   generateIdentity,
   generateRecoveryCode,
+  safetyNumber,
   toHex,
   unwrapIdentity,
   wrapIdentity,
@@ -23,6 +24,23 @@ const CLIENT_NONCE = '3f2504e0-4f89-41d3-9a0c-0305e82c3301';
 const CHEAP_KDF = { memoryKib: 64, iterations: 1, parallelism: 1 };
 
 describe('message encryption', () => {
+  it('gives both people the same safety number, whichever way round they are', () => {
+    // A number that differed by side would defeat the point: the two would read
+    // out different strings and conclude they were being attacked.
+    const alice = generateIdentity();
+    const bob = generateIdentity();
+    const alicePrint = fingerprint(alice.exchangePublicKey, alice.signingPublicKey);
+    const bobPrint = fingerprint(bob.exchangePublicKey, bob.signingPublicKey);
+
+    expect(safetyNumber(alicePrint, bobPrint)).toBe(safetyNumber(bobPrint, alicePrint));
+    expect(safetyNumber(alicePrint, bobPrint)).toMatch(/^[0-9a-f]{4}( [0-9a-f]{4}){9}$/);
+
+    // A substituted directory entry is exactly what this has to catch.
+    const impostor = generateIdentity();
+    const impostorPrint = fingerprint(impostor.exchangePublicKey, impostor.signingPublicKey);
+    expect(safetyNumber(alicePrint, impostorPrint)).not.toBe(safetyNumber(alicePrint, bobPrint));
+  });
+
   it('lets the sender read their own message', () => {
     // Without this the sender's outbox is a column of padlocks after a reload:
     // the ephemeral private key that sealed the message is gone, and the
