@@ -7,6 +7,7 @@ pub mod completion;
 pub mod discovery;
 pub mod email;
 pub mod events;
+pub mod franking;
 pub mod ical;
 pub mod importer;
 pub mod legal;

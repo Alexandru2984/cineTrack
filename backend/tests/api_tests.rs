@@ -6165,6 +6165,276 @@ async fn test_calendar_lists_new_and_regional_upcoming_releases() {
     assert_eq!(us_upcoming["items"][0]["release_type"], 3);
 }
 
+// ── Franking: moderation of messages the server cannot read ───
+
+/// Build a franked encrypted message directly in the database, the way a client
+/// will once encryption ships, and return what a reporter would later reveal.
+///
+/// Uses the same primitives the server verifies with, so the test proves the
+/// two agree rather than restating one of them.
+async fn insert_franked_message(
+    pool: &PgPool,
+    sender_id: Uuid,
+    recipient_id: Uuid,
+    plaintext: &str,
+) -> (Uuid, Vec<u8>) {
+    use aws_lc_rs::signature::{Ed25519KeyPair, KeyPair};
+
+    let rng = aws_lc_rs::rand::SystemRandom::new();
+    let document = Ed25519KeyPair::generate_pkcs8(&rng).unwrap();
+    let key_pair = Ed25519KeyPair::from_pkcs8(document.as_ref()).unwrap();
+
+    let franking_key = vec![42u8; 32];
+    let commitment = cinetrack::services::franking::commit(&franking_key, plaintext).unwrap();
+    let message_id = Uuid::new_v4();
+    let signature = key_pair
+        .sign(&cinetrack::services::franking::signing_payload(
+            &commitment,
+            message_id,
+        ))
+        .as_ref()
+        .to_vec();
+
+    sqlx::query(
+        r#"INSERT INTO user_identity_keys
+            (user_id, exchange_public_key, signing_public_key, key_fingerprint)
+        VALUES ($1, $2, $3, $4)
+        ON CONFLICT (user_id) DO UPDATE SET signing_public_key = EXCLUDED.signing_public_key"#,
+    )
+    .bind(sender_id)
+    .bind(vec![1u8; 32])
+    .bind(key_pair.public_key().as_ref().to_vec())
+    .bind("a".repeat(64))
+    .execute(pool)
+    .await
+    .unwrap();
+
+    // The insert trigger enforces an unblocked mutual follow as a database
+    // invariant, not just an application rule, so the relationship has to exist
+    // even when a test writes the row directly.
+    for (follower, following) in [(sender_id, recipient_id), (recipient_id, sender_id)] {
+        sqlx::query(
+            r#"INSERT INTO follows (follower_id, following_id, status)
+            VALUES ($1, $2, 'accepted')
+            ON CONFLICT DO NOTHING"#,
+        )
+        .bind(follower)
+        .bind(following)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
+    sqlx::query(
+        r#"INSERT INTO direct_messages
+            (id, sender_id, recipient_id, client_nonce, ciphertext, nonce,
+             sender_ephemeral_key, franking_commitment, franking_signature)
+        VALUES ($1, $2, $3, gen_random_uuid(), $4, $5, $6, $7, $8)"#,
+    )
+    .bind(message_id)
+    .bind(sender_id)
+    .bind(recipient_id)
+    .bind(vec![9u8; 64])
+    .bind(vec![8u8; 12])
+    .bind(vec![7u8; 32])
+    .bind(&commitment)
+    .bind(&signature)
+    .execute(pool)
+    .await
+    .unwrap();
+
+    (message_id, franking_key)
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn an_encrypted_message_can_be_reported_with_verifiable_evidence() {
+    // The property the whole scheme exists for: the server cannot read this
+    // message, and can still hand a moderator text the sender provably wrote.
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (_, _, sender_id) =
+        register_user(&app, "frankingsend", "fsend@mailbox.dev", "Pass1234").await;
+    let (reporter_token, _, reporter_id) =
+        register_user(&app, "frankingrecv", "frecv@mailbox.dev", "Pass1234").await;
+    let sender_id = Uuid::parse_str(&sender_id).unwrap();
+    let reporter_id = Uuid::parse_str(&reporter_id).unwrap();
+
+    let plaintext = "an abusive message the server cannot read";
+    let (message_id, franking_key) =
+        insert_franked_message(&pool, sender_id, reporter_id, plaintext).await;
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/reports")
+        .insert_header(("Authorization", format!("Bearer {reporter_token}")))
+        .set_json(json!({
+            "target_type": "message",
+            "target_id": message_id,
+            "reason": "harassment",
+            "revealed_plaintext": plaintext,
+            "franking_key": hex::encode(&franking_key),
+        }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 201, "honest evidence should be accepted");
+
+    // The stored report carries the verified text, marked as verified.
+    let (verified, revealed, snapshot): (Option<bool>, Option<String>, Value) = sqlx::query_as(
+        "SELECT franking_verified, revealed_plaintext, content_snapshot
+             FROM user_reports WHERE target_id = $1",
+    )
+    .bind(message_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(verified, Some(true));
+    assert_eq!(revealed.as_deref(), Some(plaintext));
+    assert_eq!(snapshot["encrypted"], true);
+    assert_eq!(snapshot["verified_plaintext"], plaintext);
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn a_fabricated_report_against_an_encrypted_message_is_refused() {
+    // Without verification, reporting an encrypted message would mean the
+    // moderator sees whatever the reporter typed. This is the check that makes
+    // the report button evidence rather than an accusation.
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (_, _, sender_id) =
+        register_user(&app, "fabricsend", "fabsend@mailbox.dev", "Pass1234").await;
+    let (reporter_token, _, reporter_id) =
+        register_user(&app, "fabricrecv", "fabrecv@mailbox.dev", "Pass1234").await;
+    let sender_id = Uuid::parse_str(&sender_id).unwrap();
+    let reporter_id = Uuid::parse_str(&reporter_id).unwrap();
+
+    let (message_id, franking_key) =
+        insert_franked_message(&pool, sender_id, reporter_id, "something harmless").await;
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/reports")
+        .insert_header(("Authorization", format!("Bearer {reporter_token}")))
+        .set_json(json!({
+            "target_type": "message",
+            "target_id": message_id,
+            "reason": "threatening",
+            "revealed_plaintext": "I will find you — words the sender never wrote",
+            "franking_key": hex::encode(&franking_key),
+        }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 400, "fabricated evidence must be refused");
+
+    let stored =
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM user_reports WHERE target_id = $1")
+            .bind(message_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(stored, 0, "a refused report must not be recorded at all");
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn reporting_an_encrypted_message_without_evidence_is_refused() {
+    // An encrypted message reported with no evidence cannot be moderated, and
+    // accepting it would produce a report a moderator can do nothing with.
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (_, _, sender_id) =
+        register_user(&app, "noevidsend", "nesend@mailbox.dev", "Pass1234").await;
+    let (reporter_token, _, reporter_id) =
+        register_user(&app, "noevidrecv", "nerecv@mailbox.dev", "Pass1234").await;
+    let sender_id = Uuid::parse_str(&sender_id).unwrap();
+    let reporter_id = Uuid::parse_str(&reporter_id).unwrap();
+
+    let (message_id, _) =
+        insert_franked_message(&pool, sender_id, reporter_id, "encrypted content").await;
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/reports")
+        .insert_header(("Authorization", format!("Bearer {reporter_token}")))
+        .set_json(json!({
+            "target_type": "message",
+            "target_id": message_id,
+            "reason": "spam",
+        }))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 400);
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn a_plaintext_message_is_still_reported_without_evidence() {
+    // Migration is gradual, so the old path has to keep working unchanged for
+    // every message sent before encryption.
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (sender_token, _, sender_id) =
+        register_user(&app, "plainsend", "psend@mailbox.dev", "Pass1234").await;
+    let (reporter_token, _, reporter_id) =
+        register_user(&app, "plainrecv", "precv@mailbox.dev", "Pass1234").await;
+    let sender_id = Uuid::parse_str(&sender_id).unwrap();
+    let reporter_id = Uuid::parse_str(&reporter_id).unwrap();
+    let _ = sender_token;
+
+    for (follower, following) in [(sender_id, reporter_id), (reporter_id, sender_id)] {
+        sqlx::query(
+            "INSERT INTO follows (follower_id, following_id, status) VALUES ($1, $2, 'accepted')",
+        )
+        .bind(follower)
+        .bind(following)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+
+    let message_id = sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO direct_messages (sender_id, recipient_id, client_nonce, body)
+        VALUES ($1, $2, gen_random_uuid(), 'a plaintext message from before encryption')
+        RETURNING id"#,
+    )
+    .bind(sender_id)
+    .bind(reporter_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/reports")
+        .insert_header(("Authorization", format!("Bearer {reporter_token}")))
+        .set_json(json!({
+            "target_type": "message",
+            "target_id": message_id,
+            "reason": "harassment",
+        }))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 201);
+
+    let (verified, snapshot): (Option<bool>, Value) = sqlx::query_as(
+        "SELECT franking_verified, content_snapshot FROM user_reports WHERE target_id = $1",
+    )
+    .bind(message_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    // Nothing to verify: the server read this one itself.
+    assert_eq!(verified, None);
+    assert_eq!(snapshot["encrypted"], false);
+    assert_eq!(
+        snapshot["body"],
+        "a plaintext message from before encryption"
+    );
+}
+
 // ── End-to-end encryption key directory ───────────────────────
 
 /// A syntactically valid publish payload. Values are fixtures, not real keys:
