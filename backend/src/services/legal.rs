@@ -4,7 +4,7 @@ use uuid::Uuid;
 use crate::errors::AppError;
 use crate::models::User;
 
-pub const CURRENT_TERMS_VERSION: &str = "2026-08-06";
+pub const CURRENT_TERMS_VERSION: &str = "2026-08-19";
 
 /// Minimum age for an account. Chosen as the highest consent age GDPR Art. 8
 /// lets a member state set, so one threshold covers the whole EEA without

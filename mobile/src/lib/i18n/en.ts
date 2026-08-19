@@ -72,7 +72,7 @@ export const en = {
     noMessagesTitle: 'No messages yet',
     noMessagesMessage: 'Say hello to start this conversation.',
     loadingOlderMessages: 'Loading older messages',
-    storedNotice: 'Messages are stored by Văzute and are not end-to-end encrypted.',
+    storedNotice: 'This conversation is not end-to-end encrypted, because encryption is not set up on both accounts. Văzute stores these messages and can read them.',
     unavailable: 'Messaging is unavailable',
     unavailableHint: 'You must follow each other and neither account may be blocked.',
     inputLabel: 'Message',

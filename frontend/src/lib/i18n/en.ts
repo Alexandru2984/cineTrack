@@ -264,7 +264,7 @@ export const en = {
     send: 'Send message',
     sendError: 'The message could not be sent',
     privacyNotice:
-      'Messages are stored by Văzute and are not end-to-end encrypted. A reported message can be reviewed for safety.',
+      'This conversation is not end-to-end encrypted, because encryption is not set up on both accounts. Văzute stores these messages and can read them, and a reported message can be reviewed for safety.',
     unavailable: 'Messaging is unavailable',
     unavailableHint: 'Both accounts must follow each other and neither account can be blocked.',
     sent: 'Sent',
@@ -505,7 +505,7 @@ export const en = {
     dismiss: 'Dismiss',
   },
   legal: {
-    effective: 'Effective and last updated: August 6, 2026',
+    effective: 'Effective and last updated: August 19, 2026',
     contactTitle: 'Questions, reports, and appeals',
     termsTitle: 'Terms of Use',
     termsIntro:
@@ -539,7 +539,7 @@ export const en = {
       'Material changes receive a new version and may require renewed acceptance before community features can be used. Romanian law applies where permitted, without removing mandatory protections available in your country. If one provision is unenforceable, the remaining provisions continue to apply.',
     terms10Title: 'Direct messages',
     terms10Body:
-      'Direct messages are available only between accounts that follow each other. They are stored by Văzute and are not end-to-end encrypted, so do not use them for secrets or sensitive information. Either participant may report a received message, in which case its content and relevant account context may be reviewed for safety. Blocking or ending a mutual follow stops new messages, while existing history may remain visible to both participants until an account is deleted or the service applies a lawful retention measure.',
+      'Direct messages are available only between accounts that follow each other. When both accounts have set up encryption, messages between them are end-to-end encrypted: Văzute stores them but cannot read them. Until then, messages are stored in a form Văzute can read, so do not use them for secrets or sensitive information. Either participant may report a received message; for an encrypted message the reporter discloses that message and proof of who wrote it, and for any report the content and relevant account context may be reviewed for safety. Losing both your password and your recovery code means losing access to encrypted messages, because nobody else holds a key to them. Blocking or ending a mutual follow stops new messages, while existing history may remain visible to both participants until an account is deleted or the service applies a lawful retention measure.',
     guidelinesTitle: 'Community Guidelines',
     guidelinesIntro:
       'Văzute should be a safe place to share viewing activity and lists. These rules apply to usernames, bios, avatars, public lists, direct messages, and every community interaction.',
@@ -566,7 +566,7 @@ export const en = {
       'Responses are based on context, severity, history, and risk. They may include warnings, content removal, feature limits, suspension, or account termination. Serious illegal material may be preserved or reported where required. Whoever is affected by a decision — the person acted against and the person who reported — may contest it by writing to the contact address in these documents within six months of being informed, stating the account name and why the decision looks wrong. A person, not an automated system, reviews every appeal and answers in writing, normally within 14 days; where the review finds the decision was wrong it is reversed and any restriction is lifted. Reports and decisions are recorded so an appeal can be reconstructed. This route is free, and it does not remove the right to go to a court or to an out-of-court dispute settlement body.',
     guidelines8Title: 'Use direct messages responsibly',
     guidelines8Body:
-      'A mutual follow is permission to open the messaging feature, not permission to harass, pressure, threaten, sexualize, scam, or send repeated unwanted contact. Stop when asked, never share another person’s private messages without a lawful reason, and use block and report for unsafe contact. Do not send secrets because messages are not end-to-end encrypted.',
+      'A mutual follow is permission to open the messaging feature, not permission to harass, pressure, threaten, sexualize, scam, or send repeated unwanted contact. Stop when asked, never share another person’s private messages without a lawful reason, and use block and report for unsafe contact. Encryption does not put a message beyond the rules: whoever receives one can disclose it in a report, along with proof of who wrote it.',
     acceptanceTitle: 'Review the current community terms',
     acceptanceBody:
       'The community rules have been versioned so every member has the same clear safety expectations. Accept them before continuing with social and public-content features.',
@@ -661,7 +661,7 @@ export const en = {
   },
   privacy: {
     title: 'Privacy policy',
-    effective: 'Effective and last updated: August 6, 2026',
+    effective: 'Effective and last updated: August 19, 2026',
     s1Title: 'Who is responsible',
     s1Pre: 'Văzute is operated by Dragne Alexandru Mihai. Questions and privacy requests can be sent to',
     s2Title: 'Data we process',
@@ -673,7 +673,8 @@ export const en = {
     data6: 'Mobile diagnostics: sanitized error name, message and stack, app version, platform, time, and whether the failure was fatal. Tokens, email addresses, URL parameters, device identifiers, and advertising identifiers are not included.',
     data7: 'Release alerts, when enabled: an Expo push token, platform, app version, time-zone offset, enablement time, and a short-lived delivery record containing the relevant title and release.',
     data8: 'Community safety data: blocked-account relationships, submitted report reason and optional details, a server-side snapshot of the reported profile or public list, report status, and accountable moderator decision notes.',
-    data9: 'Direct-message data: sender and recipient, message text, delivery and read timestamps, and a random idempotency identifier used to prevent duplicate sends. Messages are not end-to-end encrypted. A reported message is copied into the safety report for review.',
+    data9: 'Direct-message data: sender and recipient, delivery and read timestamps, and a random idempotency identifier used to prevent duplicate sends. Message text is stored in readable form only until both accounts have set up encryption; after that Văzute stores ciphertext it cannot read. A reported plaintext message is copied into the safety report for review; a reported encrypted message is disclosed by the reporter, together with the key that proves what the sender wrote.',
+    data10: 'Encryption key material, when encryption is set up: your public keys and their fingerprint, and two copies of your private key sealed by your password and by your recovery code. Văzute stores the sealed copies and cannot open either — losing both secrets means losing access to encrypted messages.',
     s3Title: 'How data is used',
     use1: 'Data is used to authenticate accounts, synchronize the library across devices, build calendars and statistics, provide social features and direct messages, deliver password-reset and account-security messages, send release alerts requested by the user, prevent abuse, diagnose failures, and protect the service. For users in the EEA, these activities rely on performance of the service contract and legitimate interests in security and reliability. Văzute does not sell personal data or use advertising or behavioral analytics. Cloudflare Web Analytics provides aggregate web-traffic measurements at the network edge.',
     use2: 'Văzute keeps self-hosted aggregate counters for a fixed set of successful feature actions, such as viewing the annual recap or starting an import. These counters are retained for 30 days and contain no user or device identifier, IP address, search, title, per-action timestamp, or other free-form property. The counters alone cannot identify an account or device.',

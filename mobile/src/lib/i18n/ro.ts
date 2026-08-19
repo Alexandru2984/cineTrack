@@ -72,7 +72,7 @@ export const ro: Dictionary = {
     noMessagesTitle: 'Niciun mesaj încă',
     noMessagesMessage: 'Spune salut pentru a începe conversația.',
     loadingOlderMessages: 'Se încarcă mesaje mai vechi',
-    storedNotice: 'Mesajele sunt stocate de Văzute și nu sunt criptate end-to-end.',
+    storedNotice: 'Această conversație nu este criptată cap-coadă, pentru că nu ambele conturi au criptarea activată. Văzute stochează aceste mesaje și le poate citi.',
     unavailable: 'Mesageria este indisponibilă',
     unavailableHint: 'Trebuie să vă urmăriți reciproc și niciun cont nu poate fi blocat.',
     inputLabel: 'Mesaj',
