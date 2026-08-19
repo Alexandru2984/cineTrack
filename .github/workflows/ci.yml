@@ -372,6 +372,11 @@ jobs:
       - name: Validate metrics scrape credential wiring
         run: scripts/tests/metrics_scrape_auth_test.sh
 
+      # The two clients share one encryption implementation by copy; nothing
+      # in either test suite notices if the copies drift apart.
+      - name: Validate crypto core parity
+        run: scripts/tests/crypto_core_parity_test.sh
+
       - name: Validate deploy drift reporting
         run: scripts/tests/deploy_drift_test.sh
 
