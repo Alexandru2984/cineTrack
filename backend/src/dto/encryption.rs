@@ -133,6 +133,27 @@ pub struct PublishKeysRequest {
     pub recovery_kdf_salt: String,
 }
 
+/// Replace only the password-sealed copy of the private key.
+///
+/// Separate from `PublishKeysRequest` because the two mean different things. A
+/// password change re-seals the same key under a new secret; publishing
+/// replaces the key itself, and its upsert bumps the generation counter to say
+/// so. Reusing that route here would announce a rotation that never happened,
+/// and every peer would be told to re-check a safety number that had not moved.
+///
+/// The recovery copy is deliberately absent. It is sealed under a code the
+/// server never sees and the password change has no bearing on it — rewriting
+/// it here could only lose it.
+#[derive(Debug, Deserialize, Validate)]
+#[serde(deny_unknown_fields)]
+pub struct RewrapBackupRequest {
+    #[validate(custom(function = "validate_wrapped_key"))]
+    pub password_wrapped_key: String,
+    #[validate(custom(function = "validate_salt"))]
+    pub password_kdf_salt: String,
+    pub password_kdf: KdfParameters,
+}
+
 /// A peer's public keys, as served to somebody about to message them.
 #[derive(Debug, Serialize)]
 pub struct PublicKeysResponse {

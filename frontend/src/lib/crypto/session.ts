@@ -83,6 +83,44 @@ export async function setupIdentity(userId: string, password: string): Promise<S
   return { identity, fingerprint, recoveryCode };
 }
 
+/** Re-seal the private key under a new password.
+ *
+ *  Called when the account password changes. Without it the stored copy still
+ *  opens under the old password, so the next device to restore is refused with
+ *  the password its owner believes is correct — recoverable through the
+ *  recovery code, but bewildering, and nothing on that screen suggests reaching
+ *  for it.
+ *
+ *  Only the password copy moves. The recovery copy is sealed under a code this
+ *  change has no bearing on, and the identity keys themselves are untouched, so
+ *  no peer is told to re-verify a safety number that has not moved.
+ *
+ *  Returns whether it happened. A device that does not hold the key cannot
+ *  re-seal it, and that is a real outcome the caller has to be able to report
+ *  rather than an error to swallow. */
+export async function rewrapBackup(
+  identity: IdentityKeyPair | null,
+  newPassword: string,
+): Promise<boolean> {
+  if (!identity) return false;
+
+  const { DEFAULT_KDF_COST, SALT_BYTES, deriveWrappingKey, toHex, wrapIdentity } = await core();
+  const salt = randomSalt(SALT_BYTES);
+
+  await api.put('/encryption/keys/backup', {
+    password_wrapped_key: toHex(
+      wrapIdentity(identity, deriveWrappingKey(newPassword, salt, DEFAULT_KDF_COST)),
+    ),
+    password_kdf_salt: toHex(salt),
+    password_kdf: {
+      memory_kib: DEFAULT_KDF_COST.memoryKib,
+      iterations: DEFAULT_KDF_COST.iterations,
+      parallelism: DEFAULT_KDF_COST.parallelism,
+    },
+  });
+  return true;
+}
+
 export class WrongSecretError extends Error {
   constructor() {
     super('wrong-secret');

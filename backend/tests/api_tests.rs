@@ -6454,6 +6454,113 @@ async fn plaintext_is_refused_once_both_sides_have_keys() {
     assert_eq!(actix_test::call_service(&app, req).await.status(), 201);
 }
 
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn rewrapping_the_backup_leaves_the_published_keys_alone() {
+    // A password change re-seals the same key under a new secret. Publishing
+    // replaces the key itself and bumps the generation so peers re-verify —
+    // announcing that here would send everybody to check a safety number that
+    // had not moved.
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (token, _, user_id) =
+        register_user(&app, "rewrapper", "rewrap@mailbox.dev", "Pass1234").await;
+    let user_id = Uuid::parse_str(&user_id).unwrap();
+
+    let req = actix_test::TestRequest::put()
+        .uri("/api/encryption/keys")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .set_json(publish_keys_body(&"a".repeat(64)))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert!(actix_test::call_service(&app, req)
+        .await
+        .status()
+        .is_success());
+
+    let before: (i32, Vec<u8>) = sqlx::query_as(
+        "SELECT generation, exchange_public_key FROM user_identity_keys WHERE user_id = $1",
+    )
+    .bind(user_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    let req = actix_test::TestRequest::put()
+        .uri("/api/encryption/keys/backup")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .set_json(json!({
+            "password_wrapped_key": "1a".repeat(64),
+            "password_kdf_salt": "2b".repeat(16),
+            "password_kdf": { "memory_kib": 19456, "iterations": 2, "parallelism": 1 },
+        }))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 204);
+
+    let after: (i32, Vec<u8>) = sqlx::query_as(
+        "SELECT generation, exchange_public_key FROM user_identity_keys WHERE user_id = $1",
+    )
+    .bind(user_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        after, before,
+        "re-sealing must not look like a key rotation"
+    );
+
+    // The password copy moved; the recovery copy did not. It is sealed under a
+    // code the password change has no bearing on, and rewriting it here could
+    // only lose it.
+    let backup: (Vec<u8>, Vec<u8>, Vec<u8>) = sqlx::query_as(
+        "SELECT password_wrapped_key, password_kdf_salt, recovery_wrapped_key
+         FROM user_key_backups WHERE user_id = $1",
+    )
+    .bind(user_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(hex::encode(&backup.0), "1a".repeat(64));
+    assert_eq!(hex::encode(&backup.1), "2b".repeat(16));
+    assert_eq!(hex::encode(&backup.2), "ee".repeat(64));
+
+    // And the change is visible to the person whose account it is.
+    let kind: String = sqlx::query_scalar(
+        "SELECT event_type FROM security_activity
+         WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1",
+    )
+    .bind(user_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(kind, "encryption_backup_rewrapped");
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn rewrapping_without_a_backup_is_refused() {
+    // Creating one here would store a blob the server cannot inspect and
+    // nothing can open — a backup in name only.
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (token, _, _) = register_user(&app, "nobackup", "nobackup@mailbox.dev", "Pass1234").await;
+
+    let req = actix_test::TestRequest::put()
+        .uri("/api/encryption/keys/backup")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .set_json(json!({
+            "password_wrapped_key": "1a".repeat(64),
+            "password_kdf_salt": "2b".repeat(16),
+            "password_kdf": { "memory_kib": 19456, "iterations": 2, "parallelism": 1 },
+        }))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 404);
+}
+
 // ── Franking: moderation of messages the server cannot read ───
 
 /// Build a franked encrypted message directly in the database, the way a client
