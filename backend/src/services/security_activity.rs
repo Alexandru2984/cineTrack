@@ -21,6 +21,11 @@ pub enum SecurityActivityKind {
     SessionRevoked,
     AllSessionsRevoked,
     AccountDataExported,
+    /// The account published or replaced its end-to-end encryption keys.
+    /// Security-relevant because it is what somebody who had taken the account
+    /// would do to read future messages, so the owner sees it in the timeline
+    /// they already review.
+    EncryptionKeysPublished,
 }
 
 impl SecurityActivityKind {
@@ -37,6 +42,7 @@ impl SecurityActivityKind {
             Self::SessionRevoked => "session_revoked",
             Self::AllSessionsRevoked => "all_sessions_revoked",
             Self::AccountDataExported => "account_data_exported",
+            Self::EncryptionKeysPublished => "encryption_keys_published",
         }
     }
 }
