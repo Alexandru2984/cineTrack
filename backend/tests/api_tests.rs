@@ -6165,6 +6165,293 @@ async fn test_calendar_lists_new_and_regional_upcoming_releases() {
     assert_eq!(us_upcoming["items"][0]["release_type"], 3);
 }
 
+// ── Encrypted message transport ───────────────────────────────
+
+fn encrypted_body(client_nonce: Uuid) -> Value {
+    json!({
+        "client_nonce": client_nonce,
+        "ciphertext": "11".repeat(64),
+        "nonce": "22".repeat(12),
+        "sender_ephemeral_key": "33".repeat(32),
+        "franking_commitment": "44".repeat(32),
+        "franking_signature": "55".repeat(64),
+    })
+}
+
+async fn make_mutual_followers(pool: &PgPool, first: Uuid, second: Uuid) {
+    for (follower, following) in [(first, second), (second, first)] {
+        sqlx::query(
+            r#"INSERT INTO follows (follower_id, following_id, status)
+            VALUES ($1, $2, 'accepted') ON CONFLICT DO NOTHING"#,
+        )
+        .bind(follower)
+        .bind(following)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn an_encrypted_message_round_trips_without_the_server_reading_it() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (sender_token, _, sender_id) =
+        register_user(&app, "envsender", "envsender@mailbox.dev", "Pass1234").await;
+    let (recipient_token, _, recipient_id) =
+        register_user(&app, "envrecip", "envrecip@mailbox.dev", "Pass1234").await;
+    make_mutual_followers(
+        &pool,
+        Uuid::parse_str(&sender_id).unwrap(),
+        Uuid::parse_str(&recipient_id).unwrap(),
+    )
+    .await;
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/messages/envrecip")
+        .insert_header(("Authorization", format!("Bearer {sender_token}")))
+        .set_json(encrypted_body(Uuid::new_v4()))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 201);
+    let sent: Value = actix_test::read_body_json(resp).await;
+    // Nothing readable comes back, because there is nothing readable to return.
+    assert!(sent["body"].is_null());
+    assert_eq!(sent["ciphertext"], "11".repeat(64));
+
+    // The recipient receives the envelope it needs to decrypt, including the
+    // commitment it must check against what it decrypts.
+    let req = actix_test::TestRequest::get()
+        .uri("/api/messages/envsender")
+        .insert_header(("Authorization", format!("Bearer {recipient_token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let thread: Value = actix_test::call_and_read_body_json(&app, req).await;
+    let message = &thread["messages"][0];
+    assert!(message["body"].is_null());
+    assert_eq!(message["nonce"], "22".repeat(12));
+    assert_eq!(message["sender_ephemeral_key"], "33".repeat(32));
+    assert_eq!(message["franking_commitment"], "44".repeat(32));
+    // The signature is the server's business alone; handing it to a client
+    // would invite one to believe it had verified something it cannot.
+    assert!(message.get("franking_signature").is_none());
+
+    // The conversation list carries the envelope instead of a plaintext
+    // preview, so the client can show the real last message rather than a
+    // padlock.
+    let req = actix_test::TestRequest::get()
+        .uri("/api/messages")
+        .insert_header(("Authorization", format!("Bearer {recipient_token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let conversations: Value = actix_test::call_and_read_body_json(&app, req).await;
+    assert!(conversations[0]["last_message_body"].is_null());
+    assert_eq!(conversations[0]["last_message_ciphertext"], "11".repeat(64));
+    assert_eq!(conversations[0]["last_message_nonce"], "22".repeat(12));
+    assert_eq!(
+        conversations[0]["last_message_sender_ephemeral_key"],
+        "33".repeat(32)
+    );
+
+    // And the stored row really is unreadable.
+    let stored: (Option<String>, Option<Vec<u8>>) =
+        sqlx::query_as("SELECT body, ciphertext FROM direct_messages WHERE id = $1")
+            .bind(Uuid::parse_str(sent["id"].as_str().unwrap()).unwrap())
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        stored.0, None,
+        "an encrypted message must store no plaintext"
+    );
+    assert!(stored.1.is_some());
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn a_plaintext_message_still_sends_unchanged() {
+    // Migration is gradual: a conversation where somebody has not published
+    // keys keeps working exactly as before.
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (sender_token, _, sender_id) =
+        register_user(&app, "plainsender", "plainsender@mailbox.dev", "Pass1234").await;
+    let (_, _, recipient_id) =
+        register_user(&app, "plainrecip", "plainrecip@mailbox.dev", "Pass1234").await;
+    make_mutual_followers(
+        &pool,
+        Uuid::parse_str(&sender_id).unwrap(),
+        Uuid::parse_str(&recipient_id).unwrap(),
+    )
+    .await;
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/messages/plainrecip")
+        .insert_header(("Authorization", format!("Bearer {sender_token}")))
+        .set_json(json!({ "body": "  hello\r\nthere  ", "client_nonce": Uuid::new_v4() }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 201);
+    let sent: Value = actix_test::read_body_json(resp).await;
+    // Still trimmed and newline-normalised, as it always was.
+    assert_eq!(sent["body"], "hello\nthere");
+    assert!(sent["ciphertext"].is_null());
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn a_malformed_envelope_is_refused_with_a_client_error() {
+    // Sizes are fixed by the algorithms. Catching a wrong one here turns what
+    // would be a database constraint violation into a clear 400.
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (sender_token, _, sender_id) =
+        register_user(&app, "badenvsend", "badenv@mailbox.dev", "Pass1234").await;
+    let (_, _, recipient_id) =
+        register_user(&app, "badenvrecip", "badenvr@mailbox.dev", "Pass1234").await;
+    make_mutual_followers(
+        &pool,
+        Uuid::parse_str(&sender_id).unwrap(),
+        Uuid::parse_str(&recipient_id).unwrap(),
+    )
+    .await;
+
+    let mut body = encrypted_body(Uuid::new_v4());
+    body["nonce"] = json!("22".repeat(11));
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/messages/badenvrecip")
+        .insert_header(("Authorization", format!("Bearer {sender_token}")))
+        .set_json(body)
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 400);
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn resending_an_encrypted_message_is_idempotent() {
+    // A retry after a dropped connection must not duplicate the message. The
+    // ciphertext differs on every send by design, so the nonce is what
+    // identifies the attempt.
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (sender_token, _, sender_id) =
+        register_user(&app, "idemsender", "idem@mailbox.dev", "Pass1234").await;
+    let (_, _, recipient_id) =
+        register_user(&app, "idemrecip", "idemr@mailbox.dev", "Pass1234").await;
+    make_mutual_followers(
+        &pool,
+        Uuid::parse_str(&sender_id).unwrap(),
+        Uuid::parse_str(&recipient_id).unwrap(),
+    )
+    .await;
+
+    let client_nonce = Uuid::new_v4();
+    for expected in [201, 200] {
+        let req = actix_test::TestRequest::post()
+            .uri("/api/messages/idemrecip")
+            .insert_header(("Authorization", format!("Bearer {sender_token}")))
+            .set_json(encrypted_body(client_nonce))
+            .peer_addr(peer_addr())
+            .to_request();
+        assert_eq!(actix_test::call_service(&app, req).await.status(), expected);
+    }
+
+    let count = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM direct_messages WHERE client_nonce = $1",
+    )
+    .bind(client_nonce)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(count, 1, "a retry created a second message");
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn plaintext_is_refused_once_both_sides_have_keys() {
+    // The downgrade defence. A client decides plaintext-or-envelope by looking
+    // up the peer's key; the server re-derives the same rule so that skipping
+    // the lookup is not a way to have plaintext stored.
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (sender_token, _, sender_id) =
+        register_user(&app, "downsender", "down@mailbox.dev", "Pass1234").await;
+    let (recipient_token, _, recipient_id) =
+        register_user(&app, "downrecip", "downr@mailbox.dev", "Pass1234").await;
+    make_mutual_followers(
+        &pool,
+        Uuid::parse_str(&sender_id).unwrap(),
+        Uuid::parse_str(&recipient_id).unwrap(),
+    )
+    .await;
+
+    let plaintext = |token: &str| {
+        actix_test::TestRequest::post()
+            .uri("/api/messages/downrecip")
+            .insert_header(("Authorization", format!("Bearer {token}")))
+            .set_json(json!({ "body": "hello", "client_nonce": Uuid::new_v4() }))
+            .peer_addr(peer_addr())
+            .to_request()
+    };
+
+    // Only the sender has keys: the recipient could not decrypt, so plaintext
+    // is still the only thing that works.
+    let req = actix_test::TestRequest::put()
+        .uri("/api/encryption/keys")
+        .insert_header(("Authorization", format!("Bearer {sender_token}")))
+        .set_json(publish_keys_body(&"7".repeat(64)))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert!(actix_test::call_service(&app, req)
+        .await
+        .status()
+        .is_success());
+    assert_eq!(
+        actix_test::call_service(&app, plaintext(&sender_token))
+            .await
+            .status(),
+        201,
+        "a one-sided key must not block the conversation"
+    );
+
+    // Now both do, and plaintext is no longer an option for either direction.
+    let req = actix_test::TestRequest::put()
+        .uri("/api/encryption/keys")
+        .insert_header(("Authorization", format!("Bearer {recipient_token}")))
+        .set_json(publish_keys_body(&"8".repeat(64)))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert!(actix_test::call_service(&app, req)
+        .await
+        .status()
+        .is_success());
+    assert_eq!(
+        actix_test::call_service(&app, plaintext(&sender_token))
+            .await
+            .status(),
+        400
+    );
+
+    // And the encrypted form is accepted in its place.
+    let req = actix_test::TestRequest::post()
+        .uri("/api/messages/downrecip")
+        .insert_header(("Authorization", format!("Bearer {sender_token}")))
+        .set_json(encrypted_body(Uuid::new_v4()))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 201);
+}
+
 // ── Franking: moderation of messages the server cannot read ───
 
 /// Build a franked encrypted message directly in the database, the way a client

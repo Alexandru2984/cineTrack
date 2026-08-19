@@ -2,12 +2,12 @@ use actix_web::{web, HttpRequest, HttpResponse};
 use serde_json::json;
 use sqlx::{PgPool, Postgres, Transaction};
 use uuid::Uuid;
-use validator::Validate;
 
 use crate::dto::common::PaginationParams;
 use crate::dto::message::{
-    ConversationResponse, DirectMessageResponse, MarkThreadReadRequest, MessageHistoryParams,
-    MessagePeerResponse, MessageSummaryResponse, MessageThreadResponse, SendMessageRequest,
+    ConversationResponse, DirectMessageResponse, EncryptedEnvelope, MarkThreadReadRequest,
+    MessageHistoryParams, MessagePeerResponse, MessageSummaryResponse, MessageThreadResponse,
+    SendMessageRequest,
 };
 use crate::errors::AppError;
 use crate::middleware::auth::require_auth;
@@ -25,6 +25,15 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
             .route("/{username}", web::post().to(send_message))
             .route("/{username}/read", web::post().to(mark_thread_read)),
     );
+}
+
+/// Render a validation error for the caller, preferring its message over its
+/// machine-readable code.
+fn describe_validation(error: &validator::ValidationError) -> String {
+    error
+        .message
+        .as_ref()
+        .map_or_else(|| error.code.to_string(), std::string::ToString::to_string)
 }
 
 async fn resolve_peer(pool: &PgPool, username: &str) -> Result<MessagePeerResponse, AppError> {
@@ -175,6 +184,9 @@ async fn list_conversations(
             latest.id AS last_message_id,
             latest.sender_id AS last_message_sender_id,
             latest.body AS last_message_body,
+            latest.ciphertext AS last_message_ciphertext,
+            latest.nonce AS last_message_nonce,
+            latest.sender_ephemeral_key AS last_message_sender_ephemeral_key,
             latest.created_at AS last_message_at,
             latest.read_at AS last_message_read_at,
             latest.unread_count,
@@ -265,9 +277,13 @@ async fn get_thread(
         .map_err(|message| AppError::BadRequest(message.to_string()))?;
     let messages = if let Some((before, before_id)) = cursor {
         sqlx::query_as::<_, DirectMessageResponse>(
-            r#"SELECT id, sender_id, recipient_id, body, read_at, created_at
+            r#"SELECT id, sender_id, recipient_id, body,
+                       ciphertext, nonce, sender_ephemeral_key, franking_commitment,
+                       read_at, created_at
             FROM (
-                SELECT id, sender_id, recipient_id, body, read_at, created_at
+                SELECT id, sender_id, recipient_id, body,
+                       ciphertext, nonce, sender_ephemeral_key, franking_commitment,
+                       read_at, created_at
                 FROM direct_messages
                 WHERE
                     ((sender_id = $1 AND recipient_id = $2)
@@ -287,9 +303,13 @@ async fn get_thread(
         .await?
     } else {
         sqlx::query_as::<_, DirectMessageResponse>(
-            r#"SELECT id, sender_id, recipient_id, body, read_at, created_at
+            r#"SELECT id, sender_id, recipient_id, body,
+                       ciphertext, nonce, sender_ephemeral_key, franking_commitment,
+                       read_at, created_at
             FROM (
-                SELECT id, sender_id, recipient_id, body, read_at, created_at
+                SELECT id, sender_id, recipient_id, body,
+                       ciphertext, nonce, sender_ephemeral_key, franking_commitment,
+                       read_at, created_at
                 FROM direct_messages
                 WHERE
                     (sender_id = $1 AND recipient_id = $2)
@@ -316,6 +336,24 @@ async fn get_thread(
         }))
 }
 
+/// Whether both accounts have published identity keys, and so must use them.
+///
+/// Counting rather than fetching: the keys themselves are not needed here, only
+/// whether encryption is possible for this pair.
+async fn both_parties_can_encrypt(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    sender_id: Uuid,
+    recipient_id: Uuid,
+) -> Result<bool, AppError> {
+    let published = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM user_identity_keys WHERE user_id = ANY($1)",
+    )
+    .bind(vec![sender_id, recipient_id])
+    .fetch_one(&mut **tx)
+    .await?;
+    Ok(published == 2)
+}
+
 async fn send_message(
     pool: web::Data<PgPool>,
     req: HttpRequest,
@@ -325,9 +363,15 @@ async fn send_message(
     let sender_id = require_auth(&req).await?;
     crate::services::auth::require_verified_email(pool.get_ref(), sender_id).await?;
     crate::services::legal::require_current_terms(pool.get_ref(), sender_id).await?;
-    body.validate()?;
+    body.validate_content()
+        .map_err(|error| AppError::BadRequest(describe_validation(&error)))?;
     let data = body.into_inner();
     let normalized_body = data.normalized_body();
+    let envelope = data
+        .envelope()
+        .map(EncryptedEnvelope::decode)
+        .transpose()
+        .map_err(|error| AppError::BadRequest(describe_validation(&error)))?;
 
     let mut tx = pool.begin().await?;
     let peer = resolve_peer_in_tx(&mut tx, &path.into_inner()).await?;
@@ -347,17 +391,49 @@ async fn send_message(
         ));
     }
 
+    // The switching rule, enforced where it cannot be bypassed.
+    //
+    // Clients choose plaintext or an envelope by looking up the recipient's
+    // published key, and that decision is the right one to make on the client —
+    // it is the only place that knows whether it can actually encrypt. But a
+    // decision made only on the client is a decision an attacker can make
+    // instead: strip the key lookup, send plaintext, and the server would store
+    // it. So the server re-derives the same rule from its own key directory and
+    // refuses plaintext once both sides have published keys.
+    //
+    // This can only reject a client that published a key and then sent
+    // plaintext anyway — which is to say a client that is out of date or lying.
+    // The message says which.
+    if envelope.is_none() && both_parties_can_encrypt(&mut tx, sender_id, peer.id).await? {
+        return Err(AppError::BadRequest(
+            "Both accounts have encryption keys, so this conversation is end-to-end \
+             encrypted. Update the app to send messages here."
+                .to_string(),
+        ));
+    }
+
     let existing = sqlx::query_as::<_, DirectMessageResponse>(
-        r#"SELECT id, sender_id, recipient_id, body, read_at, created_at
+        r#"SELECT id, sender_id, recipient_id, body,
+                       ciphertext, nonce, sender_ephemeral_key, franking_commitment,
+                       read_at, created_at
         FROM direct_messages
         WHERE sender_id = $1 AND client_nonce = $2"#,
     )
     .bind(sender_id)
-    .bind(data.client_nonce)
+    .bind(data.client_nonce())
     .fetch_optional(&mut *tx)
     .await?;
     if let Some(existing) = existing {
-        if existing.recipient_id != peer.id || existing.body != normalized_body {
+        // Compare whichever form this send took. An encrypted retry cannot be
+        // compared by content — the ciphertext differs every time by design —
+        // so matching the recipient and the stored form is as far as this can
+        // honestly go.
+        let same_content = match (&existing.body, &normalized_body) {
+            (Some(stored), Some(sent)) => stored == sent,
+            (None, None) => true,
+            _ => false,
+        };
+        if existing.recipient_id != peer.id || !same_content {
             return Err(AppError::Conflict(
                 "Message idempotency key was already used".to_string(),
             ));
@@ -398,14 +474,25 @@ async fn send_message(
     }
 
     let message = sqlx::query_as::<_, DirectMessageResponse>(
-        r#"INSERT INTO direct_messages (sender_id, recipient_id, client_nonce, body)
-        VALUES ($1, $2, $3, $4)
-        RETURNING id, sender_id, recipient_id, body, read_at, created_at"#,
+        r#"INSERT INTO direct_messages (
+            sender_id, recipient_id, client_nonce, body,
+            ciphertext, nonce, sender_ephemeral_key,
+            franking_commitment, franking_signature
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        RETURNING id, sender_id, recipient_id, body,
+                  ciphertext, nonce, sender_ephemeral_key,
+                  franking_commitment, read_at, created_at"#,
     )
     .bind(sender_id)
     .bind(peer.id)
-    .bind(data.client_nonce)
+    .bind(data.client_nonce())
     .bind(normalized_body)
+    .bind(envelope.as_ref().map(|e| &e.ciphertext))
+    .bind(envelope.as_ref().map(|e| &e.nonce))
+    .bind(envelope.as_ref().map(|e| &e.sender_ephemeral_key))
+    .bind(envelope.as_ref().map(|e| &e.franking_commitment))
+    .bind(envelope.as_ref().map(|e| &e.franking_signature))
     .fetch_one(&mut *tx)
     .await?;
     tx.commit().await?;
