@@ -1025,6 +1025,7 @@ dependencies = [
  "aes-gcm",
  "anyhow",
  "argon2",
+ "aws-lc-rs",
  "aws-sdk-s3",
  "aws-smithy-types",
  "chrono",

@@ -26,6 +26,11 @@ rand = "0.10"
 sha2 = "0.11"
 sha1 = "0.11"
 hmac = "0.13"
+# Already compiled in through jsonwebtoken's aws_lc_rs backend; declared
+# directly so franking signatures can be verified without pulling a second
+# Ed25519 implementation into the tree. Pinned to the version already resolved,
+# so making it explicit cannot silently change what is linked.
+aws-lc-rs = { version = "=1.17.1", default-features = false, features = ["aws-lc-sys"] }
 aes-gcm = "0.11"
 hex = "0.4"
 log = "0.4"

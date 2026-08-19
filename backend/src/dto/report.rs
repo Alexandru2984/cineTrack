@@ -59,6 +59,31 @@ pub struct CreateReportRequest {
         custom(function = "validate_optional_details")
     )]
     pub details: Option<String>,
+
+    /// Evidence for an end-to-end encrypted message: the plaintext the reporter
+    /// saw, and the per-message franking key that opens the sender's
+    /// commitment to it.
+    ///
+    /// Required when reporting an encrypted message and meaningless otherwise —
+    /// the server can snapshot a profile, a list or a plaintext message itself.
+    /// Without it an encrypted message would be either unreportable or
+    /// reportable with text the reporter simply typed.
+    #[validate(length(
+        min = 1,
+        max = 2000,
+        message = "Revealed message must be 1-2000 characters"
+    ))]
+    pub revealed_plaintext: Option<String>,
+    #[validate(custom(function = "validate_franking_key"))]
+    pub franking_key: Option<String>,
+}
+
+fn validate_franking_key(value: &str) -> Result<(), ValidationError> {
+    let decoded = hex::decode(value).map_err(|_| ValidationError::new("invalid_hex"))?;
+    if decoded.len() != 32 {
+        return Err(ValidationError::new("invalid_franking_key_length"));
+    }
+    Ok(())
 }
 
 #[derive(Debug, Serialize, sqlx::FromRow)]
@@ -201,7 +226,19 @@ mod tests {
             target_id: Uuid::new_v4(),
             reason: "harassment".to_string(),
             details: Some("Repeated unwanted contact".to_string()),
+            revealed_plaintext: None,
+            franking_key: None,
         }
+    }
+
+    #[test]
+    fn a_franking_key_must_be_thirty_two_bytes_of_hex() {
+        // The key opens the sender's commitment; a wrong length cannot, so it
+        // is refused here rather than producing an unverifiable report.
+        assert!(validate_franking_key(&"ab".repeat(32)).is_ok());
+        assert!(validate_franking_key(&"ab".repeat(31)).is_err());
+        assert!(validate_franking_key(&"ab".repeat(33)).is_err());
+        assert!(validate_franking_key("not hex").is_err());
     }
 
     #[test]
