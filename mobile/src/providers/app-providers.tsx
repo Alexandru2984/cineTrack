@@ -26,6 +26,7 @@ import {
 import { flushPendingLogoutRevocations, resumeOfflineSession } from '@/lib/session';
 import { useAuthStore } from '@/store/auth';
 import { useLocaleStore } from '@/store/locale';
+import { useEncryptionSession } from '@/hooks/use-encryption';
 import { useEventStream } from '@/hooks/use-event-stream';
 
 function refreshReleaseNotifications() {
@@ -175,8 +176,15 @@ export function AppProviders({ children }: PropsWithChildren) {
 }
 
 /** Renders nothing; exists so the event stream runs inside the query provider,
- *  which is what supplies the client it invalidates. */
+ *  which is what supplies the client it invalidates.
+ *
+ *  The encryption session loads here for the same reason, and once rather than
+ *  per screen: the three states it distinguishes — no keys anywhere, keys
+ *  elsewhere but not here, keys here — are what every messaging screen branches
+ *  on, and deriving them separately would give different answers in different
+ *  places. */
 function EventStreamBridge() {
   useEventStream();
+  useEncryptionSession();
   return null;
 }

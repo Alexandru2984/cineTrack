@@ -7,6 +7,7 @@ import { Navbar } from '@/components/Navbar';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { MobileTabBar } from '@/components/MobileTabBar';
 import { EventStream } from '@/components/EventStream';
+import { useEncryptionSession } from '@/hooks/useEncryption';
 import { EmailVerificationBanner } from '@/components/EmailVerificationBanner';
 import { TermsAcceptanceGate } from '@/components/TermsAcceptanceGate';
 import { loginPathFor, safeReturnTo } from '@/lib/navigation';
@@ -75,6 +76,9 @@ export default function App() {
   const authenticated = authStatus === 'authenticated';
 
   useCanonicalUrl();
+  // Loads this device's encryption keys once, so every screen branches on one
+  // answer rather than working it out separately and disagreeing.
+  useEncryptionSession();
 
   useEffect(() => {
     void bootstrapSession();

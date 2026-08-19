@@ -26,6 +26,9 @@ pub enum SecurityActivityKind {
     /// would do to read future messages, so the owner sees it in the timeline
     /// they already review.
     EncryptionKeysPublished,
+    /// The account re-sealed its private key under a new password. Distinct
+    /// from publishing: the key itself did not change, only what opens it.
+    EncryptionBackupRewrapped,
 }
 
 impl SecurityActivityKind {
@@ -43,6 +46,7 @@ impl SecurityActivityKind {
             Self::AllSessionsRevoked => "all_sessions_revoked",
             Self::AccountDataExported => "account_data_exported",
             Self::EncryptionKeysPublished => "encryption_keys_published",
+            Self::EncryptionBackupRewrapped => "encryption_backup_rewrapped",
         }
     }
 }
@@ -186,6 +190,8 @@ mod tests {
                 SecurityActivityKind::SessionRevoked,
                 SecurityActivityKind::AllSessionsRevoked,
                 SecurityActivityKind::AccountDataExported,
+                SecurityActivityKind::EncryptionKeysPublished,
+                SecurityActivityKind::EncryptionBackupRewrapped,
             ]
             .map(SecurityActivityKind::as_str),
             [
@@ -200,6 +206,8 @@ mod tests {
                 "session_revoked",
                 "all_sessions_revoked",
                 "account_data_exported",
+                "encryption_keys_published",
+                "encryption_backup_rewrapped",
             ]
         );
     }
