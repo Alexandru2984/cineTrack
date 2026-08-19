@@ -15,7 +15,7 @@ import {
   wrapIdentity,
 } from '@/lib/crypto/core';
 
-const MESSAGE_ID = '3f2504e0-4f89-41d3-9a0c-0305e82c3301';
+const CLIENT_NONCE = '3f2504e0-4f89-41d3-9a0c-0305e82c3301';
 
 /** Argon2id is deliberately expensive; at production cost these assertions
  *  would each take about half a second. The algorithm is identical at any
@@ -32,7 +32,7 @@ describe('message encryption', () => {
       plaintext,
       bob.exchangePublicKey,
       alice.signingPrivateKey,
-      MESSAGE_ID,
+      CLIENT_NONCE,
     );
     const opened = decryptMessage(envelope, bob.exchangePrivateKey);
 
@@ -51,7 +51,7 @@ describe('message encryption', () => {
       plaintext,
       bob.exchangePublicKey,
       alice.signingPrivateKey,
-      MESSAGE_ID,
+      CLIENT_NONCE,
     );
     expect(decryptMessage(envelope, bob.exchangePrivateKey).plaintext).toBe(plaintext);
   });
@@ -65,7 +65,7 @@ describe('message encryption', () => {
       'private',
       bob.exchangePublicKey,
       alice.signingPrivateKey,
-      MESSAGE_ID,
+      CLIENT_NONCE,
     );
     expect(() => decryptMessage(envelope, eavesdropper.exchangePrivateKey)).toThrow();
   });
@@ -75,8 +75,8 @@ describe('message encryption', () => {
     // not be identifiable as such by anyone watching the stored rows.
     const alice = generateIdentity();
     const bob = generateIdentity();
-    const first = encryptMessage('same words', bob.exchangePublicKey, alice.signingPrivateKey, MESSAGE_ID);
-    const second = encryptMessage('same words', bob.exchangePublicKey, alice.signingPrivateKey, MESSAGE_ID);
+    const first = encryptMessage('same words', bob.exchangePublicKey, alice.signingPrivateKey, CLIENT_NONCE);
+    const second = encryptMessage('same words', bob.exchangePublicKey, alice.signingPrivateKey, CLIENT_NONCE);
 
     expect(equalBytes(first.ciphertext, second.ciphertext)).toBe(false);
     expect(equalBytes(first.senderEphemeralKey, second.senderEphemeralKey)).toBe(false);
@@ -88,7 +88,7 @@ describe('message encryption', () => {
     // silently returning altered text is far worse than an error.
     const alice = generateIdentity();
     const bob = generateIdentity();
-    const envelope = encryptMessage('intact', bob.exchangePublicKey, alice.signingPrivateKey, MESSAGE_ID);
+    const envelope = encryptMessage('intact', bob.exchangePublicKey, alice.signingPrivateKey, CLIENT_NONCE);
     envelope.ciphertext[0] ^= 0x01;
 
     expect(() => decryptMessage(envelope, bob.exchangePrivateKey)).toThrow();
@@ -101,7 +101,7 @@ describe('message encryption', () => {
     // report-worthy event.
     const alice = generateIdentity();
     const bob = generateIdentity();
-    const envelope = encryptMessage('what was sent', bob.exchangePublicKey, alice.signingPrivateKey, MESSAGE_ID);
+    const envelope = encryptMessage('what was sent', bob.exchangePublicKey, alice.signingPrivateKey, CLIENT_NONCE);
     envelope.frankingCommitment = frankingCommitment(new Uint8Array(32), 'something else');
 
     const opened = decryptMessage(envelope, bob.exchangePrivateKey);
@@ -113,7 +113,7 @@ describe('message encryption', () => {
     const alice = generateIdentity();
     const bob = generateIdentity();
     const plaintext = 'reportable';
-    const envelope = encryptMessage(plaintext, bob.exchangePublicKey, alice.signingPrivateKey, MESSAGE_ID);
+    const envelope = encryptMessage(plaintext, bob.exchangePublicKey, alice.signingPrivateKey, CLIENT_NONCE);
 
     const opened = decryptMessage(envelope, bob.exchangePrivateKey);
     expect(opened.frankingKey).toHaveLength(32);

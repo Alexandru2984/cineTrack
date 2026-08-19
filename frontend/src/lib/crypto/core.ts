@@ -180,18 +180,26 @@ export function frankingCommitment(frankingKey: Uint8Array, plaintext: string): 
 
 /** The bytes the sender signs: the commitment bound to the message it belongs
  *  to, so a signature cannot be lifted onto a different message. */
+/** The bytes a sender signs: the commitment bound to the message it belongs to.
+ *
+ *  The message is identified by its client nonce rather than its server-side
+ *  id, and the reason is timing rather than taste: the id is assigned by the
+ *  INSERT, long after the sender has to sign. A scheme demanding it would be one
+ *  no client could ever satisfy. The nonce is chosen before the request leaves,
+ *  and the server's uniqueness constraint on (sender, nonce) makes it identify
+ *  exactly one message — which is the property the binding needs. */
 export function frankingSigningPayload(
   commitment: Uint8Array,
-  messageId: string,
+  clientNonce: string,
 ): Uint8Array {
-  return concat(commitment, fromHex(messageId.replace(/-/g, '')));
+  return concat(commitment, fromHex(clientNonce.replace(/-/g, '')));
 }
 
 export function encryptMessage(
   plaintext: string,
   recipientExchangePublicKey: Uint8Array,
   senderSigningPrivateKey: Uint8Array,
-  messageId: string,
+  clientNonce: string,
 ): EncryptedMessage {
   const ephemeralPrivateKey = x25519.utils.randomSecretKey();
   const senderEphemeralKey = x25519.getPublicKey(ephemeralPrivateKey);
@@ -213,7 +221,7 @@ export function encryptMessage(
     senderEphemeralKey,
     frankingCommitment: commitment,
     frankingSignature: ed25519.sign(
-      frankingSigningPayload(commitment, messageId),
+      frankingSigningPayload(commitment, clientNonce),
       senderSigningPrivateKey,
     ),
   };

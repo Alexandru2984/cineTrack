@@ -45,13 +45,14 @@ async fn report_message_target(
             Option<String>,
             Option<Vec<u8>>,
             Option<Vec<u8>>,
+            Uuid,
             Option<chrono::DateTime<chrono::Utc>>,
             chrono::DateTime<chrono::Utc>,
         ),
     >(
         r#"SELECT message.sender_id, message.body,
                   message.franking_commitment, message.franking_signature,
-                  message.read_at, message.created_at
+                  message.client_nonce, message.read_at, message.created_at
         FROM direct_messages message
         WHERE message.id = $1 AND message.recipient_id = $2"#,
     )
@@ -61,7 +62,7 @@ async fn report_message_target(
     .await?
     .ok_or_else(|| AppError::NotFound("Report target not found".to_string()))?;
 
-    let (sender_id, body, commitment, signature, read_at, created_at) = row;
+    let (sender_id, body, commitment, signature, client_nonce, read_at, created_at) = row;
 
     // Plaintext: unchanged behaviour, and no evidence is expected.
     let Some(commitment) = commitment else {
@@ -111,11 +112,13 @@ async fn report_message_target(
         AppError::BadRequest("This message carries no sender signature".to_string())
     })?;
 
+    // The nonce, not `data.target_id`: the sender signed before the row had an
+    // id to sign over. See `franking::signing_payload`.
     if let Err(failure) = franking::verify(
         &commitment,
         &signature,
         &signing_key,
-        data.target_id,
+        client_nonce,
         plaintext,
         &franking_key,
     ) {

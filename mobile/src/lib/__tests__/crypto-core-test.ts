@@ -11,7 +11,7 @@ import {
   wrapIdentity,
 } from '@/lib/crypto/core';
 
-const MESSAGE_ID = '3f2504e0-4f89-41d3-9a0c-0305e82c3301';
+const CLIENT_NONCE = '3f2504e0-4f89-41d3-9a0c-0305e82c3301';
 
 /** See the web copy: production cost would add minutes to this suite under
  *  Jest's transformed runtime, and proves nothing the server does not enforce. */
@@ -27,7 +27,7 @@ describe('message encryption', () => {
       plaintext,
       bob.exchangePublicKey,
       alice.signingPrivateKey,
-      MESSAGE_ID,
+      CLIENT_NONCE,
     );
     const opened = decryptMessage(envelope, bob.exchangePrivateKey);
 
@@ -44,7 +44,7 @@ describe('message encryption', () => {
       plaintext,
       bob.exchangePublicKey,
       alice.signingPrivateKey,
-      MESSAGE_ID,
+      CLIENT_NONCE,
     );
     expect(decryptMessage(envelope, bob.exchangePrivateKey).plaintext).toBe(plaintext);
   });
@@ -58,7 +58,7 @@ describe('message encryption', () => {
       'private',
       bob.exchangePublicKey,
       alice.signingPrivateKey,
-      MESSAGE_ID,
+      CLIENT_NONCE,
     );
     expect(() => decryptMessage(envelope, eavesdropper.exchangePrivateKey)).toThrow();
   });
@@ -70,7 +70,7 @@ describe('message encryption', () => {
       'intact',
       bob.exchangePublicKey,
       alice.signingPrivateKey,
-      MESSAGE_ID,
+      CLIENT_NONCE,
     );
     envelope.ciphertext[0] ^= 0x01;
 
@@ -84,7 +84,7 @@ describe('message encryption', () => {
       'what was sent',
       bob.exchangePublicKey,
       alice.signingPrivateKey,
-      MESSAGE_ID,
+      CLIENT_NONCE,
     );
     envelope.frankingCommitment = frankingCommitment(new Uint8Array(32), 'something else');
 
