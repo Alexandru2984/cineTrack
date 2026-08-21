@@ -30,7 +30,7 @@ hmac = "0.13"
 # directly so franking signatures can be verified without pulling a second
 # Ed25519 implementation into the tree. Pinned to the version already resolved,
 # so making it explicit cannot silently change what is linked.
-aws-lc-rs = { version = "=1.17.1", default-features = false, features = ["aws-lc-sys"] }
+aws-lc-rs = { version = "=1.18.0", default-features = false, features = ["aws-lc-sys"] }
 aes-gcm = "0.11"
 hex = "0.4"
 log = "0.4"
@@ -39,8 +39,8 @@ anyhow = "1"
 lettre = { version = "0.11", default-features = false, features = ["builder", "smtp-transport", "tokio1-rustls-tls", "hostname"] }
 actix-web-prom = "0.10"
 prometheus = { version = "0.14", default-features = false }
-aws-sdk-s3 = { version = "=1.140.0", default-features = false, features = ["behavior-version-latest", "default-https-client", "http-1x", "rt-tokio"] }
-aws-smithy-types = "=1.6.1"
+aws-sdk-s3 = { version = "=1.141.0", default-features = false, features = ["behavior-version-latest", "default-https-client", "http-1x", "rt-tokio"] }
+aws-smithy-types = "=1.6.2"
 
 [dev-dependencies]
 actix-http = "3"
