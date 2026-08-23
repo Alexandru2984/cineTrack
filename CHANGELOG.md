@@ -25,6 +25,10 @@ and release versions follow semantic versioning.
   history, because nobody else holds a key.
 - Safety numbers, so two people can confirm through another channel that the
   key directory gave each of them the right key.
+- Badges earned from watch history: runs of one show in a sitting, episodes
+  caught within a day of release, shows followed at once, and total episodes.
+  They are recomputed from history rather than counted up, so removing episodes
+  removes the badge they earned.
 - Reporting an encrypted message. The reporter discloses that one message
   together with proof of what the sender wrote, so moderation still works on
   content the service cannot read.
@@ -35,6 +39,12 @@ and release versions follow semantic versioning.
   message encryption works, including the key material the service stores and
   cannot open. **The terms version moves to `2026-08-19`, so every existing
   user is asked to accept again on their next visit.**
+- Up Next no longer offers an episode before it has aired. Availability was
+  decided by three different rules — the server's date, the server's date plus
+  fourteen hours, and the date the client reported — and the last let a caller
+  decide what counted as aired. There is now one rule, applied against the
+  origin network's own clock, so an episode broadcast on Sunday night in the
+  United States stops appearing on Saturday afternoon in Romania.
 - Up Next prioritizes the most recently released eligible episodes before older
   backlog entries while preserving sequential episode progress.
 - The native client is aligned with Expo SDK 57 and uses runtime `1.2.0`; this
