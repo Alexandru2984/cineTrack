@@ -69,3 +69,7 @@ ops/prometheus/metrics_token.generated
 /*credential*
 /*.key
 /*.pem
+
+# Personal operational tooling that names real accounts. Not a product feature
+# and not something a public repository should carry.
+/scripts/sync_my_accounts.sh

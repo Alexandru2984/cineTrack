@@ -186,6 +186,16 @@ next_ids AS (
       -- Not the date the caller reported. That value decides what counts as
       -- aired, so a client one zone east of the origin network — or one simply
       -- claiming tomorrow — pulls an episode forward by a day.
+      -- Undated episodes are excluded here, unlike everywhere else.
+      --
+      -- `episode_has_aired` answers true for a NULL date, because the paths
+      -- that mark history must not refuse an episode whose date TMDB never
+      -- supplied. Up Next is the opposite case: it answers "watch this next",
+      -- and `UpNextEpisode.air_date` is not optional, so admitting one is a
+      -- 500 rather than a bad recommendation. The predicate this replaced
+      -- excluded them by accident — NULL is not <= anything — and losing that
+      -- accident took the endpoint down.
+      AND episodes.air_date IS NOT NULL
       AND episode_has_aired(episodes.air_date, media.origin_country)
       AND ($2 OR seasons.season_number > 0)
       AND NOT EXISTS (

@@ -6891,6 +6891,42 @@ async fn track_and_watch_first_episode(pool: &PgPool, user_id: Uuid, media_id: U
 
 #[actix_web::test]
 #[ignore = "requires test DB"]
+async fn the_availability_check_can_be_inlined() {
+    // `episode_has_aired` sits in the Up Next query, which walks every episode
+    // of every tracked show. A function Postgres cannot inline is a function
+    // call per row: on production data that was 110ms against 13.6 seconds,
+    // on the most-used screen in the product.
+    //
+    // A `SET` clause is what makes inlining impossible, so its absence is the
+    // property worth pinning. Losing it again would be invisible in every
+    // behavioural test and obvious to every user.
+    let pool = setup_pool().await;
+    let with_set_clause: Vec<String> = sqlx::query_scalar(
+        "SELECT proname FROM pg_proc
+         WHERE proname IN ('episode_has_aired', 'episode_available_at', 'country_timezone')
+           AND proconfig IS NOT NULL",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert!(
+        with_set_clause.is_empty(),
+        "these cannot be inlined while they carry a SET clause: {with_set_clause:?}"
+    );
+
+    // The cheap path has to come first, or the expensive one runs anyway.
+    let body: String =
+        sqlx::query_scalar("SELECT prosrc FROM pg_proc WHERE proname = 'episode_has_aired'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    let fast = body.find("air_date <").expect("fast path missing");
+    let slow = body.find("AT TIME ZONE").expect("exact path missing");
+    assert!(fast < slow, "the cheap comparison must be tested first");
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
 async fn availability_follows_the_origin_network_clock() {
     // The same air date means different moments depending on where the show is
     // made. A Japanese broadcast has gone out ten hours before UTC agrees; a

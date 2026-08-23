@@ -255,13 +255,14 @@ pub async fn recompute(
     .execute(&mut *tx)
     .await?;
 
-    // Shows being watched at once. Dated by when the Nth of them was started,
-    // which is the moment the statement became true.
+    // Shows being watched at once, dated by when the Nth of them was started.
+    //
+    // Counted rather than ranked. `ROW_NUMBER()` over the whole set has to sort
+    // it; a count plus one offset lookup per tier reads an index and stops.
     sqlx::query(
         r#"
-        WITH tracked AS (
-            SELECT created_at,
-                ROW_NUMBER() OVER (ORDER BY created_at) AS nth
+        WITH total AS (
+            SELECT COUNT(*) AS reached
             FROM user_media
             WHERE user_id = $1 AND status = 'watching'
         ),
@@ -269,9 +270,17 @@ pub async fn recompute(
             VALUES ('juggler-3', 3), ('juggler-8', 8), ('juggler-15', 15)
         )
         INSERT INTO earned_badges (badge_key, media_id, earned_at)
-        SELECT tiers.badge_key, NULL, tracked.created_at
-        FROM tracked
-        JOIN tiers ON tiers.threshold = tracked.nth
+        SELECT tiers.badge_key, NULL, crossed.created_at
+        FROM tiers
+        JOIN total ON total.reached >= tiers.threshold
+        CROSS JOIN LATERAL (
+            SELECT created_at
+            FROM user_media
+            WHERE user_id = $1 AND status = 'watching'
+            ORDER BY created_at
+            OFFSET tiers.threshold - 1
+            LIMIT 1
+        ) AS crossed
         "#,
     )
     .bind(user_id)
@@ -279,11 +288,16 @@ pub async fn recompute(
     .await?;
 
     // Sheer volume, dated by the episode that crossed each line.
+    //
+    // This one mattered most. Ranking every watch to find four timestamps cost
+    // 147ms on an account with seventeen thousand of them — paid on every
+    // episode marked watched, and growing with the history it summarises. The
+    // count is 5ms and each offset lookup 1ms, because both read the index in
+    // order and stop.
     sqlx::query(
         r#"
-        WITH counted AS (
-            SELECT watched_at,
-                ROW_NUMBER() OVER (ORDER BY watched_at) AS nth
+        WITH total AS (
+            SELECT COUNT(*) AS reached
             FROM watch_history
             WHERE user_id = $1 AND episode_id IS NOT NULL
         ),
@@ -292,9 +306,17 @@ pub async fn recompute(
                    ('watcher-1000', 1000), ('watcher-5000', 5000)
         )
         INSERT INTO earned_badges (badge_key, media_id, earned_at)
-        SELECT tiers.badge_key, NULL, counted.watched_at
-        FROM counted
-        JOIN tiers ON tiers.threshold = counted.nth
+        SELECT tiers.badge_key, NULL, crossed.watched_at
+        FROM tiers
+        JOIN total ON total.reached >= tiers.threshold
+        CROSS JOIN LATERAL (
+            SELECT watched_at
+            FROM watch_history
+            WHERE user_id = $1 AND episode_id IS NOT NULL
+            ORDER BY watched_at
+            OFFSET tiers.threshold - 1
+            LIMIT 1
+        ) AS crossed
         "#,
     )
     .bind(user_id)
