@@ -51,3 +51,9 @@ bench-summary.json
 ops/alertmanager/alertmanager.generated.yml
 ops/alertmanager/smtp_password.generated
 ops/prometheus/metrics_token.generated
+
+# Any credential dropped in the working tree under a `*_token.txt` name. The
+# Expo build token arrived as `expo_token.txt` and matched nothing here, so it
+# sat untracked in a repository where `git add -A` is routine — one command
+# from being committed.
+*_token.txt
