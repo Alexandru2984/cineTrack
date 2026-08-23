@@ -14,11 +14,16 @@ export function ReportDialog({
   targetType,
   targetId,
   targetLabel,
+  evidence,
   onClose,
 }: {
   targetType: ReportTargetType;
   targetId: string;
   targetLabel: string;
+  /** What the reporter decrypted, for a message the server cannot read. The
+   *  franking key opens the sender's commitment, which is what turns a report
+   *  into evidence rather than an assertion. */
+  evidence?: { revealedPlaintext: string; frankingKey: string };
   onClose: () => void;
 }) {
   const t = useT();
@@ -89,6 +94,12 @@ export function ReportDialog({
       target_id: targetId,
       reason,
       ...(normalizedDetails ? { details: normalizedDetails } : {}),
+      ...(evidence
+        ? {
+            revealed_plaintext: evidence.revealedPlaintext,
+            franking_key: evidence.frankingKey,
+          }
+        : {}),
     });
   };
 

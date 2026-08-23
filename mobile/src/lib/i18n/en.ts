@@ -72,7 +72,7 @@ export const en = {
     noMessagesTitle: 'No messages yet',
     noMessagesMessage: 'Say hello to start this conversation.',
     loadingOlderMessages: 'Loading older messages',
-    storedNotice: 'Messages are stored by Văzute and are not end-to-end encrypted.',
+    storedNotice: 'This conversation is not end-to-end encrypted, because encryption is not set up on both accounts. Văzute stores these messages and can read them.',
     unavailable: 'Messaging is unavailable',
     unavailableHint: 'You must follow each other and neither account may be blocked.',
     inputLabel: 'Message',
@@ -83,6 +83,47 @@ export const en = {
     read: 'Read',
     reportMessage: 'Report this message',
     reportTarget: 'Message from @{username}',
+    encryptedPreview: 'Encrypted message',
+    lockedPreview: 'Locked',
+    undecryptable: 'This message cannot be opened on this device',
+    encryptedLabel: 'End-to-end encrypted',
+    commitmentMismatch:
+      'This message does not match what its sender committed to, so it cannot be reported.',
+    privacyNoticeEncrypted:
+      'Messages in this conversation are end-to-end encrypted. Văzute stores them but cannot read them. A message you report is revealed to moderators by you, and only that message.',
+    encryptionRequired:
+      'This conversation is encrypted and this device does not hold your key. Restore it to send messages.',
+  },
+  encryption: {
+    setupTitle: 'Turn on end-to-end encryption',
+    setupBody:
+      'Your messages will be encrypted on your device and readable only by you and the person you write to. Văzute will store them without being able to read them.',
+    setupAction: 'Set up encryption',
+    password: 'Your account password',
+    passwordHint:
+      'Used to protect your key so you can restore it on another device. It is never sent anywhere.',
+    working: 'Working…',
+    recoveryTitle: 'Save your recovery code',
+    recoveryBody:
+      'This code restores your messages if you forget your password. It is shown once and nobody else has a copy — not even us. Store it somewhere safe.',
+    recoveryConfirm: 'I have saved it',
+    copy: 'Copy',
+    copied: 'Copied',
+    restoreTitle: 'Restore your encryption key',
+    restoreBody: 'This device does not hold your key yet. Unlock it to read and send messages.',
+    restoreWithPassword: 'Use my password',
+    restoreWithCode: 'Use my recovery code',
+    recoveryCode: 'Recovery code',
+    restoreAction: 'Unlock',
+    wrongSecret: 'That did not unlock your key. Check it and try again.',
+    keyMismatch:
+      'Your key was replaced on another device. Set encryption up again to continue — older messages will stay unreadable here.',
+    unavailable:
+      'This browser cannot store encryption keys, so encrypted messaging is unavailable here. A private window often causes this.',
+    failed: 'Encryption could not be set up',
+    safetyNumber: 'Safety number',
+    safetyNumberHint:
+      'Compare this with the other person through another channel. Matching numbers mean nobody is sitting between you.',
   },
   auth: {
     registerSubtitle: 'Create your watch history',

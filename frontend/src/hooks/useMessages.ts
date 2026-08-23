@@ -6,6 +6,9 @@ import {
 } from '@tanstack/react-query';
 
 import api from '@/lib/api';
+import { fetchPeerKeys } from '@/lib/crypto/session';
+import { encryptionKeys } from '@/hooks/useEncryption';
+import { useEncryptionStore } from '@/store/encryption';
 import type {
   DirectMessage,
   MessageConversation,
@@ -91,6 +94,13 @@ export function useMessageThread(username: string) {
   });
 }
 
+export class EncryptionRequiredError extends Error {
+  constructor() {
+    super('encryption-required');
+    this.name = 'EncryptionRequiredError';
+  }
+}
+
 export function useSendMessage() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -103,9 +113,43 @@ export function useSendMessage() {
       body: string;
       clientNonce: string;
     }) => {
+      // Whether to encrypt is decided by whether the recipient can decrypt,
+      // which is a fact about the directory rather than a preference. The
+      // server re-derives the same rule, so a client that guessed wrong is
+      // refused rather than quietly downgraded.
+      const peer = await queryClient.fetchQuery({
+        queryKey: encryptionKeys.peer(username),
+        queryFn: () => fetchPeerKeys(username),
+        staleTime: 5 * 60 * 1000,
+      });
+      const identity = useEncryptionStore.getState().identity;
+
+      if (peer && !identity) {
+        // The recipient expects encryption and this device cannot provide it.
+        // Sending in the clear would be refused by the server anyway, and
+        // saying so here explains what to do about it.
+        throw new EncryptionRequiredError();
+      }
+
+      // Imported here rather than at the top of the file: the navbar pulls this
+      // module in for the unread badge, and the primitives are a third of a
+      // megabyte that a reader who never sends a message should not download.
+      const payload =
+        peer && identity
+          ? {
+              ...(await import('@/lib/crypto/messages')).sealMessage(
+                body,
+                peer,
+                identity,
+                clientNonce,
+              ),
+              client_nonce: clientNonce,
+            }
+          : { body, client_nonce: clientNonce };
+
       const response = await api.post<DirectMessage>(
         `/messages/${encodeURIComponent(username)}`,
-        { body, client_nonce: clientNonce },
+        payload,
       );
       return response.data;
     },

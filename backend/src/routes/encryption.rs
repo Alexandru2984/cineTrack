@@ -30,6 +30,7 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
             .route("/keys", web::get().to(key_status))
             .route("/keys", web::put().to(publish_keys))
             .route("/keys/backup", web::get().to(get_key_backup))
+            .route("/keys/backup", web::put().to(rewrap_key_backup))
             .route("/keys/{username}", web::get().to(peer_public_keys)),
     );
 }
@@ -166,6 +167,77 @@ async fn publish_keys(
 }
 
 /// The caller's own encrypted backup, for restoring on a new device.
+/// Re-seal the private key under a new password.
+///
+/// Called when the account password changes. Without it the stored copy still
+/// opens under the *old* password, so the next device to restore would be
+/// refused with the password its owner believes is correct, and only the
+/// recovery code would work — a state that is recoverable but bewildering.
+///
+/// Only the password copy moves. The identity row is untouched, so the
+/// generation counter does not advance and no peer is told to re-verify a
+/// safety number that has not changed.
+///
+/// Refused when the account has no backup: there is nothing to re-seal, and
+/// silently creating one from a request the server cannot inspect would store a
+/// blob nothing can open.
+async fn rewrap_key_backup(
+    pool: web::Data<PgPool>,
+    req: HttpRequest,
+    body: web::Json<RewrapBackupRequest>,
+) -> Result<HttpResponse, AppError> {
+    let user_id = require_auth(&req).await?;
+    body.validate()?;
+    let data = body.into_inner();
+    data.password_kdf
+        .validate_cost()
+        .map_err(|error| AppError::BadRequest(describe(&error)))?;
+
+    let wrapped = hex::decode(&data.password_wrapped_key)
+        .map_err(|_| AppError::BadRequest("Invalid wrapped key encoding".to_string()))?;
+    let salt = hex::decode(&data.password_kdf_salt)
+        .map_err(|_| AppError::BadRequest("Invalid salt encoding".to_string()))?;
+
+    let mut tx = pool.begin().await?;
+    let updated = sqlx::query(
+        r#"UPDATE user_key_backups SET
+            password_wrapped_key = $2,
+            password_kdf_salt = $3,
+            password_kdf_memory_kib = $4,
+            password_kdf_iterations = $5,
+            password_kdf_parallelism = $6,
+            updated_at = NOW()
+        WHERE user_id = $1"#,
+    )
+    .bind(user_id)
+    .bind(&wrapped)
+    .bind(&salt)
+    .bind(data.password_kdf.memory_kib)
+    .bind(data.password_kdf.iterations)
+    .bind(data.password_kdf.parallelism)
+    .execute(&mut *tx)
+    .await?;
+
+    if updated.rows_affected() == 0 {
+        return Err(AppError::NotFound(
+            "No key backup for this account".to_string(),
+        ));
+    }
+
+    let client = crate::routes::auth::client_info(&req);
+    security_activity::record_in_transaction(
+        &mut tx,
+        user_id,
+        SecurityActivityKind::EncryptionBackupRewrapped,
+        client.user_agent.as_deref(),
+        client.ip_address.as_deref(),
+    )
+    .await?;
+    tx.commit().await?;
+
+    Ok(no_store(HttpResponse::NoContent()).finish())
+}
+
 async fn get_key_backup(
     pool: web::Data<PgPool>,
     req: HttpRequest,
