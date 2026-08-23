@@ -3731,7 +3731,7 @@ async fn test_completing_show_records_cached_episodes_idempotently() {
     .unwrap();
     // Two, not three: 'Already aired' and the pilot. 'Airs today' carries
     // today's date, and an episode's air date has to have fully elapsed before
-    // it counts as aired — see the `aired_through` migration.
+    // it counts as aired — see the `origin_timezone` migration.
     assert_eq!(counts, (2, 0));
 
     let future_watches = sqlx::query_scalar::<_, i64>(
@@ -3740,7 +3740,7 @@ async fn test_completing_show_records_cached_episodes_idempotently() {
         JOIN episodes ON episodes.id = history.episode_id
         WHERE history.user_id = $1
           AND history.media_id = $2
-          AND episodes.air_date > aired_through()"#,
+          AND NOT episode_has_aired(episodes.air_date, NULL)"#,
     )
     .bind(user_id)
     .bind(media_id)
@@ -5927,7 +5927,7 @@ async fn test_calendar_lists_new_and_regional_upcoming_releases() {
     )
     .bind(season_id)
     // Yesterday, not today: an air date has to have fully elapsed before the
-    // episode counts as aired. See the `aired_through` migration.
+    // episode counts as aired. See the `origin_timezone` migration.
     .bind(today - chrono::Duration::days(1))
     .fetch_one(&pool)
     .await
@@ -6667,18 +6667,47 @@ async fn track_and_watch_first_episode(pool: &PgPool, user_id: Uuid, media_id: U
 
 #[actix_web::test]
 #[ignore = "requires test DB"]
-async fn sql_and_rust_agree_on_the_cutoff() {
-    // Two expressions of one rule: `aired_through()` in the database, and the
-    // Rust helper used by checks that run before their query. A disagreement
-    // would reject exactly the episodes the query is willing to insert, and
-    // would do it for a few hours a day, which is the kind of bug that gets
-    // closed as unreproducible.
+async fn availability_follows_the_origin_network_clock() {
+    // The same air date means different moments depending on where the show is
+    // made. A Japanese broadcast has gone out ten hours before UTC agrees; a
+    // Californian one has not gone out for hours after. Both used to be judged
+    // by the same UTC midnight.
     let pool = setup_pool().await;
-    let from_sql: chrono::NaiveDate = sqlx::query_scalar("SELECT aired_through()")
+
+    let (japan, united_states): (chrono::DateTime<chrono::Utc>, chrono::DateTime<chrono::Utc>) =
+        sqlx::query_as(
+            "SELECT episode_available_at(DATE '2026-08-23', 'JP'),
+                    episode_available_at(DATE '2026-08-23', 'US')",
+        )
         .fetch_one(&pool)
         .await
         .unwrap();
-    assert_eq!(from_sql, cinetrack::utils::availability::aired_through());
+
+    // End of the 23rd in Tokyo is 15:00 UTC; in New York it is 04:00 on the
+    // 24th. Thirteen hours apart, from one date.
+    assert!(
+        japan < united_states,
+        "japan={japan} united_states={united_states}"
+    );
+    assert_eq!(japan.to_rfc3339(), "2026-08-23T15:00:00+00:00");
+    assert_eq!(united_states.to_rfc3339(), "2026-08-24T04:00:00+00:00");
+
+    // An unmapped country falls back to UTC, which is exactly the behaviour
+    // this replaced — so an unknown origin is no worse off than before.
+    let unmapped: chrono::DateTime<chrono::Utc> =
+        sqlx::query_scalar("SELECT episode_available_at(DATE '2026-08-23', 'ZZ')")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(unmapped.to_rfc3339(), "2026-08-24T00:00:00+00:00");
+
+    // And no date means nothing to withhold.
+    let undated: Option<chrono::DateTime<chrono::Utc>> =
+        sqlx::query_scalar("SELECT episode_available_at(NULL, 'US')")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(undated.is_none());
 }
 
 #[actix_web::test]

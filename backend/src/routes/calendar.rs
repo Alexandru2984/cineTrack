@@ -186,7 +186,7 @@ next_ids AS (
       -- Not the date the caller reported. That value decides what counts as
       -- aired, so a client one zone east of the origin network — or one simply
       -- claiming tomorrow — pulls an episode forward by a day.
-      AND episodes.air_date <= aired_through()
+      AND episode_has_aired(episodes.air_date, media.origin_country)
       AND ($2 OR seasons.season_number > 0)
       AND NOT EXISTS (
           SELECT 1 FROM watch_history history
@@ -820,17 +820,16 @@ async fn mark_episode_watched(
     let mut tx = pool.begin().await?;
     lock_episode_state(&mut tx, user_id, episode_id).await?;
     quota::lock_tracking_writes(&mut tx, user_id).await?;
-    let (media_id, is_available) = sqlx::query_as::<_, (Uuid, bool)>(concat!(
+    let (media_id, is_available) = sqlx::query_as::<_, (Uuid, bool)>(
         r#"SELECT seasons.media_id,
-            episodes.air_date IS NULL OR episodes.air_date <= aired_through()"#,
-        r#"
+            episode_has_aired(episodes.air_date, media.origin_country)
         FROM episodes
         JOIN seasons ON seasons.id = episodes.season_id
         JOIN media ON media.id = seasons.media_id AND media.media_type = 'tv'
         JOIN user_media tracked
           ON tracked.media_id = media.id AND tracked.user_id = $1
         WHERE episodes.id = $2 AND tracked.status <> 'dropped'"#,
-    ))
+    )
     .bind(user_id)
     .bind(episode_id)
     .fetch_optional(&mut *tx)

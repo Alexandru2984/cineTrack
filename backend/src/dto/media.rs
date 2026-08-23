@@ -339,6 +339,9 @@ pub struct TmdbTvDetail {
     pub backdrop_path: Option<String>,
     pub first_air_date: Option<String>,
     pub status: Option<String>,
+    /// Where the show is made. TMDB returns a list; the first entry is the
+    /// primary origin and is the one whose broadcast date `air_date` carries.
+    pub origin_country: Option<Vec<String>>,
     pub genres: Option<Vec<TmdbGenre>>,
     pub episode_run_time: Option<Vec<i32>>,
     pub vote_average: Option<f64>,
