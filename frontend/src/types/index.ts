@@ -490,6 +490,36 @@ export interface MessageSummary {
   unread_count: number;
 }
 
+export interface BadgeShow {
+  media_id: string;
+  tmdb_id: number;
+  title: string;
+  poster_path: string | null;
+  earned_at: string;
+}
+
+export interface EarnedBadge {
+  key: string;
+  family: string;
+  threshold: number;
+  /** How many shows earned this tier. 1 for account-wide badges. */
+  count: number;
+  first_earned_at: string;
+  shows: BadgeShow[];
+}
+
+export interface BadgeProgress {
+  family: string;
+  next_key: string;
+  current: number;
+  threshold: number;
+}
+
+export interface BadgeShelf {
+  earned: EarnedBadge[];
+  progress: BadgeProgress[];
+}
+
 export interface KdfParameters {
   memory_kib: number;
   iterations: number;

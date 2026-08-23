@@ -26,6 +26,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { AppButton } from '@/components/app-button';
 import { AppText } from '@/components/app-text';
+import { BadgeShelf } from '@/components/badge-shelf';
 import { ScreenHeader } from '@/components/screen-header';
 import { TmdbLogo } from '@/components/tmdb-logo';
 import { UserAvatar } from '@/components/user-avatar';
@@ -278,6 +279,10 @@ export default function ProfileScreen() {
             <AppText muted>{t('profileTab.justWatchBody')}</AppText>
           </View>
         </View>
+
+        {/* The badges endpoint answers for the caller, so this belongs on the
+            member's own profile tab rather than on someone else's page. */}
+        <BadgeShelf />
 
         <View style={styles.footer}>
           <AppText variant="caption" muted>

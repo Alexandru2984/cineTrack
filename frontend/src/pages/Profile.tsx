@@ -9,6 +9,7 @@ import {
 } from '@/hooks/useSocial';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
 import { ActivityList } from '@/components/ActivityList';
+import { BadgeShelf } from '@/components/BadgeShelf';
 import { ReportDialog } from '@/components/ReportDialog';
 import { ConnectionsDialog } from '@/components/ConnectionsDialog';
 import type { UserConnectionKind } from '@/hooks/useSocial';
@@ -191,6 +192,12 @@ export default function ProfilePage() {
           </div>
         </div>
       </div>
+
+      {/* Only on your own profile. The endpoint answers for the caller, and a
+          shelf that silently showed your badges under somebody else's name
+          would be worse than no shelf. Serving another member's badges is a
+          separate decision about what a profile discloses. */}
+      {isOwnProfile ? <BadgeShelf /> : null}
 
       {/* Activity */}
       <div>

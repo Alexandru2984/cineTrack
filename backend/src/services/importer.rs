@@ -209,6 +209,11 @@ async fn import_all(
     write_watch_history(&mut tx, user_id, &watch_rows).await?;
     tx.commit().await?;
 
+    // Once, after the whole import, rather than per episode. An import writes
+    // thousands of rows and every one of them would otherwise trigger a full
+    // rebuild of the same shelf — quadratic work for an identical answer.
+    crate::services::badges::recompute_quietly(pool, user_id, None).await;
+
     Ok(totals)
 }
 

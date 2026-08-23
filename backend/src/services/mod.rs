@@ -1,4 +1,5 @@
 pub mod auth;
+pub mod badges;
 pub mod catalog;
 pub mod catalog_hydration;
 pub mod catalog_repair;
