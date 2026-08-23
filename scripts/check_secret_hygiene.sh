@@ -79,6 +79,7 @@ SECRET_PATTERNS=(
   '.env.prod.bak*'
   '.env.local'
   '*api_key*.txt'
+  '*_token.txt'
   '*_key.json'
   '*credentials*.json'
   '*.pem'
