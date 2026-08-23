@@ -164,7 +164,9 @@ jobs:
 
   mobile:
     name: Mobile
-    timeout-minutes: 45
+    # The Android release compile alone runs to roughly half an hour, and the
+    # checks before it add ten more. See the step's own note.
+    timeout-minutes: 75
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -276,9 +278,17 @@ jobs:
       - name: Compile Android release
         if: steps.native.outputs.needed == 'true'
         working-directory: mobile/android
-        # 30 minutes is generous for this build; a run that exceeds it is stuck,
-        # not slow, and should say so rather than sit until GitHub's 6h default.
-        timeout-minutes: 30
+        # This budget was 30 minutes, on the reasoning that a longer run was
+        # stuck rather than slow. That stopped being true: the build now takes
+        # about half an hour on a hosted runner, and the job failed on a
+        # `BUILD SUCCESSFUL in 30m 12s` — twelve seconds over, with nothing
+        # wrong. A limit that close to the real duration does not detect hangs,
+        # it manufactures failures on whichever pull request is open when the
+        # runner has a slow day, and each one costs somebody an investigation.
+        #
+        # 55 minutes leaves room for the build to grow without flaking, and
+        # still fails a genuine hang long before GitHub's 6h default.
+        timeout-minutes: 55
         env:
           # A hosted runner does not have the memory for parallel Gradle workers
           # alongside React Native's NDK compilation. Serialising keeps the peak
