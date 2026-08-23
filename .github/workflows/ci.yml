@@ -413,7 +413,7 @@ jobs:
 
   e2e:
     name: Frontend E2E
-    timeout-minutes: 25
+    timeout-minutes: 40
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -434,6 +434,20 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Playwright's browser download is the one step here with a duration
+      # nobody controls: the tests themselves run in about thirteen minutes,
+      # and this job has twice been killed at the twenty-five minute limit
+      # because fetching Chromium and WebKit crawled. Caching removes the
+      # variable rather than budgeting for it.
+      #
+      # Keyed on the lockfile, so a Playwright upgrade fetches the browsers its
+      # version needs instead of reusing the wrong ones.
+      - name: Cache Playwright browsers
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('frontend/package-lock.json') }}
+
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium webkit
 
@@ -445,7 +459,7 @@ jobs:
 
   e2e-realstack:
     name: Frontend E2E (real stack)
-    timeout-minutes: 25
+    timeout-minutes: 40
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -489,6 +503,20 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      # Playwright's browser download is the one step here with a duration
+      # nobody controls: the tests themselves run in about thirteen minutes,
+      # and this job has twice been killed at the twenty-five minute limit
+      # because fetching Chromium and WebKit crawled. Caching removes the
+      # variable rather than budgeting for it.
+      #
+      # Keyed on the lockfile, so a Playwright upgrade fetches the browsers its
+      # version needs instead of reusing the wrong ones.
+      - name: Cache Playwright browsers
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('frontend/package-lock.json') }}
 
       - name: Install Playwright browser
         run: npx playwright install --with-deps chromium
