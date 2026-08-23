@@ -21,7 +21,12 @@ api.interceptors.request.use((config) => {
 let refreshPromise: Promise<string> | null = null;
 let refreshUnavailable = false;
 
-function refreshAccessToken(): Promise<string> {
+/// Exported for the event stream, which uses `fetch` rather than this axios
+/// instance — a streaming body is not something axios can hand back — and so
+/// never reaches the interceptor below. Sharing this function rather than
+/// posting to `/auth/refresh` directly keeps one refresh in flight at a time
+/// and one circuit breaker, instead of two that can disagree.
+export function refreshAccessToken(): Promise<string> {
   if (refreshUnavailable) {
     return Promise.reject(new Error('Session refresh is unavailable'));
   }

@@ -1,6 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
 import { connectEventStream } from '@/lib/events';
 
+const mocks = vi.hoisted(() => ({ refresh: vi.fn() }));
+
+vi.mock('@/lib/api', () => ({
+  default: {},
+  refreshAccessToken: mocks.refresh,
+}));
+
 /** Build a Response whose body streams the given chunks, then ends. */
 function streamingResponse(chunks: string[]): Response {
   const encoder = new TextEncoder();
@@ -36,6 +43,55 @@ async function collect(chunks: string[]) {
 }
 
 describe('connectEventStream', () => {
+  it('refreshes the session when the stream is refused, instead of retrying a dead token', async () => {
+    // This request never reaches the axios interceptor that refreshes, because
+    // a streaming body is not something axios hands back. Without an explicit
+    // refresh the stream sat in a 401 loop until some unrelated query happened
+    // to renew the session — which a backend restart produced in every open
+    // tab at once.
+    mocks.refresh.mockClear();
+    mocks.refresh.mockResolvedValue('fresh-token');
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(null, { status: 401 }))
+      .mockImplementation(() => new Promise<Response>(() => {}));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const stop = connectEventStream('https://api.test', () => 'stale-token', {
+      onEvent: () => undefined,
+      onResync: () => undefined,
+    });
+
+    await vi.waitFor(() => expect(mocks.refresh).toHaveBeenCalledTimes(1));
+    stop();
+    vi.unstubAllGlobals();
+  });
+
+  it('does not keep refreshing once the session is genuinely gone', async () => {
+    // A refresh that fails means the session is over. Asking again on every
+    // reconnect would turn one dead tab into a stream of pointless requests.
+    mocks.refresh.mockClear();
+    mocks.refresh.mockRejectedValue(new Error('session over'));
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(null, { status: 401 }))
+      .mockImplementation(() => new Promise<Response>(() => {}));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const stop = connectEventStream('https://api.test', () => 'stale-token', {
+      onEvent: () => undefined,
+      onResync: () => undefined,
+    });
+
+    await vi.waitFor(() => expect(mocks.refresh).toHaveBeenCalledTimes(1));
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(mocks.refresh).toHaveBeenCalledTimes(1);
+    stop();
+    vi.unstubAllGlobals();
+  });
+
   it('sends the access token as a header, never in the URL', async () => {
     const { fetchMock } = await collect([]);
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
