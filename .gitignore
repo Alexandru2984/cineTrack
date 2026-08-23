@@ -52,8 +52,20 @@ ops/alertmanager/alertmanager.generated.yml
 ops/alertmanager/smtp_password.generated
 ops/prometheus/metrics_token.generated
 
-# Any credential dropped in the working tree under a `*_token.txt` name. The
-# Expo build token arrived as `expo_token.txt` and matched nothing here, so it
-# sat untracked in a repository where `git add -A` is routine — one command
-# from being committed.
-*_token.txt
+# Credentials dropped in the repository root.
+#
+# Named by class, not by the filename that last caught us out. The Expo build
+# token arrived as `expo_token.txt`; its replacement arrived as `expo_pat.txt`
+# and matched nothing here, because a list that only ever learns the last name
+# is always one rename behind. This is the third time a credential has landed
+# in the working tree under a name the guard did not know.
+#
+# Anchored to the root with a leading slash, so source files that merely
+# contain one of these words — `frontend/src/lib/oneTimeToken.ts`, for one —
+# are untouched.
+/*token*
+/*pat*.txt
+/*secret*
+/*credential*
+/*.key
+/*.pem
