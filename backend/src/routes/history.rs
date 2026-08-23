@@ -3,7 +3,6 @@ use futures_util::stream::{self, StreamExt, TryStreamExt};
 use sqlx::{PgPool, Postgres, Transaction};
 use uuid::Uuid;
 
-use crate::available_through;
 use crate::dto::common::PaginationParams;
 use crate::dto::tracking::*;
 use crate::errors::AppError;
@@ -263,16 +262,17 @@ async fn show_watch_progress(
     .ok_or_else(|| AppError::NotFound("TV series not found".to_string()))?;
 
     // Counts what the bulk actions below will actually touch, so it uses the
-    // same bound they do — the server's own date.
+    // same rule they do.
     let progress = sqlx::query_as::<_, (i32, Option<i32>, i64, i64)>(
         r#"SELECT
             seasons.season_number,
             seasons.episode_count,
             COUNT(DISTINCT episodes.id) FILTER (
-                WHERE episodes.air_date IS NULL OR episodes.air_date <= CURRENT_DATE
+                WHERE episode_has_aired(episodes.air_date, media.origin_country)
             )::bigint AS available_episode_count,
             COUNT(DISTINCT history.episode_id)::bigint AS watched_count
         FROM seasons
+        JOIN media ON media.id = seasons.media_id
         LEFT JOIN episodes ON episodes.season_id = seasons.id
         LEFT JOIN watch_history history
           ON history.episode_id = episodes.id AND history.user_id = $2
@@ -506,14 +506,15 @@ async fn mark_season_watched(
     let media = load_tv_media_for_watch(pool.get_ref(), tmdb.get_ref(), user_id, tmdb_id).await?;
     cache_bulk_seasons(pool.get_ref(), tmdb.get_ref(), &media, season_number, false).await?;
     // "The whole season" is a derived set, like completing a show: no episode
-    // was named, so the server's date is the honest bound.
+    // was named, so nothing here should reach past what has aired.
     let episode_ids = sqlx::query_scalar::<_, Uuid>(
         r#"SELECT episodes.id
         FROM episodes
         JOIN seasons ON seasons.id = episodes.season_id
+        JOIN media ON media.id = seasons.media_id
         WHERE seasons.media_id = $1
           AND seasons.season_number = $2
-          AND (episodes.air_date IS NULL OR episodes.air_date <= CURRENT_DATE)
+          AND episode_has_aired(episodes.air_date, media.origin_country)
         ORDER BY episodes.episode_number"#,
     )
     .bind(media.id)
@@ -537,10 +538,16 @@ async fn mark_episodes_watched_through(
     let media = load_tv_media_for_watch(pool.get_ref(), tmdb.get_ref(), user_id, tmdb_id).await?;
     cache_bulk_seasons(pool.get_ref(), tmdb.get_ref(), &media, season_number, true).await?;
 
-    let target_air_date = sqlx::query_scalar::<_, Option<chrono::NaiveDate>>(
-        r#"SELECT episodes.air_date
+    // Asked of the database rather than recomputed here. Whether an episode has
+    // aired now depends on the origin network's time zone, and answering that
+    // in Rust would mean a second copy of the country-to-zone mapping that
+    // could disagree with the one the query below uses — rejecting exactly the
+    // episodes that query is willing to insert, for a few hours a day.
+    let target_has_aired = sqlx::query_scalar::<_, bool>(
+        r#"SELECT episode_has_aired(episodes.air_date, media.origin_country)
         FROM episodes
         JOIN seasons ON seasons.id = episodes.season_id
+        JOIN media ON media.id = seasons.media_id
         WHERE seasons.media_id = $1
           AND seasons.season_number = $2
           AND episodes.episode_number = $3"#,
@@ -549,28 +556,19 @@ async fn mark_episodes_watched_through(
     .bind(season_number)
     .bind(episode_number)
     .fetch_optional(pool.get_ref())
-    .await?;
-    let target_air_date =
-        target_air_date.ok_or_else(|| AppError::NotFound("Episode not found".to_string()))?;
-    // This one keeps the fourteen-hour allowance, unlike the bulk actions
-    // above, because the user named this exact episode from a list the app drew
-    // using *their* date. The selection below is capped by that episode number,
-    // so a generous bound cannot reach past what they pointed at.
-    //
-    // Expressed in Rust rather than through `available_through!()` because the
-    // check runs before the query; the two must stay equal, or this would
-    // reject exactly the episodes the query is willing to insert.
-    let available_through = (chrono::Utc::now() + chrono::Duration::hours(14)).date_naive();
-    if target_air_date.is_some_and(|date| date > available_through) {
+    .await?
+    .ok_or_else(|| AppError::NotFound("Episode not found".to_string()))?;
+    if !target_has_aired {
         return Err(AppError::BadRequest(
             "Future episodes cannot be marked watched".to_string(),
         ));
     }
 
-    let episode_ids = sqlx::query_scalar::<_, Uuid>(concat!(
+    let episode_ids = sqlx::query_scalar::<_, Uuid>(
         r#"SELECT episodes.id
         FROM episodes
         JOIN seasons ON seasons.id = episodes.season_id
+        JOIN media ON media.id = seasons.media_id
         WHERE seasons.media_id = $1
           AND (
               ($2 = 0 AND seasons.season_number = 0 AND episodes.episode_number <= $3)
@@ -583,11 +581,9 @@ async fn mark_episodes_watched_through(
                   )
               )
           )
-          AND (episodes.air_date IS NULL OR episodes.air_date <= "#,
-        available_through!(),
-        r#")
+          AND episode_has_aired(episodes.air_date, media.origin_country)
         ORDER BY seasons.season_number, episodes.episode_number"#,
-    ))
+    )
     .bind(media.id)
     .bind(season_number)
     .bind(episode_number)

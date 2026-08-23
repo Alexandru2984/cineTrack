@@ -1327,13 +1327,29 @@ impl TmdbService {
             .episode_run_time
             .as_ref()
             .and_then(|r| r.first().copied());
+        // The first entry is the primary origin, and it is the network whose
+        // local date `air_date` carries. Anything that is not a two-letter code
+        // is dropped rather than stored: the column's CHECK would reject it and
+        // fail the whole refresh over a field nothing depends on.
+        let origin_country = detail
+            .origin_country
+            .as_ref()
+            .and_then(|countries| countries.first())
+            .map(|country| country.trim().to_ascii_uppercase())
+            .filter(|country| {
+                country.len() == 2 && country.bytes().all(|byte| byte.is_ascii_uppercase())
+            });
 
         let mut tx = pool.begin().await?;
         let media = sqlx::query_as::<_, Media>(
-            r#"INSERT INTO media (tmdb_id, media_type, title, original_title, overview, poster_path, backdrop_path, release_date, status, genres, runtime_minutes, tmdb_vote_average, tmdb_cached_at, last_accessed_at, metadata_level)
-            VALUES ($1, 'tv', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW(), NOW(), 'detail')
+            r#"INSERT INTO media (tmdb_id, media_type, title, original_title, overview, poster_path, backdrop_path, release_date, status, genres, runtime_minutes, tmdb_vote_average, origin_country, tmdb_cached_at, last_accessed_at, metadata_level)
+            VALUES ($1, 'tv', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), NOW(), 'detail')
             ON CONFLICT (tmdb_id, media_type)
-            DO UPDATE SET title = $2, original_title = $3, overview = $4, poster_path = $5, backdrop_path = $6, release_date = $7, status = $8, genres = $9, runtime_minutes = $10, tmdb_vote_average = $11, tmdb_cached_at = NOW(), last_accessed_at = NOW(), metadata_level = 'detail'
+            DO UPDATE SET title = $2, original_title = $3, overview = $4, poster_path = $5, backdrop_path = $6, release_date = $7, status = $8, genres = $9, runtime_minutes = $10, tmdb_vote_average = $11,
+                -- Kept when the refresh has nothing to say, so a response
+                -- missing the field does not erase a country already known.
+                origin_country = COALESCE($12, media.origin_country),
+                tmdb_cached_at = NOW(), last_accessed_at = NOW(), metadata_level = 'detail'
             RETURNING *"#
         )
         .bind(detail.id)
@@ -1347,6 +1363,7 @@ impl TmdbService {
         .bind(&genres_json)
         .bind(runtime)
         .bind(detail.vote_average)
+        .bind(&origin_country)
         .fetch_one(&mut *tx)
         .await?;
 
