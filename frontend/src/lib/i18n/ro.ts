@@ -266,13 +266,55 @@ export const ro: Dictionary = {
     send: 'Trimite mesajul',
     sendError: 'Mesajul nu a putut fi trimis',
     privacyNotice:
-      'Mesajele sunt stocate de Văzute și nu sunt criptate end-to-end. Un mesaj raportat poate fi analizat pentru siguranță.',
+      'Această conversație nu este criptată cap-coadă, pentru că nu ambele conturi au criptarea activată. Văzute stochează aceste mesaje și le poate citi, iar un mesaj raportat poate fi analizat pentru siguranță.',
     unavailable: 'Mesageria nu este disponibilă',
     unavailableHint: 'Conturile trebuie să se urmărească reciproc și niciunul nu poate fi blocat.',
     sent: 'Trimis',
     read: 'Citit',
     reportMessage: 'Raportează mesajul',
     reportTarget: 'mesajul de la @{username}',
+    encryptedPreview: 'Mesaj criptat',
+    lockedPreview: 'Blocat',
+    undecryptable: 'Acest mesaj nu poate fi deschis pe acest dispozitiv',
+    encryptedLabel: 'Criptat cap-coadă',
+    commitmentMismatch:
+      'Acest mesaj nu corespunde cu ceea ce a semnat expeditorul, deci nu poate fi raportat.',
+    privacyNoticeEncrypted:
+      'Mesajele din această conversație sunt criptate cap-coadă. Văzute le stochează, dar nu le poate citi. Un mesaj pe care îl raportezi este dezvăluit moderatorilor de către tine, și doar acel mesaj.',
+    encryptionRequired:
+      'Conversația este criptată, iar acest dispozitiv nu are cheia ta. Restaureaz-o pentru a trimite mesaje.',
+  },
+  encryption: {
+    setupTitle: 'Activează criptarea cap-coadă',
+    setupBody:
+      'Mesajele tale vor fi criptate pe dispozitiv și vor putea fi citite doar de tine și de persoana căreia îi scrii. Văzute le va stoca fără să le poată citi.',
+    setupAction: 'Activează criptarea',
+    password: 'Parola contului tău',
+    passwordHint:
+      'Folosită ca să-ți protejeze cheia, ca s-o poți restaura pe alt dispozitiv. Nu este trimisă nicăieri.',
+    working: 'Se lucrează…',
+    recoveryTitle: 'Salvează codul de recuperare',
+    recoveryBody:
+      'Codul îți restaurează mesajele dacă îți uiți parola. Se afișează o singură dată și nimeni altcineva nu are o copie — nici noi. Păstrează-l la loc sigur.',
+    recoveryConfirm: 'L-am salvat',
+    copy: 'Copiază',
+    copied: 'Copiat',
+    restoreTitle: 'Restaurează cheia de criptare',
+    restoreBody:
+      'Acest dispozitiv nu are încă cheia ta. Deblocheaz-o ca să citești și să trimiți mesaje.',
+    restoreWithPassword: 'Folosesc parola',
+    restoreWithCode: 'Folosesc codul de recuperare',
+    recoveryCode: 'Cod de recuperare',
+    restoreAction: 'Deblochează',
+    wrongSecret: 'Nu a deblocat cheia. Verifică și încearcă din nou.',
+    keyMismatch:
+      'Cheia ta a fost înlocuită pe alt dispozitiv. Activează criptarea din nou pentru a continua — mesajele mai vechi vor rămâne necitibile aici.',
+    unavailable:
+      'Acest browser nu poate stoca chei de criptare, deci mesajele criptate nu sunt disponibile aici. De obicei o fereastră privată cauzează asta.',
+    failed: 'Criptarea nu a putut fi activată',
+    safetyNumber: 'Număr de siguranță',
+    safetyNumberHint:
+      'Compară-l cu cealaltă persoană pe alt canal. Numere identice înseamnă că nimeni nu stă între voi.',
   },
   activity: {
     loadError: 'Activitatea nu a putut fi încărcată',
@@ -466,7 +508,7 @@ export const ro: Dictionary = {
     dismiss: 'Închide',
   },
   legal: {
-    effective: 'În vigoare și actualizate ultima dată: 6 august 2026',
+    effective: 'În vigoare și actualizate ultima dată: 19 august 2026',
     contactTitle: 'Întrebări, raportări și contestații',
     termsTitle: 'Termeni de utilizare',
     termsIntro:
@@ -500,7 +542,7 @@ export const ro: Dictionary = {
       'Modificările importante primesc o versiune nouă și pot necesita o nouă acceptare înainte de folosirea funcțiilor comunitare. Se aplică legea română unde este permis, fără eliminarea protecțiilor obligatorii din țara ta. Dacă o prevedere nu poate fi aplicată, celelalte rămân valabile.',
     terms10Title: 'Mesaje directe',
     terms10Body:
-      'Mesajele directe sunt disponibile numai între conturi care se urmăresc reciproc. Ele sunt stocate de Văzute și nu sunt criptate end-to-end, așadar nu le folosi pentru secrete sau informații sensibile. Oricare participant poate raporta un mesaj primit, caz în care conținutul și contextul relevant al contului pot fi analizate pentru siguranță. Blocarea sau încetarea urmăririi reciproce oprește mesajele noi, iar istoricul existent poate rămâne vizibil ambilor participanți până la ștergerea unui cont sau aplicarea de către serviciu a unei măsuri legale de păstrare.',
+      'Mesajele directe sunt disponibile numai între conturi care se urmăresc reciproc. Când ambele conturi au criptarea activată, mesajele dintre ele sunt criptate cap-coadă: Văzute le stochează, dar nu le poate citi. Până atunci, mesajele sunt stocate într-o formă pe care Văzute o poate citi, așadar nu le folosi pentru secrete sau informații sensibile. Oricare participant poate raporta un mesaj primit; pentru un mesaj criptat, cel care raportează dezvăluie acel mesaj și dovada cine l-a scris, iar pentru orice raportare conținutul și contextul relevant al contului pot fi analizate pentru siguranță. Dacă pierzi și parola, și codul de recuperare, pierzi accesul la mesajele criptate, pentru că nimeni altcineva nu are o cheie pentru ele. Blocarea sau încetarea urmăririi reciproce oprește mesajele noi, iar istoricul existent poate rămâne vizibil ambilor participanți până la ștergerea unui cont sau aplicarea de către serviciu a unei măsuri legale de păstrare.',
     guidelinesTitle: 'Regulile comunității',
     guidelinesIntro:
       'Văzute trebuie să fie un loc sigur pentru distribuirea activității de vizionare și a listelor. Regulile se aplică numelor de utilizator, biografiilor, avatarurilor, listelor publice, mesajelor directe și tuturor interacțiunilor comunitare.',
@@ -527,7 +569,7 @@ export const ro: Dictionary = {
       'Răspunsurile țin cont de context, gravitate, istoric și risc. Pot include avertismente, eliminarea conținutului, limitarea funcțiilor, suspendarea sau închiderea contului. Materialele ilegale grave pot fi păstrate ori raportate când legea o cere. Oricine este afectat de o decizie — atât persoana vizată, cât și cea care a raportat — o poate contesta scriind la adresa de contact din aceste documente, în termen de șase luni de la comunicare, menționând numele contului și motivul pentru care decizia pare greșită. Fiecare contestație este analizată de o persoană, nu de un sistem automat, iar răspunsul se transmite în scris, de regulă în 14 zile; dacă reanalizarea constată că decizia a fost greșită, aceasta este revocată, iar restricția ridicată. Raportările și deciziile sunt înregistrate, astfel încât o contestație să poată fi reconstituită. Această cale este gratuită și nu înlătură dreptul de a te adresa unei instanțe sau unui organism extrajudiciar de soluționare a litigiilor.',
     guidelines8Title: 'Folosește responsabil mesajele directe',
     guidelines8Body:
-      'Urmărirea reciprocă permite deschiderea mesageriei, dar nu oferă permisiunea de a hărțui, presa, amenința, sexualiza, înșela sau contacta repetat și nedorit. Oprește-te când ți se cere, nu distribui mesajele private ale altcuiva fără un motiv legal și folosește blocarea și raportarea pentru contacte nesigure. Nu trimite secrete, deoarece mesajele nu sunt criptate end-to-end.',
+      'Urmărirea reciprocă permite deschiderea mesageriei, dar nu oferă permisiunea de a hărțui, presa, amenința, sexualiza, înșela sau contacta repetat și nedorit. Oprește-te când ți se cere, nu distribui mesajele private ale altcuiva fără un motiv legal și folosește blocarea și raportarea pentru contacte nesigure. Criptarea nu pune un mesaj deasupra regulilor: cine îl primește îl poate dezvălui într-o raportare, împreună cu dovada cine l-a scris.',
     acceptanceTitle: 'Revizuiește termenii actuali ai comunității',
     acceptanceBody:
       'Regulile comunității sunt acum versionate, astfel încât fiecare membru să aibă aceleași așteptări clare de siguranță. Acceptă-le înainte de a continua cu funcțiile sociale și conținutul public.',
@@ -622,7 +664,7 @@ export const ro: Dictionary = {
   },
   privacy: {
     title: 'Politica de confidențialitate',
-    effective: 'În vigoare și ultima actualizare: 6 august 2026',
+    effective: 'În vigoare și ultima actualizare: 19 august 2026',
     s1Title: 'Cine este responsabil',
     s1Pre: 'Văzute este operat de Dragne Alexandru Mihai. Întrebările și cererile privind confidențialitatea pot fi trimise la',
     s2Title: 'Ce date procesăm',
@@ -634,7 +676,8 @@ export const ro: Dictionary = {
     data6: 'Diagnostice mobile: nume de eroare, mesaj și stack curățate, versiunea aplicației, platforma, ora și dacă eroarea a fost fatală. Nu sunt incluse tokenuri, adrese de email, parametri din URL, identificatori de dispozitiv sau identificatori publicitari.',
     data7: 'Alerte de lansare, când sunt activate: un token push Expo, platforma, versiunea aplicației, decalajul de fus orar, momentul activării și o înregistrare temporară de livrare care conține titlul și lansarea relevante.',
     data8: 'Date privind siguranța comunității: relații între conturile blocate, motivul și detaliile opționale ale raportării, o captură creată de server a profilului sau listei publice raportate, starea raportării și notele justificabile ale deciziei de moderare.',
-    data9: 'Date din mesaje directe: expeditorul și destinatarul, textul mesajului, momentele trimiterii și citirii și un identificator aleatoriu de idempotență folosit pentru prevenirea trimiterilor duplicate. Mesajele nu sunt criptate end-to-end. Un mesaj raportat este copiat în raportarea de siguranță pentru analiză.',
+    data9: 'Date din mesaje directe: expeditorul și destinatarul, momentele trimiterii și citirii și un identificator aleatoriu de idempotență folosit pentru prevenirea trimiterilor duplicate. Textul mesajului este stocat într-o formă lizibilă doar până când ambele conturi au criptarea activată; după aceea Văzute stochează un text cifrat pe care nu îl poate citi. Un mesaj text raportat este copiat în raportarea de siguranță pentru analiză; un mesaj criptat raportat este dezvăluit de cel care raportează, împreună cu cheia care dovedește ce a scris expeditorul.',
+    data10: 'Material criptografic, când criptarea este activată: cheile tale publice și amprenta lor, plus două copii ale cheii tale private sigilate cu parola ta și cu codul de recuperare. Văzute stochează copiile sigilate și nu poate deschide niciuna — dacă pierzi ambele secrete, pierzi accesul la mesajele criptate.',
     s3Title: 'Cum sunt folosite datele',
     use1: 'Datele sunt folosite pentru autentificarea conturilor, sincronizarea bibliotecii între dispozitive, construirea calendarelor și a statisticilor, oferirea funcțiilor sociale și a mesajelor directe, livrarea mesajelor de resetare a parolei și de securitate a contului, trimiterea alertelor de lansare cerute de utilizator, prevenirea abuzului, diagnosticarea erorilor și protejarea serviciului. Pentru utilizatorii din SEE, aceste activități se bazează pe executarea contractului de serviciu și pe interesele legitime de securitate și fiabilitate. Văzute nu vinde date personale și nu folosește publicitate sau analiză comportamentală. Cloudflare Web Analytics oferă măsurători agregate ale traficului web la marginea rețelei.',
     use2: 'Văzute păstrează contoare agregate găzduite pe cont propriu pentru un set fix de acțiuni reușite, precum vizualizarea retrospectivei anuale sau începerea unui import. Aceste contoare se păstrează 30 de zile și nu conțin niciun identificator de utilizator sau dispozitiv, adresă IP, căutare, titlu, moment per acțiune sau altă proprietate liberă. Contoarele singure nu pot identifica un cont sau un dispozitiv.',

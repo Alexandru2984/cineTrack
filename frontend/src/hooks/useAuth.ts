@@ -1,6 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import api from '@/lib/api';
+import { rewrapBackup } from '@/lib/crypto/session';
 import { useAuthStore } from '@/store/auth';
+import { useEncryptionStore } from '@/store/encryption';
 import type { AuthResponse, SecurityActivity, Session, User } from '@/types';
 
 export function useRegister() {
@@ -201,6 +203,7 @@ export function useDisableTwoFactor() {
 
 export function useChangePassword() {
   const logout = useAuthStore((s) => s.logout);
+  const identity = useEncryptionStore((s) => s.identity);
   return useMutation({
     mutationFn: async (data: {
       current_password: string;
@@ -208,6 +211,21 @@ export function useChangePassword() {
       totp_code?: string;
     }) => {
       const res = await api.patch('/auth/password', data);
+
+      // Re-seal the encryption key here, in the one moment both halves exist:
+      // the key is in memory and the new password is in hand. It cannot wait
+      // for a later screen, because success signs the user out.
+      //
+      // Failure is not allowed to undo a password change that already
+      // succeeded. The recovery code still opens the backup, so the cost of
+      // giving up here is one confusing restore, against reporting a password
+      // change as failed when it was not.
+      try {
+        await rewrapBackup(identity, data.new_password);
+      } catch {
+        // Deliberately swallowed; see above.
+      }
+
       return res.data as { message: string };
     },
     // The backend revokes every refresh token and clears the current cookie.

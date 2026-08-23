@@ -19,6 +19,8 @@ import {
   useMessageConversations,
   useMessageSummary,
 } from '@/hooks/use-messages';
+import { readConversationPreview, type MessageContent } from '@/lib/crypto/messages';
+import { useEncryptionStore } from '@/store/encryption';
 import { useT } from '@/hooks/use-t';
 import { useTheme } from '@/hooks/use-theme';
 import { formatDateTime } from '@/lib/format';
@@ -126,6 +128,27 @@ export default function MessagesScreen() {
   );
 }
 
+/** What to show for a message, in the four states one can be in.
+ *
+ *  Encrypted messages are the only ones whose text this client produces itself,
+ *  and the two failure states are kept distinct on purpose: "locked" is
+ *  something the user can fix by restoring their key, "undecryptable" is not. */
+function previewText(
+  content: MessageContent,
+  t: (key: string, params?: Record<string, string | number>) => string,
+): string {
+  switch (content.kind) {
+    case 'plain':
+      return content.text;
+    case 'encrypted':
+      return content.content.text;
+    case 'locked':
+      return t('messages.lockedPreview');
+    default:
+      return t('messages.encryptedPreview');
+  }
+}
+
 function ConversationRow({
   conversation,
   currentUserId,
@@ -136,9 +159,10 @@ function ConversationRow({
   const theme = useTheme();
   const t = useT();
   const unread = conversation.unread_count > 0;
-  const preview = conversation.last_message_sender_id === currentUserId
-    ? `${t('messages.you')}: ${conversation.last_message_body}`
-    : conversation.last_message_body;
+  const identity = useEncryptionStore((state) => state.identity);
+  const text = previewText(readConversationPreview(conversation, identity), t);
+  const preview =
+    conversation.last_message_sender_id === currentUserId ? `${t('messages.you')}: ${text}` : text;
 
   return (
     <Pressable

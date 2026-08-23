@@ -1,7 +1,7 @@
 import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 
 import { apiRequest } from '@/lib/api';
-import type { ReportReason, ReportTargetType } from '@/lib/community-safety';
+import type { ReportInput } from '@/lib/community-safety';
 import { withQuery } from '@/lib/http';
 import { socialKeys } from '@/hooks/use-social';
 import type { BlockedUser, SafetyReport } from '@/types';
@@ -63,12 +63,8 @@ export function useUnblockUser() {
 export function useReportContent() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (input: {
-      target_type: ReportTargetType;
-      target_id: string;
-      reason: ReportReason;
-      details?: string;
-    }) => apiRequest<SafetyReport>('/reports', { method: 'POST', body: input }),
+    mutationFn: (input: ReportInput) =>
+      apiRequest<SafetyReport>('/reports', { method: 'POST', body: input }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: safetyKeys.reports });
     },

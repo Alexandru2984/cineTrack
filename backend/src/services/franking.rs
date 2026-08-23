@@ -10,7 +10,7 @@
 //!
 //! ```text
 //! commitment = HMAC-SHA256(franking_key, plaintext)
-//! signature  = Ed25519(sender_signing_key, commitment || message_id)
+//! signature  = Ed25519(sender_signing_key, commitment || client_nonce)
 //! ```
 //!
 //! The franking key travels *inside* the ciphertext, so only the participants
@@ -104,13 +104,21 @@ pub fn commit(franking_key: &[u8], plaintext: &str) -> Result<Vec<u8>, FrankingF
 
 /// The bytes a sender signs: the commitment bound to the message it belongs to.
 ///
-/// Binding the message id is what stops a signature being lifted from one
-/// message and presented for another. Without it, a commitment signed once
-/// would validate a report about any message the same sender ever wrote.
-pub fn signing_payload(commitment: &[u8], message_id: Uuid) -> Vec<u8> {
+/// The binding is what stops a signature being lifted from one message and
+/// presented for another. Without it, a commitment signed once would validate a
+/// report about any message the same sender ever wrote.
+///
+/// The message is identified by its *client nonce*, not by its database id, and
+/// the reason is timing rather than taste: the id is assigned by the INSERT,
+/// long after the sender has to sign. Signing over it is impossible, so a
+/// scheme that demanded it would be a scheme no client could ever satisfy. The
+/// nonce is chosen by the sender before the request leaves, and
+/// `direct_messages_sender_nonce_unique` makes (sender, nonce) identify exactly
+/// one message — which is precisely the property the binding needs.
+pub fn signing_payload(commitment: &[u8], client_nonce: Uuid) -> Vec<u8> {
     let mut payload = Vec::with_capacity(commitment.len() + 16);
     payload.extend_from_slice(commitment);
-    payload.extend_from_slice(message_id.as_bytes());
+    payload.extend_from_slice(client_nonce.as_bytes());
     payload
 }
 
@@ -119,7 +127,7 @@ pub fn verify(
     stored_commitment: &[u8],
     stored_signature: &[u8],
     sender_signing_key: &[u8],
-    message_id: Uuid,
+    client_nonce: Uuid,
     revealed_plaintext: &str,
     franking_key: &[u8],
 ) -> Result<(), FrankingFailure> {
@@ -140,7 +148,7 @@ pub fn verify(
         return Err(FrankingFailure::CommitmentMismatch);
     }
 
-    let payload = signing_payload(stored_commitment, message_id);
+    let payload = signing_payload(stored_commitment, client_nonce);
     UnparsedPublicKey::new(&ED25519, sender_signing_key)
         .verify(&payload, stored_signature)
         .map_err(|_| FrankingFailure::SignatureInvalid)
@@ -178,9 +186,9 @@ mod tests {
             self.key_pair.public_key().as_ref().to_vec()
         }
 
-        fn sign(&self, commitment: &[u8], message_id: Uuid) -> Vec<u8> {
+        fn sign(&self, commitment: &[u8], client_nonce: Uuid) -> Vec<u8> {
             self.key_pair
-                .sign(&signing_payload(commitment, message_id))
+                .sign(&signing_payload(commitment, client_nonce))
                 .as_ref()
                 .to_vec()
         }
@@ -188,14 +196,14 @@ mod tests {
 
     fn evidence() -> (Sender, Uuid, Vec<u8>, String, Vec<u8>, Vec<u8>) {
         let sender = Sender::new();
-        let message_id = Uuid::new_v4();
+        let client_nonce = Uuid::new_v4();
         let franking_key = vec![7u8; FRANKING_KEY_BYTES];
         let plaintext = "meet me at the usual place".to_string();
         let commitment = commit(&franking_key, &plaintext).expect("commitment");
-        let signature = sender.sign(&commitment, message_id);
+        let signature = sender.sign(&commitment, client_nonce);
         (
             sender,
-            message_id,
+            client_nonce,
             franking_key,
             plaintext,
             commitment,
@@ -205,12 +213,12 @@ mod tests {
 
     #[test]
     fn honest_evidence_verifies() {
-        let (sender, message_id, key, plaintext, commitment, signature) = evidence();
+        let (sender, client_nonce, key, plaintext, commitment, signature) = evidence();
         assert!(verify(
             &commitment,
             &signature,
             &sender.public_key(),
-            message_id,
+            client_nonce,
             &plaintext,
             &key,
         )
@@ -221,12 +229,12 @@ mod tests {
     fn a_reporter_cannot_invent_the_text() {
         // The whole point: without this, a report is an accusation anybody can
         // fabricate about anybody.
-        let (sender, message_id, key, _plaintext, commitment, signature) = evidence();
+        let (sender, client_nonce, key, _plaintext, commitment, signature) = evidence();
         let result = verify(
             &commitment,
             &signature,
             &sender.public_key(),
-            message_id,
+            client_nonce,
             "something the sender never wrote",
             &key,
         );
@@ -237,12 +245,12 @@ mod tests {
     fn a_reporter_cannot_substitute_their_own_franking_key() {
         // Choosing a key that makes their text open the stored commitment is
         // exactly the forgery the commitment must resist.
-        let (sender, message_id, _key, plaintext, commitment, signature) = evidence();
+        let (sender, client_nonce, _key, plaintext, commitment, signature) = evidence();
         let result = verify(
             &commitment,
             &signature,
             &sender.public_key(),
-            message_id,
+            client_nonce,
             &plaintext,
             &[9u8; FRANKING_KEY_BYTES],
         );
@@ -254,16 +262,16 @@ mod tests {
         // Nobody but the sender can produce this signature — including the
         // server, which is what makes a verified report meaningful rather than
         // merely server-attested.
-        let (_sender, message_id, key, plaintext, commitment, _signature) = evidence();
+        let (_sender, client_nonce, key, plaintext, commitment, _signature) = evidence();
         let impostor = Sender::new();
-        let forged = impostor.sign(&commitment, message_id);
+        let forged = impostor.sign(&commitment, client_nonce);
         let victim = Sender::new();
 
         let result = verify(
             &commitment,
             &forged,
             &victim.public_key(),
-            message_id,
+            client_nonce,
             &plaintext,
             &key,
         );
@@ -272,11 +280,11 @@ mod tests {
 
     #[test]
     fn a_signature_cannot_be_lifted_onto_another_message() {
-        // Without the message id in the signed payload, one signed commitment
-        // would validate a report about any message the same sender wrote.
-        let (sender, message_id, key, plaintext, commitment, signature) = evidence();
+        // Without the nonce in the signed payload, one signed commitment would
+        // validate a report about any message the same sender wrote.
+        let (sender, client_nonce, key, plaintext, commitment, signature) = evidence();
         let other_message = Uuid::new_v4();
-        assert_ne!(message_id, other_message);
+        assert_ne!(client_nonce, other_message);
 
         let result = verify(
             &commitment,
@@ -291,7 +299,7 @@ mod tests {
 
     #[test]
     fn malformed_evidence_is_rejected_before_any_comparison() {
-        let (sender, message_id, key, plaintext, commitment, signature) = evidence();
+        let (sender, client_nonce, key, plaintext, commitment, signature) = evidence();
 
         for (commitment, signature, public_key, franking_key) in [
             (
@@ -319,7 +327,7 @@ mod tests {
                     commitment,
                     signature,
                     &public_key,
-                    message_id,
+                    client_nonce,
                     &plaintext,
                     franking_key,
                 ),
