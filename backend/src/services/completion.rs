@@ -52,7 +52,7 @@ pub async fn complete_show_if_fully_watched(
                 -- than an episode still to come; skipping those here would
                 -- award the badge while the user's own progress still shows
                 -- episodes left.
-                AND (e.air_date IS NULL OR e.air_date <= CURRENT_DATE)
+                AND (e.air_date IS NULL OR e.air_date <= aired_through())
                 AND NOT EXISTS (
                     SELECT 1 FROM watch_history wh
                     WHERE wh.user_id = um.user_id AND wh.episode_id = e.id
@@ -126,7 +126,7 @@ pub async fn demote_show_if_not_fully_watched(
               JOIN episodes e ON e.season_id = s.id
               WHERE s.media_id = m.id
                 AND s.season_number > 0
-                AND (e.air_date IS NULL OR e.air_date <= CURRENT_DATE)
+                AND (e.air_date IS NULL OR e.air_date <= aired_through())
                 AND NOT EXISTS (
                     SELECT 1 FROM watch_history wh
                     WHERE wh.user_id = um.user_id AND wh.episode_id = e.id

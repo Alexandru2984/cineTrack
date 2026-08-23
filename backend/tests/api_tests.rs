@@ -3729,7 +3729,10 @@ async fn test_completing_show_records_cached_episodes_idempotently() {
     .fetch_one(&pool)
     .await
     .unwrap();
-    assert_eq!(counts, (3, 0));
+    // Two, not three: 'Already aired' and the pilot. 'Airs today' carries
+    // today's date, and an episode's air date has to have fully elapsed before
+    // it counts as aired — see the `aired_through` migration.
+    assert_eq!(counts, (2, 0));
 
     let future_watches = sqlx::query_scalar::<_, i64>(
         r#"SELECT COUNT(*)
@@ -3737,7 +3740,7 @@ async fn test_completing_show_records_cached_episodes_idempotently() {
         JOIN episodes ON episodes.id = history.episode_id
         WHERE history.user_id = $1
           AND history.media_id = $2
-          AND episodes.air_date > CURRENT_DATE"#,
+          AND episodes.air_date > aired_through()"#,
     )
     .bind(user_id)
     .bind(media_id)
@@ -3765,7 +3768,9 @@ async fn test_completing_show_records_cached_episodes_idempotently() {
     .fetch_one(&pool)
     .await
     .unwrap();
-    assert_eq!(history_count, 3);
+    // Same two episodes as above: re-running the status change is idempotent,
+    // and 'Airs today' still has not aired.
+    assert_eq!(history_count, 2);
 
     let uncached_media_id = sqlx::query_scalar::<_, Uuid>(
         r#"INSERT INTO media (tmdb_id, media_type, title, runtime_minutes)
@@ -5914,14 +5919,16 @@ async fn test_calendar_lists_new_and_regional_upcoming_releases() {
         .await
         .unwrap();
 
-    let today_episode = sqlx::query_scalar::<_, Uuid>(
+    let newest_episode = sqlx::query_scalar::<_, Uuid>(
         r#"INSERT INTO episodes
             (season_id, episode_number, name, runtime_minutes, air_date, still_path)
-        VALUES ($1, 1, 'Today Episode', 45, $2, '/today.jpg')
+        VALUES ($1, 1, 'Newest Episode', 45, $2, '/today.jpg')
         RETURNING id"#,
     )
     .bind(season_id)
-    .bind(today)
+    // Yesterday, not today: an air date has to have fully elapsed before the
+    // episode counts as aired. See the `aired_through` migration.
+    .bind(today - chrono::Duration::days(1))
     .fetch_one(&pool)
     .await
     .unwrap();
@@ -5931,7 +5938,7 @@ async fn test_calendar_lists_new_and_regional_upcoming_releases() {
         RETURNING id"#,
     )
     .bind(season_id)
-    .bind(today - chrono::Duration::days(1))
+    .bind(today - chrono::Duration::days(2))
     .fetch_one(&pool)
     .await
     .unwrap();
@@ -6068,7 +6075,7 @@ async fn test_calendar_lists_new_and_regional_upcoming_releases() {
     assert_eq!(first_page["items"].as_array().unwrap().len(), 1);
     assert_eq!(
         first_page["items"][0]["episode_id"],
-        today_episode.to_string()
+        newest_episode.to_string()
     );
     assert!(first_page["next_cursor"].is_object());
 
@@ -6103,7 +6110,10 @@ async fn test_calendar_lists_new_and_regional_upcoming_releases() {
         .to_request();
     let up_next: Value = actix_test::call_and_read_body_json(&app, req).await;
     assert_eq!(up_next["items"].as_array().unwrap().len(), 1);
-    assert_eq!(up_next["items"][0]["episode_id"], today_episode.to_string());
+    assert_eq!(
+        up_next["items"][0]["episode_id"],
+        newest_episode.to_string()
+    );
     assert_eq!(up_next["items"][0]["is_planned"], false);
     assert_ne!(
         up_next["items"][0]["episode_id"],
@@ -6559,6 +6569,241 @@ async fn rewrapping_without_a_backup_is_refused() {
         .peer_addr(peer_addr())
         .to_request();
     assert_eq!(actix_test::call_service(&app, req).await.status(), 404);
+}
+
+// ── When an episode counts as having aired ────────────────────
+
+/// Seed a show with the given `(season, episode, air_date)` rows.
+///
+/// `episode_count` is set to what is actually inserted. Up Next withholds a
+/// show whose season looks incomplete, so a season claiming more episodes than
+/// exist would make every test here pass for the wrong reason.
+async fn seed_show_with_episodes(
+    pool: &PgPool,
+    title: &str,
+    episodes: &[(i32, i32, Option<chrono::NaiveDate>)],
+) -> Uuid {
+    let tmdb_id = 900_000 + i32::from(title.bytes().map(u16::from).sum::<u16>() % 9_000);
+    let media_id = sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO media (tmdb_id, media_type, title, status)
+        VALUES ($1, 'tv', $2, 'Returning Series')
+        RETURNING id"#,
+    )
+    .bind(tmdb_id)
+    .bind(title)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+
+    for season_number in episodes
+        .iter()
+        .map(|(season, _, _)| *season)
+        .collect::<std::collections::BTreeSet<_>>()
+    {
+        let in_season = episodes
+            .iter()
+            .filter(|(season, _, _)| *season == season_number)
+            .count();
+        let season_id = sqlx::query_scalar::<_, Uuid>(
+            r#"INSERT INTO seasons (media_id, season_number, name, episode_count)
+            VALUES ($1, $2, 'Season', $3)
+            RETURNING id"#,
+        )
+        .bind(media_id)
+        .bind(season_number)
+        .bind(i32::try_from(in_season).unwrap())
+        .fetch_one(pool)
+        .await
+        .unwrap();
+
+        for (_, episode_number, air_date) in episodes
+            .iter()
+            .filter(|(season, _, _)| *season == season_number)
+        {
+            sqlx::query(
+                r#"INSERT INTO episodes (season_id, episode_number, name, air_date)
+                VALUES ($1, $2, 'Episode', $3)"#,
+            )
+            .bind(season_id)
+            .bind(episode_number)
+            .bind(air_date)
+            .execute(pool)
+            .await
+            .unwrap();
+        }
+    }
+
+    media_id
+}
+
+/// Track the show and record the first episode as watched.
+///
+/// Up Next joins progress with an inner join, so a show with nothing watched
+/// never appears at all — without this the assertions below would hold against
+/// an empty queue no matter what the availability rule said.
+async fn track_and_watch_first_episode(pool: &PgPool, user_id: Uuid, media_id: Uuid) {
+    sqlx::query("INSERT INTO user_media (user_id, media_id, status) VALUES ($1, $2, 'watching')")
+        .bind(user_id)
+        .bind(media_id)
+        .execute(pool)
+        .await
+        .unwrap();
+
+    sqlx::query(
+        r#"INSERT INTO watch_history (user_id, media_id, episode_id, watched_at)
+        SELECT $1, $2, episodes.id, NOW()
+        FROM episodes
+        JOIN seasons ON seasons.id = episodes.season_id
+        WHERE seasons.media_id = $2
+        ORDER BY seasons.season_number, episodes.episode_number
+        LIMIT 1"#,
+    )
+    .bind(user_id)
+    .bind(media_id)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn sql_and_rust_agree_on_the_cutoff() {
+    // Two expressions of one rule: `aired_through()` in the database, and the
+    // Rust helper used by checks that run before their query. A disagreement
+    // would reject exactly the episodes the query is willing to insert, and
+    // would do it for a few hours a day, which is the kind of bug that gets
+    // closed as unreproducible.
+    let pool = setup_pool().await;
+    let from_sql: chrono::NaiveDate = sqlx::query_scalar("SELECT aired_through()")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(from_sql, cinetrack::utils::availability::aired_through());
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn an_episode_airing_today_is_not_offered_yet() {
+    // `air_date` is the local date of the first broadcast on the origin
+    // network, so an episode dated today has not aired anywhere the viewer can
+    // reach until that date has run out. Offering it is the difference between
+    // a queue and a wish.
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (token, _, user_id) = register_user(&app, "airing", "airing@mailbox.dev", "Pass1234").await;
+    let user_id = Uuid::parse_str(&user_id).unwrap();
+
+    let media_id = seed_show_with_episodes(
+        &pool,
+        "Airing Today",
+        &[
+            (
+                1,
+                1,
+                Some(chrono::Utc::now().date_naive() - chrono::Duration::days(7)),
+            ),
+            (1, 2, Some(chrono::Utc::now().date_naive())),
+        ],
+    )
+    .await;
+    track_and_watch_first_episode(&pool, user_id, media_id).await;
+
+    let req = actix_test::TestRequest::get()
+        .uri("/api/calendar/up-next")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let body: Value = actix_test::call_and_read_body_json(&app, req).await;
+    assert_eq!(
+        body["items"].as_array().map(Vec::len),
+        Some(0),
+        "an episode dated today must not be queued: {body}"
+    );
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn an_episode_whose_date_has_passed_is_offered() {
+    // The other half of the rule. Without this the previous test would pass on
+    // a queue that never offers anything.
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (token, _, user_id) = register_user(&app, "aired", "aired@mailbox.dev", "Pass1234").await;
+    let user_id = Uuid::parse_str(&user_id).unwrap();
+
+    let media_id = seed_show_with_episodes(
+        &pool,
+        "Already Aired",
+        &[
+            (
+                1,
+                1,
+                Some(chrono::Utc::now().date_naive() - chrono::Duration::days(7)),
+            ),
+            (
+                1,
+                2,
+                Some(chrono::Utc::now().date_naive() - chrono::Duration::days(1)),
+            ),
+        ],
+    )
+    .await;
+    track_and_watch_first_episode(&pool, user_id, media_id).await;
+
+    let req = actix_test::TestRequest::get()
+        .uri("/api/calendar/up-next")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let body: Value = actix_test::call_and_read_body_json(&app, req).await;
+    assert_eq!(body["items"][0]["episode_number"], 2, "body was {body}");
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn a_client_cannot_claim_tomorrow_to_unlock_an_episode() {
+    // The bound used to be the date the caller reported. Anyone could send the
+    // next day and pull an unaired episode into their queue.
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (token, _, user_id) =
+        register_user(&app, "claimer", "claimer@mailbox.dev", "Pass1234").await;
+    let user_id = Uuid::parse_str(&user_id).unwrap();
+
+    let media_id = seed_show_with_episodes(
+        &pool,
+        "Not Yet",
+        &[
+            (
+                1,
+                1,
+                Some(chrono::Utc::now().date_naive() - chrono::Duration::days(7)),
+            ),
+            (
+                1,
+                2,
+                Some(chrono::Utc::now().date_naive() + chrono::Duration::days(1)),
+            ),
+        ],
+    )
+    .await;
+    track_and_watch_first_episode(&pool, user_id, media_id).await;
+
+    let tomorrow = (chrono::Utc::now() + chrono::Duration::days(1)).date_naive();
+    let req = actix_test::TestRequest::get()
+        .uri(&format!("/api/calendar/up-next?today={tomorrow}"))
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let body: Value = actix_test::call_and_read_body_json(&app, req).await;
+    assert_eq!(
+        body["items"].as_array().map(Vec::len),
+        Some(0),
+        "the caller's date must not decide what has aired: {body}"
+    );
 }
 
 // ── Franking: moderation of messages the server cannot read ───
@@ -7789,7 +8034,7 @@ async fn test_calendar_episode_actions_are_idempotent_and_owner_scoped() {
     .unwrap();
     let episode_id = sqlx::query_scalar::<_, Uuid>(
         r#"INSERT INTO episodes (season_id, episode_number, name, air_date)
-        VALUES ($1, 1, 'Action Episode', CURRENT_DATE)
+        VALUES ($1, 1, 'Action Episode', CURRENT_DATE - 1)
         RETURNING id"#,
     )
     .bind(season_id)
@@ -8537,7 +8782,7 @@ async fn test_episode_detail_is_authenticated_and_user_scoped() {
     let episode_id = sqlx::query_scalar::<_, Uuid>(
         r#"INSERT INTO episodes
             (season_id, episode_number, name, overview, runtime_minutes, air_date, still_path)
-        VALUES ($1, 3, 'The Detail', 'A complete synopsis', 52, CURRENT_DATE, '/still.jpg')
+        VALUES ($1, 3, 'The Detail', 'A complete synopsis', 52, CURRENT_DATE - 1, '/still.jpg')
         RETURNING id"#,
     )
     .bind(season_id)
