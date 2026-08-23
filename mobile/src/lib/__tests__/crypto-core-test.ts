@@ -12,7 +12,19 @@ import {
   wrapIdentity,
 } from '@/lib/crypto/core';
 
-const CLIENT_NONCE = '3f2504e0-4f89-41d3-9a0c-0305e82c3301';
+/** A well-formed client nonce, generated rather than pasted.
+ *
+ *  These tests need *a* nonce, not a particular one. A UUID literal sitting
+ *  beside a name like this is indistinguishable from a leaked credential to a
+ *  secret scanner, and a false positive that has to be explained away every
+ *  time is worse than one line of setup. */
+function clientNonce(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+const CLIENT_NONCE = clientNonce();
 
 /** See the web copy: production cost would add minutes to this suite under
  *  Jest's transformed runtime, and proves nothing the server does not enforce. */

@@ -9,7 +9,19 @@ import {
 } from '@/lib/crypto/messages';
 import type { DirectMessage, MessageConversation, PeerPublicKeys } from '@/types';
 
-const CLIENT_NONCE = '9f8b4c2a-1d3e-4f56-8a7b-0c1d2e3f4a5b';
+/** A well-formed client nonce, generated rather than pasted.
+ *
+ *  These tests need *a* nonce, not a particular one. A UUID literal sitting
+ *  beside a name like this is indistinguishable from a leaked credential to a
+ *  secret scanner, and a false positive that has to be explained away every
+ *  time is worse than one line of setup. */
+function clientNonce(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+const CLIENT_NONCE = clientNonce();
 
 function peerFrom(identity: ReturnType<typeof generateIdentity>): PeerPublicKeys {
   return {
