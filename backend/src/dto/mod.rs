@@ -1,4 +1,5 @@
 pub mod auth;
+pub mod badge;
 pub mod calendar;
 pub mod client_error;
 pub mod common;

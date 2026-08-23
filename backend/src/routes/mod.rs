@@ -1,5 +1,6 @@
 pub mod assets;
 pub mod auth;
+pub mod badges;
 pub mod calendar;
 pub mod client_errors;
 pub mod csp_report;
@@ -45,6 +46,7 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
             .configure(notifications::configure)
             .configure(push::configure)
             .configure(reports::configure)
+            .configure(badges::configure)
             .configure(calendar::configure)
             .configure(client_errors::configure)
             .configure(csp_report::configure)
@@ -88,6 +90,7 @@ pub fn configure_with_rate_limits(
             .configure(notifications::configure)
             .configure(|cfg| push::configure_rate_limited(cfg, push_rate_limiter))
             .configure(reports::configure)
+            .configure(badges::configure)
             .configure(calendar::configure)
             .configure(|cfg| client_errors::configure_rate_limited(cfg, client_error_rate_limiter))
             .configure(|cfg| csp_report::configure_rate_limited(cfg, csp_report_rate_limiter))

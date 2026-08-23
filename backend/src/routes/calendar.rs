@@ -896,6 +896,7 @@ async fn mark_episode_watched(
         media_id,
     )
     .await;
+    crate::services::badges::recompute_quietly(pool.get_ref(), user_id, Some(media_id)).await;
 
     let status = if already_watched {
         actix_web::http::StatusCode::OK

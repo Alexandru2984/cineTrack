@@ -6571,6 +6571,230 @@ async fn rewrapping_without_a_backup_is_refused() {
     assert_eq!(actix_test::call_service(&app, req).await.status(), 404);
 }
 
+// ── Badges ────────────────────────────────────────────────────
+
+/// Record `count` episodes of one show, spaced `minutes_apart`, ending now.
+async fn seed_marathon(
+    pool: &PgPool,
+    user_id: Uuid,
+    media_id: Uuid,
+    count: i64,
+    minutes_apart: i64,
+) {
+    let season_id = sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO seasons (media_id, season_number, name, episode_count)
+        VALUES ($1, 1, 'Season', $2) RETURNING id"#,
+    )
+    .bind(media_id)
+    .bind(i32::try_from(count).unwrap())
+    .fetch_one(pool)
+    .await
+    .unwrap();
+
+    for index in 0..count {
+        let episode_id = sqlx::query_scalar::<_, Uuid>(
+            r#"INSERT INTO episodes (season_id, episode_number, name, air_date)
+            VALUES ($1, $2, 'Episode', CURRENT_DATE - 30) RETURNING id"#,
+        )
+        .bind(season_id)
+        .bind(i32::try_from(index + 1).unwrap())
+        .fetch_one(pool)
+        .await
+        .unwrap();
+
+        sqlx::query(
+            r#"INSERT INTO watch_history (user_id, media_id, episode_id, watched_at)
+            VALUES ($1, $2, $3, NOW() - make_interval(mins => $4))"#,
+        )
+        .bind(user_id)
+        .bind(media_id)
+        .bind(episode_id)
+        .bind(i32::try_from((count - index) * minutes_apart).unwrap())
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+}
+
+async fn badge_keys(pool: &PgPool, user_id: Uuid) -> Vec<String> {
+    sqlx::query_scalar::<_, String>(
+        "SELECT badge_key FROM user_badges WHERE user_id = $1 ORDER BY badge_key",
+    )
+    .bind(user_id)
+    .fetch_all(pool)
+    .await
+    .unwrap()
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn a_run_of_episodes_earns_the_tiers_it_passes() {
+    // Every tier crossed is earned, not only the highest. Awarding the top one
+    // alone would leave a shelf that skips straight to the end.
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (_, _, user_id) = register_user(&app, "marathoner", "mara@mailbox.dev", "Pass1234").await;
+    let user_id = Uuid::parse_str(&user_id).unwrap();
+    let media_id = seed_show_with_episodes(&pool, "Marathon Show", &[]).await;
+
+    seed_marathon(&pool, user_id, media_id, 6, 30).await;
+    cinetrack::services::badges::recompute(&pool, user_id, None)
+        .await
+        .unwrap();
+
+    let keys = badge_keys(&pool, user_id).await;
+    assert!(keys.contains(&"marathon-3".to_string()), "{keys:?}");
+    assert!(keys.contains(&"marathon-5".to_string()), "{keys:?}");
+    assert!(!keys.contains(&"marathon-10".to_string()), "{keys:?}");
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn episodes_spread_over_days_are_not_a_marathon() {
+    // The window is the whole point. Six episodes across a fortnight is not the
+    // same behaviour as six in an evening, and a badge that cannot tell them
+    // apart describes nothing.
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (_, _, user_id) = register_user(&app, "steady", "steady@mailbox.dev", "Pass1234").await;
+    let user_id = Uuid::parse_str(&user_id).unwrap();
+    let media_id = seed_show_with_episodes(&pool, "Steady Show", &[]).await;
+
+    // Three days apart, so no 24- or 48-hour window holds more than one.
+    seed_marathon(&pool, user_id, media_id, 6, 60 * 24 * 3).await;
+    cinetrack::services::badges::recompute(&pool, user_id, None)
+        .await
+        .unwrap();
+
+    let keys = badge_keys(&pool, user_id).await;
+    assert!(
+        !keys.iter().any(|key| key.starts_with("marathon-")),
+        "{keys:?}"
+    );
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn a_badge_goes_away_when_the_history_stops_supporting_it() {
+    // The property the whole design rests on. A counter would keep the badge
+    // after the episodes behind it were deleted, and nobody could explain why
+    // it was there.
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (_, _, user_id) = register_user(&app, "undone", "undone@mailbox.dev", "Pass1234").await;
+    let user_id = Uuid::parse_str(&user_id).unwrap();
+    let media_id = seed_show_with_episodes(&pool, "Undone Show", &[]).await;
+
+    seed_marathon(&pool, user_id, media_id, 5, 30).await;
+    cinetrack::services::badges::recompute(&pool, user_id, None)
+        .await
+        .unwrap();
+    assert!(badge_keys(&pool, user_id)
+        .await
+        .contains(&"marathon-5".to_string()));
+
+    sqlx::query(
+        "DELETE FROM watch_history WHERE user_id = $1 AND episode_id IN (
+            SELECT episode_id FROM watch_history WHERE user_id = $1 ORDER BY watched_at DESC LIMIT 3
+        )",
+    )
+    .bind(user_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    cinetrack::services::badges::recompute(&pool, user_id, None)
+        .await
+        .unwrap();
+
+    let keys = badge_keys(&pool, user_id).await;
+    assert!(!keys.contains(&"marathon-5".to_string()), "{keys:?}");
+    assert!(!keys.contains(&"marathon-3".to_string()), "{keys:?}");
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn narrowing_to_one_show_leaves_other_shows_alone() {
+    // Marking one episode recomputes only that show, for speed. If the delete
+    // were not scoped the same way, it would take every other show's badges
+    // with it — a bug that would look like badges randomly disappearing.
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (_, _, user_id) = register_user(&app, "scoped", "scoped@mailbox.dev", "Pass1234").await;
+    let user_id = Uuid::parse_str(&user_id).unwrap();
+
+    let first = seed_show_with_episodes(&pool, "First Show", &[]).await;
+    let second = seed_show_with_episodes(&pool, "Second Show", &[]).await;
+    seed_marathon(&pool, user_id, first, 5, 30).await;
+    seed_marathon(&pool, user_id, second, 5, 30).await;
+    cinetrack::services::badges::recompute(&pool, user_id, None)
+        .await
+        .unwrap();
+    assert_eq!(
+        badge_keys(&pool, user_id).await.len(),
+        4,
+        "two shows, two tiers each"
+    );
+
+    cinetrack::services::badges::recompute(&pool, user_id, Some(first))
+        .await
+        .unwrap();
+    assert_eq!(
+        badge_keys(&pool, user_id).await.len(),
+        4,
+        "a scoped recompute must not touch the other show"
+    );
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn the_shelf_aggregates_and_says_what_is_next() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (token, _, user_id) = register_user(&app, "shelf", "shelf@mailbox.dev", "Pass1234").await;
+    let user_id = Uuid::parse_str(&user_id).unwrap();
+
+    for title in ["Shelf One", "Shelf Two"] {
+        let media_id = seed_show_with_episodes(&pool, title, &[]).await;
+        seed_marathon(&pool, user_id, media_id, 3, 30).await;
+    }
+    cinetrack::services::badges::recompute(&pool, user_id, None)
+        .await
+        .unwrap();
+
+    let req = actix_test::TestRequest::get()
+        .uri("/api/badges")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let shelf: Value = actix_test::call_and_read_body_json(&app, req).await;
+
+    // One entry for the tier, not one per show. Two hundred rows on a profile
+    // is how a badge stops meaning anything.
+    let marathon = shelf["earned"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|badge| badge["key"] == "marathon-3")
+        .expect("marathon-3 should be earned");
+    assert_eq!(marathon["count"], 2);
+    assert_eq!(marathon["shows"].as_array().unwrap().len(), 2);
+
+    // And the shelf says what to aim at next rather than only what is done.
+    let next = shelf["progress"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["family"] == "marathon24")
+        .expect("progress towards the next marathon tier");
+    assert_eq!(next["next_key"], "marathon-5");
+    assert_eq!(next["current"], 3);
+}
+
 // ── When an episode counts as having aired ────────────────────
 
 /// Seed a show with the given `(season, episode, air_date)` rows.

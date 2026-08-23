@@ -210,6 +210,7 @@ async fn create_history(
         data.media_id,
     )
     .await;
+    crate::services::badges::recompute_quietly(pool.get_ref(), user_id, Some(data.media_id)).await;
 
     Ok(HttpResponse::Created().json(history))
 }
@@ -485,6 +486,7 @@ async fn write_bulk_episode_history(
         pool, user_id, media_id,
     )
     .await;
+    crate::services::badges::recompute_quietly(pool, user_id, Some(media_id)).await;
 
     Ok(BulkWatchResponse {
         media_id,
@@ -666,6 +668,7 @@ async fn mark_episode_watched(
         media.id,
     )
     .await;
+    crate::services::badges::recompute_quietly(pool.get_ref(), user_id, Some(media.id)).await;
 
     Ok(HttpResponse::Created().json(serde_json::json!({
         "history_id": history_id,
@@ -734,6 +737,7 @@ async fn unmark_episode_watched(
             media_id,
         )
         .await;
+        crate::services::badges::recompute_quietly(pool.get_ref(), user_id, Some(media_id)).await;
         log::info!(
             "audit: episode unmarked user_id={user_id} tmdb_id={tmdb_id} \
              season={season_number} episode={episode_number} removed={removed}"
@@ -782,6 +786,7 @@ async fn delete_history(
         media_id,
     )
     .await;
+    crate::services::badges::recompute_quietly(pool.get_ref(), user_id, Some(media_id)).await;
 
     Ok(HttpResponse::Ok().json(serde_json::json!({"message": "Deleted"})))
 }
