@@ -12,24 +12,40 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-WEB="$ROOT_DIR/frontend/src/lib/crypto/core.ts"
-NATIVE="$ROOT_DIR/mobile/src/lib/crypto/core.ts"
+# Everything that must agree byte for byte. `core.ts` is the cryptography
+# itself; `messages.ts` decides which envelope field goes where and `cache.ts`
+# how long plaintext lives, and a difference in either produces exactly the same
+# silent, late failure as a difference in the primitives.
+#
+# Deliberately not on this list: storage and session. Keys live in IndexedDB on
+# one platform and the keychain on the other, and pretending those are the same
+# file would be a fiction the test would have to keep working around.
+SHARED_FILES=(
+  "src/lib/crypto/core.ts"
+  "src/lib/crypto/cache.ts"
+  "src/lib/crypto/messages.ts"
+)
 
-for copy in "$WEB" "$NATIVE"; do
-  [[ -f "$copy" ]] || {
-    echo "crypto parity error: $copy is missing" >&2
+for relative in "${SHARED_FILES[@]}"; do
+  WEB="$ROOT_DIR/frontend/$relative"
+  NATIVE="$ROOT_DIR/mobile/$relative"
+
+  for copy in "$WEB" "$NATIVE"; do
+    [[ -f "$copy" ]] || {
+      echo "crypto parity error: $copy is missing" >&2
+      exit 1
+    }
+  done
+
+  if ! cmp -s "$WEB" "$NATIVE"; then
+    echo "crypto parity error: $relative differs between the web and native clients." >&2
+    echo "Edit one, copy it to the other, and run both test suites:" >&2
+    echo "  cp frontend/$relative mobile/$relative" >&2
+    echo >&2
+    diff -u "$WEB" "$NATIVE" | head -40 >&2
     exit 1
-  }
+  fi
 done
-
-if ! cmp -s "$WEB" "$NATIVE"; then
-  echo "crypto parity error: the web and native encryption cores differ." >&2
-  echo "Edit one, copy it to the other, and run both test suites:" >&2
-  echo "  cp frontend/src/lib/crypto/core.ts mobile/src/lib/crypto/core.ts" >&2
-  echo >&2
-  diff -u "$WEB" "$NATIVE" | head -40 >&2
-  exit 1
-fi
 
 # A copied file is not enough on its own: both projects must actually be able to
 # run it, and a dependency present in one and missing from the other produces a

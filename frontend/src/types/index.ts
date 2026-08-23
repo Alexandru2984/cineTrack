@@ -445,7 +445,14 @@ export interface DirectMessage {
   id: string;
   sender_id: string;
   recipient_id: string;
-  body: string;
+  /** Null for an encrypted message. The server has nothing to put here, and
+   *  says so rather than inventing a placeholder. */
+  body: string | null;
+  ciphertext?: string | null;
+  nonce?: string | null;
+  sender_ephemeral_key?: string | null;
+  sender_copy?: string | null;
+  franking_commitment?: string | null;
   read_at: string | null;
   created_at: string;
 }
@@ -468,7 +475,11 @@ export interface MessageConversation {
   avatar_url: string | null;
   last_message_id: string;
   last_message_sender_id: string;
-  last_message_body: string;
+  last_message_body: string | null;
+  last_message_ciphertext?: string | null;
+  last_message_nonce?: string | null;
+  last_message_sender_ephemeral_key?: string | null;
+  last_message_sender_copy?: string | null;
   last_message_at: string;
   last_message_read_at: string | null;
   unread_count: number;
@@ -477,6 +488,37 @@ export interface MessageConversation {
 
 export interface MessageSummary {
   unread_count: number;
+}
+
+export interface KdfParameters {
+  memory_kib: number;
+  iterations: number;
+  parallelism: number;
+}
+
+export interface KeyStatus {
+  has_keys: boolean;
+  key_fingerprint: string | null;
+  generation: number | null;
+}
+
+export interface KeyBackup {
+  password_wrapped_key: string;
+  password_kdf_salt: string;
+  password_kdf: KdfParameters;
+  recovery_wrapped_key: string;
+  recovery_kdf_salt: string;
+  updated_at: string;
+}
+
+export interface PeerPublicKeys {
+  user_id: string;
+  username: string;
+  exchange_public_key: string;
+  signing_public_key: string;
+  key_fingerprint: string;
+  generation: number;
+  updated_at: string;
 }
 
 export interface FollowRequest {
