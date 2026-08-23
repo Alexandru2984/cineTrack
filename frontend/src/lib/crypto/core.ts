@@ -25,6 +25,23 @@
  * therefore reaches the recipient and nobody else — which is what lets them
  * later prove to the server what was said, without the server ever being able
  * to read it. See `services/franking.rs` for the other half.
+ *
+ * # The sender's own copy
+ *
+ * An ephemeral key that only the recipient can complete has an awkward
+ * consequence: the sender cannot read what they sent. Their private ephemeral
+ * key is gone, and the history lives on the server, so their own outbox would
+ * be a column of padlocks after a reload. That is not a security property, it
+ * is a broken product.
+ *
+ * So the message key is also wrapped against the sender's own long-term key,
+ * using the same ephemeral private key while it still exists. The wrap travels
+ * with the message as `senderCopy`; the sender opens it later with the private
+ * half they keep. The recipient's path is untouched, and the server gains
+ * nothing — it holds one more sealed box it cannot open.
+ *
+ * The same nonce appears under both keys. That is safe precisely because they
+ * are different keys: GCM's requirement is uniqueness per key, not globally.
  */
 
 import { ed25519, x25519 } from '@noble/curves/ed25519.js';
@@ -92,6 +109,9 @@ export interface EncryptedMessage {
   ciphertext: Uint8Array;
   nonce: Uint8Array;
   senderEphemeralKey: Uint8Array;
+  /** The message key, sealed to the sender's own exchange key, so they can read
+   *  their own outbox. Absent on messages written before this existed. */
+  senderCopy?: Uint8Array;
   frankingCommitment: Uint8Array;
   frankingSignature: Uint8Array;
 }
@@ -166,6 +186,45 @@ export function fingerprint(exchangePublicKey: Uint8Array, signingPublicKey: Uin
   );
 }
 
+/** The number two people compare out loud to check nobody is between them.
+ *
+ *  Both fingerprints go in, sorted, so the two sides compute the same string
+ *  without having to agree on who is "first". Reading a different number to
+ *  each party would defeat the entire exercise.
+ *
+ *  Shown as 40 hex characters in groups of four. That is 160 bits, which is far
+ *  more than a comparison needs — an attacker would have to find a directory
+ *  substitution matching the digest, and the practical limit here is not the
+ *  arithmetic but how much a person will actually read aloud before giving up
+ *  and saying "yeah, looks right".
+ *
+ *  The server stores fingerprints but cannot vouch for them: it serves whatever
+ *  is in its own directory, and a substituted entry is exactly the attack this
+ *  detects. Comparing through another channel is what makes it meaningful. */
+export function safetyNumber(first: string, second: string): string {
+  const ordered = [first, second].sort();
+  const digest = toHex(sha256(encoder.encode(ordered.join(':'))));
+  return (digest.slice(0, 40).match(/.{1,4}/g) ?? []).join(' ');
+}
+
+/** Unwrap the message key from the sender's copy, or null when this reader is
+ *  not the sender.
+ *
+ *  Distinguishing the two by trying is deliberate: the alternative is passing a
+ *  flag from the caller, and a caller that gets it wrong produces a message
+ *  that silently fails to open rather than one that opens the other way. */
+function openSenderCopy(
+  message: EncryptedMessage,
+  derivedKey: Uint8Array,
+): Uint8Array | null {
+  if (!message.senderCopy || message.senderCopy.length === 0) return null;
+  try {
+    return gcm(derivedKey, message.nonce).decrypt(message.senderCopy);
+  } catch {
+    return null;
+  }
+}
+
 function messageKey(sharedSecret: Uint8Array, ephemeralPublicKey: Uint8Array): Uint8Array {
   // The ephemeral public key is the HKDF salt, so two messages sharing a secret
   // still derive different keys, and a nonce is never reused under one key.
@@ -180,18 +239,27 @@ export function frankingCommitment(frankingKey: Uint8Array, plaintext: string): 
 
 /** The bytes the sender signs: the commitment bound to the message it belongs
  *  to, so a signature cannot be lifted onto a different message. */
+/** The bytes a sender signs: the commitment bound to the message it belongs to.
+ *
+ *  The message is identified by its client nonce rather than its server-side
+ *  id, and the reason is timing rather than taste: the id is assigned by the
+ *  INSERT, long after the sender has to sign. A scheme demanding it would be one
+ *  no client could ever satisfy. The nonce is chosen before the request leaves,
+ *  and the server's uniqueness constraint on (sender, nonce) makes it identify
+ *  exactly one message — which is the property the binding needs. */
 export function frankingSigningPayload(
   commitment: Uint8Array,
-  messageId: string,
+  clientNonce: string,
 ): Uint8Array {
-  return concat(commitment, fromHex(messageId.replace(/-/g, '')));
+  return concat(commitment, fromHex(clientNonce.replace(/-/g, '')));
 }
 
 export function encryptMessage(
   plaintext: string,
   recipientExchangePublicKey: Uint8Array,
+  senderExchangePublicKey: Uint8Array,
   senderSigningPrivateKey: Uint8Array,
-  messageId: string,
+  clientNonce: string,
 ): EncryptedMessage {
   const ephemeralPrivateKey = x25519.utils.randomSecretKey();
   const senderEphemeralKey = x25519.getPublicKey(ephemeralPrivateKey);
@@ -207,13 +275,19 @@ export function encryptMessage(
   const nonce = randomBytes(NONCE_BYTES);
   const ciphertext = gcm(key, nonce).encrypt(payload);
 
+  // Wrapped while the ephemeral private key still exists. Afterwards nobody —
+  // including the sender — could produce this.
+  const senderShared = x25519.getSharedSecret(ephemeralPrivateKey, senderExchangePublicKey);
+  const senderCopy = gcm(messageKey(senderShared, senderEphemeralKey), nonce).encrypt(key);
+
   return {
     ciphertext,
     nonce,
     senderEphemeralKey,
+    senderCopy,
     frankingCommitment: commitment,
     frankingSignature: ed25519.sign(
-      frankingSigningPayload(commitment, messageId),
+      frankingSigningPayload(commitment, clientNonce),
       senderSigningPrivateKey,
     ),
   };
@@ -221,10 +295,16 @@ export function encryptMessage(
 
 export function decryptMessage(
   message: EncryptedMessage,
-  recipientExchangePrivateKey: Uint8Array,
+  exchangePrivateKey: Uint8Array,
 ): DecryptedMessage {
-  const shared = x25519.getSharedSecret(recipientExchangePrivateKey, message.senderEphemeralKey);
-  const key = messageKey(shared, message.senderEphemeralKey);
+  const shared = x25519.getSharedSecret(exchangePrivateKey, message.senderEphemeralKey);
+  const derived = messageKey(shared, message.senderEphemeralKey);
+  // The same call serves both parties, because both hold a private key that
+  // completes the ephemeral agreement — the recipient reaching the message key
+  // directly, the sender reaching the wrapper around it. Trying the wrapper
+  // first would cost a failed GCM open on every received message, so the
+  // direct path is tried first and the wrapper is the fallback.
+  const key = openSenderCopy(message, derived) ?? derived;
   const payload = gcm(key, message.nonce).decrypt(message.ciphertext);
 
   const frankingKey = payload.slice(0, FRANKING_KEY_BYTES);

@@ -1,4 +1,6 @@
 import { apiRequest } from '@/lib/api';
+import { rewrapBackup } from '@/lib/crypto/session';
+import { useEncryptionStore } from '@/store/encryption';
 import { ApiError, rawRequest } from '@/lib/http';
 import { readRefreshToken } from '@/lib/secure-session';
 import { clearLocalSession } from '@/lib/session';
@@ -101,6 +103,21 @@ export async function changeAccountPassword(
       ...(code ? { totp_code: code } : {}),
     },
   });
+
+  // Re-seal the encryption key here, in the one moment both halves exist: the
+  // key is in memory and the new password is in hand. It cannot wait, because
+  // the next line ends the session.
+  //
+  // Failure is not allowed to undo a password change that already succeeded.
+  // The recovery code still opens the backup, so the cost of giving up here is
+  // one confusing restore, against reporting a password change as failed when
+  // it was not.
+  try {
+    await rewrapBackup(useEncryptionStore.getState().identity, newPassword);
+  } catch {
+    // Deliberately swallowed; see above.
+  }
+
   await clearLocalSession();
 }
 

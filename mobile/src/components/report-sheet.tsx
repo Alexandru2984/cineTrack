@@ -36,11 +36,14 @@ export function ReportSheet({
   targetType,
   targetId,
   targetLabel,
+  evidence,
   onClose,
 }: {
   targetType: ReportTargetType;
   targetId: string;
   targetLabel: string;
+  /** What the reporter decrypted, for a message the server cannot read. */
+  evidence?: { revealedPlaintext: string; frankingKey: string };
   onClose: () => void;
 }) {
   const theme = useTheme();
@@ -50,7 +53,7 @@ export function ReportSheet({
   const [details, setDetails] = useState('');
 
   const submit = () => {
-    report.mutate(reportInputFromDraft(targetType, targetId, reason, details));
+    report.mutate(reportInputFromDraft(targetType, targetId, reason, details, evidence));
   };
 
   return (

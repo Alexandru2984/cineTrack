@@ -19,6 +19,12 @@ export interface ReportInput {
   target_id: string;
   reason: ReportReason;
   details?: string;
+  /** Only for an encrypted message, and required there: the server cannot read
+   *  it, so the reporter supplies the text and the key that opens the sender's
+   *  commitment to it. Without both, a report against an encrypted message
+   *  would be indistinguishable from an accusation somebody typed. */
+  revealed_plaintext?: string;
+  franking_key?: string;
 }
 
 export function reportInputFromDraft(
@@ -26,6 +32,10 @@ export function reportInputFromDraft(
   targetId: string,
   reason: ReportReason,
   details: string,
+  /** What the reporter decrypted, for a message the server cannot read. The
+   *  franking key opens the sender's commitment, which is what turns a report
+   *  into evidence rather than an assertion. */
+  evidence?: { revealedPlaintext: string; frankingKey: string },
 ): ReportInput {
   const normalizedDetails = details.trim();
   return {
@@ -33,5 +43,11 @@ export function reportInputFromDraft(
     target_id: targetId,
     reason,
     ...(normalizedDetails ? { details: normalizedDetails } : {}),
+    ...(evidence
+      ? {
+          revealed_plaintext: evidence.revealedPlaintext,
+          franking_key: evidence.frankingKey,
+        }
+      : {}),
   };
 }

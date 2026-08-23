@@ -29,6 +29,13 @@ export function useReportContent() {
       target_id: string;
       reason: ReportReason;
       details?: string;
+      /** Only for an encrypted message, and required there: the server cannot
+       *  read it, so the reporter supplies the text and the key that opens the
+       *  sender's commitment to it. Without both, a report against an
+       *  encrypted message would be indistinguishable from an accusation
+       *  somebody typed. */
+      revealed_plaintext?: string;
+      franking_key?: string;
     }) => {
       const response = await api.post<SafetyReport>('/reports', input);
       return response.data;

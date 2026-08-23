@@ -6,6 +6,10 @@ import {
 } from '@tanstack/react-query';
 
 import { apiRequest } from '@/lib/api';
+import { sealMessage } from '@/lib/crypto/messages';
+import { fetchPeerKeys } from '@/lib/crypto/session';
+import { encryptionKeys } from '@/hooks/use-encryption';
+import { useEncryptionStore } from '@/store/encryption';
 import { withQuery } from '@/lib/http';
 import {
   MESSAGE_CONVERSATION_PAGE_SIZE,
@@ -88,10 +92,17 @@ export function useMessageThread(username: string, enabled = true) {
   });
 }
 
+export class EncryptionRequiredError extends Error {
+  constructor() {
+    super('encryption-required');
+    this.name = 'EncryptionRequiredError';
+  }
+}
+
 export function useSendMessage() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({
+    mutationFn: async ({
       username,
       body,
       clientNonce,
@@ -99,11 +110,35 @@ export function useSendMessage() {
       username: string;
       body: string;
       clientNonce: string;
-    }) =>
-      apiRequest<DirectMessage>(`/messages/${encodeURIComponent(username)}`, {
+    }) => {
+      // Whether to encrypt is decided by whether the recipient can decrypt,
+      // which is a fact about the directory rather than a preference. The
+      // server re-derives the same rule, so a client that guessed wrong is
+      // refused rather than quietly downgraded.
+      const peer = await queryClient.fetchQuery({
+        queryKey: encryptionKeys.peer(username),
+        queryFn: () => fetchPeerKeys(username),
+        staleTime: 5 * 60 * 1000,
+      });
+      const identity = useEncryptionStore.getState().identity;
+
+      if (peer && !identity) {
+        // The recipient expects encryption and this device cannot provide it.
+        // Sending in the clear would be refused by the server anyway, and
+        // saying so here explains what to do about it.
+        throw new EncryptionRequiredError();
+      }
+
+      const payload =
+        peer && identity
+          ? { ...sealMessage(body, peer, identity, clientNonce), client_nonce: clientNonce }
+          : { body, client_nonce: clientNonce };
+
+      return apiRequest<DirectMessage>(`/messages/${encodeURIComponent(username)}`, {
         method: 'POST',
-        body: { body, client_nonce: clientNonce },
-      }),
+        body: payload,
+      });
+    },
     onSuccess: (_message, variables) => {
       void queryClient.invalidateQueries({
         queryKey: messageKeys.thread(variables.username),
