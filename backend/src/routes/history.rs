@@ -3,7 +3,6 @@ use futures_util::stream::{self, StreamExt, TryStreamExt};
 use sqlx::{PgPool, Postgres, Transaction};
 use uuid::Uuid;
 
-use crate::available_through;
 use crate::dto::common::PaginationParams;
 use crate::dto::tracking::*;
 use crate::errors::AppError;
@@ -11,6 +10,7 @@ use crate::middleware::auth::require_auth;
 use crate::models::Media;
 use crate::services::quota;
 use crate::services::tmdb::TmdbService;
+use crate::utils::availability::aired_through;
 
 const MAX_BULK_SEASONS: usize = 100;
 const MAX_BULK_EPISODES: usize = 10_000;
@@ -269,7 +269,7 @@ async fn show_watch_progress(
             seasons.season_number,
             seasons.episode_count,
             COUNT(DISTINCT episodes.id) FILTER (
-                WHERE episodes.air_date IS NULL OR episodes.air_date <= CURRENT_DATE
+                WHERE episodes.air_date IS NULL OR episodes.air_date <= aired_through()
             )::bigint AS available_episode_count,
             COUNT(DISTINCT history.episode_id)::bigint AS watched_count
         FROM seasons
@@ -513,7 +513,7 @@ async fn mark_season_watched(
         JOIN seasons ON seasons.id = episodes.season_id
         WHERE seasons.media_id = $1
           AND seasons.season_number = $2
-          AND (episodes.air_date IS NULL OR episodes.air_date <= CURRENT_DATE)
+          AND (episodes.air_date IS NULL OR episodes.air_date <= aired_through())
         ORDER BY episodes.episode_number"#,
     )
     .bind(media.id)
@@ -552,22 +552,17 @@ async fn mark_episodes_watched_through(
     .await?;
     let target_air_date =
         target_air_date.ok_or_else(|| AppError::NotFound("Episode not found".to_string()))?;
-    // This one keeps the fourteen-hour allowance, unlike the bulk actions
-    // above, because the user named this exact episode from a list the app drew
-    // using *their* date. The selection below is capped by that episode number,
-    // so a generous bound cannot reach past what they pointed at.
-    //
-    // Expressed in Rust rather than through `available_through!()` because the
-    // check runs before the query; the two must stay equal, or this would
-    // reject exactly the episodes the query is willing to insert.
-    let available_through = (chrono::Utc::now() + chrono::Duration::hours(14)).date_naive();
-    if target_air_date.is_some_and(|date| date > available_through) {
+    // Checked here as well as in the query below, because this one runs first
+    // and its answer has to be the same. `aired_through()` in Rust and
+    // `aired_through()` in SQL are held equal by a contract test, so the two
+    // cannot drift into rejecting exactly the episodes the query would insert.
+    if target_air_date.is_some_and(|date| date > aired_through()) {
         return Err(AppError::BadRequest(
             "Future episodes cannot be marked watched".to_string(),
         ));
     }
 
-    let episode_ids = sqlx::query_scalar::<_, Uuid>(concat!(
+    let episode_ids = sqlx::query_scalar::<_, Uuid>(
         r#"SELECT episodes.id
         FROM episodes
         JOIN seasons ON seasons.id = episodes.season_id
@@ -583,11 +578,9 @@ async fn mark_episodes_watched_through(
                   )
               )
           )
-          AND (episodes.air_date IS NULL OR episodes.air_date <= "#,
-        available_through!(),
-        r#")
+          AND (episodes.air_date IS NULL OR episodes.air_date <= aired_through())
         ORDER BY seasons.season_number, episodes.episode_number"#,
-    ))
+    )
     .bind(media.id)
     .bind(season_number)
     .bind(episode_number)

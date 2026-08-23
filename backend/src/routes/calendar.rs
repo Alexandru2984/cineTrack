@@ -3,7 +3,6 @@ use chrono::{DateTime, Utc};
 use sqlx::{PgPool, Postgres, Transaction};
 use uuid::Uuid;
 
-use crate::available_through;
 use crate::config::Config;
 use crate::dto::calendar::*;
 use crate::errors::AppError;
@@ -184,8 +183,11 @@ next_ids AS (
     JOIN episodes ON episodes.season_id = seasons.id
     WHERE tracked.user_id = $1
       AND tracked.status <> 'dropped'
-      AND episodes.air_date <= $2
-      AND ($3 OR seasons.season_number > 0)
+      -- Not the date the caller reported. That value decides what counts as
+      -- aired, so a client one zone east of the origin network — or one simply
+      -- claiming tomorrow — pulls an episode forward by a day.
+      AND episodes.air_date <= aired_through()
+      AND ($2 OR seasons.season_number > 0)
       AND NOT EXISTS (
           SELECT 1 FROM watch_history history
           WHERE history.user_id = $1 AND history.episode_id = episodes.id
@@ -262,7 +264,7 @@ async fn up_next_episodes(
                 plans.episode_id IS NOT NULL AS is_planned,
                 CASE
                     WHEN plans.episode_id IS NOT NULL THEN 0
-                    WHEN next_ids.last_watched_at >= $5 THEN 1
+                    WHEN next_ids.last_watched_at >= $4 THEN 1
                     ELSE 2
                 END AS queue_priority
             FROM next_ids
@@ -283,7 +285,7 @@ async fn up_next_episodes(
                 CASE WHEN queue_priority = 2 THEN air_date END DESC,
                 last_watched_at DESC,
                 episode_id DESC
-            LIMIT $4
+            LIMIT $3
         )
         SELECT
             selected.episode_id,
@@ -312,7 +314,6 @@ async fn up_next_episodes(
         ),
     )
     .bind(user_id)
-    .bind(params.today)
     .bind(params.include_specials)
     .bind(params.limit)
     .bind(Utc::now() - chrono::Duration::days(30))
@@ -336,10 +337,9 @@ async fn up_next_episodes(
         FROM withheld
         JOIN media ON media.id = withheld.media_id
         ORDER BY withheld.last_watched_at DESC, withheld.media_id
-        LIMIT $4"#
+        LIMIT $3"#
     ))
     .bind(user_id)
-    .bind(params.today)
     .bind(params.include_specials)
     .bind(params.limit)
     .fetch_all(pool.get_ref())
@@ -822,8 +822,7 @@ async fn mark_episode_watched(
     quota::lock_tracking_writes(&mut tx, user_id).await?;
     let (media_id, is_available) = sqlx::query_as::<_, (Uuid, bool)>(concat!(
         r#"SELECT seasons.media_id,
-            episodes.air_date IS NULL OR episodes.air_date <= "#,
-        available_through!(),
+            episodes.air_date IS NULL OR episodes.air_date <= aired_through()"#,
         r#"
         FROM episodes
         JOIN seasons ON seasons.id = episodes.season_id

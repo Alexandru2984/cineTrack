@@ -59,6 +59,16 @@ pub struct ResolvedNewCalendarQuery {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct UpNextQuery {
+    /// Accepted and ignored.
+    ///
+    /// Up Next used to bound "has this aired" with the date the client
+    /// reported, which let the caller decide what counted as aired and pulled
+    /// episodes forward by a day for anyone east of the origin network. The
+    /// server answers that question now.
+    ///
+    /// Still parsed because `deny_unknown_fields` is on and released clients
+    /// send it; removing the field would turn their requests into 400s.
+    /// Remove once they no longer do.
     pub today: Option<NaiveDate>,
     pub limit: Option<u16>,
     pub include_specials: Option<bool>,
@@ -67,7 +77,6 @@ pub struct UpNextQuery {
 impl UpNextQuery {
     pub fn resolve(&self) -> Result<ResolvedUpNextQuery, AppError> {
         Ok(ResolvedUpNextQuery {
-            today: resolve_today(self.today)?,
             limit: i64::from(self.limit.unwrap_or(6).clamp(1, 20)),
             include_specials: self.include_specials.unwrap_or(false),
         })
@@ -75,7 +84,6 @@ impl UpNextQuery {
 }
 
 pub struct ResolvedUpNextQuery {
-    pub today: NaiveDate,
     pub limit: i64,
     pub include_specials: bool,
 }
