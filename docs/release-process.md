@@ -99,6 +99,27 @@ docker compose --profile ops -f docker-compose.prod.yml --env-file .env.prod \
 docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
 ```
 
+### Query visibility, once
+
+`pg_stat_statements` records what every query costs in real traffic.
+`docker-compose.prod.yml` preloads it, but creating the extension needs
+superuser, so no migration can do it. Once, after the database has restarted
+with the new configuration:
+
+```bash
+docker exec -i cinetrack-db-1 psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+  -c 'CREATE EXTENSION IF NOT EXISTS pg_stat_statements;'
+```
+
+Then `scripts/slow_queries.sh` ranks statements by the share of database time
+they consume. It answers a different question from `bench/db`, which measures
+fourteen queries chosen by hand against seeded data: this one notices the query
+nobody thought to benchmark. A hot path once reached thirteen seconds in
+production while every check reported healthy, which is the gap it closes.
+
+Note that preloading a library requires the database container to restart, so
+the deploy above stops the database rather than reloading it.
+
 ### The nginx vhost is a separate artifact
 
 `nginx/vazute.micutu.com.conf` is not in any image. Compose will not install it,

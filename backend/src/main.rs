@@ -133,7 +133,9 @@ async fn main() -> std::io::Result<()> {
     if matches!(mode, RunMode::Migrate) {
         let database_url = std::env::var("DATABASE_URL")
             .map_err(|_| std::io::Error::other("DATABASE_URL must be set"))?;
-        let pool = db::create_pool(&database_url).await;
+        // Migrations run alone and in sequence; a wide pool would only hold
+        // connections open for work that never happens in parallel.
+        let pool = db::create_pool(&database_url, 2).await;
         MIGRATOR.run(&pool).await.map_err(|error| {
             log::error!("Database migration failed: {error}");
             std::io::Error::other("database migration failed")
@@ -159,7 +161,7 @@ async fn main() -> std::io::Result<()> {
         log::error!("Failed to initialize password verification: {error:?}");
         std::io::Error::other("failed to initialize password verification")
     })?;
-    let pool = db::create_pool(&config.database_url).await;
+    let pool = db::create_pool(&config.database_url, config.database_max_connections).await;
 
     if config.is_production() {
         db::ensure_runtime_role_is_restricted(&pool)

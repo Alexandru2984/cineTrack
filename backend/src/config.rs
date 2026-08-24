@@ -30,6 +30,12 @@ pub struct Config {
     pub tmdb_image_base_url: String,
     pub tmdb_timeout_seconds: u64,
     pub cors_allowed_origins: Vec<String>,
+    /// Concurrent database operations this process may run.
+    ///
+    /// Hardcoded at ten until now, which is a ceiling nobody could raise
+    /// without a rebuild — the wrong property for the one setting that decides
+    /// how much traffic the process can serve at once.
+    pub database_max_connections: u32,
     pub rate_limit_rps: u32,
     pub rate_limit_burst: u32,
     pub smtp_host: Option<String>,
@@ -171,6 +177,13 @@ impl Config {
             ),
             tmdb_timeout_seconds: bounded_env("TMDB_TIMEOUT_SECONDS", 10_u64, 1, 60),
             cors_allowed_origins,
+            // Twenty by default: roughly two per core on the host this runs
+            // on, and well inside PostgreSQL's own limit of a hundred, which
+            // the monitoring and migration connections also draw from. Raising
+            // it past what the database can serve turns a queue in the
+            // application into a queue in PostgreSQL, which is worse — the
+            // application at least fails fast when it cannot acquire.
+            database_max_connections: bounded_env("DATABASE_MAX_CONNECTIONS", 20_u32, 1, 80),
             rate_limit_rps: bounded_env("RATE_LIMIT_REQUESTS_PER_SECOND", 10_u32, 1, 100),
             rate_limit_burst: bounded_env("RATE_LIMIT_BURST_SIZE", 50_u32, 1, 1000),
             smtp_host,
@@ -208,6 +221,7 @@ impl Config {
             app_port: 0,
             frontend_url: "http://localhost:5173".to_string(),
             database_url: "postgres://example".to_string(),
+            database_max_connections: 5,
             jwt_secret: "test_secret_must_be_64_chars_long_so_we_pad_it_here_abcdefghijklmnopq"
                 .to_string(),
             totp_encryption_key: [0x42; 32],
