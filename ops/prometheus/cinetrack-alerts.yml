@@ -290,6 +290,18 @@ groups:
           summary: Văzute auto-deploy rolled back a bad revision
           description: A revision passed CI, failed its health check in production, and was automatically reverted to the previous images.
 
+      # The release is fine and the containers are answering; the path from the
+      # public name to them is not. No image swap fixes that, so this reports
+      # rather than reverting a good deploy.
+      - alert: CineTrackAutoDeployEdgeUnhealthy
+        expr: cinetrack_auto_deploy_state{state="edge_unhealthy"} == 1
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: Văzute containers are healthy but the public URL is not
+          description: A deploy succeeded and both containers answer locally, but https://vazute.micutu.com/api/health does not. Check nginx and Cloudflare, not the release.
+
       # Needs a person: the images cannot ship until the vhost is installed by
       # hand, so this state does not clear itself.
       - alert: CineTrackAutoDeployNeedsVhost

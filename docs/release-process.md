@@ -209,6 +209,12 @@ scripts/auto_deploy.sh --dry-run
 Before building, it tags the running images `:rollback`. If the new revision
 fails its health check it puts them back.
 
+The health check that decides this is the two containers on their own published
+ports (`127.0.0.1:8090`, `127.0.0.1:8091`), not the public URL. Those are
+different questions: the public name additionally crosses nginx and Cloudflare,
+which are in no image. A Cloudflare incident must not revert a good release, so
+that case reports `edge_unhealthy` and changes nothing.
+
 That only works when the revision applied no migrations. Migrations run forward
 only, and `ensure_migrations_current` refuses to start a binary against a
 database holding a migration it does not know — so restoring the old image
@@ -236,6 +242,7 @@ Textfile metrics next to `deploy_drift.prom`, one gauge per state:
 | `blocked_ci` | a check or status failed |
 | `blocked_nginx` | the revision needs a manual vhost install |
 | `rolled_back` | shipped, failed, previous images restored |
+| `edge_unhealthy` | containers fine, public URL not — nginx or Cloudflare |
 | `stuck` | failed and could not be undone — needs a person |
 
 `CineTrackAutoDeployNotRunning` fires if no run reports for an hour, so the

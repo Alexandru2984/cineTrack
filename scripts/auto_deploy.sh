@@ -40,7 +40,15 @@ STATE_DIR="${AUTO_DEPLOY_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/cinetr
 METRICS_FILE="${AUTO_DEPLOY_METRICS_FILE:-$STATE_DIR/auto_deploy.prom}"
 BRANCH="${AUTO_DEPLOY_BRANCH:-origin/main}"
 ENV_FILE="${AUTO_DEPLOY_ENV_FILE:-$REPO_DIR/.env.prod}"
-HEALTH_URL="${AUTO_DEPLOY_HEALTH_URL:-https://vazute.micutu.com/api/health}"
+# Two different questions, and conflating them causes the wrong repair.
+#
+# The local ports are the containers answering for themselves; that is what a
+# rollback can fix. The public URL additionally crosses nginx and Cloudflare,
+# neither of which is in any image — if that fails while the containers are
+# fine, replacing the images reverts a good release and repairs nothing.
+LOCAL_BACKEND_URL="${AUTO_DEPLOY_LOCAL_BACKEND_URL:-http://127.0.0.1:8090/api/health}"
+LOCAL_FRONTEND_URL="${AUTO_DEPLOY_LOCAL_FRONTEND_URL:-http://127.0.0.1:8091/}"
+PUBLIC_HEALTH_URL="${AUTO_DEPLOY_HEALTH_URL:-https://vazute.micutu.com/api/health}"
 VHOST_DEPLOYED="${AUTO_DEPLOY_VHOST_DEPLOYED:-/etc/nginx/sites-available/vazute.micutu.com}"
 # Resolved from the remote rather than written with gh's `{owner}/{repo}`
 # placeholders: those are expanded by shelling out to git in the *current*
@@ -72,7 +80,7 @@ say() { printf '[%s] %s\n' "$(date -u +%FT%TZ)" "$1" >&2; }
 # Every state is written every run, including the zeros. A series that only
 # appears when it is true cannot be alerted on with `== 1` without also
 # alerting the moment it goes away.
-STATES=(idle deployed waiting_ci blocked_ci blocked_nginx rolled_back stuck)
+STATES=(idle deployed waiting_ci blocked_ci blocked_nginx rolled_back stuck edge_unhealthy)
 report() {
   local current="$1" revision="${2:-}"
   local tmp
@@ -113,12 +121,26 @@ deployed_revision() {
     --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' 2>/dev/null || true
 }
 
+probe() { curl --fail --silent --max-time 10 "$1" >/dev/null 2>&1; }
+
+# Both containers, on their own published ports. This is the rollback trigger.
 healthy() {
   local attempt=0
   while (( attempt < HEALTH_ATTEMPTS )); do
-    if curl --fail --silent --show-error --max-time 10 "$HEALTH_URL" >/dev/null 2>&1; then
+    if probe "$LOCAL_BACKEND_URL" && probe "$LOCAL_FRONTEND_URL"; then
       return 0
     fi
+    attempt=$((attempt + 1))
+    sleep "$HEALTH_INTERVAL"
+  done
+  return 1
+}
+
+# The whole path a real user takes. Not a rollback trigger — only a report.
+edge_healthy() {
+  local attempt=0
+  while (( attempt < 5 )); do
+    probe "$PUBLIC_HEALTH_URL" && return 0
     attempt=$((attempt + 1))
     sleep "$HEALTH_INTERVAL"
   done
@@ -259,12 +281,19 @@ compose --profile ops run --rm migrate
 compose up -d
 
 if healthy; then
-  say "healthy on ${target:0:8}"
-  report deployed "$target"
-  exit 0
+  if edge_healthy; then
+    say "healthy on ${target:0:8}"
+    report deployed "$target"
+    exit 0
+  fi
+  # The release itself is good. Something between the containers and the
+  # public name is not, and no image swap addresses that.
+  say "containers are healthy on ${target:0:8} but $PUBLIC_HEALTH_URL is not answering; not rolling back"
+  report edge_unhealthy "$target"
+  exit 1
 fi
 
-say "unhealthy after deploying ${target:0:8}"
+say "containers unhealthy after deploying ${target:0:8}"
 
 if (( migrations_added > 0 )); then
   say "this revision applied $migrations_added migration(s): the previous image would refuse to start against the new schema. leaving it up for a human."

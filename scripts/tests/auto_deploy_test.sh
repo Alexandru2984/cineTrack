@@ -81,9 +81,16 @@ chmod +x "$STUB_DIR/docker"
 # old image back fixes it. It is modelled by answering healthy only once the
 # rollback has actually been performed, so the test cannot pass by reporting a
 # rollback it never did.
+# The local ports and the public URL are answered separately, because the
+# script must treat them as different questions.
 cat > "$STUB_DIR/curl" <<'STUB'
 #!/usr/bin/env bash
-case "${STUB_HEALTHY:-1}" in
+url="${*: -1}"
+case "$url" in
+  http://127.0.0.1:*) mode="${STUB_HEALTHY:-1}" ;;
+  *)                  mode="${STUB_EDGE_HEALTHY:-1}" ;;
+esac
+case "$mode" in
   1) exit 0 ;;
   recover)
     grep -q "tag cinetrack-backend:rollback cinetrack-backend:latest" "$STUB_ACTIONS" && exit 0
@@ -117,6 +124,7 @@ run_deploy() {
   STUB_CHECKS_FILE="$3" \
   STUB_STATUS_FILE="$4" \
   STUB_HEALTHY="$5" \
+  STUB_EDGE_HEALTHY="${6:-1}" \
     "$ROOT_DIR/scripts/auto_deploy.sh" >/dev/null 2>&1 || true
   cat "$metrics" 2>/dev/null || true
 }
@@ -263,6 +271,23 @@ if ! grep -q "tag cinetrack-backend:rollback cinetrack-backend:latest" "$ACTIONS
   pass "no rollback was attempted into a migrated schema"
 else
   fail "it rolled back into a migrated schema, which cannot start"
+fi
+
+# ── An edge failure is not an image failure ─────────────────────────────
+#
+# The containers answer on their own ports; only the public URL is down, which
+# means nginx or Cloudflare. Rolling back would revert a working release and
+# fix nothing, so this must report rather than repair.
+out="$(run_deploy "$CODE_ONLY" "$BASE" "$GREEN" "$EMPTY" 1 0)"
+if is_state "$out" edge_unhealthy; then
+  pass "a healthy release behind a broken edge is reported, not rolled back"
+else
+  fail "an edge failure was misread as a bad release"
+fi
+if ! grep -q "tag cinetrack-backend:rollback cinetrack-backend:latest" "$ACTIONS"; then
+  pass "no rollback was attempted for an edge failure"
+else
+  fail "a good release was rolled back because the edge was down"
 fi
 
 # ── An unknown starting point keeps the rollback path closed ────────────
