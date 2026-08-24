@@ -9,7 +9,20 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('@/hooks/useStats', () => ({
-  useMyStats: () => ({ data: { total_episodes: 0 }, isLoading: false }),
+  // Every field the summary cards read. A partial fixture let
+  // `Math.round(undefined)` reach the DOM as NaN, and a warning that is always
+  // there is a warning nobody reads the next time it means something.
+  useMyStats: () => ({
+    data: {
+      total_movies: 0,
+      total_shows: 0,
+      total_episodes: 0,
+      total_hours: 0,
+      current_streak: 0,
+      longest_streak: 0,
+    },
+    isLoading: false,
+  }),
   useHeatmap: () => ({ data: [] }),
   useMonthlyActivity: () => ({ data: [] }),
   useGenreDistribution: () => mocks.genres(),

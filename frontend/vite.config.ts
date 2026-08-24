@@ -94,6 +94,26 @@ export default defineConfig({
       },
     }),
   ],
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          // lucide ships one module per icon, so every icon shared between two
+          // lazily-loaded routes becomes a chunk of its own. That produced 63
+          // files averaging 700 bytes — each one a request, a cache entry, and
+          // a line in the service worker's precache manifest, for a few
+          // hundred bytes of payload.
+          //
+          // One chunk for the whole set pulls a little more in up front, since
+          // icons used only on a lazy route now arrive with the first one. The
+          // measured trade is in the commit message.
+          if (id.includes('node_modules/lucide-react')) {
+            return 'icons'
+          }
+        },
+      },
+    },
+  },
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
