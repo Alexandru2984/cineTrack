@@ -37,7 +37,6 @@ const episode = {
   season_number: 2,
   episode_number: 4,
   episode_name: 'The Next Step',
-  overview: null,
   runtime_minutes: 47,
   air_date: '2026-07-16',
   still_path: '/still.jpg',

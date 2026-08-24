@@ -284,7 +284,6 @@ export interface CalendarEpisode {
   season_number: number;
   episode_number: number;
   episode_name: string | null;
-  overview: string | null;
   runtime_minutes: number | null;
   air_date: string;
   still_path: string | null;
