@@ -2,10 +2,19 @@
 --
 -- Benchmarks against an empty database measure nothing: every list query returns
 -- zero rows, the planner picks sequential scans over tiny tables, and payloads
--- come back a few hundred bytes. The volumes here describe a long-time user —
--- 320 tracked titles, ~4.8k episodes, ~3.8k watches over three years — so the
--- planner sees realistic selectivity and mobile payloads are measured at the
--- size they actually reach a phone.
+-- come back a few hundred bytes. The volumes here describe a long-time user, so
+-- the planner sees realistic selectivity and mobile payloads are measured at
+-- the size they actually reach a phone.
+--
+-- They were sized at ~320 titles, ~4.8k episodes and ~3.8k watches. The largest
+-- real account has since reached 887 titles, 28k episodes and 17k watches — six
+-- times the episodes this seeded. That gap has a cost: a regression that took
+-- Up Next from 110ms to 13.6 seconds in production would have measured a few
+-- hundred milliseconds here, under any budget loose enough not to flake.
+--
+-- So the volumes now track the real ceiling rather than a guess made before
+-- there was one. Re-sizing when production outgrows them again is the
+-- maintenance this buys.
 --
 -- Invoked as: psql -v user_id="'<uuid>'" -f seed_bench_data.sql
 -- Re-running is safe: it clears this account's rows first.
@@ -176,28 +185,29 @@ INSERT INTO media (tmdb_id, media_type, title, overview, poster_path, backdrop_p
                    release_date, status, genres, runtime_minutes, tmdb_vote_average)
 SELECT
   9000000 + n,
-  CASE WHEN n <= 80 THEN 'tv' ELSE 'movie' END,
+  CASE WHEN n <= 400 THEN 'tv' ELSE 'movie' END,
   'Bench Title ' || n,
   repeat('Synopsis sentence for benchmark payload sizing. ', 6),
   '/bench' || n || '.jpg',
   '/benchbd' || n || '.jpg',
   DATE '2005-01-01' + (n * 17),
-  CASE WHEN n <= 80 THEN 'Returning Series' ELSE 'Released' END,
+  CASE WHEN n <= 400 THEN 'Returning Series' ELSE 'Released' END,
   '[{"id":18,"name":"Drama"},{"id":10765,"name":"Sci-Fi & Fantasy"}]'::jsonb,
-  CASE WHEN n <= 80 THEN 45 ELSE 100 + (n % 60) END,
+  CASE WHEN n <= 400 THEN 45 ELSE 100 + (n % 60) END,
   5.0 + ((n % 50) / 10.0)
-FROM generate_series(1, 320) AS n
+FROM generate_series(1, 900) AS n
 ON CONFLICT DO NOTHING;
 
--- Five seasons per show.
+-- Six seasons per show.
 INSERT INTO seasons (media_id, season_number, name, episode_count, air_date, episodes_cached_at)
 SELECT m.id, s, 'Season ' || s, 12, DATE '2010-01-01' + (s * 365), NOW()
 FROM media m
-CROSS JOIN generate_series(1, 5) AS s
-WHERE m.tmdb_id BETWEEN 9000001 AND 9000080 AND m.media_type = 'tv'
+CROSS JOIN generate_series(1, 6) AS s
+WHERE m.tmdb_id BETWEEN 9000001 AND 9000400 AND m.media_type = 'tv'
 ON CONFLICT DO NOTHING;
 
--- Twelve episodes per season: 80 * 5 * 12 = 4800 rows.
+-- Twelve episodes per season: 400 * 6 * 12 = 28,800 rows, which is the size
+-- the largest real library reached.
 INSERT INTO episodes (season_id, episode_number, name, overview, runtime_minutes, air_date, still_path)
 SELECT
   se.id,
@@ -210,7 +220,7 @@ SELECT
 FROM seasons se
 JOIN media m ON m.id = se.media_id
 CROSS JOIN generate_series(1, 12) AS e
-WHERE m.tmdb_id BETWEEN 9000001 AND 9000080
+WHERE m.tmdb_id BETWEEN 9000001 AND 9000400
 ON CONFLICT DO NOTHING;
 
 -- Tracked library, weighted the way a real one is: mostly completed, a long
