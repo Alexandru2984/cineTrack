@@ -37,11 +37,17 @@ Run the invariant locally:
    worktree.
 6. Let the repository owner push the reviewed commit.
 
-Every push to `main` runs GitHub CI. The repository has no GitHub Actions
+Every push to `main` runs GitHub CI. The repository still has no GitHub Actions
 production-deploy workflow, so a green push alone cannot modify the VPS.
 
 That is deliberate: it keeps a compromised build action away from production.
-The cost is that forgetting to deploy is silent, which has already happened, so
+Deployment is now automatic but still *pull*-based — `scripts/auto_deploy.sh`
+runs on the VPS from cron, asks GitHub whether a commit passed, and deploys it
+itself. GitHub is never given a way in, and holds no secret for this: there is
+no deploy key, no host, no SSH credential in the repository settings. See
+section 2a.
+
+The cost that remains is that forgetting is silent, so
 `scripts/check_deploy_drift.sh` runs hourly and reports how many deployable
 commits production is missing. `GIT_REVISION` below is what makes that check
 possible — an image built without it cannot say which commit it came from, and
@@ -169,6 +175,94 @@ source commit and database backup available until the smoke check finishes.
 Application rollback must never reverse an already-applied database migration;
 restore the previous application commit only when its schema compatibility is
 known.
+
+## 2a. Automatic deployment
+
+`scripts/auto_deploy.sh` does section 2 without a person, for the commits where
+that is safe. It runs from cron on the VPS:
+
+```cron
+*/10 * * * * /usr/bin/flock -n /tmp/cinetrack_auto_deploy.lock /home/micu/vazute/cineTrack/scripts/auto_deploy.sh >> /home/micu/backups/vazute/auto-deploy.log 2>&1
+```
+
+`flock -n` matters: a build outlasts the ten-minute interval, and two deploys
+replacing the same containers at once is worse than a late one.
+
+It authenticates to nothing. The repository is public, so the fetch and both
+API calls are anonymous reads — deliberately not via `gh`, whose stored token
+carries `admin:org`, `repo` and `workflow` scopes. An unattended deploy path
+should not have a credential in it that can write, when what it needs is two
+GETs. The cost is the anonymous rate limit, 60 requests an hour per address;
+this spends two per run and refuses to deploy rather than guess when it cannot
+get an answer.
+
+### What it refuses
+
+- **Anything CI has not passed.** Every check run and every commit status must
+  have completed successfully. `skipped` and `neutral` count as passes; a job
+  correctly deciding it had nothing to do is not a failure.
+- **Anything CI has not checked at all.** Zero check runs means "not tested
+  yet", never "nothing to object to". This is the difference between shipping a
+  bad commit and shipping an unexamined one.
+- **Revisions that change the nginx vhost.** It is not in any image, installing
+  it needs root, and the reload is shared with every other site on this host.
+  Deploy those by hand, per section 2.
+
+Check what it would do without doing it:
+
+```bash
+scripts/auto_deploy.sh --dry-run
+```
+
+### What it can undo, and what it cannot
+
+Before building, it tags the running images `:rollback`. If the new revision
+fails its health check it puts them back.
+
+The health check that decides this is the two containers on their own published
+ports (`127.0.0.1:8090`, `127.0.0.1:8091`), not the public URL. Those are
+different questions: the public name additionally crosses nginx and Cloudflare,
+which are in no image. A Cloudflare incident must not revert a good release, so
+that case reports `edge_unhealthy` and changes nothing.
+
+That only works when the revision applied no migrations. Migrations run forward
+only, and `ensure_migrations_current` refuses to start a binary against a
+database holding a migration it does not know — so restoring the old image
+after a migration would replace a broken application with one that will not
+boot at all.
+
+So when a failed deploy included a migration, it stops and alerts instead:
+`CineTrackAutoDeployStuck`, severity critical. Production is left running the
+broken revision, because broken and reachable can be fixed by a person and
+broken and refusing to start cannot. **That alert means go and look.**
+
+A rollback that does not restore health reports `stuck` as well, for the same
+reason — the images were never the problem, and closing the alert would close
+it on an outage still in progress.
+
+### What it reports
+
+Textfile metrics next to `deploy_drift.prom`, one gauge per state:
+
+| state | meaning |
+| --- | --- |
+| `idle` | production already runs `main` |
+| `deployed` | a revision shipped and is healthy |
+| `waiting_ci` | CI has not finished, or has not started |
+| `blocked_ci` | a check or status failed |
+| `blocked_nginx` | the revision needs a manual vhost install |
+| `rolled_back` | shipped, failed, previous images restored |
+| `edge_unhealthy` | containers fine, public URL not — nginx or Cloudflare |
+| `blocked_api` | GitHub could not be asked; rate limit or network |
+| `stuck` | failed and could not be undone — needs a person |
+
+`CineTrackAutoDeployNotRunning` fires if no run reports for an hour, so the
+mechanism disappearing is itself visible rather than looking like calm.
+
+### Turning it off
+
+Comment out the cron line. Nothing else holds state, and section 2 keeps
+working by hand exactly as before.
 
 ## 3. Build the native artifact
 

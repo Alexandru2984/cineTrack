@@ -369,7 +369,8 @@ jobs:
             scripts/backup_to_r2.sh scripts/restore_from_r2.sh \
             scripts/tests/deployment_hardening_test.sh \
             scripts/tests/ci_contract_test.sh \
-            scripts/tests/edge_security_config_test.sh
+            scripts/tests/edge_security_config_test.sh \
+            scripts/tests/auto_deploy_test.sh
 
       - name: Validate dependency policy
         run: |
@@ -398,6 +399,11 @@ jobs:
 
       - name: Validate deploy drift reporting
         run: scripts/tests/deploy_drift_test.sh
+
+      # This one deploys production unattended, so its refusals and its
+      # rollback decision are the parts that must not regress silently.
+      - name: Validate automatic deployment gating
+        run: scripts/tests/auto_deploy_test.sh
 
       - name: Validate calendar feed log redaction
         run: scripts/tests/calendar_feed_log_safety_test.sh
