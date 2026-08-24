@@ -85,7 +85,11 @@ fingerprint alone will not verify Android App Links on store builds.
 - Add the Play **app signing** SHA-256 fingerprint, not only the upload/EAS fingerprint, to `frontend/public/.well-known/assetlinks.json`.
 - Verify `https://vazute.micutu.com/.well-known/assetlinks.json` returns HTTP 200, no redirect, and `application/json`.
 - Reinstall the signed release and test `/reset-password`, `/media`, `/episodes`, `/profile`, `/lists`, and `/messages` links with `adb`.
-- Complete Data safety from the actual behavior documented at `https://vazute.micutu.com/privacy`.
+- Complete Data safety from the actual behavior documented at
+  `https://vazute.micutu.com/privacy`. For 1.2.0 the answers are worked out
+  against the code in `docs/release-notes/1.2.0-data-safety.md`, including the
+  one that changed: message text is only unreadable to the service after both
+  accounts have set up encryption, so a blanket end-to-end claim would be false.
 - Set the account-deletion URL to `https://vazute.micutu.com/account-deletion` and verify deletion inside the app.
 - Review the production AAB permissions and confirm that blocked permissions did not return.
 - Add FCM v1 credentials only when release alerts are intentionally enabled for the store build.
