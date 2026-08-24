@@ -43,7 +43,9 @@ production-deploy workflow, so a green push alone cannot modify the VPS.
 That is deliberate: it keeps a compromised build action away from production.
 Deployment is now automatic but still *pull*-based — `scripts/auto_deploy.sh`
 runs on the VPS from cron, asks GitHub whether a commit passed, and deploys it
-itself. GitHub is never given a way in. See section 2a.
+itself. GitHub is never given a way in, and holds no secret for this: there is
+no deploy key, no host, no SSH credential in the repository settings. See
+section 2a.
 
 The cost that remains is that forgetting is silent, so
 `scripts/check_deploy_drift.sh` runs hourly and reports how many deployable
@@ -186,6 +188,14 @@ that is safe. It runs from cron on the VPS:
 `flock -n` matters: a build outlasts the ten-minute interval, and two deploys
 replacing the same containers at once is worse than a late one.
 
+It authenticates to nothing. The repository is public, so the fetch and both
+API calls are anonymous reads — deliberately not via `gh`, whose stored token
+carries `admin:org`, `repo` and `workflow` scopes. An unattended deploy path
+should not have a credential in it that can write, when what it needs is two
+GETs. The cost is the anonymous rate limit, 60 requests an hour per address;
+this spends two per run and refuses to deploy rather than guess when it cannot
+get an answer.
+
 ### What it refuses
 
 - **Anything CI has not passed.** Every check run and every commit status must
@@ -243,6 +253,7 @@ Textfile metrics next to `deploy_drift.prom`, one gauge per state:
 | `blocked_nginx` | the revision needs a manual vhost install |
 | `rolled_back` | shipped, failed, previous images restored |
 | `edge_unhealthy` | containers fine, public URL not — nginx or Cloudflare |
+| `blocked_api` | GitHub could not be asked; rate limit or network |
 | `stuck` | failed and could not be undone — needs a person |
 
 `CineTrackAutoDeployNotRunning` fires if no run reports for an hour, so the

@@ -324,6 +324,31 @@ groups:
           summary: Văzute cannot deploy because CI is failing on main
           description: The newest commit on main has failing checks, so nothing has been deployed since it landed.
 
+      # GitHub cannot be asked whether a commit passed. The anonymous API is
+      # rate limited to 60 requests an hour per address, and this shares that
+      # budget with anything else on the host that talks to GitHub.
+      - alert: CineTrackAutoDeployApiUnreadable
+        expr: cinetrack_auto_deploy_state{state="blocked_api"} == 1
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: Văzute auto-deploy cannot read CI results from GitHub
+          description: The anonymous GitHub API has been unreadable for an hour — most likely the 60/hour rate limit shared with other tooling on this host. Nothing is being deployed.
+
+      # A commit that has been "waiting for CI" for hours is not waiting, it is
+      # stuck — a workflow that never reports leaves this state indefinitely,
+      # and a permanent `waiting_ci` is indistinguishable from a busy one
+      # without a clock on it. CI takes about half an hour.
+      - alert: CineTrackAutoDeployWaitingTooLong
+        expr: cinetrack_auto_deploy_state{state="waiting_ci"} == 1
+        for: 2h
+        labels:
+          severity: warning
+        annotations:
+          summary: Văzute auto-deploy has been waiting on CI for two hours
+          description: The newest commit on main has checks that never completed. Look for a hung or never-started workflow; nothing has deployed since it landed.
+
       # The cron entry stopped running. Without this the whole mechanism can
       # disappear and the only symptom is that deploys quietly stop happening —
       # the exact silence the drift check was added to end.

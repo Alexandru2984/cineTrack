@@ -49,19 +49,6 @@ WITH_MIGRATION="$(git -C "$REPO" rev-parse HEAD)"
 STUB_DIR="$WORK_DIR/bin"
 mkdir -p "$STUB_DIR"
 
-# `gh` answers with whatever the current case declares.
-cat > "$STUB_DIR/gh" <<'STUB'
-#!/usr/bin/env bash
-for arg in "$@"; do
-  case "$arg" in
-    */check-runs) cat "${STUB_CHECKS_FILE:-/dev/null}"; exit 0 ;;
-    */status)     cat "${STUB_STATUS_FILE:-/dev/null}"; exit 0 ;;
-  esac
-done
-exit 0
-STUB
-chmod +x "$STUB_DIR/gh"
-
 # `docker` records what it was asked to do, so the test can assert on the
 # actions taken rather than only on the final state.
 cat > "$STUB_DIR/docker" <<'STUB'
@@ -81,12 +68,19 @@ chmod +x "$STUB_DIR/docker"
 # old image back fixes it. It is modelled by answering healthy only once the
 # rollback has actually been performed, so the test cannot pass by reporting a
 # rollback it never did.
-# The local ports and the public URL are answered separately, because the
-# script must treat them as different questions.
+# `curl` is now the only thing the script talks to the outside with: the GitHub
+# API and both health probes. A file named "FAIL" makes the call fail the way a
+# rate limit or a network error would.
 cat > "$STUB_DIR/curl" <<'STUB'
 #!/usr/bin/env bash
 url="${*: -1}"
 case "$url" in
+  *check-runs*)
+    [[ "$(cat "$STUB_CHECKS_FILE")" == FAIL ]] && exit 22
+    cat "$STUB_CHECKS_FILE"; exit 0 ;;
+  *api.github.com*/status*)
+    [[ "$(cat "$STUB_STATUS_FILE")" == FAIL ]] && exit 22
+    cat "$STUB_STATUS_FILE"; exit 0 ;;
   http://127.0.0.1:*) mode="${STUB_HEALTHY:-1}" ;;
   *)                  mode="${STUB_EDGE_HEALTHY:-1}" ;;
 esac
@@ -135,24 +129,63 @@ is_state() { [[ "$(state "$1" "$2")" == "1" ]]; }
 printf 'DATABASE_URL=x\n' > "$WORK_DIR/env.prod"
 printf 'vhost\n' > "$WORK_DIR/vhost.deployed"
 
-GREEN="$WORK_DIR/green.tsv"
-printf 'CI Gate\tcompleted\tsuccess\nBackend\tcompleted\tsuccess\n' > "$GREEN"
-RUNNING="$WORK_DIR/running.tsv"
-printf 'CI Gate\tcompleted\tsuccess\nBackend\tin_progress\tnone\n' > "$RUNNING"
-RED="$WORK_DIR/red.tsv"
-printf 'CI Gate\tcompleted\tsuccess\nBackend\tcompleted\tfailure\n' > "$RED"
-SKIPPED="$WORK_DIR/skipped.tsv"
-printf 'CI Gate\tcompleted\tsuccess\nMobile\tcompleted\tskipped\n' > "$SKIPPED"
-EMPTY="$WORK_DIR/empty.tsv"
-: > "$EMPTY"
-STATUS_RED="$WORK_DIR/status_red.tsv"
-printf 'security/scan\tfailure\n' > "$STATUS_RED"
+# `total_count` is written to match the array, because the script rejects a
+# response where it does not — a truncated page could be hiding the failure.
+checks_fixture() {
+  local file="$1"; shift
+  python3 - "$file" "$@" <<'PY'
+import json, sys
+path, *pairs = sys.argv[1:]
+runs = []
+for pair in pairs:
+    name, status, conclusion = pair.split(":")
+    runs.append({
+        "name": name,
+        "status": status,
+        "conclusion": None if conclusion == "none" else conclusion,
+    })
+with open(path, "w") as fh:
+    json.dump({"total_count": len(runs), "check_runs": runs}, fh)
+PY
+}
+
+status_fixture() {
+  local file="$1"; shift
+  python3 - "$file" "$@" <<'PY'
+import json, sys
+path, *pairs = sys.argv[1:]
+statuses = [{"context": c, "state": st} for c, st in (p.split(":") for p in pairs)]
+with open(path, "w") as fh:
+    json.dump({"state": "pending", "statuses": statuses}, fh)
+PY
+}
+
+GREEN="$WORK_DIR/green.json"
+checks_fixture "$GREEN" "CI Gate:completed:success" "Backend:completed:success"
+RUNNING="$WORK_DIR/running.json"
+checks_fixture "$RUNNING" "CI Gate:completed:success" "Backend:in_progress:none"
+RED="$WORK_DIR/red.json"
+checks_fixture "$RED" "CI Gate:completed:success" "Backend:completed:failure"
+SKIPPED="$WORK_DIR/skipped.json"
+checks_fixture "$SKIPPED" "CI Gate:completed:success" "Mobile:completed:skipped"
+NO_CHECKS="$WORK_DIR/no_checks.json"
+checks_fixture "$NO_CHECKS"
+
+NO_STATUS="$WORK_DIR/no_status.json"
+status_fixture "$NO_STATUS"
+STATUS_RED="$WORK_DIR/status_red.json"
+status_fixture "$STATUS_RED" "security/scan:failure"
+
+API_DOWN="$WORK_DIR/api_down"
+printf 'FAIL' > "$API_DOWN"
+TRUNCATED="$WORK_DIR/truncated.json"
+printf '{"total_count": 12, "check_runs": [{"name":"CI Gate","status":"completed","conclusion":"success"}]}' > "$TRUNCATED"
 
 # ── An untested commit is not a passing one ─────────────────────────────
 #
 # Zero check runs is the case that must not be read as consent. It is what a
 # commit looks like in the seconds before CI starts.
-out="$(run_deploy "$CODE_ONLY" "$BASE" "$EMPTY" "$EMPTY" 1)"
+out="$(run_deploy "$CODE_ONLY" "$BASE" "$NO_CHECKS" "$NO_STATUS" 1)"
 if is_state "$out" waiting_ci; then
   pass "a commit with no CI results is not deployed"
 else
@@ -165,7 +198,7 @@ else
 fi
 
 # ── CI still running is not CI passed ───────────────────────────────────
-out="$(run_deploy "$CODE_ONLY" "$BASE" "$RUNNING" "$EMPTY" 1)"
+out="$(run_deploy "$CODE_ONLY" "$BASE" "$RUNNING" "$NO_STATUS" 1)"
 if is_state "$out" waiting_ci; then
   pass "a commit with CI in progress waits"
 else
@@ -173,7 +206,7 @@ else
 fi
 
 # ── A failing check blocks ──────────────────────────────────────────────
-out="$(run_deploy "$CODE_ONLY" "$BASE" "$RED" "$EMPTY" 1)"
+out="$(run_deploy "$CODE_ONLY" "$BASE" "$RED" "$NO_STATUS" 1)"
 if is_state "$out" blocked_ci; then
   pass "a failed check blocks the deploy"
 else
@@ -196,7 +229,7 @@ fi
 # GitHub reports the combined state of no statuses as `pending`. Treating that
 # as a verdict would block every deploy forever, which is a failure that looks
 # exactly like working correctly.
-out="$(run_deploy "$CODE_ONLY" "$BASE" "$GREEN" "$EMPTY" 1)"
+out="$(run_deploy "$CODE_ONLY" "$BASE" "$GREEN" "$NO_STATUS" 1)"
 if is_state "$out" deployed; then
   pass "no commit statuses does not block a green commit"
 else
@@ -204,7 +237,7 @@ else
 fi
 
 # ── `skipped` and `neutral` are passes ──────────────────────────────────
-out="$(run_deploy "$CODE_ONLY" "$BASE" "$SKIPPED" "$EMPTY" 1)"
+out="$(run_deploy "$CODE_ONLY" "$BASE" "$SKIPPED" "$NO_STATUS" 1)"
 if is_state "$out" deployed; then
   pass "a skipped job does not count as a failure"
 else
@@ -212,7 +245,7 @@ else
 fi
 
 # ── Already deployed is not a deploy ────────────────────────────────────
-out="$(run_deploy "$CODE_ONLY" "$CODE_ONLY" "$GREEN" "$EMPTY" 1)"
+out="$(run_deploy "$CODE_ONLY" "$CODE_ONLY" "$GREEN" "$NO_STATUS" 1)"
 if is_state "$out" idle; then
   pass "the deployed revision is left alone"
 else
@@ -224,7 +257,7 @@ fi
 # nginx config is not in any image. Shipping the images alone leaves the edge
 # on the old behaviour while the site looks updated.
 printf 'a different vhost\n' > "$WORK_DIR/vhost.deployed"
-out="$(run_deploy "$CODE_ONLY" "$BASE" "$GREEN" "$EMPTY" 1)"
+out="$(run_deploy "$CODE_ONLY" "$BASE" "$GREEN" "$NO_STATUS" 1)"
 if is_state "$out" blocked_nginx; then
   pass "a revision needing a vhost change is refused"
 else
@@ -233,7 +266,7 @@ fi
 printf 'vhost\n' > "$WORK_DIR/vhost.deployed"
 
 # ── A bad deploy with no schema change is put back ──────────────────────
-out="$(run_deploy "$CODE_ONLY" "$BASE" "$GREEN" "$EMPTY" recover)"
+out="$(run_deploy "$CODE_ONLY" "$BASE" "$GREEN" "$NO_STATUS" recover)"
 if is_state "$out" rolled_back; then
   pass "an unhealthy deploy without migrations rolls back"
 else
@@ -250,7 +283,7 @@ fi
 # The images went back and the site is still down, so the problem was never in
 # the image. Reporting `rolled_back` here would close the alert on an outage
 # that is still happening.
-out="$(run_deploy "$CODE_ONLY" "$BASE" "$GREEN" "$EMPTY" 0)"
+out="$(run_deploy "$CODE_ONLY" "$BASE" "$GREEN" "$NO_STATUS" 0)"
 if is_state "$out" stuck; then
   pass "a rollback that does not restore health reports stuck"
 else
@@ -261,7 +294,7 @@ fi
 #
 # The old binary refuses to start against a schema carrying a migration it does
 # not know, so putting it back turns a broken site into one that will not boot.
-out="$(run_deploy "$WITH_MIGRATION" "$CODE_ONLY" "$GREEN" "$EMPTY" 0)"
+out="$(run_deploy "$WITH_MIGRATION" "$CODE_ONLY" "$GREEN" "$NO_STATUS" 0)"
 if is_state "$out" stuck; then
   pass "an unhealthy deploy that applied a migration reports stuck"
 else
@@ -278,7 +311,7 @@ fi
 # The containers answer on their own ports; only the public URL is down, which
 # means nginx or Cloudflare. Rolling back would revert a working release and
 # fix nothing, so this must report rather than repair.
-out="$(run_deploy "$CODE_ONLY" "$BASE" "$GREEN" "$EMPTY" 1 0)"
+out="$(run_deploy "$CODE_ONLY" "$BASE" "$GREEN" "$NO_STATUS" 1 0)"
 if is_state "$out" edge_unhealthy; then
   pass "a healthy release behind a broken edge is reported, not rolled back"
 else
@@ -290,11 +323,40 @@ else
   fail "a good release was rolled back because the edge was down"
 fi
 
+# ── An unreadable API is not a pass ─────────────────────────────────────
+#
+# Anonymous calls are rate limited. When the answer cannot be obtained, the
+# commit is unverified, and unverified never ships.
+out="$(run_deploy "$CODE_ONLY" "$BASE" "$API_DOWN" "$NO_STATUS" 1)"
+if is_state "$out" blocked_api; then
+  pass "an unreadable GitHub API blocks the deploy"
+else
+  fail "a deploy went ahead without being able to read CI results"
+fi
+
+out="$(run_deploy "$CODE_ONLY" "$BASE" "$GREEN" "$API_DOWN" 1)"
+if is_state "$out" blocked_api; then
+  pass "an unreadable status API blocks the deploy"
+else
+  fail "a deploy went ahead without being able to read commit statuses"
+fi
+
+# ── A truncated page is not a verdict ───────────────────────────────────
+#
+# Twelve checks exist and one came back. The eleven missing could be the
+# failing ones, so the visible subset must not be mistaken for the whole.
+out="$(run_deploy "$CODE_ONLY" "$BASE" "$TRUNCATED" "$NO_STATUS" 1)"
+if is_state "$out" blocked_api; then
+  pass "a partial check-run page is refused rather than judged"
+else
+  fail "a deploy was approved on an incomplete list of checks"
+fi
+
 # ── An unknown starting point keeps the rollback path closed ────────────
 #
 # Without a known previous revision there is no way to tell whether schema
 # moved, and guessing "it did not" is the guess that cannot be recovered from.
-out="$(run_deploy "$CODE_ONLY" "" "$GREEN" "$EMPTY" 0)"
+out="$(run_deploy "$CODE_ONLY" "" "$GREEN" "$NO_STATUS" 0)"
 if is_state "$out" stuck; then
   pass "an unknown deployed revision is treated as unsafe to roll back"
 else

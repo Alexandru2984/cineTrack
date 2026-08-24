@@ -8,8 +8,11 @@
 # cron, and pulls. A compromised build action still cannot reach production; it
 # can only produce a commit, which must then pass CI to be picked up.
 #
-# The repository is public, so fetching is anonymous and this holds no
-# credential. `gh` is used read-only, to ask whether CI passed.
+# The repository is public, so everything this needs is a public read: the
+# fetch is anonymous and so are the two GitHub API calls. It deliberately does
+# not use `gh`, whose stored token carries `admin:org`, `repo` and `workflow`
+# scopes — an unattended deploy path should not have a credential sitting in it
+# that can write anything, when what it actually needs is two GETs.
 #
 # # What it will not ship
 #
@@ -80,7 +83,7 @@ say() { printf '[%s] %s\n' "$(date -u +%FT%TZ)" "$1" >&2; }
 # Every state is written every run, including the zeros. A series that only
 # appears when it is true cannot be alerted on with `== 1` without also
 # alerting the moment it goes away.
-STATES=(idle deployed waiting_ci blocked_ci blocked_nginx rolled_back stuck edge_unhealthy)
+STATES=(idle deployed waiting_ci blocked_ci blocked_nginx rolled_back stuck edge_unhealthy blocked_api)
 report() {
   local current="$1" revision="${2:-}"
   local tmp
@@ -122,6 +125,16 @@ deployed_revision() {
 }
 
 probe() { curl --fail --silent --max-time 10 "$1" >/dev/null 2>&1; }
+
+# Anonymous, and rate-limited to 60 requests an hour per address as a result.
+# This runs every ten minutes and spends two, so the margin is wide — but if it
+# is ever exhausted the call fails, and a failed call must never read as
+# approval.
+github_api() {
+  curl --fail --silent --max-time 20 \
+    --header "Accept: application/vnd.github+json" \
+    "https://api.github.com/repos/$REPO_SLUG/$1"
+}
 
 # Both containers, on their own published ports. This is the rollback trigger.
 healthy() {
@@ -178,8 +191,24 @@ fi
 
 # Ask GitHub what it thinks of this commit. Read-only, and the answer must be
 # unambiguous in the affirmative — anything else waits.
-checks="$(gh api --paginate "repos/$REPO_SLUG/commits/$target/check-runs" \
-  --jq '.check_runs[] | [.name, .status, (.conclusion // "none")] | @tsv' 2>/dev/null || true)"
+if ! checks_json="$(github_api "commits/$target/check-runs?per_page=100")"; then
+  say "cannot read CI results from GitHub for ${target:0:8} (rate limit or network)"
+  report blocked_api "$target"
+  exit 0
+fi
+
+# A partial answer is not an answer. If more check runs exist than came back,
+# the missing ones could be the failing ones, and approving on the visible
+# subset is exactly the mistake this whole gate exists to prevent.
+total_checks="$(jq -r '.total_count // 0' <<<"$checks_json")"
+returned_checks="$(jq -r '.check_runs | length' <<<"$checks_json")"
+if [[ "$total_checks" != "$returned_checks" ]]; then
+  say "GitHub returned $returned_checks of $total_checks check runs for ${target:0:8}; not deciding on a partial answer"
+  report blocked_api "$target"
+  exit 0
+fi
+
+checks="$(jq -r '.check_runs[] | [.name, .status, (.conclusion // "none")] | @tsv' <<<"$checks_json")"
 
 if [[ -z "$checks" ]]; then
   # No check runs at all. Either CI has not started yet or this commit is not
@@ -215,8 +244,12 @@ fi
 # one still running. Requiring it green would have blocked every deploy
 # permanently. So the individual statuses are read instead, and an empty list
 # means nothing to satisfy.
-statuses="$(gh api --paginate "repos/$REPO_SLUG/commits/$target/status" \
-  --jq '.statuses[] | [.context, .state] | @tsv' 2>/dev/null || true)"
+if ! status_json="$(github_api "commits/$target/status?per_page=100")"; then
+  say "cannot read commit statuses from GitHub for ${target:0:8}"
+  report blocked_api "$target"
+  exit 0
+fi
+statuses="$(jq -r '.statuses[] | [.context, .state] | @tsv' <<<"$status_json")"
 if [[ -n "$statuses" ]]; then
   bad_status="$(awk -F'\t' '$2 != "success"' <<<"$statuses" || true)"
   if [[ -n "$bad_status" ]]; then

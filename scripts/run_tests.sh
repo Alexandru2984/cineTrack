@@ -152,7 +152,8 @@ python3 scripts/tests/check_embedded_python.py \
   scripts/backup_to_r2.sh scripts/restore_from_r2.sh \
   scripts/tests/deployment_hardening_test.sh \
   scripts/tests/ci_contract_test.sh \
-  scripts/tests/edge_security_config_test.sh
+  scripts/tests/edge_security_config_test.sh \
+  scripts/tests/auto_deploy_test.sh
 scripts/tests/ci_contract_test.sh
 scripts/tests/backup_restore_test.sh
 scripts/tests/release_schedule_metrics_test.sh
