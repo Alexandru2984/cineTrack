@@ -184,7 +184,12 @@ pub struct CalendarEpisode {
     pub season_number: i32,
     pub episode_number: i32,
     pub episode_name: Option<String>,
-    pub overview: Option<String>,
+    /// Deliberately absent: `overview`.
+    ///
+    /// Episode synopses average 216 characters and no screen here renders one —
+    /// the detail pages fetch their own data. A fifty-item calendar page was
+    /// carrying ten kilobytes of text nobody reads, and on the native client
+    /// that text was also encrypted and written to disk with the query cache.
     pub runtime_minutes: Option<i32>,
     pub air_date: NaiveDate,
     pub still_path: Option<String>,
@@ -217,7 +222,12 @@ pub struct UpNextEpisode {
     pub season_number: i32,
     pub episode_number: i32,
     pub episode_name: Option<String>,
-    pub overview: Option<String>,
+    /// Deliberately absent: `overview`.
+    ///
+    /// Episode synopses average 216 characters and no screen here renders one —
+    /// the detail pages fetch their own data. A fifty-item calendar page was
+    /// carrying ten kilobytes of text nobody reads, and on the native client
+    /// that text was also encrypted and written to disk with the query cache.
     pub runtime_minutes: Option<i32>,
     pub air_date: NaiveDate,
     pub still_path: Option<String>,

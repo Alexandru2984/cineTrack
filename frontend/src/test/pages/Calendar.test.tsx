@@ -65,7 +65,6 @@ const plannedEpisode = {
   season_number: 2,
   episode_number: 4,
   episode_name: 'Saved Episode',
-  overview: null,
   runtime_minutes: 48,
   air_date: '2026-06-01',
   still_path: '/still.jpg',
