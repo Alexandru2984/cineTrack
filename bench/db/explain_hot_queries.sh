@@ -24,8 +24,43 @@ if [[ -z "$CONTAINER" ]]; then
   exit 1
 fi
 
+# These queries are copies of what the application runs, and a copy has a shelf
+# life. `calendar: up next` measured `air_date <= today` for weeks after the
+# application had moved to `episode_has_aired(...)`, so the check reported a
+# healthy 21ms for a query nothing executed while the real one took thirteen
+# seconds in production. A benchmark that drifts from its subject is worse than
+# none: it reports success on work nobody does.
+#
+# When a hot query changes, change it here. There is no mechanism that will
+# notice for you.
+
 # Tables whose growth is unbounded; a sequential scan here is the alarm.
 GROWING='watch_history|user_media|episodes|direct_messages'
+
+# The other alarm: wall-clock time.
+#
+# A plan can use every index correctly and still be slow. `calendar: up next`
+# went from 110ms to 13.6 seconds on production data without changing its plan
+# at all — a predicate moved into a SQL function carrying a `SET` clause, which
+# Postgres cannot inline, so the body ran once per row.
+#
+# Be clear about what this budget does and does not do, because the temptation
+# is to believe it covers more than it can. Measured here, that same fault costs
+# 116ms against 16ms healthy: a sevenfold regression that any budget loose
+# enough to survive a shared runner will wave through. It was thirteen seconds
+# in production only because that library is larger and busier than anything
+# seeded.
+#
+# So this catches a catastrophe — a query that has fallen off a cliff — and
+# nothing subtler. The guard for that specific fault is a test in the backend
+# suite asserting these functions carry no `SET` clause and stay inlinable,
+# which is deterministic and cannot flake. Two instruments, different jobs.
+#
+# 250ms is an order of magnitude above the slowest healthy query measured here
+# (~23ms), which is the most a timing check on shared hardware can honestly
+# claim.
+BUDGET_MS="${BENCH_QUERY_BUDGET_MS:-250}"
+TIME_FAILURES=0
 
 psql() {
   docker exec -i "$CONTAINER" psql -U test_user -d cinetrack_test -X -q "$@"
@@ -43,12 +78,20 @@ run_case() {
   # it finds none, which is the good case, so it must not abort the run.
   seq_tables="$(grep -oE "Seq Scan on ($GROWING)" <<<"$plan" | awk '{print $4}' | sort -u | paste -sd, - || true)"
 
+  local verdict="indexed"
   if [[ -n "$seq_tables" ]]; then
-    printf '%-28s %8s ms   SEQ SCAN: %s\n' "$name" "${ms:-?}" "$seq_tables"
+    verdict="SEQ SCAN: $seq_tables"
     PLAN_FAILURES=$((PLAN_FAILURES + 1))
-  else
-    printf '%-28s %8s ms   indexed\n' "$name" "${ms:-?}"
   fi
+
+  # Compared as integers: the shell cannot do decimals, and a budget precise to
+  # the millisecond would be false precision on a shared runner anyway.
+  if [[ -n "$ms" ]] && (( ${ms%%.*} > BUDGET_MS )); then
+    verdict="$verdict, OVER BUDGET (${BUDGET_MS}ms)"
+    TIME_FAILURES=$((TIME_FAILURES + 1))
+  fi
+
+  printf '%-28s %8s ms   %s\n' "$name" "${ms:-?}" "$verdict"
 
   {
     printf '\n===== %s =====\n' "$name"
@@ -138,7 +181,7 @@ trap 'rm -f "$PLAN_LOG" "$REPORT"' EXIT
     JOIN seasons se ON se.media_id = m.id
     JOIN episodes ep ON ep.season_id = se.id
     WHERE um.user_id = '$USER_ID' AND um.status = 'watching'
-      AND ep.air_date <= '$TODAY'
+      AND episode_has_aired(ep.air_date, m.origin_country)
       AND NOT EXISTS (
         SELECT 1 FROM watch_history wh
         WHERE wh.user_id = um.user_id AND wh.episode_id = ep.id)
@@ -226,5 +269,10 @@ cat "$REPORT"
 [[ "$OUT" != "/dev/stdout" ]] && cp "$REPORT" "$OUT"
 if (( PLAN_FAILURES > 0 )); then
   echo "query-plan regression: $PLAN_FAILURES hot path(s) sequentially scanned a growing table" >&2
+fi
+if (( TIME_FAILURES > 0 )); then
+  echo "query-time regression: $TIME_FAILURES hot path(s) took longer than ${BUDGET_MS}ms" >&2
+fi
+if (( PLAN_FAILURES > 0 || TIME_FAILURES > 0 )); then
   exit 1
 fi
