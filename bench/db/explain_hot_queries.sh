@@ -16,7 +16,6 @@ USER_ID="${1:?usage: explain_hot_queries.sh <user_id> [output_file]}"
 OUT="${2:-/dev/stdout}"
 DB_PORT="${BENCH_DB_PORT:-55433}"
 YEAR="$(date +%Y)"
-TODAY="$(date +%F)"
 
 CONTAINER="${BENCH_DB_CONTAINER:-$(docker ps -qf "publish=$DB_PORT" | head -n 1)}"
 if [[ -z "$CONTAINER" ]]; then

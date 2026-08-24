@@ -227,6 +227,15 @@ jobs:
       - name: Unit tests
         run: npm test
 
+      # `expo-doctor` only. The version half — `expo install --check` — compares
+      # against whatever Expo published most recently, so it fails on every open
+      # pull request the day a patch ships, regardless of what the change
+      # touched. That happened twice in two days, on branches that touched no
+      # mobile dependency at all.
+      #
+      # A check that reports on the world rather than on your change does not
+      # belong on the path that blocks your change. It runs on a schedule
+      # instead — see `mobile-dependency-drift.yml`.
       - name: Validate Expo project
         run: npm run doctor
 

@@ -1,0 +1,47 @@
+# Report when the Expo SDK's expected dependency versions move.
+#
+# `expo install --check` compares the lockfile against whatever Expo published
+# most recently. That answer changes without anybody touching this repository,
+# so it cannot sit on the pull-request path: it failed two unrelated branches on
+# two consecutive days, and the fix each time was to bump packages that had
+# nothing to do with the change under review.
+#
+# Here it reports drift on its own schedule. A red run means "somebody should
+# run `npx expo install --fix`", not "this change is broken".
+name: Mobile dependency drift
+
+on:
+  schedule:
+    # Mondays, early. Expo patches land through the week; one report is enough.
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  drift:
+    name: Expo expected versions
+    timeout-minutes: 15
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Install Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check expected versions
+        run: npm run doctor:versions
