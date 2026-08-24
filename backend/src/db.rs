@@ -4,9 +4,9 @@ use sqlx::PgPool;
 use std::collections::BTreeMap;
 use std::time::Duration;
 
-pub async fn create_pool(database_url: &str) -> PgPool {
+pub async fn create_pool(database_url: &str, max_connections: u32) -> PgPool {
     PgPoolOptions::new()
-        .max_connections(10)
+        .max_connections(max_connections)
         .min_connections(1)
         // Fail fast instead of piling up requests when the DB is unreachable.
         .acquire_timeout(Duration::from_secs(5))
