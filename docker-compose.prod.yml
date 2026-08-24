@@ -29,6 +29,14 @@ services:
       - pg_stat_statements.max=5000
       - -c
       - pg_stat_statements.track=top
+      # Utility statements are stored verbatim — only ordinary queries get their
+      # literals replaced by placeholders. `provision_db_role.sh` runs
+      # `ALTER ROLE ... PASSWORD '...'` on every deploy, so leaving this on put
+      # the database passwords in clear text in a view any role with access can
+      # read. Off also removes GRANT and CREATE EXTENSION noise from a report
+      # meant for application queries.
+      - -c
+      - pg_stat_statements.track_utility=off
     environment:
       POSTGRES_DB: "${POSTGRES_DB:?POSTGRES_DB must be set}"
       POSTGRES_USER: "${POSTGRES_USER:?POSTGRES_USER must be set}"

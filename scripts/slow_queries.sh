@@ -11,6 +11,13 @@
 # matters less than one taking 8ms fifty times a second, and sorting by mean
 # puts the wrong one on top.
 #
+# Utility statements are not recorded — see `pg_stat_statements.track_utility`
+# in docker-compose.prod.yml. They are stored verbatim rather than with their
+# literals replaced, so recording them wrote the database role passwords into a
+# readable view. The guard below refuses to print anything that slipped through,
+# because a report nobody expects to contain a secret is exactly where one goes
+# unnoticed.
+#
 # Usage: scripts/slow_queries.sh [rows]           (default 15)
 #        scripts/slow_queries.sh --reset          start a fresh measuring window
 set -euo pipefail
@@ -45,6 +52,14 @@ if [[ "${1:-}" == "--reset" ]]; then
 fi
 
 ROWS="${1:-15}"
+
+leaked="$(psql -tAc "SELECT COUNT(*) FROM pg_stat_statements WHERE query ~* '(password|secret|token)\\s*=?\\s*'''" | tr -d '[:space:]')"
+if [[ "${leaked:-0}" != "0" ]]; then
+  echo "refusing to print: $leaked recorded statement(s) contain a literal that looks like a credential." >&2
+  echo "run 'scripts/slow_queries.sh --reset' to clear them, and check that" >&2
+  echo "pg_stat_statements.track_utility is off." >&2
+  exit 1
+fi
 
 psql -c "
 SELECT
