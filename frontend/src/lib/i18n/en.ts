@@ -309,6 +309,13 @@ export const en = {
     unavailable:
       'This browser cannot store encryption keys, so encrypted messaging is unavailable here. A private window often causes this.',
     failed: 'Encryption could not be set up',
+    settingsTitle: 'Message encryption',
+    settingsAbsent:
+      'Set it up here and it is ready before your first conversation. Without it, messages are stored in a form Văzute can read.',
+    settingsReady:
+      'On, and this device holds your key. Messages with people who have also set it up are stored encrypted, and Văzute cannot read them.',
+    settingsLocked:
+      'Your account has keys, but this device does not hold them yet.',
     safetyNumber: 'Safety number',
     safetyNumberHint:
       'Compare this with the other person through another channel. Matching numbers mean nobody is sitting between you.',
