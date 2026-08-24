@@ -208,6 +208,31 @@ get an answer.
   it needs root, and the reload is shared with every other site on this host.
   Deploy those by hand, per section 2.
 
+### What it does not wait for
+
+`Mobile`. The app ships through EAS and the Play Store, never through this
+host, so a React Native build says nothing about a backend or frontend image —
+the same reasoning `check_deploy_drift.sh` uses when it measures each artifact
+against the paths that affect it. The two clients share their encryption
+implementation by copy rather than by import, so nothing outside `mobile/` can
+change what the mobile build produces.
+
+This changes nothing about what CI verifies: `main` still gets its full native
+build on every push, which is what keeps any commit on `main` releasable to the
+stores. Only the web deploy stops waiting on it, and only when the revision
+range touches neither `mobile/` nor `ci.yml`. Touch either and the check is
+required again, pending or failing.
+
+The waiver covers failure as well as pending, deliberately. A result that
+cannot bear on these artifacts is not evidence about them in either direction,
+and this job has a documented history of failing on Expo's release schedule
+rather than on anything in this repository — blocking every web deploy on that
+would hand an outside party a switch over this pipeline.
+
+If a waiver ever leaves nothing behind, the deploy stops: a revision whose only
+check was waived has been examined by nothing, which reads the same as having
+no checks at all.
+
 Check what it would do without doing it:
 
 ```bash

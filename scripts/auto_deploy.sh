@@ -63,6 +63,30 @@ REPO_SLUG="${AUTO_DEPLOY_REPO_SLUG:-}"
 # being worked on, and merging under it would move somebody's branch. A
 # detached worktree also means a half-edited file cannot reach an image.
 BUILD_DIR="${AUTO_DEPLOY_BUILD_DIR:-$STATE_DIR/build}"
+
+# Checks that cannot speak for what this deploys.
+#
+# The mobile app ships through EAS and the Play Store, never through this host.
+# `check_deploy_drift.sh` already encodes that fact by measuring each artifact
+# against the paths that affect it, and the same reasoning applies to the gate:
+# a React Native build says nothing about a backend or frontend image. The two
+# clients share their encryption implementation by copy rather than by import,
+# so no change outside `mobile/` can alter what the mobile build produces.
+#
+# This does not change what CI verifies. `main` still gets its native build on
+# every push; the web deploy simply stops waiting on it. Waived only when the
+# revision range touches none of the check's own paths — touch `mobile/` and it
+# is required again, whether it is pending or failing.
+#
+# Waiving covers failure as well as pending on purpose. A check that cannot bear
+# on the artifacts is not evidence about them in either direction, and the
+# mobile job has a documented history of failing on Expo's release schedule
+# rather than on anything in this repository. Blocking every web deploy on that
+# would hand an outside party a switch over this pipeline.
+WAIVABLE_CHECKS=("Mobile")
+# Read through `declare -n` below, which ShellCheck cannot follow.
+# shellcheck disable=SC2034
+Mobile_paths=(mobile/ .github/workflows/ci.yml)
 HEALTH_ATTEMPTS="${AUTO_DEPLOY_HEALTH_ATTEMPTS:-30}"
 HEALTH_INTERVAL="${AUTO_DEPLOY_HEALTH_INTERVAL:-4}"
 
@@ -214,6 +238,39 @@ if [[ -z "$checks" ]]; then
   # No check runs at all. Either CI has not started yet or this commit is not
   # covered by any workflow. Both mean "unverified", and unverified never ships.
   say "no CI results yet for ${target:0:8}"
+  report waiting_ci "$target"
+  exit 0
+fi
+
+# Drop the checks this revision cannot have affected, before judging the rest.
+waived=()
+if [[ -n "$current" && "$current" != unknown ]] \
+  && git -C "$REPO_DIR" cat-file -e "${current}^{commit}" 2>/dev/null; then
+  for check in "${WAIVABLE_CHECKS[@]}"; do
+    declare -n check_paths="${check}_paths"
+    if [[ -z "$(git -C "$REPO_DIR" rev-list "${current}..${target}" --max-count=1 \
+      -- "${check_paths[@]}" 2>/dev/null)" ]]; then
+      waived+=("$check")
+    fi
+    unset -n check_paths
+  done
+fi
+
+if (( ${#waived[@]} > 0 )); then
+  # Exact names, not a regex: a check name is free text and could contain
+  # anything a pattern would treat as syntax.
+  # The trailing `-` is load-bearing: given only a filename, awk reads that
+  # file and never touches stdin, so the here-string would be silently
+  # discarded and every check would vanish along with it.
+  checks="$(awk -F'\t' 'NR==FNR { skip[$0]=1; next } !($1 in skip)' \
+    <(printf '%s\n' "${waived[@]}") - <<<"$checks")"
+  say "not waiting on ${waived[*]}: this revision touches none of their paths"
+fi
+
+# Everything was waived, which means nothing actually examined this revision.
+# However unlikely that is, it must not read as approval.
+if [[ -z "$checks" ]]; then
+  say "every check for ${target:0:8} was waived; nothing verified it"
   report waiting_ci "$target"
   exit 0
 fi
