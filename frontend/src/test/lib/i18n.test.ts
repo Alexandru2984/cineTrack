@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { dictionaries, SUPPORTED_LOCALES, translate } from '@/lib/i18n';
+import { loadAllLocales, SUPPORTED_LOCALES, translate } from '@/lib/i18n';
 
 // Structural parity: `ro` is typed as the `en` shape, so this can only ever
 // catch a value that was accidentally left empty; it also documents intent.
@@ -15,14 +15,16 @@ describe('i18n', () => {
     expect(SUPPORTED_LOCALES).toEqual(['en', 'ro']);
   });
 
-  it('keeps every locale in structural sync with english', () => {
+  it('keeps every locale in structural sync with english', async () => {
+    const dictionaries = await loadAllLocales();
     const englishKeys = flatten(dictionaries.en).sort();
     for (const locale of SUPPORTED_LOCALES) {
       expect(flatten(dictionaries[locale]).sort()).toEqual(englishKeys);
     }
   });
 
-  it('translates known keys per locale', () => {
+  it('translates known keys per locale', async () => {
+    await loadAllLocales();
     expect(translate('en', 'calendarFeed.title')).toBe('Calendar feed');
     expect(translate('ro', 'calendarFeed.title')).toBe('Feed de calendar');
   });

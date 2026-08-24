@@ -1,7 +1,12 @@
 import { create } from 'zustand';
-import { SUPPORTED_LOCALES, type Locale } from '@/lib/i18n';
+import { SUPPORTED_LOCALES, loadLocale, type Locale } from '@/lib/i18n';
 
 const STORAGE_KEY = 'vazute-locale';
+
+/** The locale to start in, decided before anything renders. */
+export function initialLocale(): Locale {
+  return getInitialLocale();
+}
 
 function getInitialLocale(): Locale {
   try {
@@ -29,7 +34,11 @@ function applyLocale(locale: Locale) {
 
 interface LocaleState {
   locale: Locale;
-  setLocale: (locale: Locale) => void;
+  /** Resolves once the new dictionary is loaded and the switch has happened.
+   *  Returning the promise rather than firing and forgetting is what lets a
+   *  caller — or a test — know when the interface is actually in the new
+   *  language. */
+  setLocale: (locale: Locale) => Promise<void>;
 }
 
 export const useLocaleStore = create<LocaleState>((set) => {
@@ -39,7 +48,11 @@ export const useLocaleStore = create<LocaleState>((set) => {
     locale: initial,
     setLocale: (locale) => {
       applyLocale(locale);
-      set({ locale });
+      // Switch only once the new dictionary is in hand. Setting the locale
+      // first would render every string as its raw key for as long as the
+      // fetch takes — brief, and exactly the kind of flicker people report as
+      // "the app broke for a second".
+      return loadLocale(locale).then(() => set({ locale }));
     },
   };
 });
