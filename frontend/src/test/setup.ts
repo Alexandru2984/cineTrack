@@ -28,3 +28,10 @@ Object.defineProperty(window, 'matchMedia', {
     dispatchEvent: () => false,
   }),
 });
+
+// Dictionaries load on demand now, so a component test that renders translated
+// text would otherwise assert against raw keys. Loading both here matches what
+// the application does before its first paint, once, for every suite.
+import { loadAllLocales } from '@/lib/i18n';
+
+await loadAllLocales();

@@ -63,8 +63,8 @@ describe('MobileTabBar', () => {
     );
   });
 
-  it('renders the localized labels in Romanian', () => {
-    useLocaleStore.getState().setLocale('ro');
+  it('renders the localized labels in Romanian', async () => {
+    await useLocaleStore.getState().setLocale('ro');
     render(
       <MemoryRouter initialEntries={['/calendar']}>
         <MobileTabBar />

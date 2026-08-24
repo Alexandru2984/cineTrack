@@ -104,5 +104,36 @@ textarea {
 
 .react-calendar-heatmap text {
   fill: hsl(var(--muted-foreground));
-  font-size: 8px;
+  /* Was 8px, which is below what most people can read and the reason the chart
+     looked like noise: the month and weekday labels were there and illegible. */
+  font-size: 11px;
+}
+
+/* The legend swatches reuse the same fills as the grid, so the scale and the
+   squares cannot drift apart. */
+.heatmap-swatch {
+  display: inline-block;
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 2px;
+}
+
+.heatmap-swatch.color-empty {
+  background-color: hsl(var(--muted));
+}
+
+.heatmap-swatch.color-scale-1 {
+  background-color: hsl(262 83% 58% / 0.25);
+}
+
+.heatmap-swatch.color-scale-2 {
+  background-color: hsl(262 83% 58% / 0.5);
+}
+
+.heatmap-swatch.color-scale-3 {
+  background-color: hsl(262 83% 58% / 0.75);
+}
+
+.heatmap-swatch.color-scale-4 {
+  background-color: hsl(var(--primary));
 }

@@ -366,6 +366,11 @@ export const ro: Dictionary = {
     deleteError: 'Lista nu a putut fi ștearsă',
   },
   stats: {
+    genreOther: 'Alte genuri',
+    genreTitles: '{count} titluri',
+    heatmapDay: '{count} episoade pe {date}',
+    heatmapLess: 'Mai puțin',
+    heatmapMore: 'Mai mult',
     title: 'Statistici',
     yourWrapped: 'Retrospectiva ta',
     movies: 'Filme',

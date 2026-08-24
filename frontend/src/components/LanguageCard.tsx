@@ -31,7 +31,7 @@ export function LanguageCard() {
             key={option}
             type="button"
             aria-pressed={locale === option}
-            onClick={() => setLocale(option)}
+            onClick={() => void setLocale(option)}
             className={`rounded px-4 py-1.5 text-sm font-medium transition-colors ${
               locale === option
                 ? 'bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))]'

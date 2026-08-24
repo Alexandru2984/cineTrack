@@ -363,6 +363,11 @@ export const en = {
     deleteError: 'The list could not be deleted',
   },
   stats: {
+    genreOther: 'Other genres',
+    genreTitles: '{count} titles',
+    heatmapDay: '{count} episodes on {date}',
+    heatmapLess: 'Less',
+    heatmapMore: 'More',
     title: 'Statistics',
     yourWrapped: 'Your Wrapped',
     movies: 'Movies',
