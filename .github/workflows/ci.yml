@@ -399,6 +399,11 @@ jobs:
       - name: Validate deploy drift reporting
         run: scripts/tests/deploy_drift_test.sh
 
+      # This one deploys production unattended, so its refusals and its
+      # rollback decision are the parts that must not regress silently.
+      - name: Validate automatic deployment gating
+        run: scripts/tests/auto_deploy_test.sh
+
       - name: Validate calendar feed log redaction
         run: scripts/tests/calendar_feed_log_safety_test.sh
 

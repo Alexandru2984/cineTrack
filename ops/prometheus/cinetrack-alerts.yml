@@ -263,6 +263,67 @@ groups:
           summary: A Văzute safety report is stale
           description: The oldest open or reviewing report is more than twelve hours old. Review the queue and document the delay.
 
+  - name: cinetrack-auto-deploy
+    rules:
+      # The state that cannot be left alone: a deploy failed and the previous
+      # image could not be put back, because the revision had already migrated
+      # the schema. Production is running something known to be broken and only
+      # a person can decide what happens next.
+      - alert: CineTrackAutoDeployStuck
+        expr: cinetrack_auto_deploy_state{state="stuck"} == 1
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: Văzute auto-deploy failed and could not roll back
+          description: A deployment left production unhealthy and no rollback was available. Check scripts/auto_deploy.sh output and deploy by hand.
+
+      # Recovered on its own, so not a page — but somebody still merged
+      # something that took production down, and that should not pass unnoticed
+      # just because the machine cleaned it up.
+      - alert: CineTrackAutoDeployRolledBack
+        expr: cinetrack_auto_deploy_state{state="rolled_back"} == 1
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: Văzute auto-deploy rolled back a bad revision
+          description: A revision passed CI, failed its health check in production, and was automatically reverted to the previous images.
+
+      # Needs a person: the images cannot ship until the vhost is installed by
+      # hand, so this state does not clear itself.
+      - alert: CineTrackAutoDeployNeedsVhost
+        expr: cinetrack_auto_deploy_state{state="blocked_nginx"} == 1
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: Văzute auto-deploy is waiting on an nginx vhost change
+          description: The pending revision changes nginx/vazute.micutu.com.conf, which is installed by hand. Deploy this revision manually.
+
+      # `main` has been red for hours. Auto-deploy is correctly refusing it, so
+      # nothing is broken in production — but nothing can ship either.
+      - alert: CineTrackAutoDeployBlockedByCI
+        expr: cinetrack_auto_deploy_state{state="blocked_ci"} == 1
+        for: 3h
+        labels:
+          severity: warning
+        annotations:
+          summary: Văzute cannot deploy because CI is failing on main
+          description: The newest commit on main has failing checks, so nothing has been deployed since it landed.
+
+      # The cron entry stopped running. Without this the whole mechanism can
+      # disappear and the only symptom is that deploys quietly stop happening —
+      # the exact silence the drift check was added to end.
+      - alert: CineTrackAutoDeployNotRunning
+        expr: absent(cinetrack_auto_deploy_run_timestamp_seconds) or time() - cinetrack_auto_deploy_run_timestamp_seconds > 3600
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: Văzute auto-deploy has stopped running
+          description: No auto-deploy run has reported in over an hour. Check the cron entry and its log.
+
   - name: cinetrack-releases
     rules:
       - alert: CineTrackReleaseWorkerMetricsMissing

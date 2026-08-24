@@ -161,6 +161,7 @@ scripts/tests/metrics_scrape_auth_test.sh
 scripts/tests/rust_audit_exceptions_test.sh
 scripts/tests/container_scan_exceptions_test.sh
 scripts/tests/deploy_drift_test.sh
+scripts/tests/auto_deploy_test.sh
 scripts/tests/crypto_core_parity_test.sh
 scripts/tests/calendar_feed_log_safety_test.sh
 scripts/tests/edge_security_config_test.sh
