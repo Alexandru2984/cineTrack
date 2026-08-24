@@ -3,7 +3,8 @@ import { useMyStats, useHeatmap, useGenreDistribution, useMonthlyActivity } from
 import { LoadingSpinner } from '@/components/LoadingSpinner';
 import CalendarHeatmap from 'react-calendar-heatmap';
 import 'react-calendar-heatmap/dist/styles.css';
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
+import { GenreDonut } from '@/components/GenreDonut';
+import { MonthlyActivityChart } from '@/components/MonthlyActivityChart';
 import { Link } from 'react-router';
 import { Film, Tv, Clock, Flame, Trophy, Zap, Sparkles } from 'lucide-react';
 import { useT } from '@/hooks/useT';
@@ -130,14 +131,15 @@ export default function StatsPage() {
         {monthly && monthly.length > 0 && (
           <div className="rounded-lg border border-[hsl(var(--border))] p-6 bg-[hsl(var(--card))]">
             <h2 className="text-lg font-semibold mb-4">{t('stats.monthlyActivity')}</h2>
-            <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={[...monthly].reverse()}>
-                <XAxis dataKey="month" tick={{ fontSize: 12 }} />
-                <YAxis tick={{ fontSize: 12 }} />
-                <Tooltip />
-                <Bar dataKey="hours" fill="hsl(262 83% 58%)" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
+            <MonthlyActivityChart
+              data={[...monthly].reverse()}
+              describePoint={(point) =>
+                t('stats.monthlyHours', {
+                  hours: Math.round(point.hours),
+                  month: point.month,
+                })
+              }
+            />
           </div>
         )}
 
@@ -149,35 +151,21 @@ export default function StatsPage() {
                 drew its name and percentage around a circle, and with thirty
                 genres they landed on top of each other. A legend cannot
                 overlap, and it has room for the number as well as the name. */}
-            <ResponsiveContainer width="100%" height={260}>
-              <PieChart>
-                <Pie
-                  data={genreSlices}
-                  dataKey="count"
-                  nameKey="genre"
-                  cx="50%"
-                  cy="50%"
-                  outerRadius={100}
-                  innerRadius={55}
-                  paddingAngle={2}
-                >
-                  {genreSlices.map((slice, index) => (
-                    <Cell
-                      key={slice.genre}
-                      fill={slice.genre === otherLabel ? OTHER_COLOR : COLORS[index % COLORS.length]}
-                    />
-                  ))}
-                </Pie>
-                <Tooltip
-                  // Recharts types the value loosely because a chart can carry
-                  // anything; every slice here is a count.
-                  formatter={(value) => [
-                    t('stats.genreTitles', { count: Number(value) || 0 }),
-                    '',
-                  ]}
-                />
-              </PieChart>
-            </ResponsiveContainer>
+            <GenreDonut
+              slices={genreSlices.map((slice, index) => ({
+                label: slice.genre,
+                value: slice.count,
+                color:
+                  slice.genre === otherLabel ? OTHER_COLOR : COLORS[index % COLORS.length],
+              }))}
+              describeSlice={(slice, percent) =>
+                t('stats.genreSlice', {
+                  genre: slice.label,
+                  count: slice.value,
+                  percent: Math.round(percent),
+                })
+              }
+            />
             <ul className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
               {genreSlices.map((slice, index) => (
                 <li key={slice.genre} className="flex items-center gap-2">

@@ -28,21 +28,6 @@ vi.mock('@/hooks/useStats', () => ({
   useGenreDistribution: () => mocks.genres(),
 }));
 
-// Recharts measures its container, which jsdom reports as zero, so the chart
-// itself renders nothing. The legend is plain DOM and is what this test is
-// about anyway — it is the part that replaced the overlapping labels.
-vi.mock('recharts', () => ({
-  ResponsiveContainer: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  PieChart: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  Pie: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  Cell: () => null,
-  Tooltip: () => null,
-  BarChart: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  Bar: () => null,
-  XAxis: () => null,
-  YAxis: () => null,
-}));
-
 function renderStats() {
   return render(
     <MemoryRouter>

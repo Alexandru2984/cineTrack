@@ -365,6 +365,8 @@ export const en = {
   stats: {
     genreOther: 'Other genres',
     genreTitles: '{count} titles',
+    genreSlice: '{genre}: {count} titles ({percent}%)',
+    monthlyHours: '{hours} h in {month}',
     heatmapDay: '{count} episodes on {date}',
     heatmapLess: 'Less',
     heatmapMore: 'More',

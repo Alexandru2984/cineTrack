@@ -368,6 +368,8 @@ export const ro: Dictionary = {
   stats: {
     genreOther: 'Alte genuri',
     genreTitles: '{count} titluri',
+    genreSlice: '{genre}: {count} titluri ({percent}%)',
+    monthlyHours: '{hours} h în {month}',
     heatmapDay: '{count} episoade pe {date}',
     heatmapLess: 'Mai puțin',
     heatmapMore: 'Mai mult',
