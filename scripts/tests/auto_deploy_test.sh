@@ -20,7 +20,7 @@ pass() { printf 'ok    %s\n' "$1"; }
 
 # ── A fixture repository, so expectations are facts ─────────────────────
 REPO="$WORK_DIR/repo"
-mkdir -p "$REPO"/{backend/migrations,scripts,nginx}
+mkdir -p "$REPO"/{backend/migrations,scripts,nginx,mobile}
 git -C "$REPO" init --quiet
 git -C "$REPO" config user.email deploy@test.invalid
 git -C "$REPO" config user.name "Deploy Test"
@@ -45,6 +45,11 @@ printf 'ALTER TABLE t ADD COLUMN c int;\n' > "$REPO/backend/migrations/20260101_
 git -C "$REPO" add -A
 git -C "$REPO" commit --quiet -m "adds a migration"
 WITH_MIGRATION="$(git -C "$REPO" rev-parse HEAD)"
+
+printf 'export default {}\n' > "$REPO/mobile/App.tsx"
+git -C "$REPO" add -A
+git -C "$REPO" commit --quiet -m "touches the mobile app"
+TOUCHES_MOBILE="$(git -C "$REPO" rev-parse HEAD)"
 
 STUB_DIR="$WORK_DIR/bin"
 mkdir -p "$STUB_DIR"
@@ -175,6 +180,13 @@ NO_STATUS="$WORK_DIR/no_status.json"
 status_fixture "$NO_STATUS"
 STATUS_RED="$WORK_DIR/status_red.json"
 status_fixture "$STATUS_RED" "security/scan:failure"
+
+MOBILE_RUNNING="$WORK_DIR/mobile_running.json"
+checks_fixture "$MOBILE_RUNNING" "CI Gate:completed:success" "Mobile:in_progress:none"
+MOBILE_FAILED="$WORK_DIR/mobile_failed.json"
+checks_fixture "$MOBILE_FAILED" "CI Gate:completed:success" "Mobile:completed:failure"
+ONLY_MOBILE="$WORK_DIR/only_mobile.json"
+checks_fixture "$ONLY_MOBILE" "Mobile:completed:success"
 
 API_DOWN="$WORK_DIR/api_down"
 printf 'FAIL' > "$API_DOWN"
@@ -321,6 +333,66 @@ if ! grep -q "tag cinetrack-backend:rollback cinetrack-backend:latest" "$ACTIONS
   pass "no rollback was attempted for an edge failure"
 else
   fail "a good release was rolled back because the edge was down"
+fi
+
+# ── A check that cannot speak for the artifacts does not hold them up ───
+#
+# The mobile app ships through EAS and the Play Store, never through this host,
+# and a revision that touches no mobile file cannot change what its build
+# produces. Waiting on it delays a web deploy for a verdict about something
+# else entirely.
+out="$(run_deploy "$CODE_ONLY" "$BASE" "$MOBILE_RUNNING" "$NO_STATUS" 1)"
+if is_state "$out" deployed; then
+  pass "a still-running mobile build does not delay a web-only revision"
+else
+  fail "a web-only revision waited on a mobile build"
+fi
+
+# Waiving covers failure too: a result that cannot bear on these artifacts is
+# not evidence about them in either direction, and this job has failed on
+# Expo's release schedule rather than on anything in the repository.
+out="$(run_deploy "$CODE_ONLY" "$BASE" "$MOBILE_FAILED" "$NO_STATUS" 1)"
+if is_state "$out" deployed; then
+  pass "a failing mobile build does not block a web-only revision"
+else
+  fail "a web-only revision was blocked by a mobile failure"
+fi
+
+# ── But it holds them up the moment it is relevant ──────────────────────
+out="$(run_deploy "$TOUCHES_MOBILE" "$CODE_ONLY" "$MOBILE_RUNNING" "$NO_STATUS" 1)"
+if is_state "$out" waiting_ci; then
+  pass "a revision touching mobile/ waits for the mobile build again"
+else
+  fail "a revision touching mobile/ skipped its own build"
+fi
+
+out="$(run_deploy "$TOUCHES_MOBILE" "$CODE_ONLY" "$MOBILE_FAILED" "$NO_STATUS" 1)"
+if is_state "$out" blocked_ci; then
+  pass "a revision touching mobile/ is blocked by a failing mobile build"
+else
+  fail "a revision touching mobile/ ignored its own failing build"
+fi
+
+# ── Waiving everything is not approval ──────────────────────────────────
+#
+# If the only check present is one that gets waived, nothing examined this
+# revision at all, and that must read the same as having no checks.
+out="$(run_deploy "$CODE_ONLY" "$BASE" "$ONLY_MOBILE" "$NO_STATUS" 1)"
+if is_state "$out" waiting_ci; then
+  pass "a revision whose only check was waived is not deployed"
+else
+  fail "a revision deployed with every check waived"
+fi
+
+# ── An unknown starting point waives nothing ────────────────────────────
+#
+# Without a previous revision there is no range to test paths against, so
+# relevance cannot be established and nothing is skipped.
+out="$(run_deploy "$CODE_ONLY" "" "$MOBILE_RUNNING" "$NO_STATUS" 1)"
+if is_state "$out" waiting_ci; then
+  pass "nothing is waived when the deployed revision is unknown"
+else
+  fail "a check was waived without a range to justify it"
 fi
 
 # ── An unreadable API is not a pass ─────────────────────────────────────
