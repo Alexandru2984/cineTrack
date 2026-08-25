@@ -18,6 +18,7 @@ pub mod push;
 pub mod reports;
 pub mod stats;
 pub mod tracking;
+pub mod unfurl;
 pub mod users;
 
 use actix_web::web;
@@ -54,6 +55,7 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
             .configure(messages::configure)
             .configure(moderation::configure)
             .configure(tracking::configure)
+            .configure(unfurl::configure)
             .configure(history::configure)
             .configure(lists::configure)
             .configure(stats::configure)
