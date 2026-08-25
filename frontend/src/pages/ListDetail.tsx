@@ -12,6 +12,7 @@ import {
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 
+import { AddFromLibrary } from '@/components/AddFromLibrary';
 import { ListEditorDialog } from '@/components/ListEditorDialog';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
 import { ReportDialog } from '@/components/ReportDialog';
@@ -231,13 +232,30 @@ export default function ListDetailPage() {
           ))}
         </div>
       ) : (
-        <div className="flex min-h-72 flex-col items-center justify-center gap-3 px-6 text-center">
+        <div
+          // An owner has the way to fill it directly below, so reserving most
+          // of a screen of blank space above that pushes the answer out of
+          // sight. A visitor has nothing else on the page, so the room reads
+          // as deliberate rather than wasted.
+          className={`flex flex-col items-center justify-center gap-3 px-6 text-center ${
+            isOwner ? 'min-h-32' : 'min-h-72'
+          }`}
+        >
           <p className="font-medium">{t('listDetail.empty')}</p>
           <p className="max-w-md text-sm text-[hsl(var(--muted-foreground))]">
             {isOwner ? t('listDetail.emptyOwner') : t('listDetail.emptyOther')}
           </p>
         </div>
       )}
+
+      {/* Below the list rather than above it: what is already here is the
+          point of the page, and this is how it grows. */}
+      {isOwner ? (
+        <AddFromLibrary
+          listId={list.id}
+          alreadyIn={new Set(items.map((item) => item.id))}
+        />
+      ) : null}
 
       {removeItem.error || deleteList.error ? (
         <p className="mt-4 text-sm text-[hsl(var(--destructive))]" role="alert">
