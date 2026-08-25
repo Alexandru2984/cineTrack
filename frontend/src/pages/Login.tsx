@@ -6,6 +6,7 @@ import { getApiErrorMessage } from '@/lib/api';
 import { Film, Loader2, ShieldCheck } from 'lucide-react';
 import { safeReturnTo } from '@/lib/navigation';
 import { useT } from '@/hooks/useT';
+import { usePageMeta } from '@/hooks/usePageMeta';
 
 function isTwoFactorRequired(error: unknown): boolean {
   return (
@@ -15,6 +16,7 @@ function isTwoFactorRequired(error: unknown): boolean {
 }
 
 export default function LoginPage() {
+  usePageMeta({ title: 'Sign in', path: '/login' });
   const t = useT();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');

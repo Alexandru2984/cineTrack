@@ -3,11 +3,13 @@ import { Link } from 'react-router';
 import { loginPathFor } from '@/lib/navigation';
 import { useAuthStore } from '@/store/auth';
 import { useT } from '@/hooks/useT';
+import { usePageMeta } from '@/hooks/usePageMeta';
 
 const CONTACT_EMAIL = 'postmaster@micutu.com';
 const DELETE_SETTINGS_PATH = '/settings#delete-account';
 
 export default function AccountDeletionPage() {
+  usePageMeta({ title: 'Delete your account', path: '/account-deletion' });
   const t = useT();
   const authenticated = useAuthStore((state) => state.isAuthenticated)();
   const deletionPath = authenticated

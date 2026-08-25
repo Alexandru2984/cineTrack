@@ -1,10 +1,10 @@
 import { LegalDocument } from '@/components/LegalDocument';
 import { useT } from '@/hooks/useT';
-import { usePageTitle } from '@/hooks/usePageTitle';
+import { usePageMeta } from '@/hooks/usePageMeta';
 
 export default function CommunityGuidelinesPage() {
   const t = useT();
-  usePageTitle(t('legal.guidelinesTitle'));
+  usePageMeta({ title: t('legal.guidelinesTitle'), path: '/community-guidelines' });
 
   return (
     <LegalDocument
