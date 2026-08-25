@@ -4,8 +4,10 @@ import { useRegister } from '@/hooks/useAuth';
 import { getApiErrorMessage } from '@/lib/api';
 import { Film, Loader2 } from 'lucide-react';
 import { useT } from '@/hooks/useT';
+import { usePageMeta } from '@/hooks/usePageMeta';
 
 export default function RegisterPage() {
+  usePageMeta({ title: 'Create an account', path: '/register' });
   const t = useT();
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');

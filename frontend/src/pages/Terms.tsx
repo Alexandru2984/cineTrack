@@ -1,10 +1,10 @@
 import { LegalDocument } from '@/components/LegalDocument';
 import { useT } from '@/hooks/useT';
-import { usePageTitle } from '@/hooks/usePageTitle';
+import { usePageMeta } from '@/hooks/usePageMeta';
 
 export default function TermsPage() {
   const t = useT();
-  usePageTitle(t('legal.termsTitle'));
+  usePageMeta({ title: t('legal.termsTitle'), path: '/terms' });
 
   return (
     <LegalDocument
