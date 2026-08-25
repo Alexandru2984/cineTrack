@@ -121,6 +121,13 @@ export const ro: Dictionary = {
     'watcher-5000': 'Cinci mii de episoade',
   },
   encryption: {
+    settingsTitle: 'Criptarea mesajelor',
+    settingsAbsent:
+      'Activeaz-o aici și e gata înainte de prima conversație. Fără ea, mesajele sunt stocate într-o formă pe care Văzute o poate citi.',
+    settingsReady:
+      'Activă, iar acest dispozitiv îți deține cheia. Mesajele cu cei care au activat-o și ei sunt stocate criptat, iar Văzute nu le poate citi.',
+    settingsLocked:
+      'Contul tău are chei, dar acest dispozitiv nu le deține încă.',
     setupTitle: 'Activează criptarea cap-coadă',
     setupBody:
       'Mesajele tale vor fi criptate pe dispozitiv și vor putea fi citite doar de tine și de persoana căreia îi scrii. Văzute le va stoca fără să le poată citi.',
