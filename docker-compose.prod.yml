@@ -11,6 +11,29 @@ services:
     image: postgres:16-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
     security_opt:
       - no-new-privileges:true
+    # The backend and frontend already run with every capability dropped; this
+    # was the one container still holding all of them, and it is the one with
+    # the data in it.
+    #
+    # Postgres cannot start from nothing: its entrypoint chowns the data
+    # directory and the socket directory, then drops from root to `postgres`.
+    # That needs CHOWN, FOWNER and DAC_OVERRIDE for the permissions and
+    # SETUID/SETGID for the switch — and nothing else. Verified against this
+    # exact image before committing: with these five it is ready in four
+    # seconds and serves queries; with none it fails at
+    # `chmod: /var/lib/postgresql/data: Operation not permitted`.
+    #
+    # The database publishes no port and sits on an internal network, so this
+    # is not about reaching it from outside. It narrows what an attacker who
+    # already has code execution inside the container can do with it.
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
     pids_limit: 256
     # `pg_stat_statements` records what every query actually costs in real
     # traffic. Without it the only visibility is a benchmark of fourteen
