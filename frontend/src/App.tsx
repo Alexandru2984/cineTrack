@@ -34,6 +34,7 @@ const MessagesPage = lazy(() => import('@/pages/Messages'));
 const ListsPage = lazy(() => import('@/pages/Lists'));
 const ListDetailPage = lazy(() => import('@/pages/ListDetail'));
 const AboutPage = lazy(() => import('@/pages/About'));
+const LandingPage = lazy(() => import('@/pages/Landing'));
 const PrivacyPage = lazy(() => import('@/pages/Privacy'));
 const AccountDeletionPage = lazy(() => import('@/pages/AccountDeletion'));
 const TermsPage = lazy(() => import('@/pages/Terms'));
@@ -58,6 +59,12 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const returnTo = `${location.pathname}${location.search}${location.hash}`;
   if (!isAuthenticated) return <Navigate to={loginPathFor(returnTo)} replace />;
   return <>{children}</>;
+}
+
+/** The dashboard for a member, an explanation for everyone else. */
+function HomeRoute() {
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated)();
+  return isAuthenticated ? <Dashboard /> : <LandingPage />;
 }
 
 function PublicOnlyRoute({ children }: { children: React.ReactNode }) {
@@ -124,7 +131,11 @@ export default function App() {
               <Route path="/account-deletion" element={<AccountDeletionPage />} />
               <Route path="/terms" element={<TermsPage />} />
               <Route path="/community-guidelines" element={<CommunityGuidelinesPage />} />
-              <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+              {/* `/` is the address every canonical points at and the one a
+                  shared link or a search result lands on. Sending a stranger
+                  straight to a sign-in form greeted them with "welcome back"
+                  and told them nothing about what they had arrived at. */}
+              <Route path="/" element={<HomeRoute />} />
               <Route path="/search" element={<ProtectedRoute><SearchPage /></ProtectedRoute>} />
               <Route path="/calendar" element={<ProtectedRoute><CalendarPage /></ProtectedRoute>} />
               <Route path="/media/:id" element={<ProtectedRoute><MediaDetail /></ProtectedRoute>} />

@@ -82,10 +82,26 @@ test.beforeEach(async ({ page }) => {
   );
 });
 
-test('redirects unauthenticated users to the login page', async ({ page }) => {
-  await page.goto('/');
-  await expect(page).toHaveURL(/\/login\?returnTo=%2F$/);
+test('redirects unauthenticated users away from a protected page', async ({ page }) => {
+  // `/` is no longer the example: it is a public page now, and somebody
+  // arriving from a search result or a shared link needs to be told what this
+  // is before being asked for credentials. The gate itself is unchanged, so it
+  // is asserted on a page that is actually behind it.
+  await page.goto('/calendar');
+  await expect(page).toHaveURL(/\/login\?returnTo=%2Fcalendar$/);
   await expect(page.getByRole('heading', { name: 'Welcome back' })).toBeVisible();
+});
+
+test('shows a stranger what this is instead of a login form', async ({ page }) => {
+  await page.goto('/');
+
+  await expect(page).toHaveURL(/\/$/);
+  await expect(
+    page.getByRole('heading', { name: /keep track of what you watch/i }),
+  ).toBeVisible();
+  await expect(page.getByRole('link', { name: /create a free account/i })).toBeVisible();
+  // The greeting that was here before belongs to somebody who has been before.
+  await expect(page.getByRole('heading', { name: 'Welcome back' })).toHaveCount(0);
 });
 
 test('publishes privacy controls and returns to account deletion after login', async ({ page }) => {
