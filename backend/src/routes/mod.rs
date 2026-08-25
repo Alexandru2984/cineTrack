@@ -55,7 +55,6 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
             .configure(messages::configure)
             .configure(moderation::configure)
             .configure(tracking::configure)
-            .configure(unfurl::configure)
             .configure(history::configure)
             .configure(lists::configure)
             .configure(stats::configure)
@@ -77,6 +76,13 @@ pub fn configure_with_rate_limits(
     // 429s — a poster that never loads. These are top-level `/api/img` and
     // `/api/assets` scopes, matched before the `/api` scope below.
     assets::configure_public_images(cfg, image_rate_limiter);
+
+    // Top level, beside the images and not inside `/api`: these answer the
+    // shared page URLs themselves, and the vhost sends preview crawlers
+    // straight here. Registered in this function specifically — `configure`
+    // above is not the one the server builds itself from, which is how the
+    // first version of this shipped as a 404 nobody's tests could see.
+    unfurl::configure(cfg);
 
     cfg.service(
         web::scope("/api")

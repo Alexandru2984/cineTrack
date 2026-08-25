@@ -12325,6 +12325,29 @@ async fn test_rate_limited_wiring_resolves_every_route_class() {
         );
     }
 
+    // The link-preview routes sit at the top level too, and nginx sends preview
+    // crawlers straight at them. The first version of them was registered in
+    // `configure` — which this function is not — so they shipped as a 404 that
+    // every test and every check passed straight over. A card for a title that
+    // does not exist is still a card, so 200 is the answer either way; what is
+    // asserted is that the request is routed at all.
+    for path in [
+        "/unfurl/media/550",
+        "/unfurl/list/00000000-0000-4000-8000-000000000000",
+        "/unfurl/profile/nobody",
+    ] {
+        let req = actix_test::TestRequest::get()
+            .uri(path)
+            .peer_addr(peer_addr())
+            .to_request();
+        let status = actix_test::call_service(&app, req).await.status();
+        assert_eq!(
+            status.as_u16(),
+            200,
+            "{path} must reach the unfurl handler; a 404 here means it was never registered"
+        );
+    }
+
     pool.close().await;
 }
 
