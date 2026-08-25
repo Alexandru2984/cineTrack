@@ -121,6 +121,13 @@ export const en = {
     'watcher-5000': 'Five thousand episodes',
   },
   encryption: {
+    settingsTitle: 'Message encryption',
+    settingsAbsent:
+      'Set it up here and it is ready before your first conversation. Without it, messages are stored in a form Văzute can read.',
+    settingsReady:
+      'On, and this device holds your key. Messages with people who have also set it up are stored encrypted, and Văzute cannot read them.',
+    settingsLocked:
+      'Your account has keys, but this device does not hold them yet.',
     setupTitle: 'Turn on end-to-end encryption',
     setupBody:
       'Your messages will be encrypted on your device and readable only by you and the person you write to. Văzute will store them without being able to read them.',

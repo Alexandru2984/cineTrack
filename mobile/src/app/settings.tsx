@@ -70,6 +70,7 @@ import {
   useUpdateCalendarPreferences,
 } from '@/hooks/use-calendar';
 import { useReleaseNotifications } from '@/hooks/use-release-notifications';
+import { EncryptionSettingsCard } from '@/components/encryption-settings-card';
 import { useT } from '@/hooks/use-t';
 import { useTheme } from '@/hooks/use-theme';
 import {
@@ -986,6 +987,8 @@ export default function SettingsScreen() {
             )}
           </View>
 
+
+          <EncryptionSettingsCard />
           <View style={[styles.section, { borderBottomColor: theme.border }]}>
             <View style={styles.sectionHeading}>
               <Mail color={theme.info} size={20} />
