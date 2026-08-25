@@ -222,9 +222,19 @@ if [ "$FULL" = true ]; then
 
   TRIVY_IMAGE="aquasec/trivy@sha256:cffe3f5161a47a6823fbd23d985795b3ed72a4c806da4c4df16266c02accdd6f"
   for image in backend frontend; do
-    docker run --rm --volume "$TEMP_DIR:/evidence" "$TRIVY_IMAGE" image \
+    # `.trivyignore` has to be mounted and named. Trivy looks for it in the
+    # working directory, which inside this container is not the repository, so
+    # without both it is never read — and the scan then fails on findings CI
+    # accepts through `trivyignores:` in the workflow.
+    #
+    # That divergence is worse than either behaviour on its own: the gate the
+    # release process tells you to run locally rejects what the gate that
+    # actually blocks the merge allows, and the reasoning recorded next to each
+    # exception is invisible to the person staring at the failure.
+    docker run --rm --volume "$TEMP_DIR:/evidence" \
+      --volume "$ROOT_DIR/.trivyignore:/repo/.trivyignore:ro" "$TRIVY_IMAGE" image \
       --input "/evidence/$image.tar" --scanners vuln --severity HIGH,CRITICAL \
-      --exit-code 1
+      --ignorefile /repo/.trivyignore --exit-code 1
     docker run --rm --volume "$TEMP_DIR:/evidence" "$TRIVY_IMAGE" image \
       --input "/evidence/$image.tar" --scanners vuln --format cyclonedx \
       --output "/evidence/$image.cdx.json"
