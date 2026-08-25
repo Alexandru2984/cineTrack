@@ -80,8 +80,11 @@ export default function Dashboard() {
         </p>
       </div>
 
-      {/* "You're caught up" is true of an empty library and says nothing. */}
-      {hasNothingTracked ? null : <UpNextEpisodes />}
+      {/* Kept even on a first visit. "You're caught up" is thin comfort with an
+          empty library, but hiding it needed the stats summary to refresh in
+          lockstep with the queue — and it does not, so the panel vanished and
+          returned in the middle of marking an episode watched. */}
+      <UpNextEpisodes />
 
       {hasNothingTracked ? <GetStarted /> : null}
 
@@ -137,10 +140,11 @@ export default function Dashboard() {
               trackingByMedia={trackingByMedia}
             />
           )}
-          {/* Recommendations are derived from history, so on a first
-              visit this can only ever be an empty heading. The invitation
-              above stands in its place. */}
-          {hasNothingTracked ? null : (
+          {/* Only when it would be an empty heading. The backend can return
+              unpersonalised recommendations to somebody with no history, and
+              hiding a shelf that has titles in it would be worse than the
+              blank one this replaces. */}
+          {hasNothingTracked && (discovery?.recommendations?.length ?? 0) === 0 ? null : (
           <MediaShelf
             id="recommendations-heading"
             title={discovery?.personalized ? t('dashboard.forYou') : t('dashboard.recommended')}
@@ -176,7 +180,9 @@ export default function Dashboard() {
         </>
       )}
 
-      {hasNothingTracked ? null : (
+      {/* Activity comes from the people followed, not from own history, so an
+          account that tracks nothing can still have a feed worth reading. */}
+      {hasNothingTracked && (activity?.length ?? 0) === 0 ? null : (
       <section aria-labelledby="recent-activity-heading">
         <h2 id="recent-activity-heading" className="mb-4 flex items-center gap-2 text-xl font-bold">
           <Activity className="h-5 w-5 text-[hsl(var(--primary))]" aria-hidden="true" />

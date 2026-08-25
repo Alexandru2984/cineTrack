@@ -18,22 +18,12 @@ import Dashboard from '@/pages/Dashboard';
  */
 const mocks = vi.hoisted(() => ({
   stats: vi.fn(),
+  activity: vi.fn(),
+  discovery: vi.fn(),
 }));
 
 vi.mock('@/hooks/useMedia', () => ({
-  useDiscovery: () => ({
-    data: {
-      recommendations: [],
-      personalized: false,
-      recommendation_basis: [],
-      popular_movies: [{ id: 1, media_type: 'movie', title: 'Something popular' }],
-      popular_shows: [],
-    },
-    isLoading: false,
-    isError: false,
-    isFetching: false,
-    refetch: vi.fn(),
-  }),
+  useDiscovery: () => mocks.discovery(),
 }));
 
 vi.mock('@/hooks/useStats', () => ({
@@ -42,7 +32,7 @@ vi.mock('@/hooks/useStats', () => ({
 }));
 
 vi.mock('@/hooks/useSocial', () => ({
-  useActivityFeed: () => ({ data: [], isLoading: false, isError: false }),
+  useActivityFeed: () => mocks.activity(),
 }));
 
 vi.mock('@/hooks/useTracking', () => ({
@@ -91,6 +81,20 @@ describe('Dashboard on a first visit', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.stats.mockReturnValue({ data: EMPTY });
+    mocks.activity.mockReturnValue({ data: [], isLoading: false, isError: false });
+    mocks.discovery.mockReturnValue({
+      data: {
+        recommendations: [],
+        personalized: false,
+        recommendation_basis: [],
+        popular_movies: [{ id: 1, media_type: 'movie', title: 'Something popular' }],
+        popular_shows: [],
+      },
+      isLoading: false,
+      isError: false,
+      isFetching: false,
+      refetch: vi.fn(),
+    });
   });
 
   it('asks for the first title instead of reporting zero', () => {
@@ -111,9 +115,7 @@ describe('Dashboard on a first visit', () => {
   it('drops the sections that can only report nothing', () => {
     renderDashboard();
 
-    // "You're caught up" is true of an empty library and means nothing.
-    expect(screen.queryByText('Up Next fixture')).not.toBeInTheDocument();
-    // Recommendations are derived from history, so this is an empty heading.
+    // Recommendations with nothing in them are an empty heading.
     expect(screen.queryByRole('heading', { name: /^recommended$/i })).not.toBeInTheDocument();
     expect(screen.queryByText('Activity fixture')).not.toBeInTheDocument();
     expect(screen.queryByText('Heatmap fixture')).not.toBeInTheDocument();
@@ -135,10 +137,54 @@ describe('Dashboard on a first visit', () => {
     renderDashboard();
 
     expect(screen.queryByRole('heading', { name: /add something you have watched/i })).not.toBeInTheDocument();
-    expect(screen.getByText('Up Next fixture')).toBeInTheDocument();
     expect(screen.getByText('Heatmap fixture')).toBeInTheDocument();
     expect(screen.getByText(/hours watched/i)).toBeInTheDocument();
     expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(/welcome back/i);
+  });
+
+  it('keeps the activity feed for someone who follows people but tracks nothing', () => {
+    // Activity comes from the people followed, not from own history. CI caught
+    // this: the first version of this change keyed every section off the stats
+    // summary and hid a feed that had something in it.
+    mocks.activity.mockReturnValue({
+      data: [{ id: 'a1', username: 'followed_user' }],
+      isLoading: false,
+      isError: false,
+    });
+    renderDashboard();
+
+    expect(screen.getByText('Activity fixture')).toBeInTheDocument();
+  });
+
+  it('keeps the queue, whose reassurance is the one thing worth saying here', () => {
+    // Hiding it needed the stats summary to refresh in lockstep with the
+    // queue. It does not, so the panel vanished and came back in the middle of
+    // marking an episode watched. CI caught that.
+    renderDashboard();
+
+    expect(screen.getByText('Up Next fixture')).toBeInTheDocument();
+  });
+
+  it('keeps recommendations that actually have titles in them', () => {
+    // The backend can return unpersonalised recommendations to somebody with
+    // no history. Hiding a shelf with titles in it is worse than the blank
+    // heading this replaces.
+    mocks.discovery.mockReturnValue({
+      data: {
+        recommendations: [{ id: 7, media_type: 'movie', title: 'Recommended anyway' }],
+        personalized: false,
+        recommendation_basis: [],
+        popular_movies: [],
+        popular_shows: [],
+      },
+      isLoading: false,
+      isError: false,
+      isFetching: false,
+      refetch: vi.fn(),
+    });
+    renderDashboard();
+
+    expect(screen.getByText('Recommended anyway')).toBeInTheDocument();
   });
 
   it('shows the normal page while the statistics are still loading', () => {
@@ -148,6 +194,6 @@ describe('Dashboard on a first visit', () => {
     renderDashboard();
 
     expect(screen.queryByRole('heading', { name: /add something you have watched/i })).not.toBeInTheDocument();
-    expect(screen.getByText('Up Next fixture')).toBeInTheDocument();
+    expect(screen.getByText('Heatmap fixture')).toBeInTheDocument();
   });
 });
