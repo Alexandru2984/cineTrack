@@ -312,6 +312,13 @@ export const ro: Dictionary = {
     unavailable:
       'Acest browser nu poate stoca chei de criptare, deci mesajele criptate nu sunt disponibile aici. De obicei o fereastră privată cauzează asta.',
     failed: 'Criptarea nu a putut fi activată',
+    settingsTitle: 'Criptarea mesajelor',
+    settingsAbsent:
+      'Activeaz-o aici și e gata înainte de prima conversație. Fără ea, mesajele sunt stocate într-o formă pe care Văzute o poate citi.',
+    settingsReady:
+      'Activă, iar acest dispozitiv îți deține cheia. Mesajele cu cei care au activat-o și ei sunt stocate criptat, iar Văzute nu le poate citi.',
+    settingsLocked:
+      'Contul tău are chei, dar acest dispozitiv nu le deține încă.',
     safetyNumber: 'Număr de siguranță',
     safetyNumberHint:
       'Compară-l cu cealaltă persoană pe alt canal. Numere identice înseamnă că nimeni nu stă între voi.',

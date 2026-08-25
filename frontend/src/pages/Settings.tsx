@@ -54,6 +54,7 @@ import { BlockedUsersCard } from '@/components/BlockedUsersCard';
 import { LanguageCard } from '@/components/LanguageCard';
 import { Switch } from '@/components/Switch';
 import { useAuthStore } from '@/store/auth';
+import { EncryptionSettingsCard } from '@/components/EncryptionSettingsCard';
 import { useT } from '@/hooks/useT';
 import { useModeratorStatus } from '@/hooks/useCommunitySafety';
 
@@ -1220,6 +1221,7 @@ export default function SettingsPage() {
       <ChangeEmailCard />
       <ChangePasswordCard />
       <TwoFactorCard />
+      <EncryptionSettingsCard />
       <SessionsCard />
       <SecurityActivityCard />
       <SignOutCard />
