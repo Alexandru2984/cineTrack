@@ -68,7 +68,19 @@ jobs:
 
   integration:
     name: Backend Integration
-    timeout-minutes: 25
+    # Enough headroom for a bad runner, not for a hang.
+    #
+    # This job normally finishes in under nine minutes. Twice it was killed at
+    # exactly 25 while the tests themselves passed, and the PostgreSQL log says
+    # why: checkpoints taking 78 and 269 seconds, where a healthy machine takes
+    # under one. Roughly forty-seven buffers a second is a sick disk, not slow
+    # code, and no amount of tuning here changes it.
+    #
+    # A limit set to the typical run reports a green build as a failure whenever
+    # the shared infrastructure has a bad day, which teaches people to re-run
+    # rather than read. Set against the worst case instead; a genuine hang still
+    # ends, just later.
+    timeout-minutes: 45
     runs-on: ubuntu-latest
     defaults:
       run:
