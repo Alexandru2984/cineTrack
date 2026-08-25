@@ -10,7 +10,8 @@ import { useTrackingLookupBatch } from '@/hooks/useTracking';
 import type { TmdbSearchResult, TrackingStatus } from '@/types';
 import CalendarHeatmap from 'react-calendar-heatmap';
 import 'react-calendar-heatmap/dist/styles.css';
-import { Activity, Clock, Film, Flame, RefreshCw, Sparkles, Tv } from 'lucide-react';
+import { Link } from 'react-router';
+import { Activity, Clock, Film, Flame, RefreshCw, Search, Sparkles, Tv } from 'lucide-react';
 
 export default function Dashboard() {
   const t = useT();
@@ -49,22 +50,46 @@ export default function Dashboard() {
   const today = new Date();
   const startDate = new Date(today.getFullYear(), 0, 1);
 
+  /** Nothing tracked at all — not a slow start, a first visit.
+   *
+   *  Five of the six accounts that ever signed up here without being mine have
+   *  never marked anything watched. What this page showed them was a greeting
+   *  saying "welcome back", four counters reading zero, three empty sections,
+   *  and a full year of blank squares — and nowhere any suggestion of what to
+   *  do. The rows of posters below were the only way in, and nothing said so.
+   *
+   *  So when there is nothing to summarise, this stops pretending to summarise
+   *  and asks for the first title instead. */
+  const hasNothingTracked =
+    stats !== undefined &&
+    stats.total_movies === 0 &&
+    stats.total_shows === 0 &&
+    stats.total_episodes === 0;
+
   return (
     <div className="mx-auto max-w-7xl space-y-7 px-4 py-6 sm:space-y-8 sm:py-8">
       <div>
         <h1 className="text-2xl font-bold sm:text-3xl">
-          {t('dashboard.welcome')}
+          {hasNothingTracked ? t('dashboard.welcomeFirst') : t('dashboard.welcome')}
           <span className="mt-1 block max-w-full truncate text-[hsl(var(--primary))] sm:mt-0 sm:inline sm:whitespace-normal sm:break-all">
             {' '}{user?.username}!
           </span>
         </h1>
-        <p className="text-[hsl(var(--muted-foreground))] mt-1">{t('dashboard.overview')}</p>
+        <p className="text-[hsl(var(--muted-foreground))] mt-1">
+          {hasNothingTracked ? t('dashboard.overviewFirst') : t('dashboard.overview')}
+        </p>
       </div>
 
+      {/* Kept even on a first visit. "You're caught up" is thin comfort with an
+          empty library, but hiding it needed the stats summary to refresh in
+          lockstep with the queue — and it does not, so the panel vanished and
+          returned in the middle of marking an episode watched. */}
       <UpNextEpisodes />
 
+      {hasNothingTracked ? <GetStarted /> : null}
+
       {/* Stats cards */}
-      {stats && (
+      {stats && !hasNothingTracked && (
         <div className="grid grid-cols-2 gap-2 sm:gap-4 md:grid-cols-4">
           <StatCard icon={<Film className="h-5 w-5" />} label={t('dashboard.movies')} value={stats.total_movies} />
           <StatCard icon={<Tv className="h-5 w-5" />} label={t('dashboard.shows')} value={stats.total_shows} />
@@ -115,6 +140,11 @@ export default function Dashboard() {
               trackingByMedia={trackingByMedia}
             />
           )}
+          {/* Only when it would be an empty heading. The backend can return
+              unpersonalised recommendations to somebody with no history, and
+              hiding a shelf that has titles in it would be worse than the
+              blank one this replaces. */}
+          {hasNothingTracked && (discovery?.recommendations?.length ?? 0) === 0 ? null : (
           <MediaShelf
             id="recommendations-heading"
             title={discovery?.personalized ? t('dashboard.forYou') : t('dashboard.recommended')}
@@ -130,6 +160,7 @@ export default function Dashboard() {
             showQuickAdd
             trackingByMedia={trackingByMedia}
           />
+          )}
           <MediaShelf
             id="popular-movies-heading"
             title={t('dashboard.popularMovies')}
@@ -149,6 +180,9 @@ export default function Dashboard() {
         </>
       )}
 
+      {/* Activity comes from the people followed, not from own history, so an
+          account that tracks nothing can still have a feed worth reading. */}
+      {hasNothingTracked && (activity?.length ?? 0) === 0 ? null : (
       <section aria-labelledby="recent-activity-heading">
         <h2 id="recent-activity-heading" className="mb-4 flex items-center gap-2 text-xl font-bold">
           <Activity className="h-5 w-5 text-[hsl(var(--primary))]" aria-hidden="true" />
@@ -160,7 +194,9 @@ export default function Dashboard() {
           isError={activityError}
         />
       </section>
+      )}
 
+      {hasNothingTracked ? null : (
       <div className="rounded-lg border border-[hsl(var(--border))] p-6 bg-[hsl(var(--card))]">
         <h2 className="text-lg font-semibold mb-4">{t('dashboard.watchActivity')}</h2>
         <div className="overflow-x-auto">
@@ -183,7 +219,36 @@ export default function Dashboard() {
           />
         </div>
       </div>
+      )}
     </div>
+  );
+}
+
+/** The one thing a first visit needs: what to do, and where. */
+function GetStarted() {
+  const t = useT();
+  return (
+    <section className="rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-6">
+      <h2 className="flex items-center gap-2 text-lg font-semibold">
+        <Sparkles className="h-5 w-5 text-[hsl(var(--primary))]" aria-hidden="true" />
+        {t('dashboard.startTitle')}
+      </h2>
+      <p className="mt-2 max-w-prose text-sm text-[hsl(var(--muted-foreground))]">
+        {t('dashboard.startBody')}
+      </p>
+      <div className="mt-4 flex flex-wrap items-center gap-3">
+        <Link
+          to="/search"
+          className="inline-flex items-center gap-2 rounded-lg bg-[hsl(var(--primary))] px-4 py-2 text-sm font-medium text-[hsl(var(--primary-foreground))] transition-opacity hover:opacity-90"
+        >
+          <Search className="h-4 w-4" aria-hidden="true" />
+          {t('dashboard.startAction')}
+        </Link>
+        <span className="text-sm text-[hsl(var(--muted-foreground))]">
+          {t('dashboard.startBrowse')}
+        </span>
+      </div>
+    </section>
   );
 }
 

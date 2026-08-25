@@ -110,6 +110,13 @@ export const ro: Dictionary = {
   },
   dashboard: {
     welcome: 'Bine ai revenit,',
+    welcomeFirst: 'Bine ai venit,',
+    overviewFirst: 'Încă nu ai nimic urmărit — se completează pe măsură ce adaugi.',
+    startTitle: 'Adaugă ceva ce ai văzut',
+    startBody:
+      'Caută un film sau un serial și marchează-l ca văzut. Calendarul, statisticile și recomandările se construiesc din asta.',
+    startAction: 'Caută un titlu',
+    startBrowse: 'Sau alege ceva de mai jos.',
     overview: 'Iată privirea de ansamblu asupra vizionărilor tale',
     movies: 'Filme',
     shows: 'Seriale',

@@ -108,6 +108,13 @@ export const en = {
   },
   dashboard: {
     welcome: 'Welcome back,',
+    welcomeFirst: 'Welcome,',
+    overviewFirst: 'Nothing tracked yet — this fills in as you go.',
+    startTitle: 'Add something you have watched',
+    startBody:
+      'Search for a film or a series and mark it watched. Your calendar, statistics and recommendations are all built from that.',
+    startAction: 'Search for a title',
+    startBrowse: 'Or pick something from below.',
     overview: "Here's your watching overview",
     movies: 'Movies',
     shows: 'Shows',
