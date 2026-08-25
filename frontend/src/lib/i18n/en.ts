@@ -884,6 +884,27 @@ export const en = {
     deleteError: 'Could not delete account',
     permanentlyDelete: 'Permanently delete',
   },
+  landing: {
+    tagline: 'Keep track of what you watch.',
+    lede:
+      'A calendar that knows when the next episode lands, a library that remembers where you stopped, and statistics built from what you actually watched. No adverts, no feed, no algorithm deciding what you see.',
+    startAction: 'Create a free account',
+    signInAction: 'I already have an account',
+    featureCalendarTitle: 'A calendar that gets the date right',
+    featureCalendarBody:
+      'Release times are worked out in your own timezone, so an episode that airs Sunday night in the United States does not show up a day early where you are.',
+    featureLibraryTitle: 'Your library, not a feed',
+    featureLibraryBody:
+      'Mark a film watched, follow a series episode by episode, and pick up exactly where you left off. Lists are yours to build and share, or keep private.',
+    featureStatsTitle: 'Statistics from your own history',
+    featureStatsBody:
+      'Hours watched, streaks, genres and a year in review — all counted from what you logged, and recomputed if you change it.',
+    featurePrivacyTitle: 'Private by default',
+    featurePrivacyBody:
+      'Your profile is private unless you make it public. Direct messages can be end-to-end encrypted, and the service stores them without being able to read them.',
+    languageNote: 'Available in Romanian and English.',
+    openSourceNote: 'Independent and ad-free.',
+  },
   about: {
     title: 'About Văzute',
     dataSources: 'Data sources',

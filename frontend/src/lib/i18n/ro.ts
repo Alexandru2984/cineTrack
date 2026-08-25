@@ -887,6 +887,27 @@ export const ro: Dictionary = {
     deleteError: 'Contul nu a putut fi șters',
     permanentlyDelete: 'Șterge permanent',
   },
+  landing: {
+    tagline: 'Ține minte ce ai văzut.',
+    lede:
+      'Un calendar care știe când apare episodul următor, o bibliotecă ce reține unde ai rămas și statistici construite din ce ai văzut cu adevărat. Fără reclame, fără flux, fără algoritm care să decidă ce vezi.',
+    startAction: 'Creează un cont gratuit',
+    signInAction: 'Am deja cont',
+    featureCalendarTitle: 'Un calendar care nimerește data',
+    featureCalendarBody:
+      'Orele de lansare sunt calculate în fusul tău orar, așa că un episod care apare duminică seara în Statele Unite nu îți apare cu o zi mai devreme.',
+    featureLibraryTitle: 'Biblioteca ta, nu un flux',
+    featureLibraryBody:
+      'Marchează un film ca văzut, urmărește un serial episod cu episod și reia exact de unde ai rămas. Listele sunt ale tale — le construiești și le împarți sau le ții private.',
+    featureStatsTitle: 'Statistici din propriul istoric',
+    featureStatsBody:
+      'Ore vizionate, serii, genuri și o retrospectivă anuală — toate numărate din ce ai marcat, și recalculate dacă modifici ceva.',
+    featurePrivacyTitle: 'Privat din start',
+    featurePrivacyBody:
+      'Profilul tău e privat până îl faci public. Mesajele directe pot fi criptate cap-coadă, iar serviciul le stochează fără să le poată citi.',
+    languageNote: 'Disponibil în română și engleză.',
+    openSourceNote: 'Independent și fără reclame.',
+  },
   about: {
     title: 'Despre Văzute',
     dataSources: 'Surse de date',
