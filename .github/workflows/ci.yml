@@ -248,7 +248,22 @@ jobs:
       # A check that reports on the world rather than on your change does not
       # belong on the path that blocks your change. It runs on a schedule
       # instead — see `mobile-dependency-drift.yml`.
+      # Every check except the dependency-version one, which asks npm what Expo
+      # published most recently and therefore answers differently on identical
+      # code. It turned red here on a backend-only branch whose diff touched
+      # nothing under mobile/, an hour after passing on another branch with the
+      # same lockfile.
+      #
+      # That answer already has a home: `mobile-dependency-drift.yml` runs
+      # `expo install --check` on a schedule, and its header says why it was
+      # moved off the pull-request path — "it failed two unrelated branches on
+      # two consecutive days". The move was left half done, because `expo-doctor`
+      # runs the same check inside itself. This finishes it.
+      #
+      # The other nineteen checks still run and still block.
       - name: Validate Expo project
+        env:
+          EXPO_DOCTOR_SKIP_DEPENDENCY_VERSION_CHECK: "1"
         run: npm run doctor
 
       - name: Audit high and critical vulnerabilities
