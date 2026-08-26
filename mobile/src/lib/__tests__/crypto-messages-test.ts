@@ -1,4 +1,4 @@
-import { generateIdentity, toHex } from '@/lib/crypto/core';
+import { fingerprint, generateIdentity, toHex } from '@/lib/crypto/core';
 import {
   clearDecryptionCache,
   readConversationPreview,
@@ -27,7 +27,11 @@ function peerFrom(identity: ReturnType<typeof generateIdentity>): PeerPublicKeys
     username: 'peer',
     exchange_public_key: toHex(identity.exchangePublicKey),
     signing_public_key: toHex(identity.signingPublicKey),
-    key_fingerprint: 'f'.repeat(64),
+    // Computed from the keys beside it rather than a row of 'f's. A directory
+    // entry whose stated fingerprint does not match its own keys is one the
+    // client now refuses to encrypt to, so a placeholder here would be a
+    // fixture describing a state that cannot exist.
+    key_fingerprint: fingerprint(identity.exchangePublicKey, identity.signingPublicKey),
     generation: 1,
     updated_at: new Date().toISOString(),
   };
