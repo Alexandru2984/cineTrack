@@ -1,8 +1,9 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { fingerprint, generateIdentity, toHex } from '@/lib/crypto/core';
 import MessagesPage from '@/pages/Messages';
 
 const mocks = vi.hoisted(() => ({
@@ -72,14 +73,25 @@ vi.mock('@/store/locale', () => ({
 // Mocked alongside the message hooks so this test stays about rendering a
 // thread rather than about query wiring; the encryption paths have their own
 // tests.
+// The directory entry this page is given. `peerKeysData` is reassigned per test
+// so one case can serve a substituted key while leaving the *stated*
+// fingerprint alone — which is the attack the safety number has to survive.
+let peerKeysData: {
+  exchange_public_key: string;
+  signing_public_key: string;
+  key_fingerprint: string;
+} | null = null;
+
 vi.mock('@/hooks/useEncryption', () => ({
-  usePeerKeys: () => ({ data: null }),
+  usePeerKeys: () => ({ data: peerKeysData }),
 }));
+
+let ownFingerprint: string | null = null;
 
 vi.mock('@/store/encryption', () => ({
   useEncryptionStore: (
-    selector: (state: { identity: null; fingerprint: null; status: 'absent' }) => unknown,
-  ) => selector({ identity: null, fingerprint: null, status: 'absent' }),
+    selector: (state: { identity: null; fingerprint: string | null; status: 'absent' }) => unknown,
+  ) => selector({ identity: null, fingerprint: ownFingerprint, status: 'absent' }),
 }));
 
 // Rendered whenever this device has no key. Stubbed so the setup form's own
@@ -110,7 +122,58 @@ function renderMessages() {
 }
 
 describe('Messages page', () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    peerKeysData = null;
+    ownFingerprint = null;
+  });
+
+  /** The safety number the page actually renders, read out of the panel.
+   *
+   *  Opened through the button because the number is hidden until asked for. */
+  async function readSafetyNumber() {
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Safety number' }));
+    const panel = await screen.findByText(/^[0-9a-f]{4}( [0-9a-f]{4}){9}$/);
+    return panel.textContent ?? '';
+  }
+
+  it('derives the safety number from the peer key, not from the fingerprint it is handed', async () => {
+    // The attack, end to end, at the only place it was ever visible.
+    //
+    // A server that wants to read Alice's mail serves Bob's directory entry
+    // with the attacker's exchange key — so `sealMessage` encrypts to the
+    // attacker — while leaving the *stated* `key_fingerprint` at Bob's old
+    // value. The page used to render that stated value, so the number Alice
+    // read aloud to Bob over the phone had not changed, and the comparison the
+    // whole feature exists for silently agreed with the attacker.
+    const bob = generateIdentity();
+    const attacker = generateIdentity();
+    const bobsStatedFingerprint = fingerprint(bob.exchangePublicKey, bob.signingPublicKey);
+
+    ownFingerprint = 'a'.repeat(64);
+
+    peerKeysData = {
+      exchange_public_key: toHex(bob.exchangePublicKey),
+      signing_public_key: toHex(bob.signingPublicKey),
+      key_fingerprint: bobsStatedFingerprint,
+    };
+    renderMessages();
+    const honest = await readSafetyNumber();
+
+    cleanup();
+
+    peerKeysData = {
+      // Substituted key, untouched stated fingerprint.
+      exchange_public_key: toHex(attacker.exchangePublicKey),
+      signing_public_key: toHex(bob.signingPublicKey),
+      key_fingerprint: bobsStatedFingerprint,
+    };
+    renderMessages();
+    const substituted = await readSafetyNumber();
+
+    expect(substituted).not.toBe(honest);
+  });
 
   it('renders message bodies as text, marks incoming messages read, and reports them', async () => {
     const user = userEvent.setup();

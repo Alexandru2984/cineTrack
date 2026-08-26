@@ -32,7 +32,7 @@ import { messagePath, safePostAuthRedirect } from '@/lib/deep-links';
 import { readMessage, type MessageContent } from '@/lib/crypto/messages';
 import { formatDateTime } from '@/lib/format';
 import { getErrorMessage } from '@/lib/http';
-import { safetyNumber, toHex } from '@/lib/crypto/core';
+import { peerFingerprint, safetyNumber, toHex } from '@/lib/crypto/core';
 import { useEncryptionStore } from '@/store/encryption';
 import {
   clampMessageBody,
@@ -75,9 +75,23 @@ export default function MessageThreadScreen() {
   // until then, and offering the check would imply a protection not in place.
   const ownFingerprint = useEncryptionStore((state) => state.fingerprint);
   const peerKeys = usePeerKeys(username, Boolean(username));
+  // Derived here from the keys this device was handed, never read from
+  // `key_fingerprint`. The directory states a fingerprint too, and rendering
+  // that was the flaw: messages are sealed to `exchange_public_key`, so a
+  // server serving an attacker's exchange key beside the victim's old
+  // fingerprint produced a safety number that had not changed and mail it could
+  // read. A number that does not follow the key in use is not worth comparing.
+  const peerFingerprintValue = useMemo(() => {
+    if (!peerKeys.data) return null;
+    try {
+      return peerFingerprint(peerKeys.data.exchange_public_key, peerKeys.data.signing_public_key);
+    } catch {
+      return null;
+    }
+  }, [peerKeys.data]);
   const safetyNumberValue =
-    ownFingerprint && peerKeys.data
-      ? safetyNumber(ownFingerprint, peerKeys.data.key_fingerprint)
+    ownFingerprint && peerFingerprintValue
+      ? safetyNumber(ownFingerprint, peerFingerprintValue)
       : null;
 
   /** The evidence a report needs, for a message only this device can read.

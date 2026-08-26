@@ -18,8 +18,20 @@
  *
  * Every message gets a fresh X25519 key pair. The shared secret is derived
  * against the recipient's long-term exchange key, run through HKDF, and used
- * once for AES-256-GCM. The ephemeral public key travels with the message, so a
- * long-term key compromised later does not open what was already sent.
+ * once for AES-256-GCM. The ephemeral public key travels with the message.
+ *
+ * What that does and does not buy, stated plainly, because this comment used to
+ * claim the opposite of the truth: the sender's long-term key is not part of the
+ * agreement at all, so compromising it later opens nothing. The *recipient's*
+ * long-term exchange key is, and the sender's ephemeral public key is stored
+ * next to the ciphertext — so anyone who later obtains that private key can
+ * recompute the shared secret for every message ever sent to it. The same holds
+ * for the sender's own history through `senderCopy`.
+ *
+ * This is therefore not forward secrecy. It protects against a passive copy of
+ * the database, which is the threat it was built for. Forward secrecy needs
+ * prekeys and a ratchet, and saying otherwise in a comment misleads whoever
+ * reads it next into trusting a property that is not here.
  *
  * The plaintext is encrypted together with a per-message franking key. That key
  * therefore reaches the recipient and nobody else — which is what lets them
@@ -131,11 +143,18 @@ export function toHex(bytes: Uint8Array): string {
 
 export function fromHex(value: string): Uint8Array {
   if (value.length % 2 !== 0) throw new Error('hex string has an odd length');
+  // Checked up front, not per pair. `Number.parseInt` stops at the first
+  // character it cannot read and returns what it had, so `parseInt('1z', 16)`
+  // is 1 rather than NaN: the old per-pair NaN check only caught a bad *first*
+  // character and accepted `1z` as the byte 0x01. Keys and commitments arrive
+  // through this function, and silently reading a corrupted one as a valid
+  // shorter value is the worst available outcome.
+  if (!/^[0-9a-fA-F]*$/.test(value)) {
+    throw new Error('hex string contains a non-hex character');
+  }
   const bytes = new Uint8Array(value.length / 2);
   for (let index = 0; index < bytes.length; index += 1) {
-    const byte = Number.parseInt(value.slice(index * 2, index * 2 + 2), 16);
-    if (Number.isNaN(byte)) throw new Error('hex string contains a non-hex character');
-    bytes[index] = byte;
+    bytes[index] = Number.parseInt(value.slice(index * 2, index * 2 + 2), 16);
   }
   return bytes;
 }
@@ -184,6 +203,42 @@ export function fingerprint(exchangePublicKey: Uint8Array, signingPublicKey: Uin
   return toHex(
     hkdf(sha256, concat(exchangePublicKey, signingPublicKey), undefined, INFO_FINGERPRINT, 32),
   );
+}
+
+/** A peer's fingerprint, computed here from the keys we were handed.
+ *
+ *  The directory also *states* a fingerprint for every peer, and reading that
+ *  number back to the user was the whole flaw: a message is encrypted to
+ *  `exchange_public_key`, while the safety number was rendered from
+ *  `key_fingerprint`, and nothing tied the two together. A server that serves
+ *  an attacker's exchange key alongside the victim's old fingerprint gets a
+ *  safety number that has not changed and mail it can read. The comparison two
+ *  people make out loud is only worth making if the number they compare is
+ *  derived from the key their messages are actually sealed to.
+ *
+ *  So the stated fingerprint is never displayed and never trusted. It is only
+ *  worth checking as a consistency signal — see `assertPeerFingerprint`. */
+export function peerFingerprint(exchangePublicKeyHex: string, signingPublicKeyHex: string): string {
+  return fingerprint(fromHex(exchangePublicKeyHex), fromHex(signingPublicKeyHex));
+}
+
+/** Refuse a directory entry that does not agree with itself.
+ *
+ *  This does not detect a competent substitution — an attacker who swaps the
+ *  key will swap the fingerprint with it, and only the out-of-band comparison
+ *  catches that. What it does catch is a mismatched pair, which is either a
+ *  broken directory or a careless one, and encrypting to a key whose own
+ *  advertised identity does not match is never the right thing to do quietly. */
+export function assertPeerFingerprint(
+  exchangePublicKeyHex: string,
+  signingPublicKeyHex: string,
+  statedFingerprint: string,
+): string {
+  const computed = peerFingerprint(exchangePublicKeyHex, signingPublicKeyHex);
+  if (statedFingerprint && computed !== statedFingerprint.toLowerCase()) {
+    throw new Error('peer key does not match the fingerprint published with it');
+  }
+  return computed;
 }
 
 /** The number two people compare out loud to check nobody is between them.

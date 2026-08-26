@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  assertPeerFingerprint,
   DEFAULT_KDF_COST,
   decryptMessage,
   deriveWrappingKey,
@@ -10,6 +11,7 @@ import {
   fromHex,
   generateIdentity,
   generateRecoveryCode,
+  peerFingerprint,
   safetyNumber,
   toHex,
   unwrapIdentity,
@@ -51,6 +53,62 @@ describe('message encryption', () => {
     const impostor = generateIdentity();
     const impostorPrint = fingerprint(impostor.exchangePublicKey, impostor.signingPublicKey);
     expect(safetyNumber(alicePrint, impostorPrint)).not.toBe(safetyNumber(alicePrint, bobPrint));
+  });
+
+  it('reads the peer fingerprint off the key, not off what it was told', () => {
+    // The attack this closes, concretely. A server that wants to read Alice's
+    // mail to Bob serves Bob's directory entry with the *attacker's* exchange
+    // key, so messages are sealed to the attacker, and leaves the stated
+    // `key_fingerprint` at Bob's old value so the safety number Alice reads out
+    // has not changed. Believing the stated number makes the comparison
+    // theatre; computing it from the keys in hand makes it work.
+    const bob = generateIdentity();
+    const attacker = generateIdentity();
+    const bobsRealPrint = fingerprint(bob.exchangePublicKey, bob.signingPublicKey);
+
+    const substituted = peerFingerprint(
+      toHex(attacker.exchangePublicKey),
+      toHex(bob.signingPublicKey),
+    );
+
+    expect(substituted).not.toBe(bobsRealPrint);
+    // And the honest entry still computes to exactly what Bob would publish.
+    expect(peerFingerprint(toHex(bob.exchangePublicKey), toHex(bob.signingPublicKey))).toBe(
+      bobsRealPrint,
+    );
+  });
+
+  it('refuses a directory entry whose key and fingerprint disagree', () => {
+    const bob = generateIdentity();
+    const attacker = generateIdentity();
+    const bobsRealPrint = fingerprint(bob.exchangePublicKey, bob.signingPublicKey);
+
+    expect(() =>
+      assertPeerFingerprint(
+        toHex(attacker.exchangePublicKey),
+        toHex(bob.signingPublicKey),
+        bobsRealPrint,
+      ),
+    ).toThrow(/fingerprint/i);
+
+    expect(
+      assertPeerFingerprint(
+        toHex(bob.exchangePublicKey),
+        toHex(bob.signingPublicKey),
+        bobsRealPrint,
+      ),
+    ).toBe(bobsRealPrint);
+  });
+
+  it('rejects a hex pair it can only partly read', () => {
+    // `Number.parseInt('1z', 16)` is 1, not NaN, so the old per-pair NaN check
+    // accepted a corrupted key as a valid shorter one. Keys, commitments and
+    // nonces all arrive through fromHex.
+    expect(() => fromHex('1z')).toThrow(/non-hex/i);
+    expect(() => fromHex('ff1z')).toThrow(/non-hex/i);
+    expect(() => fromHex('zz')).toThrow(/non-hex/i);
+    expect(() => fromHex('abc')).toThrow(/odd length/i);
+    expect(Array.from(fromHex('00ff10'))).toEqual([0, 255, 16]);
   });
 
   it('lets the sender read their own message', () => {

@@ -25,7 +25,7 @@ import { usePeerKeys } from '@/hooks/useEncryption';
 import { usePageTitle } from '@/hooks/usePageTitle';
 import { useT } from '@/hooks/useT';
 import { getApiErrorMessage } from '@/lib/api';
-import { safetyNumber, toHex } from '@/lib/crypto/core';
+import { peerFingerprint, safetyNumber, toHex } from '@/lib/crypto/core';
 import {
   readConversationPreview,
   readMessage,
@@ -302,9 +302,23 @@ function MessagesContent({ username }: { username: string }) {
   // not in place.
   const ownFingerprint = useEncryptionStore((state) => state.fingerprint);
   const peerKeys = usePeerKeys(username, Boolean(username));
+  // Derived here from the keys this device was handed, never read from
+  // `key_fingerprint`. The directory states a fingerprint too, and rendering
+  // that was the flaw: messages are sealed to `exchange_public_key`, so a
+  // server serving an attacker's exchange key beside the victim's old
+  // fingerprint produced a safety number that had not changed and mail it could
+  // read. A number that does not follow the key in use is not worth comparing.
+  const peerFingerprintValue = useMemo(() => {
+    if (!peerKeys.data) return null;
+    try {
+      return peerFingerprint(peerKeys.data.exchange_public_key, peerKeys.data.signing_public_key);
+    } catch {
+      return null;
+    }
+  }, [peerKeys.data]);
   const safetyNumberValue =
-    ownFingerprint && peerKeys.data
-      ? safetyNumber(ownFingerprint, peerKeys.data.key_fingerprint)
+    ownFingerprint && peerFingerprintValue
+      ? safetyNumber(ownFingerprint, peerFingerprintValue)
       : null;
 
   // True when anything in this thread arrived encrypted. Derived from the
