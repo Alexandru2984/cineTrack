@@ -34,7 +34,9 @@ CONTAINER="cinetrack-unfurl-routing-$$"
 STUBS_PID=""
 cleanup() {
   docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
-  [[ -n "$STUBS_PID" ]] && kill "$STUBS_PID" 2>/dev/null || true
+  if [[ -n "$STUBS_PID" ]]; then
+    kill "$STUBS_PID" 2>/dev/null || true
+  fi
   rm -rf "$WORK_DIR"
 }
 trap cleanup EXIT
