@@ -24,11 +24,24 @@ use uuid::Uuid;
 use crate::errors::AppError;
 
 pub fn configure(cfg: &mut web::ServiceConfig) {
+    // HEAD as well as GET. Some preview services ask for the headers first, to
+    // see the content type and size before spending a body fetch. Registering
+    // only GET answered those with 404 — and because the vhost sends a crawler
+    // here and a reader to the application, `HEAD /media/550` returned 404 to a
+    // crawler and 200 to a browser, on the same URL. A previewer that checks
+    // before it fetches would give up at that point, which is the whole feature
+    // failing for exactly the clients it exists to serve.
+    //
+    // Actix drops the body from a HEAD response itself, so the same handler is
+    // correct for both.
     cfg.service(
         web::scope("/unfurl")
             .route("/list/{id}", web::get().to(list_card))
+            .route("/list/{id}", web::head().to(list_card))
             .route("/media/{tmdb_id}", web::get().to(media_card))
-            .route("/profile/{username}", web::get().to(profile_card)),
+            .route("/media/{tmdb_id}", web::head().to(media_card))
+            .route("/profile/{username}", web::get().to(profile_card))
+            .route("/profile/{username}", web::head().to(profile_card)),
     );
 }
 

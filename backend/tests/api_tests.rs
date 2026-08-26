@@ -12331,21 +12331,32 @@ async fn test_rate_limited_wiring_resolves_every_route_class() {
     // every test and every check passed straight over. A card for a title that
     // does not exist is still a card, so 200 is the answer either way; what is
     // asserted is that the request is routed at all.
+    //
+    // HEAD is asserted alongside GET because some preview services ask for the
+    // headers before spending a body fetch. With only GET registered, and the
+    // vhost routing a crawler here while a reader goes to the application, the
+    // same URL answered a crawler 404 and a browser 200 — so a previewer that
+    // checks first would abandon the preview.
     for path in [
         "/unfurl/media/550",
         "/unfurl/list/00000000-0000-4000-8000-000000000000",
         "/unfurl/profile/nobody",
     ] {
-        let req = actix_test::TestRequest::get()
-            .uri(path)
-            .peer_addr(peer_addr())
-            .to_request();
-        let status = actix_test::call_service(&app, req).await.status();
-        assert_eq!(
-            status.as_u16(),
-            200,
-            "{path} must reach the unfurl handler; a 404 here means it was never registered"
-        );
+        for method in ["GET", "HEAD"] {
+            let builder = if method == "GET" {
+                actix_test::TestRequest::get()
+            } else {
+                actix_test::TestRequest::default().method(actix_web::http::Method::HEAD)
+            };
+            let req = builder.uri(path).peer_addr(peer_addr()).to_request();
+            let status = actix_test::call_service(&app, req).await.status();
+            assert_eq!(
+                status.as_u16(),
+                200,
+                "{method} {path} must reach the unfurl handler; a 404 here means \
+                 it was never registered for this method"
+            );
+        }
     }
 
     pool.close().await;

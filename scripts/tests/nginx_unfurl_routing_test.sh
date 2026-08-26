@@ -70,6 +70,14 @@ def handler(name):
             self.end_headers()
             self.wfile.write(body)
 
+        # A real backend answers HEAD for these routes; the stub must too, or
+        # the HEAD checks below would fail on the stub rather than on nginx.
+        # Whether the application registers HEAD is asserted in api_tests.rs.
+        def do_HEAD(self):
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain")
+            self.end_headers()
+
         def log_message(self, *args):
             pass
 
@@ -158,6 +166,20 @@ expect "a sub-page"     "Discordbot/2.0" "/media/550/cast" "frontend /media/550/
 expect "a non-numeric"  "Discordbot/2.0" "/media/abc"      "frontend /media/abc"
 expect "a short id"     "Discordbot/2.0" "/lists/abc"      "frontend /lists/abc"
 expect "the homepage"   "Discordbot/2.0" "/"               "frontend /"
+
+# Some preview services ask for the headers before spending a body fetch. The
+# routes were registered for GET only at first, so `HEAD /media/550` answered a
+# crawler 404 while answering a browser 200 — on the same URL — and a previewer
+# that checks first would give up there.
+for path in "/media/550" "/profile/micutu" "/lists/$LIST_ID"; do
+  head_code="$(curl --silent --max-time 5 --head --output /dev/null \
+    --write-out '%{http_code}' --user-agent "Discordbot/2.0" \
+    "http://127.0.0.1:$EDGE_PORT$path")"
+  if [[ "$head_code" != 200 ]]; then
+    echo "nginx unfurl routing: HEAD $path as a crawler answered $head_code, want 200" >&2
+    failures=$((failures + 1))
+  fi
+done
 
 # The card is not a page of its own: a second public address for the same
 # content is exactly what the canonical work was meant to stop.
