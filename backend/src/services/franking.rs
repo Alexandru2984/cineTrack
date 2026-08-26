@@ -14,8 +14,20 @@
 //! ```
 //!
 //! The franking key travels *inside* the ciphertext, so only the participants
-//! learn it. The server stores the commitment and the signature and can verify
-//! neither on its own — it has no plaintext and no key.
+//! learn it. The server stores the commitment and the signature.
+//!
+//! It can verify the *signature* immediately, and does: the payload is
+//! `commitment || client_nonce`, both of which it holds, and the sender's
+//! signing public key is in its own directory. This module used to claim the
+//! server could verify neither half, which was true of the commitment and
+//! wrong about the signature — and the cost of that error was that an
+//! unverified signature went into storage and only failed years later, when a
+//! victim tried to report the message and the evidence would not hold up.
+//! Rejecting a bad signature at send is the difference between a client bug the
+//! sender sees at once and a report that cannot be made.
+//!
+//! The *commitment* it genuinely cannot check without the plaintext and the
+//! franking key, which is why that half waits for a report.
 //!
 //! When the recipient reports, they reveal the plaintext and the franking key.
 //! The server can then check both halves, and each closes a different hole:
@@ -148,9 +160,36 @@ pub fn verify(
         return Err(FrankingFailure::CommitmentMismatch);
     }
 
-    let payload = signing_payload(stored_commitment, client_nonce);
+    verify_signature(
+        stored_commitment,
+        stored_signature,
+        sender_signing_key,
+        client_nonce,
+    )
+}
+
+/// Check that the sender really authored this commitment for this message.
+///
+/// Split out of `verify` because the server can do this half on its own, at
+/// send time, before anything is stored — it needs only the commitment, the
+/// nonce and the sender's public key. The other half needs a plaintext nobody
+/// but the participants has.
+pub fn verify_signature(
+    commitment: &[u8],
+    signature: &[u8],
+    sender_signing_key: &[u8],
+    client_nonce: Uuid,
+) -> Result<(), FrankingFailure> {
+    if commitment.len() != COMMITMENT_BYTES
+        || signature.len() != SIGNATURE_BYTES
+        || sender_signing_key.len() != 32
+    {
+        return Err(FrankingFailure::MalformedEvidence);
+    }
+
+    let payload = signing_payload(commitment, client_nonce);
     UnparsedPublicKey::new(&ED25519, sender_signing_key)
-        .verify(&payload, stored_signature)
+        .verify(&payload, signature)
         .map_err(|_| FrankingFailure::SignatureInvalid)
 }
 
