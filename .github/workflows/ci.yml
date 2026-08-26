@@ -382,6 +382,7 @@ jobs:
             scripts/tests/deployment_hardening_test.sh \
             scripts/tests/ci_contract_test.sh \
             scripts/tests/edge_security_config_test.sh \
+            scripts/tests/nginx_unfurl_routing_test.sh \
             scripts/tests/auto_deploy_test.sh
 
       - name: Validate dependency policy
@@ -422,6 +423,11 @@ jobs:
 
       - name: Validate edge security contact
         run: scripts/tests/edge_security_config_test.sh
+
+      # Behavioural, not textual: the defect this catches is a vhost that reads
+      # correctly and routes wrongly, which `nginx -t` and grep both accept.
+      - name: Validate link-preview routing
+        run: scripts/tests/nginx_unfurl_routing_test.sh
 
       - name: Validate deployment isolation
         run: scripts/tests/deployment_hardening_test.sh

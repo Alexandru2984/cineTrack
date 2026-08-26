@@ -122,10 +122,18 @@ fn render(card: &Card) -> String {
 fn html(card: Card) -> HttpResponse {
     HttpResponse::Ok()
         .content_type("text/html; charset=utf-8")
-        // Shared links are fetched repeatedly by every service the link passes
-        // through; a short cache spares the database without holding a stale
-        // card long enough to matter.
-        .insert_header(("Cache-Control", "public, max-age=300"))
+        // `private`, not `public`. This address answers a reader with the
+        // application and a preview crawler with this card, so a shared cache
+        // that stored one response under the plain URL would hand it to the
+        // other: a reader served a bare card, or a crawler served a shell it
+        // cannot read. Cloudflare reports these pages as DYNAMIC today, but the
+        // response should not be asking to be cached in the first place.
+        //
+        // `Vary` states the same thing in the terms a well-behaved intermediary
+        // reads, and the short lifetime still spares the database when one
+        // service fetches a link several times.
+        .insert_header(("Cache-Control", "private, max-age=300"))
+        .insert_header(("Vary", "User-Agent"))
         .body(render(&card))
 }
 
@@ -287,6 +295,34 @@ mod tests {
     #[test]
     fn whitespace_from_a_pasted_description_is_collapsed() {
         assert_eq!(shorten("two\n\nlines   here", 200), "two lines here");
+    }
+
+    #[actix_web::test]
+    async fn a_card_is_never_stored_by_a_cache_shared_with_readers() {
+        // The same URL serves the application to a reader and this card to a
+        // preview crawler. A shared cache holding either one under the plain
+        // address would serve it to the wrong client.
+        let response = html(Card::generic("/media/550"));
+
+        let cache_control = response
+            .headers()
+            .get("Cache-Control")
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or_default()
+            .to_string();
+        assert!(
+            !cache_control.contains("public"),
+            "a card must not invite a shared cache to store it, got {cache_control:?}"
+        );
+        assert!(cache_control.contains("private"), "got {cache_control:?}");
+        assert_eq!(
+            response
+                .headers()
+                .get("Vary")
+                .and_then(|value| value.to_str().ok()),
+            Some("User-Agent"),
+            "the response depends on the user agent and must say so"
+        );
     }
 
     #[test]

@@ -153,6 +153,7 @@ python3 scripts/tests/check_embedded_python.py \
   scripts/tests/deployment_hardening_test.sh \
   scripts/tests/ci_contract_test.sh \
   scripts/tests/edge_security_config_test.sh \
+  scripts/tests/nginx_unfurl_routing_test.sh \
   scripts/tests/auto_deploy_test.sh
 scripts/tests/ci_contract_test.sh
 scripts/tests/backup_restore_test.sh
@@ -166,6 +167,7 @@ scripts/tests/auto_deploy_test.sh
 scripts/tests/crypto_core_parity_test.sh
 scripts/tests/calendar_feed_log_safety_test.sh
 scripts/tests/edge_security_config_test.sh
+scripts/tests/nginx_unfurl_routing_test.sh
 scripts/tests/deployment_hardening_test.sh
 scripts/tests/secret_hygiene_test.sh
 # Unlike the contract test above, this audits the real tree. It only means

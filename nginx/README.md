@@ -29,6 +29,7 @@ this project repo. To rebuild the edge on a fresh host, recreate them:
 | `snippets/block-dotfiles.conf` | `location ~ /\.(?!well-known).* { deny all; }` — blocks dotfile probing while allowing `/.well-known`. | static |
 | `snippets/robots.conf` | serves a shared `robots.txt`. | static |
 | `scripts/update-cloudflare-ips.sh` | refreshes the two Cloudflare range files above. | run on the host, `nginx -t && systemctl reload nginx` |
+| `nginx.conf` → `variables_hash_max_size 2048;` | The link-preview `map` in this vhost added one variable and took the default 1024 past optimal, so nginx warned on every reload — for all ~68 sites, not just this one. The hash is per-instance, which is why the fix is not in the vhost. | add beside the existing `types_hash_max_size 2048;` in the `http` block |
 
 ## Why the client IP is correct (rate limiting & audit)
 
