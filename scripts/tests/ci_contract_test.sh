@@ -186,5 +186,27 @@ require(
     "the registration smoke test must accept the terms before submitting",
 )
 
+# Dependency freshness must stay off the pull-request path, and must not simply
+# vanish. `expo doctor` asks npm what Expo published most recently, so it can
+# turn a branch red without anybody changing the branch — it did exactly that to
+# a backend-only change whose diff touched nothing under mobile/. The answer
+# belongs on a schedule, and the schedule has to still exist for skipping it here
+# to be honest rather than convenient.
+doctor_step = ci.find("- name: Validate Expo project")
+require(doctor_step != -1, "CI must still validate the Expo project")
+doctor_block = ci[doctor_step : doctor_step + 400]
+require(
+    "EXPO_DOCTOR_SKIP_DEPENDENCY_VERSION_CHECK" in doctor_block,
+    "the pull-request doctor step must not depend on what npm published today",
+)
+
+drift = root / ".github/workflows/mobile-dependency-drift.yml"
+require(drift.is_file(), "the scheduled dependency drift workflow must exist")
+drift_text = drift.read_text(encoding="utf-8")
+require(
+    "schedule:" in drift_text and "expo install --check" in drift_text.replace("doctor:versions", "expo install --check"),
+    "dependency drift must still be reported on a schedule",
+)
+
 print("CI security and smoke-test contracts passed")
 PY

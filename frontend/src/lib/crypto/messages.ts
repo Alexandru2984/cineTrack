@@ -4,6 +4,7 @@
  *  belongs to the messaging chunk rather than the initial route. The cache it
  *  uses lives in `cache.ts` for exactly that reason. */
 import {
+  assertPeerFingerprint,
   decryptMessage,
   encryptMessage,
   fromHex,
@@ -121,6 +122,12 @@ export function sealMessage(
   identity: IdentityKeyPair,
   clientNonce: string,
 ): EncryptedPayload {
+  // Fail closed on a directory entry that contradicts itself. This does not
+  // stop a competent substitution — an attacker swapping the key swaps the
+  // fingerprint with it, and only the out-of-band comparison catches that — but
+  // sealing a message to a key whose own published identity does not match it
+  // is never right, and doing it silently is how the mismatch would go unseen.
+  assertPeerFingerprint(peer.exchange_public_key, peer.signing_public_key, peer.key_fingerprint);
   const envelope = encryptMessage(
     plaintext,
     fromHex(peer.exchange_public_key),

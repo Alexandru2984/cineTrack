@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { generateIdentity, toHex } from '@/lib/crypto/core';
+import { fingerprint, generateIdentity, toHex } from '@/lib/crypto/core';
 import {
   clearDecryptionCache,
   readConversationPreview,
@@ -29,11 +29,35 @@ function peerFrom(identity: ReturnType<typeof generateIdentity>): PeerPublicKeys
     username: 'peer',
     exchange_public_key: toHex(identity.exchangePublicKey),
     signing_public_key: toHex(identity.signingPublicKey),
-    key_fingerprint: 'f'.repeat(64),
+    // Computed from the keys beside it rather than a row of 'f's. A directory
+    // entry whose stated fingerprint does not match its own keys is one the
+    // client now refuses to encrypt to, so a placeholder here would be a
+    // fixture describing a state that cannot exist.
+    key_fingerprint: fingerprint(identity.exchangePublicKey, identity.signingPublicKey),
     generation: 1,
     updated_at: new Date().toISOString(),
   };
 }
+
+describe('sealing to a directory entry', () => {
+  it('refuses a peer whose key and published fingerprint disagree', () => {
+    // A server serving the attacker's exchange key beside the victim's old
+    // fingerprint is the substitution the safety number exists to expose. This
+    // does not catch a competent one — it swaps both — but sealing to a key
+    // whose own published identity contradicts it should never happen quietly.
+    const alice = generateIdentity();
+    const bob = generateIdentity();
+    const attacker = generateIdentity();
+
+    const tampered: PeerPublicKeys = {
+      ...peerFrom(bob),
+      exchange_public_key: toHex(attacker.exchangePublicKey),
+    };
+
+    expect(() => sealMessage('hello', tampered, alice, CLIENT_NONCE)).toThrow(/fingerprint/i);
+    expect(() => sealMessage('hello', peerFrom(bob), alice, CLIENT_NONCE)).not.toThrow();
+  });
+});
 
 function messageFrom(sealed: ReturnType<typeof sealMessage>, id = 'message-1'): DirectMessage {
   return {
