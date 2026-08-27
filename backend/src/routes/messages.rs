@@ -11,7 +11,7 @@ use crate::dto::message::{
 };
 use crate::errors::AppError;
 use crate::middleware::auth::require_auth;
-use crate::services::{community_safety, quota};
+use crate::services::{community_safety, franking, quota};
 
 pub const MAX_MESSAGES_PER_MINUTE: i64 = 30;
 pub const MAX_MESSAGES_PER_DAY: i64 = 500;
@@ -413,6 +413,57 @@ async fn send_message(
         ));
     }
 
+    // Check the sender's signature now, and record the key it was checked
+    // against.
+    //
+    // The signature covers `commitment || client_nonce`, and the server holds
+    // both along with the sender's public key — so there was never a reason to
+    // store it unverified. Storing it unverified had a cost that only appeared
+    // much later: a client sending a wrong or random signature produced a
+    // message that displayed perfectly and could never be reported, because the
+    // evidence only gets checked when a victim tries to use it.
+    //
+    // The recorded key is what makes the report survive a rotation.
+    // `user_identity_keys` keeps one row per user and replacing keys
+    // overwrites it, so verifying a report against the sender's *current* key
+    // meant: send abuse, rotate keys, and the report can no longer be verified.
+    let sender_signing_key = match envelope.as_ref() {
+        None => None,
+        Some(envelope) => {
+            let key = sqlx::query_scalar::<_, Vec<u8>>(
+                "SELECT signing_public_key FROM user_identity_keys WHERE user_id = $1",
+            )
+            .bind(sender_id)
+            .fetch_optional(&mut *tx)
+            .await?
+            .ok_or_else(|| {
+                AppError::BadRequest(
+                    "Publish your encryption keys before sending an encrypted message.".to_string(),
+                )
+            })?;
+
+            if let Err(failure) = franking::verify_signature(
+                &envelope.franking_commitment,
+                &envelope.franking_signature,
+                &key,
+                data.client_nonce(),
+            ) {
+                log::warn!(
+                    "audit: rejected direct message with unusable franking signature \
+                     sender_id={sender_id} recipient_id={} reason={}",
+                    peer.id,
+                    failure.as_str()
+                );
+                return Err(AppError::BadRequest(
+                    "This message could not be signed correctly and was not sent. \
+                     Update the app and try again."
+                        .to_string(),
+                ));
+            }
+            Some(key)
+        }
+    };
+
     let existing = sqlx::query_as::<_, DirectMessageResponse>(
         r#"SELECT id, sender_id, recipient_id, body,
                        ciphertext, nonce, sender_ephemeral_key, sender_copy, franking_commitment,
@@ -478,9 +529,9 @@ async fn send_message(
         r#"INSERT INTO direct_messages (
             sender_id, recipient_id, client_nonce, body,
             ciphertext, nonce, sender_ephemeral_key, sender_copy,
-            franking_commitment, franking_signature
+            franking_commitment, franking_signature, sender_signing_key
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
         RETURNING id, sender_id, recipient_id, body,
                   ciphertext, nonce, sender_ephemeral_key, sender_copy,
                   franking_commitment, read_at, created_at"#,
@@ -495,6 +546,7 @@ async fn send_message(
     .bind(envelope.as_ref().map(|e| &e.sender_copy))
     .bind(envelope.as_ref().map(|e| &e.franking_commitment))
     .bind(envelope.as_ref().map(|e| &e.franking_signature))
+    .bind(sender_signing_key.as_ref())
     .fetch_one(&mut *tx)
     .await?;
     tx.commit().await?;

@@ -45,6 +45,7 @@ async fn report_message_target(
             Option<String>,
             Option<Vec<u8>>,
             Option<Vec<u8>>,
+            Option<Vec<u8>>,
             Uuid,
             Option<chrono::DateTime<chrono::Utc>>,
             chrono::DateTime<chrono::Utc>,
@@ -52,6 +53,7 @@ async fn report_message_target(
     >(
         r#"SELECT message.sender_id, message.body,
                   message.franking_commitment, message.franking_signature,
+                  message.sender_signing_key,
                   message.client_nonce, message.read_at, message.created_at
         FROM direct_messages message
         WHERE message.id = $1 AND message.recipient_id = $2"#,
@@ -62,7 +64,16 @@ async fn report_message_target(
     .await?
     .ok_or_else(|| AppError::NotFound("Report target not found".to_string()))?;
 
-    let (sender_id, body, commitment, signature, client_nonce, read_at, created_at) = row;
+    let (
+        sender_id,
+        body,
+        commitment,
+        signature,
+        signing_key_at_send,
+        client_nonce,
+        read_at,
+        created_at,
+    ) = row;
 
     // Plaintext: unchanged behaviour, and no evidence is expected.
     let Some(commitment) = commitment else {
@@ -92,21 +103,33 @@ async fn report_message_target(
     let franking_key = hex::decode(key_hex)
         .map_err(|_| AppError::BadRequest("Invalid franking key encoding".to_string()))?;
 
-    let signing_key = sqlx::query_scalar::<_, Vec<u8>>(
-        "SELECT signing_public_key FROM user_identity_keys WHERE user_id = $1",
-    )
-    .bind(sender_id)
-    .fetch_optional(&mut **tx)
-    .await?
-    .ok_or_else(|| {
-        // The sender encrypted a message, so their keys existed. If they are
-        // gone the evidence cannot be checked, and an unverifiable report must
-        // not be recorded as if it had been.
-        AppError::BadRequest(
-            "The sender's signing key is no longer published, so this report cannot be verified"
-                .to_string(),
+    // The key the message was signed with, not whichever key the sender holds
+    // today. `user_identity_keys` keeps one row per user and publishing new keys
+    // overwrites it, so reading the current key made abuse disposable: send it,
+    // rotate, and the victim's report could no longer be verified against a key
+    // that never signed anything.
+    //
+    // Falling back to the directory only for messages sent before the column
+    // existed. Those are exactly as verifiable as they were before — no worse,
+    // and there is nothing else recorded that could make them better.
+    let signing_key = match signing_key_at_send {
+        Some(key) => key,
+        None => sqlx::query_scalar::<_, Vec<u8>>(
+            "SELECT signing_public_key FROM user_identity_keys WHERE user_id = $1",
         )
-    })?;
+        .bind(sender_id)
+        .fetch_optional(&mut **tx)
+        .await?
+        .ok_or_else(|| {
+            // The sender encrypted a message, so their keys existed. If they are
+            // gone the evidence cannot be checked, and an unverifiable report must
+            // not be recorded as if it had been.
+            AppError::BadRequest(
+                "The sender's signing key is no longer published, so this report cannot be verified"
+                    .to_string(),
+            )
+        })?,
+    };
 
     let signature = signature.ok_or_else(|| {
         AppError::BadRequest("This message carries no sender signature".to_string())

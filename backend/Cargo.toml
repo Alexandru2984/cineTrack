@@ -44,6 +44,10 @@ aws-smithy-types = "=1.6.2"
 
 [dev-dependencies]
 actix-http = "3"
+# Same pin as the runtime dependency. The message tests have to produce real
+# Ed25519 signatures now that the server rejects ones it cannot verify, and a
+# test that fakes the signature would only prove the check can be bypassed.
+aws-lc-rs = { version = "=1.18.0", default-features = false, features = ["aws-lc-sys"] }
 criterion = { version = "0.8", features = ["async_tokio"] }
 
 [[bench]]
