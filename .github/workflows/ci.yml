@@ -444,6 +444,11 @@ jobs:
       - name: Validate link-preview routing
         run: scripts/tests/nginx_unfurl_routing_test.sh
 
+      # Also behavioural: the defect was a directory redirect nginx builds from
+      # its own address, which no reading of the file reveals.
+      - name: Validate public page addresses
+        run: scripts/tests/spa_public_pages_test.sh
+
       - name: Validate deployment isolation
         run: scripts/tests/deployment_hardening_test.sh
 
