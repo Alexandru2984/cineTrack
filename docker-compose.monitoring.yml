@@ -60,7 +60,7 @@ services:
           pids: 256
 
   alertmanager:
-    image: prom/alertmanager:v0.28.1@sha256:27c475db5fb156cab31d5c18a4251ac7ed567746a2483ff264516437a39b15ba
+    image: prom/alertmanager:v0.34.0@sha256:690c7b525f4367aa91f73e2f91c632206d32e97c6384bdbf2fb7a861b420340d
     restart: unless-stopped
     # Keep the image's unprivileged user so it owns the image-initialized data
     # volume. Its primary group is the host group that owns the rendered config,
