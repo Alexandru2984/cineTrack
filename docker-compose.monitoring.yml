@@ -23,7 +23,7 @@ x-logging: &monitoring-logging
 
 services:
   prometheus:
-    image: prom/prometheus:v3.13.2@sha256:508729e0e2d18e11fd742a5a5ca70e557b940a93948c3c95fd0123a6fd538b69
+    image: prom/prometheus:v3.14.0@sha256:5ce7540c3c00ef4ab0c9d2c995c6a5b9c421f44b4a115d97a2c7af3b1c21cbb0
     restart: unless-stopped
     # Same arrangement as Alertmanager: keep the image's unprivileged user so it
     # still owns its data volume, and add the host group that owns the rendered
@@ -60,7 +60,7 @@ services:
           pids: 256
 
   alertmanager:
-    image: prom/alertmanager:v0.28.1@sha256:27c475db5fb156cab31d5c18a4251ac7ed567746a2483ff264516437a39b15ba
+    image: prom/alertmanager:v0.34.0@sha256:690c7b525f4367aa91f73e2f91c632206d32e97c6384bdbf2fb7a861b420340d
     restart: unless-stopped
     # Keep the image's unprivileged user so it owns the image-initialized data
     # volume. Its primary group is the host group that owns the rendered config,

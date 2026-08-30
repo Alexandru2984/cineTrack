@@ -60,7 +60,7 @@ services:
       - node_modules:/app/node_modules
 
   adminer:
-    image: adminer:5-standalone@sha256:983261ecc40a4aaf11e25aeda8ef821f5a43a9f024b3967c81cbcc0e6ce43ba3
+    image: adminer:6-standalone@sha256:e82c16620650d359b87284b598d9ae03e5d95f3412f45d1ef3936b803445f1ae
     profiles:
       - tools
     security_opt:
