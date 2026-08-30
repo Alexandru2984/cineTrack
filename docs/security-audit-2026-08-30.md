@@ -140,7 +140,7 @@ whether that risk was acceptable was told the opposite of the truth.
 and accept that a locked phone shows a notification it cannot yet decrypt. The
 comment must change either way.
 
-### 2. Messages are not authenticated before they are displayed
+### 2. Messages are not authenticated before they are displayed — fixed
 
 `#162` closed the send half: the server now verifies the sender's Ed25519
 signature before storing, and records the key it verified against. The receiving
@@ -156,7 +156,33 @@ never checked until somebody files a report.
 **Fix.** Verify the signature at decryption time and mark, or refuse, a message
 that fails. The public key needed is already in the peer directory response.
 
-### 3. An unreportable message is still displayed as if it were fine
+**Done.** The message list now returns `franking_signature`, `client_nonce` and
+the `sender_signing_key` recorded at send, and both clients check the signature
+before rendering. Verification is against the *directory* key — the one behind
+the safety number — never the key delivered beside the signature: a signature
+checked against a key from the same source proves only that the source can do
+arithmetic. The recorded key is used for one thing, telling a key rotation apart
+from tampering. Four states, of which one hides the message:
+
+| | meaning | shown |
+|---|---|---|
+| `verified` | signed by the key behind the safety number | normally |
+| `unchecked` | no trusted key on hand yet | normally, no claim made |
+| `unrecognised` | fails under the current key, and was signed with another, or with none recorded | with a notice |
+| `forged` | fails under the very key it is recorded as signed with | text withheld |
+
+The soft states are deliberate. A key rotation produces a failed signature on
+every message that preceded it, and hiding those would erase legitimate history
+the moment somebody changes keys. What a forger cannot do, under any of these,
+is reach `verified` — which is the property the finding asked for.
+
+**Still open, deliberately.** The conversation list is not covered. Its response
+carries neither the commitment nor the signature, and authenticating one line
+per row would cost a directory fetch per conversation. So a message the thread
+view refuses to draw can still appear as a one-line preview in the list. Closing
+it needs the peer keys the list does not have.
+
+### 3. An unreportable message is still displayed as if it were fine — fixed
 
 `frontend/src/pages/Messages.tsx:199` renders the decrypted text and appends a
 10px notice when `commitmentVerified` is false.
@@ -169,6 +195,20 @@ they cannot prove.
 **Fix.** Do not render the plaintext when the commitment does not verify. Show
 that the message is malformed and offer blocking — a message nobody can report
 is itself the reportable event.
+
+**Done.** The text is withheld and replaced with why. It is withheld
+structurally rather than by a flag: `readMessage` returns an `untrusted` variant
+that does not carry the plaintext at all, so no render path can draw what it was
+never handed.
+
+Fixing this surfaced a second defect that had to be fixed first. The
+conversation list decrypts the newest message of every thread without fetching
+its commitment, and cached that result under the message id; the thread view
+then found the entry and inherited a verdict the preview had never actually
+computed. Every conversation's newest message was already being labelled a
+commitment mismatch, and under this change it would have been hidden outright.
+The cache now distinguishes *absent* from *negative*, and re-judges an entry as
+soon as the caller can see more than the one that cached it.
 
 ### 4. Key operations accept a plain access token
 
