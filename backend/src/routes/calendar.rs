@@ -128,6 +128,23 @@ macro_rules! up_next_ctes {
 ),
 -- How much of each season we actually hold. `episodes` is a lazily filled
 -- cache, so "no rows" means "never fetched", not "no episodes exist".
+--
+-- Joined to `progress` rather than aggregating every season in the catalogue.
+-- Without it this counted all 44,398 seasons against all 28,486 episodes on
+-- every call — 71,073 intermediate rows to answer with two — because the
+-- planner does not push the user's filter into an aggregate it cannot see
+-- through. Confirmed in the plan, not assumed: `EXPLAIN (GENERIC_PLAN)` showed
+-- a sequential scan of both tables.
+--
+-- The filter changes no result. `first_incomplete` feeds only `withheld`,
+-- which already joins `progress` and this user's `user_media`, so every season
+-- removed here belongs to a show that could not have survived that join.
+-- `progress` holds one row per media_id, so the join cannot multiply rows and
+-- `cached_count` is unchanged.
+--
+-- It also changes how this scales. The old shape grew with the catalogue,
+-- which fills continuously from TMDB; this one grows with what the member
+-- actually watches.
 season_cache AS (
     SELECT
         seasons.media_id,
@@ -136,6 +153,7 @@ season_cache AS (
         seasons.episodes_cached_at,
         COUNT(episodes.id) AS cached_count
     FROM seasons
+    JOIN progress ON progress.media_id = seasons.media_id
     LEFT JOIN episodes ON episodes.season_id = seasons.id
     GROUP BY seasons.id
 ),

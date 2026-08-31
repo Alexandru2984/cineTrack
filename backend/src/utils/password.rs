@@ -25,9 +25,14 @@ use crate::errors::AppError;
 /// Verification reads the parameters recorded inside each stored PHC hash, so
 /// passwords hashed at the old cost keep working untouched and simply move to
 /// these settings the next time they are set.
-const ARGON2_MEMORY_KIB: u32 = 32 * 1024;
-const ARGON2_ITERATIONS: u32 = 3;
-const ARGON2_PARALLELISM: u32 = 1;
+/// The parameters in use, public so the benchmark can measure *these* rather
+/// than a second copy of them. The benchmark's comparison table labelled
+/// `m=19MiB t=2 p=1` as "current" long after this moved to 32 MiB and three
+/// iterations, which made the configuration in production look 3.3x cheaper
+/// than it is and every alternative look correspondingly worse.
+pub const ARGON2_MEMORY_KIB: u32 = 32 * 1024;
+pub const ARGON2_ITERATIONS: u32 = 3;
+pub const ARGON2_PARALLELISM: u32 = 1;
 
 const MAX_CONCURRENT_PASSWORD_JOBS: usize = 4;
 const PASSWORD_QUEUE_TIMEOUT: Duration = Duration::from_secs(2);
@@ -243,6 +248,34 @@ mod tests {
         assert!(!verify_password_or_dummy(DUMMY_PASSWORD, None)
             .await
             .unwrap());
+    }
+
+    /// The benchmark must measure these parameters, not a second copy of them.
+    ///
+    /// It restated them as literals once, and they fell out of step: the
+    /// comparison table still called `m=19MiB t=2` "current" after this moved
+    /// to 32 MiB and three iterations. A table whose entire purpose is choosing
+    /// parameters was anchored to a baseline that no longer existed, so the
+    /// configuration actually running looked 3.3x cheaper than it is and every
+    /// alternative looked correspondingly worse. Capacity planning drawn from
+    /// it would have been three times optimistic.
+    #[test]
+    fn the_benchmark_reads_these_parameters_rather_than_restating_them() {
+        let bench = include_str!("../../benches/hot_paths.rs");
+        for constant in [
+            "ARGON2_MEMORY_KIB",
+            "ARGON2_ITERATIONS",
+            "ARGON2_PARALLELISM",
+        ] {
+            assert!(
+                bench.contains(constant),
+                "hot_paths.rs must read {constant} instead of hardcoding its value"
+            );
+        }
+        assert!(
+            !bench.contains("current: m=19MiB"),
+            "the benchmark is describing parameters this module no longer uses"
+        );
     }
 
     #[test]
