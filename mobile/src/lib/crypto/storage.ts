@@ -7,9 +7,21 @@
  *
  *  `expo-secure-store` puts values in the iOS keychain and the Android
  *  EncryptedSharedPreferences, both backed by hardware where the device has it.
- *  That is a genuinely stronger guarantee than the browser's — the keys are not
- *  readable by other apps, and on a locked device not readable at all — so the
- *  trade the web client has to make is not one that has to be made here.
+ *  That is a genuinely stronger guarantee than the browser's: the keys are not
+ *  readable by other apps.
+ *
+ *  What it is *not*, and what this comment claimed for a while: unreadable on a
+ *  locked device. These are stored `AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY` (see
+ *  `saveIdentity`), which means readable from the moment the phone is unlocked
+ *  once after boot — including while it sits locked afterwards. The reason is
+ *  written down where the choice is made and it is a real one: background
+ *  refresh needs the key, and without it a notification arrives announcing a
+ *  message the app cannot open.
+ *
+ *  The refresh token, by contrast, uses `WHEN_UNLOCKED_THIS_DEVICE_ONLY`
+ *  (`secure-session.ts`). So the weaker setting is the deliberate one here, not
+ *  an oversight — but anyone weighing that trade deserves to read it, rather
+ *  than a sentence saying the opposite.
  *
  *  Keys are scoped by user id, so two accounts on one phone cannot read each
  *  other's messages. */
