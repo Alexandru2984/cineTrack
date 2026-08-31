@@ -1,4 +1,4 @@
-import { fingerprint, generateIdentity, toHex } from '@/lib/crypto/core';
+import { fingerprint, fromHex, generateIdentity, toHex } from '@/lib/crypto/core';
 import {
   clearDecryptionCache,
   readConversationPreview,
@@ -37,7 +37,11 @@ function peerFrom(identity: ReturnType<typeof generateIdentity>): PeerPublicKeys
   };
 }
 
-function messageFrom(sealed: ReturnType<typeof sealMessage>, id = 'message-1'): DirectMessage {
+function messageFrom(
+  sealed: ReturnType<typeof sealMessage>,
+  id = 'message-1',
+  extra: Partial<DirectMessage> = {},
+): DirectMessage {
   return {
     id,
     sender_id: 'alice',
@@ -48,8 +52,11 @@ function messageFrom(sealed: ReturnType<typeof sealMessage>, id = 'message-1'): 
     sender_ephemeral_key: sealed.sender_ephemeral_key,
     sender_copy: sealed.sender_copy,
     franking_commitment: sealed.franking_commitment,
+    franking_signature: sealed.franking_signature,
+    client_nonce: CLIENT_NONCE,
     read_at: null,
     created_at: new Date().toISOString(),
+    ...extra,
   };
 }
 
@@ -150,5 +157,162 @@ describe('reading messages', () => {
     // Cleared rather than merely hidden: with no key the same message can no
     // longer be read, which would be impossible if the plaintext had stayed.
     expect(readMessage(messageFrom(sealed, 'cache-1'), null).kind).toBe('locked');
+  });
+});
+
+describe('deciding whether a message is really from the sender', () => {
+  it('accepts one signed by the key behind the safety number', () => {
+    clearDecryptionCache();
+    const alice = generateIdentity();
+    const bob = generateIdentity();
+    const sealed = sealMessage('genuinely mine', peerFrom(bob), alice, CLIENT_NONCE);
+
+    const read = readMessage(
+      messageFrom(sealed, 'signed-1'),
+      bob,
+      alice.signingPublicKey,
+    );
+    if (read.kind !== 'encrypted') throw new Error('unreachable');
+    expect(read.content.authenticity).toBe('verified');
+    expect(read.content.text).toBe('genuinely mine');
+  });
+
+  it('refuses to show one the trusted key did not sign', () => {
+    // The attack the signature exists to catch. Encryption is to a *public*
+    // exchange key, so a server can compose a message that decrypts perfectly
+    // and file it under whoever it likes; without this check the interface
+    // draws it exactly like a real one.
+    clearDecryptionCache();
+    const alice = generateIdentity();
+    const bob = generateIdentity();
+    const server = generateIdentity();
+    const forged = sealMessage('meet me at the docks', peerFrom(bob), server, CLIENT_NONCE);
+
+    const read = readMessage(
+      // Recorded as signed by Alice's current key, which is what makes this
+      // tampering rather than an old message from a key she has since replaced.
+      messageFrom(forged, 'forged-1', { sender_signing_key: toHex(alice.signingPublicKey) }),
+      bob,
+      alice.signingPublicKey,
+    );
+    expect(read).toEqual({ kind: 'untrusted', reason: 'forged' });
+  });
+
+  it('shows, but does not vouch for, one signed by a key the sender has replaced', () => {
+    // A rotation looks like a failed signature and is not an accusation. Hiding
+    // this would erase legitimate history the moment somebody changes keys.
+    clearDecryptionCache();
+    const alice = generateIdentity();
+    const alicesOldKeys = generateIdentity();
+    const bob = generateIdentity();
+    const sealed = sealMessage('sent long ago', peerFrom(bob), alicesOldKeys, CLIENT_NONCE);
+
+    const read = readMessage(
+      messageFrom(sealed, 'rotated-1', {
+        sender_signing_key: toHex(alicesOldKeys.signingPublicKey),
+      }),
+      bob,
+      alice.signingPublicKey,
+    );
+    if (read.kind !== 'encrypted') throw new Error('unreachable');
+    expect(read.content.authenticity).toBe('unrecognised');
+    expect(read.content.text).toBe('sent long ago');
+  });
+
+  it('claims nothing when there is no key to check against', () => {
+    clearDecryptionCache();
+    const alice = generateIdentity();
+    const bob = generateIdentity();
+    const sealed = sealMessage('while the directory loads', peerFrom(bob), alice, CLIENT_NONCE);
+
+    const read = readMessage(messageFrom(sealed, 'unchecked-1'), bob, null);
+    if (read.kind !== 'encrypted') throw new Error('unreachable');
+    expect(read.content.authenticity).toBe('unchecked');
+  });
+
+  it('withholds text that does not open the commitment', () => {
+    // A sender who encrypts abuse while committing to something harmless leaves
+    // their victim with something they can read and can never report. Showing
+    // it hands over the abuse and withholds the remedy.
+    clearDecryptionCache();
+    const alice = generateIdentity();
+    const bob = generateIdentity();
+    const sealed = sealMessage('what they will actually read', peerFrom(bob), alice, CLIENT_NONCE);
+    const decoy = sealMessage('what they committed to', peerFrom(bob), alice, clientNonce());
+
+    const read = readMessage(
+      messageFrom(sealed, 'malformed-1', { franking_commitment: decoy.franking_commitment }),
+      bob,
+    );
+    expect(read).toEqual({ kind: 'untrusted', reason: 'malformed' });
+  });
+});
+
+describe('a preview does not decide anything for the thread', () => {
+  it('re-judges a message the conversation list had already decrypted', () => {
+    // The list decrypts the newest message of every thread with neither a
+    // commitment nor a trusted key, and caches it under the same id the thread
+    // then reads. Inheriting those verdicts labelled the newest message of
+    // every conversation a commitment mismatch — and, once a mismatch hides the
+    // text, would have hidden it outright.
+    clearDecryptionCache();
+    const alice = generateIdentity();
+    const bob = generateIdentity();
+    const sealed = sealMessage('perfectly ordinary', peerFrom(bob), alice, CLIENT_NONCE);
+    const id = 'shared-id-1';
+
+    const conversation = {
+      user_id: 'alice',
+      username: 'alice',
+      avatar_url: null,
+      last_message_id: id,
+      last_message_sender_id: 'alice',
+      last_message_body: null,
+      last_message_ciphertext: sealed.ciphertext,
+      last_message_nonce: sealed.nonce,
+      last_message_sender_ephemeral_key: sealed.sender_ephemeral_key,
+      last_message_sender_copy: sealed.sender_copy,
+      last_message_at: new Date().toISOString(),
+      last_message_read_at: null,
+      unread_count: 1,
+      can_message: true,
+    } satisfies MessageConversation;
+
+    const preview = readConversationPreview(conversation, bob);
+    if (preview.kind !== 'encrypted') throw new Error('unreachable');
+    // Absent, not false: the preview had nothing to check.
+    expect(preview.content.commitmentVerified).toBeNull();
+    expect(preview.content.authenticity).toBe('unchecked');
+
+    const inThread = readMessage(messageFrom(sealed, id), bob, alice.signingPublicKey);
+    if (inThread.kind !== 'encrypted') throw new Error('unreachable');
+    expect(inThread.content.commitmentVerified).toBe(true);
+    expect(inThread.content.authenticity).toBe('verified');
+    expect(inThread.content.text).toBe('perfectly ordinary');
+  });
+});
+
+describe('the shared crypto modules', () => {
+  it('verifies against the trusted key rather than the one delivered with the message', () => {
+    // A signature checked against a key that arrived beside it proves only that
+    // whoever sent both can do arithmetic. This is the one property that makes
+    // the whole check worth doing, so it is asserted rather than assumed.
+    clearDecryptionCache();
+    const alice = generateIdentity();
+    const bob = generateIdentity();
+    const server = generateIdentity();
+    const forged = sealMessage('trust me', peerFrom(bob), server, CLIENT_NONCE);
+
+    const read = readMessage(
+      // Everything the server controls says this is fine: its own signature,
+      // its own key, recorded as the signing key. Only the directory disagrees.
+      messageFrom(forged, 'substituted-1', {
+        sender_signing_key: toHex(server.signingPublicKey),
+      }),
+      bob,
+      fromHex(toHex(alice.signingPublicKey)),
+    );
+    if (read.kind !== 'encrypted') throw new Error('unreachable');
+    expect(read.content.authenticity).not.toBe('verified');
   });
 });

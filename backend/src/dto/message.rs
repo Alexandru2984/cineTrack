@@ -233,6 +233,36 @@ pub struct DirectMessageResponse {
     #[sqlx(default)]
     #[serde(serialize_with = "serialize_optional_hex")]
     pub franking_commitment: Option<Vec<u8>>,
+    /// The sender's signature over `commitment || client_nonce`, returned so
+    /// the recipient can check it before rendering.
+    ///
+    /// It used to be withheld on the reasoning that a client checking its own
+    /// signature only reassures itself. That is true of *reporting*, where the
+    /// server is the one who must be convinced, and false of *display*: the
+    /// encryption is ephemeral-static X25519, so anyone holding the recipient's
+    /// public key can produce a message that decrypts. The signature is the
+    /// only thing in the envelope that says who wrote it, and a client that
+    /// never sees it draws a message the server composed exactly like a real
+    /// one.
+    #[sqlx(default)]
+    #[serde(serialize_with = "serialize_optional_hex")]
+    pub franking_signature: Option<Vec<u8>>,
+    /// What the signature is bound to. The sender signs before the row has an
+    /// id, so the nonce is the identifier available at signing time; without it
+    /// the recipient cannot rebuild the signed bytes.
+    #[sqlx(default)]
+    pub client_nonce: Option<Uuid>,
+    /// The key the message was signed with, recorded at send.
+    ///
+    /// The client verifies against the key it trusts from the directory, never
+    /// against this one — a key supplied beside the signature would let whoever
+    /// supplied both declare any message authentic. It is returned so the
+    /// client can tell a rotation from a forgery: a signature that fails under
+    /// a key the sender no longer holds is history, one that fails under the
+    /// key they do hold is tampering.
+    #[sqlx(default)]
+    #[serde(serialize_with = "serialize_optional_hex")]
+    pub sender_signing_key: Option<Vec<u8>>,
     pub read_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
 }

@@ -452,6 +452,15 @@ export interface DirectMessage {
   sender_ephemeral_key?: string | null;
   sender_copy?: string | null;
   franking_commitment?: string | null;
+  /** The sender's signature over the commitment, and the nonce it is bound to.
+   *  Together they are the only evidence in an envelope that says who wrote it:
+   *  anyone can seal a message to a public exchange key. */
+  franking_signature?: string | null;
+  client_nonce?: string | null;
+  /** The signing key recorded when the message was sent. Never verified
+   *  against — the directory key is — but it separates a key rotation from
+   *  tampering when a signature does not check out. */
+  sender_signing_key?: string | null;
   read_at: string | null;
   created_at: string;
 }

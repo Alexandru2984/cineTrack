@@ -87,8 +87,12 @@ export const ro: Dictionary = {
     lockedPreview: 'Blocat',
     undecryptable: 'Acest mesaj nu poate fi deschis pe acest dispozitiv',
     encryptedLabel: 'Criptat cap-coadă',
-    commitmentMismatch:
-      'Acest mesaj nu corespunde cu ceea ce a semnat expeditorul, deci nu poate fi raportat.',
+    notFromSender:
+      'Acest mesaj nu a fost semnat de acest cont. Este ascuns pentru că s-ar putea să nu fie de la el.',
+    malformedMessage:
+      'Acest mesaj nu corespunde cu ceea ce a semnat expeditorul, deci nu poate fi raportat. Din acest motiv este ascuns.',
+    notAuthenticated:
+      'Nu a putut fi verificat cu cheia actuală a acestui cont — poate a fost trimis înainte ca ea să fie schimbată.',
     privacyNoticeEncrypted:
       'Mesajele din această conversație sunt criptate cap-coadă. Văzute le stochează, dar nu le poate citi. Un mesaj pe care îl raportezi este dezvăluit moderatorilor de către tine, și doar acel mesaj.',
     encryptionRequired:
