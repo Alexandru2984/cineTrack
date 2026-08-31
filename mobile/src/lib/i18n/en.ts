@@ -87,8 +87,12 @@ export const en = {
     lockedPreview: 'Locked',
     undecryptable: 'This message cannot be opened on this device',
     encryptedLabel: 'End-to-end encrypted',
-    commitmentMismatch:
-      'This message does not match what its sender committed to, so it cannot be reported.',
+    notFromSender:
+      'This message was not signed by this account. It is hidden because it may not be from them.',
+    malformedMessage:
+      'This message does not match what its sender committed to, so it cannot be reported. It is hidden for that reason.',
+    notAuthenticated:
+      'Could not be checked against this account’s current key — it may have been sent before they changed it.',
     privacyNoticeEncrypted:
       'Messages in this conversation are end-to-end encrypted. Văzute stores them but cannot read them. A message you report is revealed to moderators by you, and only that message.',
     encryptionRequired:

@@ -25,7 +25,13 @@ import { usePeerKeys } from '@/hooks/useEncryption';
 import { usePageTitle } from '@/hooks/usePageTitle';
 import { useT } from '@/hooks/useT';
 import { getApiErrorMessage } from '@/lib/api';
-import { peerFingerprint, safetyNumber, toHex } from '@/lib/crypto/core';
+import {
+  assertPeerFingerprint,
+  fromHex,
+  peerFingerprint,
+  safetyNumber,
+  toHex,
+} from '@/lib/crypto/core';
 import {
   readConversationPreview,
   readMessage,
@@ -72,6 +78,10 @@ function previewText(
       return content.content.text;
     case 'locked':
       return t('messages.lockedPreview');
+    case 'untrusted':
+      return t(
+        content.reason === 'forged' ? 'messages.notFromSender' : 'messages.malformedMessage',
+      );
     default:
       return t('messages.encryptedPreview');
   }
@@ -190,15 +200,18 @@ function MessageBubble({
           }`}
         >
           <p className="whitespace-pre-wrap break-words text-sm leading-5">
-            {content.kind === 'undecryptable' ? (
-              <span className="italic opacity-80">{t('messages.undecryptable')}</span>
+            {content.kind === 'undecryptable' || content.kind === 'untrusted' ? (
+              <span className="italic opacity-80">{previewText(content, t)}</span>
             ) : (
               previewText(content, t)
             )}
           </p>
-          {content.kind === 'encrypted' && !content.content.commitmentVerified ? (
+          {/* Only for a message that was drawn. The refusals say why in place of
+              the text, and repeating it underneath would read as a footnote on
+              something the reader can see. */}
+          {content.kind === 'encrypted' && content.content.authenticity === 'unrecognised' ? (
             <p className="mt-1 text-[10px] leading-4 opacity-80">
-              {t('messages.commitmentMismatch')}
+              {t('messages.notAuthenticated')}
             </p>
           ) : null}
           <div
@@ -321,6 +334,34 @@ function MessagesContent({ username }: { username: string }) {
       ? safetyNumber(ownFingerprint, peerFingerprintValue)
       : null;
 
+  /** The key incoming messages are checked against.
+   *
+   *  Taken only from a directory entry that agrees with itself: a row whose
+   *  stated fingerprint contradicts its own keys is not one to authenticate
+   *  anything against, and `assertPeerFingerprint` throws on exactly that. Null
+   *  while the directory is still loading, which reads as "not checked" rather
+   *  than as a pass. */
+  const peerSigningKey = useMemo(() => {
+    if (!peerKeys.data) return null;
+    try {
+      assertPeerFingerprint(
+        peerKeys.data.exchange_public_key,
+        peerKeys.data.signing_public_key,
+        peerKeys.data.key_fingerprint,
+      );
+      return fromHex(peerKeys.data.signing_public_key);
+    } catch {
+      return null;
+    }
+  }, [peerKeys.data]);
+
+  /** Whose signature a given message should carry: the peer's for one they
+   *  sent, this account's own for one it sent. */
+  const authorSigningKey = (message: DirectMessage) =>
+    message.sender_id === currentUser?.id
+      ? (identity?.signingPublicKey ?? null)
+      : peerSigningKey;
+
   // True when anything in this thread arrived encrypted. Derived from the
   // messages rather than from the peer's key, so the notice describes what the
   // user is actually looking at instead of what a future message would be.
@@ -333,7 +374,7 @@ function MessagesContent({ username }: { username: string }) {
    *  commitment would be refused, and offering the user a form that cannot
    *  succeed is worse than refusing it here. */
   const reportEvidence = (message: DirectMessage) => {
-    const content = readMessage(message, identity);
+    const content = readMessage(message, identity, authorSigningKey(message));
     if (content.kind !== 'encrypted') return undefined;
     return {
       revealedPlaintext: content.content.text,
@@ -523,7 +564,7 @@ function MessagesContent({ username }: { username: string }) {
                 <MessageBubble
                   key={message.id}
                   message={message}
-                  content={readMessage(message, identity)}
+                  content={readMessage(message, identity, authorSigningKey(message))}
                   own={message.sender_id === currentUser?.id}
                   locale={locale}
                   isLastOwn={message.id === lastOwnMessageId}
