@@ -126,6 +126,27 @@ macro_rules! up_next_ctes {
     WHERE user_id = $1
     GROUP BY media_id
 ),
+-- Everything this member has watched, read once.
+--
+-- `next_ids` excludes watched episodes, and it used to do that with a
+-- correlated `NOT EXISTS` against `watch_history`. The planner answered it with
+-- a nested loop anti join and one index probe per candidate episode: 19,723
+-- probes on the production dataset, 59,182 of the query's 70,211 buffer hits.
+-- Not a bad index — `idx_watch_history_user_episode` served every probe from
+-- cache — simply the wrong shape, because the estimate said 194 rows and
+-- reality was a hundred times that.
+--
+-- One scan of this member's history is 54 buffers, which the CTE above already
+-- pays for, and the anti join becomes a hash probe against a set held in
+-- memory. Measured on production, warm, seven runs each: 145-199 ms before,
+-- 102-132 ms after, and 70,211 buffers down to 11,212.
+--
+-- MATERIALIZED on purpose. Without it Postgres is free to inline the CTE and
+-- rebuild exactly the correlated subquery this replaces, which would make the
+-- fix disappear silently the next time the statistics shift.
+watched AS MATERIALIZED (
+    SELECT episode_id FROM watch_history WHERE user_id = $1
+),
 -- How much of each season we actually hold. `episodes` is a lazily filled
 -- cache, so "no rows" means "never fetched", not "no episodes exist".
 --
@@ -216,8 +237,8 @@ next_ids AS (
       AND episode_has_aired(episodes.air_date, media.origin_country)
       AND ($2 OR seasons.season_number > 0)
       AND NOT EXISTS (
-          SELECT 1 FROM watch_history history
-          WHERE history.user_id = $1 AND history.episode_id = episodes.id
+          SELECT 1 FROM watched
+          WHERE watched.episode_id = episodes.id
       )
     ORDER BY
         tracked.media_id,
@@ -971,4 +992,37 @@ async fn ensure_tracked_episode(
     .fetch_optional(&mut **tx)
     .await?
     .ok_or_else(|| AppError::NotFound("Episode not found in your tracked shows".to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    /// The history is read once, not probed once per candidate episode.
+    ///
+    /// This is a shape the planner can undo. Written as a correlated
+    /// `NOT EXISTS` against `watch_history`, the anti join came out as a nested
+    /// loop with one index probe per candidate — 19,723 probes on the
+    /// production dataset, 59,182 of the query's 70,211 buffer hits — because
+    /// the row estimate was a hundred times under. Reading the member's history
+    /// into a CTE turns that into a hash probe against a set already in memory,
+    /// and drops the query to 11,212 buffers.
+    ///
+    /// `MATERIALIZED` is what makes it stick. Without it Postgres may inline the
+    /// CTE and rebuild the correlated subquery, which would put the cost back
+    /// with nothing in the diff to show it. So the keyword is asserted rather
+    /// than trusted to survive a tidy-up.
+    #[test]
+    fn up_next_reads_the_watch_history_once() {
+        let sql = up_next_ctes!();
+        assert!(
+            sql.contains("watched AS MATERIALIZED"),
+            "the watched set must stay materialised; inlining it restores the per-episode probe"
+        );
+        assert!(
+            !sql.contains("FROM watch_history history"),
+            "next_ids is probing watch_history per candidate again"
+        );
+        // The one place the history is still read directly is `progress`, which
+        // aggregates it per show rather than per episode.
+        assert_eq!(sql.matches("FROM watch_history").count(), 2);
+    }
 }
