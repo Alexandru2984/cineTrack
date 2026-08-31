@@ -632,6 +632,29 @@ mod tests {
         panic!("{function} has an unbalanced body");
     }
 
+    /// Runs of whitespace collapsed to one space, so a search is about code
+    /// rather than layout.
+    ///
+    /// The first version of these tests searched for `"store\n        .put("`
+    /// — a pattern carrying the source's own indentation. rustfmt reflows the
+    /// very lines being searched for, and the search would then quietly stop
+    /// matching: the loop below used `if let Some(..)`, so a guard that no
+    /// longer found anything would have passed while checking nothing. That is
+    /// the exact failure these tests exist to prevent, so the pattern must not
+    /// depend on formatting and a missing match must be an error.
+    fn flattened(function: &str) -> String {
+        body_of(function)
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    /// Where a call appears, or a failure naming what is missing.
+    fn position_of(body: &str, call: &str, function: &str) -> usize {
+        body.find(call)
+            .unwrap_or_else(|| panic!("{function} no longer calls {call}"))
+    }
+
     /// Nothing touches R2 while a transaction is open.
     ///
     /// Both handlers used to call the object store between `begin` and
@@ -639,18 +662,22 @@ mod tests {
     /// latency into lock-queue latency for every other write to that member.
     #[test]
     fn avatar_storage_is_never_called_inside_a_transaction() {
-        for function in ["upload_avatar", "delete_avatar"] {
-            let body = body_of(function);
-            let begin = body.find("pool.begin()").expect("opens a transaction");
-            let commit = body.find("tx.commit()").expect("commits");
-            for call in ["store
-        .put(", "delete_avatar_variants", "delete_other_avatar"] {
-                if let Some(at) = body.find(call) {
-                    assert!(
-                        at < begin || at > commit,
-                        "{function} calls {call} between begin and commit"
-                    );
-                }
+        for (function, calls) in [
+            (
+                "upload_avatar",
+                ["store .put(", "delete_other_avatar_variants"].as_slice(),
+            ),
+            ("delete_avatar", ["delete_avatar_variants"].as_slice()),
+        ] {
+            let body = flattened(function);
+            let begin = position_of(&body, "pool.begin()", function);
+            let commit = position_of(&body, "tx.commit()", function);
+            for call in calls {
+                let at = position_of(&body, call, function);
+                assert!(
+                    at < begin || at > commit,
+                    "{function} calls {call} between begin and commit"
+                );
             }
         }
     }
@@ -662,18 +689,16 @@ mod tests {
     /// exists — a broken avatar produced by an upload that failed.
     #[test]
     fn an_upload_writes_before_it_deletes() {
-        let body = body_of("upload_avatar");
-        let put = body.find("store
-        .put(").expect("uploads the image");
-        let cleanup = body
-            .find("delete_other_avatar_variants")
-            .expect("removes superseded variants");
+        let body = flattened("upload_avatar");
+        let put = position_of(&body, "store .put(", "upload_avatar");
+        let cleanup = position_of(&body, "delete_other_avatar_variants", "upload_avatar");
+        let commit = position_of(&body, "tx.commit()", "upload_avatar");
         assert!(
             put < cleanup,
             "upload_avatar deletes the old variants before writing the new one"
         );
         assert!(
-            body.find("tx.commit()").expect("commits") < cleanup,
+            commit < cleanup,
             "cleanup must follow the commit, so a failure cannot orphan the live avatar"
         );
     }
