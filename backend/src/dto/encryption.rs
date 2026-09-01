@@ -131,6 +131,25 @@ pub struct PublishKeysRequest {
     pub recovery_wrapped_key: String,
     #[validate(custom(function = "validate_salt"))]
     pub recovery_kdf_salt: String,
+
+    /// Required only when the account already has keys, because only then does
+    /// this route destroy something.
+    ///
+    /// A first publication has nothing to overwrite, and asking for a password
+    /// during onboarding would buy nothing. A second one replaces the identity
+    /// *and* both wrapped copies of the private key — the password copy and the
+    /// recovery copy — so after it there is no way back to the old key and
+    /// every message ever sent to it is unreadable for good. A fifteen-minute
+    /// access token should not be enough to do that.
+    ///
+    /// The interface never asks for this: `EncryptionGate` shows the setup form
+    /// only when no keys exist and the restore form otherwise, so a replacement
+    /// can currently only come from a direct API call. Which is precisely the
+    /// shape of the attack.
+    #[validate(length(max = 128, message = "Current password must be at most 128 characters"))]
+    pub current_password: Option<String>,
+    #[validate(length(max = 64, message = "Two-factor code is too long"))]
+    pub totp_code: Option<String>,
 }
 
 /// Replace only the password-sealed copy of the private key.

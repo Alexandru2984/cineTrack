@@ -77,6 +77,12 @@ export async function setupIdentity(userId: string, password: string): Promise<S
         wrapIdentity(identity, deriveWrappingKey(recoveryCode, recoverySalt, DEFAULT_KDF_COST)),
       ),
       recovery_kdf_salt: toHex(recoverySalt),
+      // Ignored on a first publication and required on a replacement, which is
+      // the only case where this route destroys anything. Sent unconditionally
+      // because the password is already in hand here — it is what wraps the key
+      // two lines above — so the request stays valid if replacing keys ever
+      // becomes something the interface offers.
+      current_password: password,
     },
   });
 

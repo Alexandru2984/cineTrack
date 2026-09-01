@@ -6233,10 +6233,16 @@ async fn publish_signer_keys(
     signer: &TestSigner,
     fingerprint: &str,
 ) {
+    // The password is ignored on a first publication and required on a
+    // replacement, so sending it always keeps this helper usable for both. Every
+    // account here registers with `Pass1234`; a rotation for one that did not
+    // would be refused, which is the intended behaviour rather than a gap.
+    let mut body = publish_keys_body_for(signer, fingerprint);
+    body["current_password"] = json!("Pass1234");
     let req = actix_test::TestRequest::put()
         .uri("/api/encryption/keys")
         .insert_header(("Authorization", format!("Bearer {token}")))
-        .set_json(publish_keys_body_for(signer, fingerprint))
+        .set_json(body)
         .peer_addr(peer_addr())
         .to_request();
     assert!(
@@ -7793,11 +7799,15 @@ async fn encryption_keys_publish_and_are_readable_by_a_peer() {
     assert!(body.get("recovery_wrapped_key").is_none());
 
     // Publishing again rotates, and the generation is what lets a peer notice a
-    // cached key has been replaced.
+    // cached key has been replaced. It carries the account password because a
+    // replacement destroys both wrapped copies of the old private key; see
+    // `replacing_encryption_keys_needs_the_account_password`.
+    let mut rotation = publish_keys_body(&"2".repeat(64));
+    rotation["current_password"] = json!("Pass1234");
     let req = actix_test::TestRequest::put()
         .uri("/api/encryption/keys")
         .insert_header(("Authorization", format!("Bearer {owner_token}")))
-        .set_json(publish_keys_body(&"2".repeat(64)))
+        .set_json(rotation)
         .peer_addr(peer_addr())
         .to_request();
     let body: Value = actix_test::call_and_read_body_json(&app, req).await;
@@ -12687,4 +12697,86 @@ async fn test_sign_in_alerts_skip_familiar_devices() {
         .await
         .unwrap();
     pool.close().await;
+}
+
+/// Replacing keys costs a password; creating them the first time does not.
+///
+/// The second publication overwrites the identity *and* both wrapped copies of
+/// the private key — the password copy and the recovery copy — after which no
+/// one, the owner included, can read a message encrypted to the old key. A
+/// stolen access token is valid for fifteen minutes and should not be enough.
+///
+/// The first publication overwrites nothing, so it stays free: asking for a
+/// password during onboarding would buy exactly nothing, and `EncryptionGate`
+/// shows the setup form only when no keys exist.
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn replacing_encryption_keys_needs_the_account_password() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (token, _, _) = register_user(&app, "keyswap", "keyswap@mailbox.dev", "Pass1234").await;
+
+    // First publication: nothing to destroy, nothing to prove.
+    let req = actix_test::TestRequest::put()
+        .uri("/api/encryption/keys")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .set_json(publish_keys_body(&"1".repeat(64)))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 200);
+
+    // The attack: a live token, no password, and a new identity.
+    let req = actix_test::TestRequest::put()
+        .uri("/api/encryption/keys")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .set_json(publish_keys_body(&"2".repeat(64)))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 400);
+
+    // Refused, and refused *before* anything changed: the directory still holds
+    // the original fingerprint. A check that rejected the request after writing
+    // would be no protection at all.
+    let req = actix_test::TestRequest::get()
+        .uri("/api/encryption/keys")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let status: Value = actix_test::call_and_read_body_json(&app, req).await;
+    assert_eq!(status["key_fingerprint"], "1".repeat(64));
+    assert_eq!(status["generation"], 1);
+
+    // A wrong password is refused too, so the check is the password and not the
+    // mere presence of the field.
+    let mut body = publish_keys_body(&"3".repeat(64));
+    body["current_password"] = json!("WrongPass1");
+    let req = actix_test::TestRequest::put()
+        .uri("/api/encryption/keys")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .set_json(body)
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 401);
+
+    // With the password, the owner can still replace their own keys.
+    let mut body = publish_keys_body(&"4".repeat(64));
+    body["current_password"] = json!("Pass1234");
+    let req = actix_test::TestRequest::put()
+        .uri("/api/encryption/keys")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .set_json(body)
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 200);
+
+    let req = actix_test::TestRequest::get()
+        .uri("/api/encryption/keys")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let status: Value = actix_test::call_and_read_body_json(&app, req).await;
+    assert_eq!(status["key_fingerprint"], "4".repeat(64));
+    assert_eq!(status["generation"], 2);
 }
