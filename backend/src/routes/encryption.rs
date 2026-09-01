@@ -69,12 +69,51 @@ async fn key_status(pool: web::Data<PgPool>, req: HttpRequest) -> Result<HttpRes
 /// for the same reason.
 async fn publish_keys(
     pool: web::Data<PgPool>,
+    config: web::Data<crate::config::Config>,
     req: HttpRequest,
     body: web::Json<PublishKeysRequest>,
 ) -> Result<HttpResponse, AppError> {
     let user_id = require_auth(&req).await?;
     body.validate()?;
     let data = body.into_inner();
+
+    // Replacing keys costs a password; creating them for the first time does
+    // not. The difference is what the route destroys. A first publication
+    // overwrites nothing, and a password prompt during onboarding would buy
+    // nothing. A second one replaces the identity and *both* wrapped copies of
+    // the private key below — the password copy and the recovery copy — after
+    // which no one, the owner included, can read a single message that was
+    // encrypted to the old key. That is not something a fifteen-minute access
+    // token should be able to do on its own.
+    //
+    // Checked before any work, so a request that cannot succeed does not first
+    // spend an Argon2 verification or open a transaction.
+    let replacing = sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS (SELECT 1 FROM user_identity_keys WHERE user_id = $1)",
+    )
+    .bind(user_id)
+    .fetch_one(pool.get_ref())
+    .await?;
+    if replacing {
+        let user = sqlx::query_as::<_, crate::models::User>("SELECT * FROM users WHERE id = $1")
+            .bind(user_id)
+            .fetch_optional(pool.get_ref())
+            .await?
+            .ok_or_else(|| AppError::NotFound("User not found".to_string()))?;
+        let password = data.current_password.as_deref().ok_or_else(|| {
+            AppError::BadRequest(
+                "Replacing your encryption keys requires your account password".to_string(),
+            )
+        })?;
+        crate::services::auth::confirm_sensitive_action(
+            pool.get_ref(),
+            &config,
+            &user,
+            password,
+            data.totp_code.as_deref(),
+        )
+        .await?;
+    }
     data.password_kdf
         .validate_cost()
         .map_err(|error| AppError::BadRequest(describe(&error)))?;
