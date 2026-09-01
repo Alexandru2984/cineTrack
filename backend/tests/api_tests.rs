@@ -6295,10 +6295,11 @@ async fn an_encrypted_message_round_trips_without_the_server_reading_it() {
     let signer = TestSigner::new();
     publish_signer_keys(&app, &sender_token, &signer, &"7".repeat(64)).await;
 
+    let client_nonce = Uuid::new_v4();
     let req = actix_test::TestRequest::post()
         .uri("/api/messages/envrecip")
         .insert_header(("Authorization", format!("Bearer {sender_token}")))
-        .set_json(encrypted_body(&signer, Uuid::new_v4()))
+        .set_json(encrypted_body(&signer, client_nonce))
         .peer_addr(peer_addr())
         .to_request();
     let resp = actix_test::call_service(&app, req).await;
@@ -6322,9 +6323,23 @@ async fn an_encrypted_message_round_trips_without_the_server_reading_it() {
     assert_eq!(message["sender_ephemeral_key"], "33".repeat(32));
     assert_eq!(message["sender_copy"], "66".repeat(48));
     assert_eq!(message["franking_commitment"], "44".repeat(32));
-    // The signature is the server's business alone; handing it to a client
-    // would invite one to believe it had verified something it cannot.
-    assert!(message.get("franking_signature").is_none());
+    // The signature travels with the envelope, and so does everything needed to
+    // check it. It used to be withheld, on the reasoning that a client
+    // verifying its own mail only reassures itself — true of a *report*, where
+    // the server is the party who must be convinced, and false of *display*.
+    // Messages are sealed to a public exchange key, so anyone can produce one
+    // that decrypts; the signature is the only field bound to an identity, and
+    // a client that never sees it draws a forgery exactly like a real message.
+    assert_eq!(
+        message["franking_signature"],
+        signer.signature_hex(&[0x44_u8; 32], client_nonce)
+    );
+    // The nonce, because the sender signs before the row has an id and the
+    // recipient cannot rebuild the signed bytes without it.
+    assert_eq!(message["client_nonce"], client_nonce.to_string());
+    // The key it was signed with, so a client can tell a rotation from
+    // tampering. It verifies against the directory, never against this.
+    assert_eq!(message["sender_signing_key"], signer.public_hex());
 
     // The conversation list carries the envelope instead of a plaintext
     // preview, so the client can show the real last message rather than a

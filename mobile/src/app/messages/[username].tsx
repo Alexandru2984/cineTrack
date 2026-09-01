@@ -32,7 +32,13 @@ import { messagePath, safePostAuthRedirect } from '@/lib/deep-links';
 import { readMessage, type MessageContent } from '@/lib/crypto/messages';
 import { formatDateTime } from '@/lib/format';
 import { getErrorMessage } from '@/lib/http';
-import { peerFingerprint, safetyNumber, toHex } from '@/lib/crypto/core';
+import {
+  assertPeerFingerprint,
+  fromHex,
+  peerFingerprint,
+  safetyNumber,
+  toHex,
+} from '@/lib/crypto/core';
 import { useEncryptionStore } from '@/store/encryption';
 import {
   clampMessageBody,
@@ -94,6 +100,34 @@ export default function MessageThreadScreen() {
       ? safetyNumber(ownFingerprint, peerFingerprintValue)
       : null;
 
+  /** The key incoming messages are checked against.
+   *
+   *  Taken only from a directory entry that agrees with itself: a row whose
+   *  stated fingerprint contradicts its own keys is not one to authenticate
+   *  anything against, and `assertPeerFingerprint` throws on exactly that. Null
+   *  while the directory is still loading, which reads as "not checked" rather
+   *  than as a pass. */
+  const peerSigningKey = useMemo(() => {
+    if (!peerKeys.data) return null;
+    try {
+      assertPeerFingerprint(
+        peerKeys.data.exchange_public_key,
+        peerKeys.data.signing_public_key,
+        peerKeys.data.key_fingerprint,
+      );
+      return fromHex(peerKeys.data.signing_public_key);
+    } catch {
+      return null;
+    }
+  }, [peerKeys.data]);
+
+  /** Whose signature a given message should carry: the peer's for one they
+   *  sent, this account's own for one it sent. */
+  const authorSigningKey = (message: DirectMessage) =>
+    message.sender_id === currentUser?.id
+      ? (identity?.signingPublicKey ?? null)
+      : peerSigningKey;
+
   /** The evidence a report needs, for a message only this device can read.
    *
    *  Absent for a plaintext message, and absent — deliberately — for one that
@@ -101,7 +135,7 @@ export default function MessageThreadScreen() {
    *  commitment would be refused, and offering a form that cannot succeed is
    *  worse than refusing it here. */
   const reportEvidence = (message: DirectMessage) => {
-    const content = readMessage(message, identity);
+    const content = readMessage(message, identity, authorSigningKey(message));
     if (content.kind !== 'encrypted') return undefined;
     return {
       revealedPlaintext: content.content.text,
@@ -306,7 +340,7 @@ export default function MessageThreadScreen() {
             return (
               <MessageBubble
                 message={item}
-                content={readMessage(item, identity)}
+                content={readMessage(item, identity, authorSigningKey(item))}
                 own={own}
                 isLastOwn={item.id === lastOwnMessageId}
                 onReport={() => setReporting(item)}
@@ -399,6 +433,10 @@ function previewText(
       return content.content.text;
     case 'locked':
       return t('messages.lockedPreview');
+    case 'untrusted':
+      return t(
+        content.reason === 'forged' ? 'messages.notFromSender' : 'messages.malformedMessage',
+      );
     default:
       return t('messages.undecryptable');
   }
@@ -440,9 +478,12 @@ function MessageBubble({
         ]}
       >
         <AppText style={own ? styles.ownText : undefined}>{previewText(content, t)}</AppText>
-        {content.kind === 'encrypted' && !content.content.commitmentVerified ? (
+        {/* Only for a message that was drawn. The refusals say why in place of
+            the text, and repeating it underneath would read as a footnote on
+            something the reader can see. */}
+        {content.kind === 'encrypted' && content.content.authenticity === 'unrecognised' ? (
           <AppText variant="caption" style={own ? styles.ownMeta : { color: theme.mutedText }}>
-            {t('messages.commitmentMismatch')}
+            {t('messages.notAuthenticated')}
           </AppText>
         ) : null}
         <View style={styles.messageMeta}>

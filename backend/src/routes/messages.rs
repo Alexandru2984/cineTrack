@@ -280,10 +280,12 @@ async fn get_thread(
         sqlx::query_as::<_, DirectMessageResponse>(
             r#"SELECT id, sender_id, recipient_id, body,
                        ciphertext, nonce, sender_ephemeral_key, sender_copy, franking_commitment,
+                       franking_signature, client_nonce, sender_signing_key,
                        read_at, created_at
             FROM (
                 SELECT id, sender_id, recipient_id, body,
                        ciphertext, nonce, sender_ephemeral_key, sender_copy, franking_commitment,
+                       franking_signature, client_nonce, sender_signing_key,
                        read_at, created_at
                 FROM direct_messages
                 WHERE
@@ -306,10 +308,12 @@ async fn get_thread(
         sqlx::query_as::<_, DirectMessageResponse>(
             r#"SELECT id, sender_id, recipient_id, body,
                        ciphertext, nonce, sender_ephemeral_key, sender_copy, franking_commitment,
+                       franking_signature, client_nonce, sender_signing_key,
                        read_at, created_at
             FROM (
                 SELECT id, sender_id, recipient_id, body,
                        ciphertext, nonce, sender_ephemeral_key, sender_copy, franking_commitment,
+                       franking_signature, client_nonce, sender_signing_key,
                        read_at, created_at
                 FROM direct_messages
                 WHERE
@@ -467,6 +471,7 @@ async fn send_message(
     let existing = sqlx::query_as::<_, DirectMessageResponse>(
         r#"SELECT id, sender_id, recipient_id, body,
                        ciphertext, nonce, sender_ephemeral_key, sender_copy, franking_commitment,
+                       franking_signature, client_nonce, sender_signing_key,
                        read_at, created_at
         FROM direct_messages
         WHERE sender_id = $1 AND client_nonce = $2"#,
@@ -534,7 +539,8 @@ async fn send_message(
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
         RETURNING id, sender_id, recipient_id, body,
                   ciphertext, nonce, sender_ephemeral_key, sender_copy,
-                  franking_commitment, read_at, created_at"#,
+                  franking_commitment, franking_signature, client_nonce,
+                  sender_signing_key, read_at, created_at"#,
     )
     .bind(sender_id)
     .bind(peer.id)

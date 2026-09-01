@@ -16,9 +16,28 @@ export interface DecryptedContent {
    *  sender provably wrote and text the reporter typed. */
   frankingKey: Uint8Array;
   /** False when the sender encrypted one thing and committed to another. Such a
-   *  message cannot be reported, so saying so beats showing it as ordinary. */
-  commitmentVerified: boolean;
+   *  message cannot be reported, so saying so beats showing it as ordinary.
+   *
+   *  `null` means nothing was checked, because the envelope carried no
+   *  commitment to check against. A conversation preview is exactly that, and
+   *  conflating it with `false` had a real consequence: the preview cached its
+   *  own answer under the message id, the thread view found that entry and
+   *  trusted it, and the newest message of every conversation was labelled a
+   *  commitment mismatch. Absence of a verdict is not a negative verdict. */
+  commitmentVerified: boolean | null;
+  /** Whether the account this claims to be from actually signed it.
+   *
+   *  * `verified` — signed by the key behind the safety number.
+   *  * `unchecked` — nothing to check against: no trusted key was on hand.
+   *  * `unrecognised` — the signature does not verify under the key the sender
+   *    publishes today, and the key it was made with is either not recorded or
+   *    is a different one. A key rotation looks exactly like this.
+   *  * `forged` — it fails under the very key the message is recorded as having
+   *    been signed with. Nothing legitimate produces that. */
+  authenticity: MessageAuthenticity;
 }
+
+export type MessageAuthenticity = 'verified' | 'unchecked' | 'unrecognised' | 'forged';
 
 const cache = new Map<string, DecryptedContent>();
 /** Bounded so a long-lived tab scrolling years of history cannot grow without

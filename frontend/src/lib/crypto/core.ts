@@ -309,6 +309,40 @@ export function frankingSigningPayload(
   return concat(commitment, fromHex(clientNonce.replace(/-/g, '')));
 }
 
+/** Did the account we trust actually write this commitment?
+ *
+ *  The encryption alone answers no part of that question. Every message is
+ *  sealed to the *recipient's* public exchange key with a fresh ephemeral pair,
+ *  and that key is public — so anyone at all, the server included, can produce
+ *  a ciphertext the recipient opens cleanly. The signature is the only field in
+ *  the envelope that is bound to an identity, and it is what separates "this
+ *  decrypted" from "this is from them".
+ *
+ *  The key must be the one the reader trusts — the directory entry behind the
+ *  safety number — never a key handed over beside the signature. Verifying a
+ *  signature against a key supplied by the same party that supplied the
+ *  signature proves only that they can do arithmetic.
+ *
+ *  Returns false rather than throwing on malformed input: a signature of the
+ *  wrong length is a failed check, not an exceptional condition, and the caller
+ *  treats both the same way. */
+export function verifyFrankingSignature(
+  commitment: Uint8Array,
+  signature: Uint8Array,
+  signingPublicKey: Uint8Array,
+  clientNonce: string,
+): boolean {
+  try {
+    return ed25519.verify(
+      signature,
+      frankingSigningPayload(commitment, clientNonce),
+      signingPublicKey,
+    );
+  } catch {
+    return false;
+  }
+}
+
 export function encryptMessage(
   plaintext: string,
   recipientExchangePublicKey: Uint8Array,

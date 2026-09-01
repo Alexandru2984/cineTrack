@@ -58,8 +58,22 @@ pub struct Config {
 
 impl Config {
     pub fn from_env() -> Self {
-        let app_env =
-            validate_app_env(env::var("APP_ENV").unwrap_or_else(|_| "development".to_string()));
+        let app_env = validate_app_env(env::var("APP_ENV").unwrap_or_else(|_| {
+            // No default. It used to fall back to `development`, and that is the
+            // wrong direction for a default to point: `development` is the
+            // setting that relaxes JWT secret strength, CORS, the breached
+            // password check and the metrics credential, and logs reset URLs.
+            // Every one of those loosens when the variable is *absent*, so a
+            // deployment that lost its environment would come up weaker while
+            // looking like it had started fine.
+            //
+            // Nothing depended on the fallback: the production compose file sets
+            // it as a literal, the development one reads it from `.env`, and
+            // `.env.example` and the README both spell it out. Requiring it
+            // costs a clear error on a machine that was already misconfigured,
+            // and removes the one way to reach the weak settings by accident.
+            panic!("APP_ENV must be set to development, test, or production")
+        }));
         let is_production = app_env == "production";
         let jwt_secret = env::var("JWT_SECRET").expect("JWT_SECRET must be set");
         assert!(
@@ -549,6 +563,15 @@ mod tests {
     #[should_panic(expected = "APP_ENV must be development, test, or production")]
     fn rejects_unknown_application_environment() {
         validate_app_env("prod".to_string());
+    }
+
+    /// The three it does accept, so making the variable required did not also
+    /// narrow what it may say.
+    #[test]
+    fn accepts_the_three_known_environments() {
+        for value in ["development", "test", "production"] {
+            assert_eq!(validate_app_env(value.to_string()), value);
+        }
     }
 
     #[test]
