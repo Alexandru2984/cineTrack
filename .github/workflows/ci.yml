@@ -9,12 +9,6 @@ on:
 permissions:
   contents: read
 
-env:
-  # Keep in step with the rust tag in backend/Dockerfile.{dev,prod}: CI installs
-  # its own toolchain, so bumping only the image leaves this behind and the
-  # build fails on crates that raised their minimum rustc.
-  RUST_TOOLCHAIN: 1.98.0
-
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -33,19 +27,9 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Check the toolchain matches the container images
-        run: |
-          # RUST_TOOLCHAIN and the Dockerfile tags are separate knobs, so bumping
-          # one alone gets caught here rather than as a compile error deep in the
-          # dependency graph.
-          for file in Dockerfile.dev Dockerfile.prod; do
-            found=$(grep -oP '(?<=^FROM rust:)[0-9]+\.[0-9]+\.[0-9]+' "$file")
-            if [ "$found" != "$RUST_TOOLCHAIN" ]; then
-              echo "::error file=backend/$file::$file uses rust $found but RUST_TOOLCHAIN is $RUST_TOOLCHAIN"
-              exit 1
-            fi
-          done
-          echo "backend images and RUST_TOOLCHAIN agree on rust $RUST_TOOLCHAIN"
+
+      - name: Read the Rust version from the backend images
+        run: echo "RUST_TOOLCHAIN=$(${{ github.workspace }}/scripts/rust_toolchain.sh)" >> "$GITHUB_ENV"
 
       - name: Install Rust
         run: |
@@ -104,6 +88,9 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
+
+      - name: Read the Rust version from the backend images
+        run: echo "RUST_TOOLCHAIN=$(${{ github.workspace }}/scripts/rust_toolchain.sh)" >> "$GITHUB_ENV"
 
       - name: Install Rust
         run: |
@@ -449,6 +436,9 @@ jobs:
       - name: Validate public page addresses
         run: scripts/tests/spa_public_pages_test.sh
 
+      - name: Validate the Rust version has one home
+        run: scripts/tests/rust_toolchain_test.sh
+
       - name: Validate deployment isolation
         run: scripts/tests/deployment_hardening_test.sh
 
@@ -537,6 +527,9 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Read the Rust version from the backend images
+        run: echo "RUST_TOOLCHAIN=$(${{ github.workspace }}/scripts/rust_toolchain.sh)" >> "$GITHUB_ENV"
+
       - name: Install Rust
         run: |
           rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal
@@ -591,6 +584,9 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
+
+      - name: Read the Rust version from the backend images
+        run: echo "RUST_TOOLCHAIN=$(${{ github.workspace }}/scripts/rust_toolchain.sh)" >> "$GITHUB_ENV"
 
       - name: Install Rust
         run: |
