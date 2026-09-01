@@ -145,6 +145,13 @@ async fn main() -> std::io::Result<()> {
     }
 
     let config = config::Config::from_env();
+    // Before the mode check, so `--check-config` exercises it too: a malformed
+    // `TRUSTED_PROXY_IPS` should fail the deployment gate rather than the first
+    // request after the swap.
+    log::info!(
+        "{}",
+        cinetrack::middleware::rate_limit::describe_trusted_proxies()
+    );
     if matches!(mode, RunMode::CheckConfig) {
         log::info!("Application configuration is valid");
         return Ok(());

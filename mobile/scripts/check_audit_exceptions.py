@@ -35,9 +35,15 @@ AUDIT_LEVEL = "high"
 # More than that, the vulnerable code is unreachable here. Both advisories are
 # in the ICNS, JXL and HEIF decoders, and Metro picks a decoder by file type;
 # assets/ holds three PNG files and the repository contains no image in any of
-# those three formats. Re-check that if artwork is ever added:
-#     find . -path ./node_modules -prune -o \
-#          \( -iname '*.icns' -o -iname '*.jxl' -o -iname '*.heic' \) -print
+# those three formats.
+#
+# That last clause is now checked rather than asserted, by
+# `unreachable_formats_present` below. It used to be a `find` written in this
+# comment, and the recipe was wrong: it pruned `./node_modules` but not
+# `./mobile/node_modules`, so run from the repository root it reported
+# `@react-native/debugger-shell/.../icon.icns` and told the next reader nothing.
+# The conclusion held — that file is an Electron resource Metro never bundles —
+# but a re-check that cries wolf is a re-check nobody runs twice.
 #
 # There is nothing to upgrade to either. GitHub reports no patched version, the
 # advisories cover every release, and the package has not been published since
@@ -106,9 +112,46 @@ def audit_findings() -> dict[tuple[str, str], str]:
     return findings
 
 
+#: The decoders both advisories live in. Metro dispatches on file type, so an
+#: asset in one of these is what would make the vulnerable path reachable.
+UNREACHABLE_FORMATS = (".icns", ".jxl", ".heic")
+
+
+def unreachable_formats_present() -> list[Path]:
+    """Assets that would put the vulnerable decoders back in reach.
+
+    The exception rests on there being none, so this walks the tree instead of
+    leaving a command in a comment for somebody to run. `node_modules` is
+    skipped at any depth — the version of this check that lived in a comment
+    pruned only the top-level one, and the hit it then reported inside
+    `mobile/node_modules` was an Electron resource that Metro never opens.
+
+    Only what Metro can bundle counts, so the search starts at the mobile
+    project rather than the repository root.
+    """
+    found: list[Path] = []
+    for path in MOBILE.rglob("*"):
+        if not path.is_file():
+            continue
+        if "node_modules" in path.parts or ".git" in path.parts:
+            continue
+        if path.suffix.lower() in UNREACHABLE_FORMATS:
+            found.append(path.relative_to(MOBILE))
+    return found
+
+
 def main() -> int:
     findings = audit_findings()
     errors: list[str] = []
+
+    if any(package == "image-size" for package, _ in ACCEPTED):
+        reachable = unreachable_formats_present()
+        if reachable:
+            listed = ", ".join(str(path) for path in sorted(reachable))
+            errors.append(
+                "the image-size exception assumes no ICNS, JXL or HEIF asset exists, "
+                f"and these now do: {listed}. Re-assess before accepting the advisories"
+            )
 
     for key, title in sorted(findings.items()):
         package, advisory = key

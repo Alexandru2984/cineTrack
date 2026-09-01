@@ -400,27 +400,59 @@ async fn upload_avatar(
     let info = validate_avatar_image(&bytes, declared_type)?;
     let bytes = strip_avatar_metadata(&bytes, info)?;
 
-    let mut tx = pool.begin().await?;
-    lock_user(&mut tx, user_id).await?;
-
     let key = format!("avatars/{user_id}.{}", info.extension);
-    store
-        .delete_other_avatar_variants(user_id, info.extension)
-        .await
-        .map_err(|error| avatar_storage_unavailable("replacement cleanup", user_id, error))?;
 
+    // Write the new image before anything else, and before any transaction is
+    // open. Two things were wrong with doing this the other way round.
+    //
+    // The old variants were deleted *first*, so a `put` that then failed left
+    // the member with no image at all while their row still pointed at a key
+    // that had just been removed — a broken avatar produced by a failed upload
+    // that changed nothing the member asked to change.
+    //
+    // And both calls ran inside the transaction, with `FOR UPDATE` held on the
+    // member's row. That makes R2's latency into lock-queue latency: a slow
+    // object store stalls every other write to that member.
+    //
+    // Ordered this way, a failed upload leaves everything exactly as it was.
     store
         .put(&key, &bytes, info.content_type)
         .await
         .map_err(|error| avatar_storage_unavailable("upload", user_id, error))?;
 
     let avatar_url = format!("{}?v={}", store.public_url(&key), Uuid::new_v4().simple());
+
+    // The transaction now holds one statement, so the lock lives for a local
+    // write rather than for two round trips to a third party.
+    let mut tx = pool.begin().await?;
+    lock_user(&mut tx, user_id).await?;
     sqlx::query("UPDATE users SET avatar_url = $2, updated_at = NOW() WHERE id = $1")
         .bind(user_id)
         .bind(&avatar_url)
         .execute(&mut *tx)
         .await?;
     tx.commit().await?;
+
+    // Only once the row points at the new image. Failing here leaves an image
+    // in a *different* format that nothing references — invisible to anyone,
+    // and removed by the next upload, which deletes every variant but the one
+    // it just wrote. Refusing the request over it would be worse: the avatar
+    // the member uploaded is already live and already theirs.
+    //
+    // This is why the key is not versioned, which is the other way to make the
+    // write safe. `avatars/{id}.{ext}` is derived from what it holds, so an
+    // interrupted upload leaves a key the next one overwrites. A versioned key
+    // would leave genuinely unreferenced objects behind and need a sweeper to
+    // find them — trading a problem that cannot happen for one that needs
+    // machinery to clean up.
+    if let Err(error) = store
+        .delete_other_avatar_variants(user_id, info.extension)
+        .await
+    {
+        log::warn!(
+            "avatar replacement cleanup failed user_id={user_id}: {error:#};              the superseded variant will be removed by the next upload"
+        );
+    }
 
     crate::metrics::record_product_action(crate::metrics::ProductAction::AvatarUploaded);
     Ok(HttpResponse::Ok().json(serde_json::json!({ "avatar_url": avatar_url })))
@@ -434,12 +466,23 @@ async fn delete_avatar(
     let user_id = require_auth(&req).await?;
     let store = storage_or_503(storage.get_ref())?;
 
-    let mut tx = pool.begin().await?;
-    lock_user(&mut tx, user_id).await?;
+    // Removal goes the other way round from upload, deliberately.
+    //
+    // Here the object is the thing being removed, and it is publicly readable
+    // at a guessable URL until it is gone. Clearing the column first and then
+    // failing to delete would answer "removed" while the image stayed
+    // downloadable — so the store is emptied first, and a failure is refused
+    // with the member's avatar still intact and the request still retryable.
+    //
+    // What both paths share is that no transaction is open across the network
+    // call. The lock is taken afterwards, for one local statement.
     store
         .delete_avatar_variants(user_id)
         .await
         .map_err(|error| avatar_storage_unavailable("delete", user_id, error))?;
+
+    let mut tx = pool.begin().await?;
+    lock_user(&mut tx, user_id).await?;
     sqlx::query("UPDATE users SET avatar_url = NULL, updated_at = NOW() WHERE id = $1")
         .bind(user_id)
         .execute(&mut *tx)
@@ -559,6 +602,106 @@ fn serve_image(bytes: Vec<u8>, content_type: &str) -> HttpResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The body of one function in this file, by brace matching.
+    ///
+    /// The two tests below are about the *order* of calls, which no unit test
+    /// can observe without a real object store and a real database. Reading the
+    /// source is the honest way to pin an ordering constraint that has no
+    /// runtime signal, and it is the constraint that matters: both defects
+    /// these tests exist for were invisible until R2 misbehaved.
+    fn body_of(function: &str) -> &'static str {
+        const SOURCE: &str = include_str!("assets.rs");
+        let start = SOURCE
+            .find(&format!("async fn {function}("))
+            .unwrap_or_else(|| panic!("{function} is gone from this file"));
+        let open = SOURCE[start..].find(" {").expect("function has a body") + start;
+        let mut depth = 0usize;
+        for (offset, character) in SOURCE[open..].char_indices() {
+            match character {
+                '{' => depth += 1,
+                '}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return &SOURCE[open..open + offset];
+                    }
+                }
+                _ => {}
+            }
+        }
+        panic!("{function} has an unbalanced body");
+    }
+
+    /// Runs of whitespace collapsed to one space, so a search is about code
+    /// rather than layout.
+    ///
+    /// The first version of these tests searched for `"store\n        .put("`
+    /// — a pattern carrying the source's own indentation. rustfmt reflows the
+    /// very lines being searched for, and the search would then quietly stop
+    /// matching: the loop below used `if let Some(..)`, so a guard that no
+    /// longer found anything would have passed while checking nothing. That is
+    /// the exact failure these tests exist to prevent, so the pattern must not
+    /// depend on formatting and a missing match must be an error.
+    fn flattened(function: &str) -> String {
+        body_of(function)
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    /// Where a call appears, or a failure naming what is missing.
+    fn position_of(body: &str, call: &str, function: &str) -> usize {
+        body.find(call)
+            .unwrap_or_else(|| panic!("{function} no longer calls {call}"))
+    }
+
+    /// Nothing touches R2 while a transaction is open.
+    ///
+    /// Both handlers used to call the object store between `begin` and
+    /// `commit`, with `FOR UPDATE` held on the member's row, which turns R2's
+    /// latency into lock-queue latency for every other write to that member.
+    #[test]
+    fn avatar_storage_is_never_called_inside_a_transaction() {
+        for (function, calls) in [
+            (
+                "upload_avatar",
+                ["store .put(", "delete_other_avatar_variants"].as_slice(),
+            ),
+            ("delete_avatar", ["delete_avatar_variants"].as_slice()),
+        ] {
+            let body = flattened(function);
+            let begin = position_of(&body, "pool.begin()", function);
+            let commit = position_of(&body, "tx.commit()", function);
+            for call in calls {
+                let at = position_of(&body, call, function);
+                assert!(
+                    at < begin || at > commit,
+                    "{function} calls {call} between begin and commit"
+                );
+            }
+        }
+    }
+
+    /// The new image is written before the old ones are removed.
+    ///
+    /// Reversed, a `put` that fails after the delete leaves the member with no
+    /// image at all while their row still points at a key that no longer
+    /// exists — a broken avatar produced by an upload that failed.
+    #[test]
+    fn an_upload_writes_before_it_deletes() {
+        let body = flattened("upload_avatar");
+        let put = position_of(&body, "store .put(", "upload_avatar");
+        let cleanup = position_of(&body, "delete_other_avatar_variants", "upload_avatar");
+        let commit = position_of(&body, "tx.commit()", "upload_avatar");
+        assert!(
+            put < cleanup,
+            "upload_avatar deletes the old variants before writing the new one"
+        );
+        assert!(
+            commit < cleanup,
+            "cleanup must follow the commit, so a failure cannot orphan the live avatar"
+        );
+    }
 
     fn png(width: u32, height: u32) -> Vec<u8> {
         let mut bytes = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();

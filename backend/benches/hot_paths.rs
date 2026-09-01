@@ -82,9 +82,27 @@ fn bench_password_params(c: &mut Criterion) {
     let mut group = c.benchmark_group("password_params");
     group.sample_size(10);
 
+    // The first row is read from the application rather than restated here. It
+    // used to be a literal, and it fell out of step: it still said
+    // `m=19MiB t=2` after the application moved to 32 MiB and three iterations,
+    // so this table — whose whole purpose is choosing parameters — measured a
+    // baseline that no longer existed and made every alternative look about
+    // three times more expensive than it really is.
+    //
     // (label, memory KiB, iterations, parallelism)
+    let current_label = format!(
+        "current: m={}MiB t={} p={}",
+        cinetrack::utils::password::ARGON2_MEMORY_KIB / 1024,
+        cinetrack::utils::password::ARGON2_ITERATIONS,
+        cinetrack::utils::password::ARGON2_PARALLELISM,
+    );
     let settings = [
-        ("current: m=19MiB t=2 p=1", 19_456u32, 2u32, 1u32),
+        (
+            current_label.as_str(),
+            cinetrack::utils::password::ARGON2_MEMORY_KIB,
+            cinetrack::utils::password::ARGON2_ITERATIONS,
+            cinetrack::utils::password::ARGON2_PARALLELISM,
+        ),
         ("owasp alt: m=46MiB t=1 p=1", 47_104, 1, 1),
         ("rfc9106 2nd: m=64MiB t=3 p=4", 65_536, 3, 4),
     ];

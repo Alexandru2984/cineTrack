@@ -117,6 +117,21 @@ services:
       CORS_ALLOWED_ORIGINS: "${CORS_ALLOWED_ORIGINS}"
       RATE_LIMIT_REQUESTS_PER_SECOND: "${RATE_LIMIT_REQUESTS_PER_SECOND:-10}"
       RATE_LIMIT_BURST_SIZE: "${RATE_LIMIT_BURST_SIZE:-50}"
+      # Who may state a client's address on its behalf. One address: the gateway
+      # of this project's own bridge, which is where nginx's traffic arrives
+      # from after Docker forwards the published loopback port.
+      #
+      # It has to be exact. This host serves about seventy sites, and Docker
+      # publishes the backend with a rule that accepts cross-bridge traffic to
+      # its port ahead of the isolation DROP — so a neighbouring container can
+      # reach the application directly and claim to be any client it likes.
+      # Trusting "anything RFC1918" trusted every one of those neighbours.
+      #
+      # Confirm after a change with `docker network inspect
+      # cinetrack_backend_egress`; the backend logs the rule it ended up with on
+      # every start, and `--check-config` refuses a value it cannot parse before
+      # a deployment swaps anything over.
+      TRUSTED_PROXY_IPS: "${TRUSTED_PROXY_IPS:-172.26.0.1}"
       BREACHED_PASSWORD_CHECK: "${BREACHED_PASSWORD_CHECK:-true}"
       # Required in production: /metrics is on this container's own port, which
       # is published on 127.0.0.1 next to unrelated services. `:?` so a missing
