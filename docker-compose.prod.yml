@@ -60,6 +60,27 @@ services:
       # meant for application queries.
       - -c
       - pg_stat_statements.track_utility=off
+      # Sized against the database rather than left at the default 128 MB.
+      #
+      # `catalog_external_ids` alone is 620 MB — sixty per cent of a 1019 MB
+      # database — so at 128 MB the table the discovery query sorts by
+      # popularity could never stay resident. Measured on production: that query
+      # runs in 232-268 ms warm and averages 1003 ms in `pg_stat_statements`,
+      # and the gap is disk: 4067 blocks read on a cold execution.
+      #
+      # 512 MB against the 2 GiB limit below leaves room for `work_mem` across
+      # every connection (4 MB x 100) plus maintenance work, and a probe with
+      # exactly these settings starts clean and idles at 43 MiB.
+      - -c
+      - shared_buffers=512MB
+      # What the planner believes the operating system is caching, and it was
+      # wrong in a way that mattered: 4 GB, on a container capped at 1 GiB. The
+      # planner was told there was four times more cache than the container
+      # could ever hold, which makes repeated index probes look cheaper than
+      # they are — the shape behind more than one slow query found this week.
+      # 1536 MB is honest against a 2 GiB limit.
+      - -c
+      - effective_cache_size=1536MB
     environment:
       POSTGRES_DB: "${POSTGRES_DB:?POSTGRES_DB must be set}"
       POSTGRES_USER: "${POSTGRES_USER:?POSTGRES_USER must be set}"
@@ -78,7 +99,11 @@ services:
     deploy:
       resources:
         limits:
-          memory: 1024M
+          # 1024M for a 1019 MB database meant the whole thing could not be
+          # cached even in principle, and every eviction became a disk read
+          # against a 620 MB table. The host carries 60 GB with 36 GB free, so
+          # the ceiling was the only thing making this tight.
+          memory: 2048M
           cpus: "1.0"
           pids: 256
 
