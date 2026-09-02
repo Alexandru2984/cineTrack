@@ -423,6 +423,11 @@ jobs:
       - name: Validate calendar feed log redaction
         run: scripts/tests/calendar_feed_log_safety_test.sh
 
+      # Beside the crypto parity check, for the same reason: the clients keep
+      # separate copies of a shared contract, and copies drift silently.
+      - name: Validate client type parity
+        run: scripts/tests/client_type_parity_test.py
+
       - name: Validate edge security contact
         run: scripts/tests/edge_security_config_test.sh
 
