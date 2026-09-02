@@ -20,23 +20,19 @@
     "test:e2e:pwa": "playwright test --config=playwright.pwa.config.ts"
   },
   "dependencies": {
-    "@hookform/resolvers": "^5.9.1",
     "@noble/ciphers": "^2.3.0",
     "@noble/curves": "^2.3.0",
     "@noble/hashes": "^2.3.0",
     "@tanstack/react-query": "^5.102.1",
     "axios": "^1.19.0",
-    "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^1.33.0",
     "qrcode.react": "^4.2.0",
     "react": "^19.2.8",
     "react-calendar-heatmap": "^1.10.0",
     "react-dom": "^19.2.8",
-    "react-hook-form": "^7.86.0",
     "react-router": "8.3.0",
     "tailwind-merge": "^3.6.0",
-    "zod": "^4.4.3",
     "zustand": "^5.0.15"
   },
   "devDependencies": {
