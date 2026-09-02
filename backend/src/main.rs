@@ -28,6 +28,17 @@ const LOG_FORMAT: &str = r#"%a "%r" %s %b "%{User-Agent}i" %T req-id=%{x-request
 // calendar clients cannot send an Authorization header. Never copy it into the
 // backend access log. Operational health remains visible through HTTP metrics.
 const CALENDAR_FEED_LOG_EXCLUDE_REGEX: &str = r"^/api/calendar/feed/";
+// The scrape endpoint, kept out of the access log because what it logged was
+// false. The metrics middleware answers /metrics itself with 200 — verified by
+// scraping it with the real token and getting 35 KB of metrics back — but the
+// router never matches the path, so the logger recorded the router's 404 for a
+// request that had already succeeded. At a 15-second scrape interval that is
+// about 3,900 invented 404s a day, enough to bury a real one and to make any
+// alert on 4xx rates permanently wrong.
+//
+// Scrape health is not lost with the line: Prometheus tracks it as
+// up{job="cinetrack-backend"}, which CineTrackBackendDown already alerts on.
+const METRICS_LOG_EXCLUDE_REGEX: &str = r"^/metrics$";
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
 
 #[derive(Clone, Copy)]
@@ -499,7 +510,8 @@ async fn main() -> std::io::Result<()> {
             .wrap(actix_middleware::from_fn(request_id))
             .wrap(
                 actix_middleware::Logger::new(LOG_FORMAT)
-                    .exclude_regex(CALENDAR_FEED_LOG_EXCLUDE_REGEX),
+                    .exclude_regex(CALENDAR_FEED_LOG_EXCLUDE_REGEX)
+                    .exclude_regex(METRICS_LOG_EXCLUDE_REGEX),
             )
             .wrap(prometheus.clone())
             // Registered after the metrics middleware, so it is the outermost
