@@ -1,0 +1,165 @@
+# Keep main ahead of the advisory feed, so pull requests do not trip over it.
+#
+# Audits answer against the advisory database as it stands *at the moment they
+# run*. That answer changes without anybody touching this repository, so every
+# open pull request starts failing the hour a new advisory lands — on a diff
+# that has nothing to do with it. It happened three times in twenty-four hours:
+# libexpat in the frontend base image, then browserslist, then fast-uri. Each
+# time the fix was mechanical and each time it blocked unrelated work first.
+#
+# Dependabot already has security updates enabled, but its schedule here is
+# weekly with a seven-day cooldown, which is the wrong shape for something that
+# breaks the queue within the hour.
+#
+# So the sweep runs daily against main and does the mechanical part itself:
+# lockfile-only fixes arrive as a pull request before anyone else trips over
+# them. What it cannot fix — a base image whose distro package is behind — it
+# reports as a red run, the same convention `mobile-dependency-drift.yml` uses:
+# red means "somebody should look", not "this change is broken".
+
+name: Advisory sweep
+
+on:
+  schedule:
+    # Daily, early. Advisories publish around the clock; one sweep a day keeps
+    # main clean without adding noise.
+    - cron: "23 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: advisory-sweep
+  cancel-in-progress: false
+
+jobs:
+  lockfiles:
+    name: npm advisories
+    timeout-minutes: 20
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      # No persisted credentials, like every other checkout here. The push below
+      # carries the token explicitly instead, so a later step in this job cannot
+      # reach the remote just by running `git`.
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Install Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+
+      # Lockfiles only. `package.json` is never touched, so a declared version
+      # cannot move behind your back and no major upgrade can arrive this way —
+      # the sweep is for transitive packages, which is what every one of the
+      # three incidents was.
+      - name: Apply fixable advisories
+        run: |
+          for project in frontend mobile; do
+            echo "::group::$project"
+            npm --prefix "$project" audit fix --package-lock-only || true
+            echo "::endgroup::"
+          done
+
+      - name: Report what is left
+        run: |
+          # Informational: the sweep opens a pull request for what it fixed, and
+          # anything still listed here needs a person. Mobile's reviewed
+          # exceptions live in check_audit_exceptions.py and are expected.
+          for project in frontend mobile; do
+            echo "::group::$project audit after fix"
+            npm --prefix "$project" audit --audit-level=high || true
+            echo "::endgroup::"
+          done
+
+      - name: Open a pull request when something changed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if git diff --quiet -- frontend/package-lock.json mobile/package-lock.json; then
+            echo "no fixable advisories; nothing to open"
+            exit 0
+          fi
+
+          BRANCH=chore/advisory-sweep
+          git config user.name "${{ github.actor }}"
+          git config user.email "${{ github.actor_id }}+${{ github.actor }}@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git add frontend/package-lock.json mobile/package-lock.json
+
+          # The body is generated, so it says what moved rather than repeating a
+          # template. Whoever reads the pull request should not have to open the
+          # diff to learn which packages changed.
+          SUMMARY=$(git diff --cached --stat | tail -n +1)
+          git commit -m "fix(deps): apply fixable advisories" \
+                     -m "Opened by the daily advisory sweep. Lockfiles only." \
+                     -m "$SUMMARY"
+          git push --force \
+            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+            "$BRANCH"
+
+          if gh pr view "$BRANCH" --json state --jq .state 2>/dev/null | grep -q OPEN; then
+            echo "pull request already open; branch updated"
+            exit 0
+          fi
+
+          cat > /tmp/sweep-body.md <<BODY
+          Opened by the daily advisory sweep.
+
+          Lockfiles only. \`package.json\` is untouched, so nothing declared here
+          moved and no major upgrade arrived this way.
+
+          \`\`\`
+          ${SUMMARY}
+          \`\`\`
+
+          The audit output for both projects is in the run log, including
+          anything the sweep could not fix.
+          BODY
+
+          gh pr create \
+            --title "fix(deps): apply fixable advisories" \
+            --body-file /tmp/sweep-body.md
+
+  frontend-image:
+    name: Frontend image advisories
+    timeout-minutes: 25
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      # The built image, not the pinned base. Scanning the base alone would be
+      # wrong in both directions now: the Dockerfile upgrades `libexpat` past
+      # what `nginx:*-alpine` ships, so the base reports a vulnerability this
+      # image does not have, and would stay red forever.
+      #
+      # Only the frontend is built here. It is the image with a distro package
+      # manager and therefore the one that goes vulnerable on somebody else's
+      # release schedule; the backend runs on distroless and its scan rides
+      # along on every merge to main.
+      # The same command the pull-request job runs, so the two cannot drift into
+      # scanning different artefacts.
+      - name: Build the frontend image
+        run: |
+          docker build --tag cinetrack-frontend:sweep --file frontend/Dockerfile.prod frontend
+
+      # Same settings as the pull-request scan, so a red run here predicts a red
+      # run there rather than describing a different question.
+      - name: Scan it
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: cinetrack-frontend:sweep
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          ignore-unfixed: false
+          trivyignores: .trivyignore
+          exit-code: "1"
