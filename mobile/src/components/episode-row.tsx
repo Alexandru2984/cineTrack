@@ -39,6 +39,7 @@ export function EpisodeRow({
   return (
     <View style={[styles.row, { borderBottomColor: theme.border }]}>
       <Pressable
+        accessibilityRole="button"
         style={({ pressed }) => [styles.details, { opacity: pressed ? 0.72 : 1 }]}
         onPress={() =>
           router.push({

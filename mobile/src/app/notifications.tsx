@@ -167,7 +167,9 @@ export default function NotificationsScreen() {
             >
               <View style={[styles.avatar, { backgroundColor: theme.surface }]}>
                 {item.actor_avatar_url ? (
+                  // Decorative: the notification text names the person.
                   <Image
+                    accessible={false}
                     source={{ uri: item.actor_avatar_url }}
                     contentFit="cover"
                     transition={120}

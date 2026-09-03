@@ -28,6 +28,8 @@ function ProviderGroup({
       </AppText>
       <View style={styles.providers}>
         {providers.map((provider) => {
+          // The provider's name labels the pressable below, so the logo inside
+          // it is marked decorative rather than announced a second time.
           const logo = imageUrl(provider.logo_path, 'w92');
           return (
             <View
@@ -37,6 +39,7 @@ function ProviderGroup({
             >
               {logo ? (
                 <Image
+                  accessible={false}
                   source={{ uri: logo }}
                   contentFit="cover"
                   transition={120}

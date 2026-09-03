@@ -238,6 +238,7 @@ function UpcomingRow({
   return (
     <View style={[styles.upcomingRow, { borderBottomColor: theme.border }]}>
       <Pressable
+        accessibilityRole="button"
         style={({ pressed }) => [styles.upcomingDetails, { opacity: pressed ? 0.72 : 1 }]}
         onPress={() =>
           isEpisode

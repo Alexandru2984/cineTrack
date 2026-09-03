@@ -63,6 +63,9 @@ export function TrackingFeedbackSheet({
         style={styles.flex}
       >
         <Pressable
+          // Not a control: the dimmed backdrop behind a sheet. Announcing
+          // it as a button would be noise, so it leaves the tree entirely.
+          accessible={false}
           style={[styles.overlay, { backgroundColor: theme.overlay }]}
           onPress={() => {
             if (!pending) onClose();
@@ -72,7 +75,11 @@ export function TrackingFeedbackSheet({
             edges={['bottom']}
             style={[styles.sheet, { backgroundColor: theme.elevated }]}
           >
-            <Pressable onPress={(event) => event.stopPropagation()}>
+            <Pressable
+              // Not a control: a wrapper that exists only to stop taps reaching the backdrop. Announcing
+              // it as a button would be noise, so it leaves the tree entirely.
+              accessible={false}
+              onPress={(event) => event.stopPropagation()}>
               <ScrollView
                 keyboardShouldPersistTaps="handled"
                 contentContainerStyle={styles.content}

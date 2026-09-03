@@ -100,7 +100,9 @@ export default function EpisodeDetailScreen() {
         contentContainerStyle={styles.content}
       >
         {artwork ? (
+          // Decorative: the episode's name and number are read out below it.
           <Image
+            accessible={false}
             source={{ uri: artwork }}
             contentFit="cover"
             transition={120}
