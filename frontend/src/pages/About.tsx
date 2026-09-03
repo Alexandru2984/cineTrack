@@ -59,7 +59,13 @@ export default function AboutPage() {
               href="https://www.justwatch.com/ro"
               target="_blank"
               rel="noreferrer"
-              className="shrink-0 text-lg font-bold text-amber-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--ring))]"
+              /* The theme token every other link on the site uses, not a fixed
+                 amber. `text-amber-500` is #fe9a00, which is 2.13:1 on white
+                 against the 4.5:1 WCAG AA needs — unreadable for the one thing
+                 on this row meant to be clicked, and it did not follow the
+                 theme either. The token measures 5.67:1 in light and 7.40:1 in
+                 dark. Underlined as well, because colour alone is not a link. */
+              className="shrink-0 text-lg font-bold text-[hsl(var(--primary))] underline underline-offset-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--ring))]"
             >
               JustWatch
             </a>
