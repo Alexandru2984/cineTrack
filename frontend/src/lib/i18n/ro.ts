@@ -122,6 +122,8 @@ export const ro: Dictionary = {
     shows: 'Seriale',
     hoursWatched: 'Ore vizionate',
     currentStreak: 'Serie curentă',
+    notInterested: 'Nu mă interesează',
+    notInterestedFor: 'Nu mă interesează {title}',
     recommendationsUnavailable: 'Recomandările nu sunt disponibile',
     recommendationsUnavailableHint: 'Biblioteca și activitatea ta sunt în continuare disponibile.',
     retryRecommendations: 'Reîncearcă recomandările',

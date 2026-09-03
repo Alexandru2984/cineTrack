@@ -12951,3 +12951,115 @@ async fn discovery_prefers_a_close_match_over_a_broad_one() {
         "a title about the member's one genre should beat one tagged with seven"
     );
 }
+
+/// "Not interested" has to do both things: hide the title and stop favouring
+/// its genres.
+///
+/// Hiding alone is not enough — a dismissed title carries the member's genres,
+/// so the next candidate down is more of the same and the row barely changes.
+/// Weighting alone is not enough either, because a strong genre match brings
+/// the same title straight back to the top.
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn dismissing_a_recommendation_hides_it_and_cools_its_genre() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (token, _, user_id) =
+        register_user(&app, "dismissuser", "dismiss@mailbox.dev", "Pass1234").await;
+
+    sqlx::query(
+        r#"INSERT INTO media
+            (tmdb_id, media_type, title, genres, poster_path, metadata_level,
+             tmdb_vote_average)
+        VALUES
+            (674001, 'movie', 'Seed Horror',
+             '[{"id": 27, "name": "Horror"}]'::jsonb, '/seed.jpg', 'detail', 8.0),
+            (674002, 'movie', 'Horror One',
+             '[{"id": 27, "name": "Horror"}]'::jsonb, '/h1.jpg', 'detail', 7.5),
+            (674003, 'movie', 'Horror Two',
+             '[{"id": 27, "name": "Horror"}]'::jsonb, '/h2.jpg', 'detail', 7.4)"#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO catalog_external_ids (tmdb_id, media_type, popularity, adult, video)
+        VALUES (674001, 'movie', 5, FALSE, FALSE),
+               (674002, 'movie', 50, FALSE, FALSE),
+               (674003, 'movie', 40, FALSE, FALSE)"#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO user_media (user_id, media_id, status, is_favorite)
+        SELECT $1::uuid, id, 'completed', TRUE FROM media WHERE tmdb_id = 674001"#,
+    )
+    .bind(&user_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let basis = |body: &Value| body["recommendation_basis"].clone();
+    let ids = |body: &Value| {
+        body["recommendations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|item| item["id"].as_i64().unwrap())
+            .collect::<Vec<_>>()
+    };
+
+    let req = actix_test::TestRequest::get()
+        .uri("/api/media/discovery?language=en")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let before: Value = actix_test::call_and_read_body_json(&app, req).await;
+    assert_eq!(basis(&before), json!(["Horror"]));
+    assert!(
+        ids(&before).contains(&674002),
+        "the top horror should be there"
+    );
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/media/discovery/dismiss/movie/674002")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 204);
+
+    // Dismissing again is not an error: the card can still be on screen when
+    // the list refreshes.
+    let req = actix_test::TestRequest::post()
+        .uri("/api/media/discovery/dismiss/movie/674002")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 204);
+
+    let req = actix_test::TestRequest::get()
+        .uri("/api/media/discovery?language=en")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let after: Value = actix_test::call_and_read_body_json(&app, req).await;
+
+    assert!(
+        !ids(&after).contains(&674002),
+        "a dismissed title must not come back"
+    );
+    // One favourite is +4 and one dismissal is -2, so Horror survives as a
+    // preference here — quieter, not erased. That asymmetry is the point.
+    assert_eq!(basis(&after), json!(["Horror"]));
+
+    // A title the catalogue does not hold is refused rather than silently
+    // recorded, so a typo cannot look like it worked.
+    let req = actix_test::TestRequest::post()
+        .uri("/api/media/discovery/dismiss/movie/999999")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 404);
+}

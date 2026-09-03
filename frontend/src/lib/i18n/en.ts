@@ -120,6 +120,8 @@ export const en = {
     shows: 'Shows',
     hoursWatched: 'Hours Watched',
     currentStreak: 'Current Streak',
+    notInterested: 'Not interested',
+    notInterestedFor: 'Not interested in {title}',
     recommendationsUnavailable: 'Recommendations unavailable',
     recommendationsUnavailableHint: 'Your library and activity are still available.',
     retryRecommendations: 'Retry recommendations',

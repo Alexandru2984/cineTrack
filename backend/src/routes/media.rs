@@ -16,6 +16,10 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
         web::scope("/media")
             .route("/search", web::get().to(search))
             .route("/discovery", web::get().to(discovery))
+            .route(
+                "/discovery/dismiss/{media_type}/{tmdb_id}",
+                web::post().to(dismiss_recommendation),
+            )
             .route("/episodes/{episode_id}", web::get().to(get_episode_detail))
             .route(
                 "/episodes/{episode_id}/reaction",
@@ -124,6 +128,27 @@ async fn discovery(
     )
     .await?;
     Ok(HttpResponse::Ok().json(response))
+}
+
+/// "Not interested", from a discovery card.
+///
+/// The recommender had no way for a member to say no: every signal it learned
+/// from was a form of yes. This both hides the title and takes its genres off
+/// the profile.
+async fn dismiss_recommendation(
+    pool: web::Data<PgPool>,
+    req: HttpRequest,
+    path: web::Path<(String, String)>,
+) -> Result<HttpResponse, AppError> {
+    let user_id = require_auth(&req).await?;
+    let (media_type, tmdb_id) = path.into_inner();
+    if media_type != "movie" && media_type != "tv" {
+        return Err(AppError::BadRequest("Unsupported media type".to_string()));
+    }
+    let tmdb_id = parse_tmdb_id(&tmdb_id)?;
+    discovery_service::dismiss_recommendation(pool.get_ref(), user_id, tmdb_id, &media_type)
+        .await?;
+    Ok(HttpResponse::NoContent().finish())
 }
 
 fn parse_tmdb_id(value: &str) -> Result<i32, AppError> {
