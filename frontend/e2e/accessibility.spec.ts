@@ -58,6 +58,29 @@ async function stubAuthenticatedApp(page: Page) {
       });
     }
     if (path === '/api/calendar/up-next') return route.fulfill({ json: { items: [] } });
+    // A media detail payload with the fields the page actually renders. Without
+    // it the generic `{}` fallback leaves the poster with no title, React drops
+    // the `alt` attribute entirely, and the sweep reports a critical violation
+    // that only its own stub creates.
+    if (/^\/api\/media\/\d+$/.test(path)) {
+      return route.fulfill({
+        json: {
+          id: 550,
+          tmdb_id: 550,
+          media_type: 'movie',
+          title: 'Accessibility Fixture',
+          original_title: 'Accessibility Fixture',
+          overview: 'A fixture used to render the media detail page.',
+          poster_path: null,
+          backdrop_path: null,
+          release_date: '2026-01-01',
+          vote_average: 7.5,
+          genres: [],
+          runtime_minutes: 100,
+          seasons: [],
+        },
+      });
+    }
     if (path === '/api/media/discovery') {
       return route.fulfill({
         json: {
@@ -128,19 +151,51 @@ test.beforeEach(async ({ page }) => {
   );
 });
 
-test('public authentication and privacy pages meet WCAG A/AA checks', async ({ page }) => {
-  for (const path of ['/login', '/register', '/privacy']) {
+// Every route the router serves, not a sample. Six of the twenty-five were
+// covered before, so a violation on any of the other nineteen — a link at
+// 2.13:1 on the about page, as it turned out — could sit there unseen.
+const PUBLIC_ROUTES = [
+  '/login',
+  '/register',
+  '/privacy',
+  '/terms',
+  '/about',
+  '/community-guidelines',
+  '/forgot-password',
+  '/reset-password',
+  '/verify-email',
+  '/confirm-email-change',
+  '/account-deletion',
+];
+
+const PRIVATE_ROUTES = [
+  '/',
+  '/settings',
+  '/moderation',
+  '/calendar',
+  '/search',
+  '/lists',
+  '/messages',
+  '/notifications',
+  '/stats',
+  '/tracking',
+  '/wrapped',
+  '/media/550',
+  '/episodes/1',
+  '/profile/accessibility-user',
+];
+
+test('public pages meet WCAG A/AA checks', async ({ page }) => {
+  for (const path of PUBLIC_ROUTES) {
     await page.goto(path);
     await expect(page.locator('h1')).toBeVisible();
     await expectNoAccessibilityViolations(page);
   }
 });
 
-test('authenticated dashboard, settings, and moderation queue meet WCAG A/AA checks', async ({
-  page,
-}) => {
+test('signed-in pages meet WCAG A/AA checks', async ({ page }) => {
   await stubAuthenticatedApp(page);
-  for (const path of ['/', '/settings', '/moderation']) {
+  for (const path of PRIVATE_ROUTES) {
     await page.goto(path);
     await expect(page.locator('main')).toBeVisible();
     await expectNoAccessibilityViolations(page);

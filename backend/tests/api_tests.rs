@@ -5769,7 +5769,11 @@ async fn test_tracked_release_schedule_sync_persists_episodes_and_cadence() {
     let media_id = sqlx::query_scalar::<_, Uuid>(
         r#"INSERT INTO media
             (tmdb_id, media_type, title, status, metadata_level)
-        VALUES (770001, 'tv', 'Schedule Fixture', 'Returning Series', 'detail')
+        -- Seeded as ended while the provider fixture below returns
+        -- `Returning Series`. The two differing is the point: the cadence must
+        -- come from what the refresh just wrote, not from the status the
+        -- candidate was selected with.
+        VALUES (770001, 'tv', 'Schedule Fixture', 'Ended', 'detail')
         RETURNING id"#,
     )
     .fetch_one(&pool)
@@ -5840,9 +5844,15 @@ async fn test_tracked_release_schedule_sync_persists_episodes_and_cadence() {
         "Fresh Episode"
     );
     assert!(sqlx::query_scalar::<_, bool>(
+        // Upper bound as well as lower. Without it the seven-day ended-series
+        // cadence also satisfies "at least five hours", and this assertion
+        // passed against the defect it now catches: a series returning from
+        // `Ended` was rescheduled a week out at the moment it started airing
+        // again, so new episodes could reach the calendar days late.
         r#"SELECT outcome = 'success'
                 AND consecutive_failures = 0
                 AND next_attempt_at >= NOW() + INTERVAL '5 hours'
+                AND next_attempt_at < NOW() + INTERVAL '12 hours'
             FROM release_schedule_sync_state
             WHERE media_id = $1"#,
     )
