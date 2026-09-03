@@ -74,6 +74,13 @@ async fn load_preferences(pool: &PgPool, user_id: Uuid) -> Result<Vec<Preference
                     END
                     + CASE
                         WHEN tracked.status = 'completed' THEN 2
+                        -- The watchlist, which this used to discard entirely.
+                        -- It is 30% of what a member tracks here and the most
+                        -- direct statement of intent they can make: finishing
+                        -- something says it held their attention, but adding it
+                        -- says they chose it. Weighted above `completed` and
+                        -- below `is_favorite` for that reason.
+                        WHEN tracked.status = 'plan_to_watch' THEN 3
                         WHEN tracked.status = 'watching' THEN 1
                         ELSE 0
                     END
@@ -91,7 +98,7 @@ async fn load_preferences(pool: &PgPool, user_id: Uuid) -> Result<Vec<Preference
               AND (
                   tracked.is_favorite
                   OR tracked.rating >= 6
-                  OR tracked.status IN ('completed', 'watching')
+                  OR tracked.status IN ('completed', 'watching', 'plan_to_watch')
               )
         )
         SELECT
@@ -229,21 +236,41 @@ async fn load_recommendations(
             candidate.backdrop_path,
             candidate.release_date,
             candidate.vote_average,
-            COALESCE((
-                SELECT SUM(preference.weight)
-                FROM (
-                    SELECT DISTINCT genre.value ->> 'id' AS genre_id
-                    FROM jsonb_array_elements(
-                        CASE
-                            WHEN jsonb_typeof(candidate.genres) = 'array'
-                                THEN candidate.genres
-                            ELSE '[]'::jsonb
-                        END
-                    ) AS genre(value)
-                ) AS candidate_genre
-                JOIN preferences preference
-                  USING (genre_id)
-            ), 0)::double precision AS affinity
+            -- Matched preference weight, divided by the square root of how
+            -- many genres the candidate carries.
+            --
+            -- The plain sum rewarded breadth rather than fit. Candidates here
+            -- carry between zero and seven genres and average 2.2, so a
+            -- seven-genre title could accumulate seven weights while a focused
+            -- one collected at most a single weight — and won on that alone.
+            -- The square root keeps matching several of a member's genres worth
+            -- more than matching one, without letting a title win by being
+            -- about everything.
+            (
+                COALESCE((
+                    SELECT SUM(preference.weight)
+                    FROM (
+                        SELECT DISTINCT genre.value ->> 'id' AS genre_id
+                        FROM jsonb_array_elements(
+                            CASE
+                                WHEN jsonb_typeof(candidate.genres) = 'array'
+                                    THEN candidate.genres
+                                ELSE '[]'::jsonb
+                            END
+                        ) AS genre(value)
+                    ) AS candidate_genre
+                    JOIN preferences preference
+                      USING (genre_id)
+                ), 0)
+                / SQRT(GREATEST(
+                    CASE
+                        WHEN jsonb_typeof(candidate.genres) = 'array'
+                            THEN jsonb_array_length(candidate.genres)
+                        ELSE 0
+                    END,
+                    1
+                ))
+            )::double precision AS affinity
         FROM candidate_pool candidate
         ORDER BY
             affinity DESC,

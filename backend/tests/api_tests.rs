@@ -12780,3 +12780,174 @@ async fn replacing_encryption_keys_needs_the_account_password() {
     assert_eq!(status["key_fingerprint"], "4".repeat(64));
     assert_eq!(status["generation"], 2);
 }
+
+/// The watchlist is part of the taste profile, not just a to-do list.
+///
+/// It used to be discarded: preferences were learned only from favourites,
+/// ratings and `completed`/`watching`. On this deployment `plan_to_watch` is
+/// about thirty per cent of everything members track, and it is the most direct
+/// statement of intent available — finishing something says it held attention,
+/// adding it says they chose it. Weighted above `completed` and below
+/// `is_favorite` for exactly that reason.
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn discovery_learns_from_the_watchlist() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (token, _, user_id) =
+        register_user(&app, "watchlistuser", "watchlist@mailbox.dev", "Pass1234").await;
+
+    sqlx::query(
+        r#"INSERT INTO media
+            (tmdb_id, media_type, title, genres, poster_path, metadata_level,
+             tmdb_vote_average)
+        VALUES
+            (671001, 'movie', 'Planned Documentary',
+             '[{"id": 99, "name": "Documentary"}]'::jsonb,
+             '/planned.jpg', 'detail', 7.5),
+            (671002, 'movie', 'Another Documentary',
+             '[{"id": 99, "name": "Documentary"}]'::jsonb,
+             '/doc.jpg', 'detail', 7.4),
+            (671003, 'movie', 'Unrelated Western',
+             '[{"id": 37, "name": "Western"}]'::jsonb,
+             '/western.jpg', 'detail', 9.5)"#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    sqlx::query(
+        r#"INSERT INTO catalog_external_ids (tmdb_id, media_type, popularity, adult, video)
+        VALUES (671001, 'movie', 10, FALSE, FALSE),
+               (671002, 'movie', 20, FALSE, FALSE),
+               (671003, 'movie', 900, FALSE, FALSE)"#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // The only thing this member has ever done is put a documentary on their
+    // watchlist. Nothing completed, nothing rated, nothing favourited.
+    sqlx::query(
+        r#"INSERT INTO user_media (user_id, media_id, status)
+        SELECT $1::uuid, id, 'plan_to_watch' FROM media WHERE tmdb_id = 671001"#,
+    )
+    .bind(user_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let req = actix_test::TestRequest::get()
+        .uri("/api/media/discovery?language=en")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let body: Value = actix_test::call_and_read_body_json(&app, req).await;
+
+    // Before this change the member looked like a blank profile, and the
+    // western won on popularity alone — it is forty-five times more popular.
+    assert_eq!(body["personalized"], true);
+    assert_eq!(body["recommendation_basis"], json!(["Documentary"]));
+
+    let first = body["recommendations"][0]["id"].as_i64().unwrap();
+    assert_eq!(
+        first, 671002,
+        "the watchlist genre should outrank a far more popular title outside it"
+    );
+}
+
+/// Matching a member's genres should beat being about everything.
+///
+/// Affinity was a plain sum of matched preference weights, so a candidate
+/// carrying seven genres could collect seven of them while a focused one
+/// collected a single weight — and won on breadth rather than fit. Candidates
+/// here carry between zero and seven genres and average 2.2. The score is now
+/// divided by the square root of the candidate's genre count, which still
+/// rewards matching several of a member's genres without handing the win to
+/// whatever is tagged most broadly.
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn discovery_prefers_a_close_match_over_a_broad_one() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (token, _, user_id) =
+        register_user(&app, "breadthuser", "breadth@mailbox.dev", "Pass1234").await;
+
+    sqlx::query(
+        r#"INSERT INTO media
+            (tmdb_id, media_type, title, genres, poster_path, metadata_level,
+             tmdb_vote_average)
+        VALUES
+            (672001, 'movie', 'Seed Horror',
+             '[{"id": 27, "name": "Horror"}]'::jsonb,
+             '/seed.jpg', 'detail', 8.0),
+            (672002, 'movie', 'Focused Horror',
+             '[{"id": 27, "name": "Horror"}]'::jsonb,
+             '/focused.jpg', 'detail', 7.0),
+            (672003, 'movie', 'Everything Bagel',
+             '[{"id": 27, "name": "Horror"}, {"id": 35, "name": "Comedy"},
+               {"id": 18, "name": "Drama"}, {"id": 28, "name": "Action"},
+               {"id": 12, "name": "Adventure"}, {"id": 878, "name": "Science Fiction"},
+               {"id": 53, "name": "Thriller"}]'::jsonb,
+             '/bagel.jpg', 'detail', 7.0),
+            (672004, 'movie', 'Seed Comedy',
+             '[{"id": 35, "name": "Comedy"}]'::jsonb,
+             '/seedcomedy.jpg', 'detail', 6.0)"#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    sqlx::query(
+        r#"INSERT INTO catalog_external_ids (tmdb_id, media_type, popularity, adult, video)
+        VALUES (672001, 'movie', 5, FALSE, FALSE),
+               (672002, 'movie', 10, FALSE, FALSE),
+               (672003, 'movie', 10, FALSE, FALSE),
+               (672004, 'movie', 5, FALSE, FALSE)"#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // Two preferences, weighted differently: Horror from a favourite, Comedy
+    // from something merely completed. This matters — with a single preference
+    // both candidates score identically under either formula and the winner is
+    // decided by the id tiebreak, which would let this test pass against the
+    // very code it exists to catch.
+    //
+    // Now the broad candidate matches *both* genres, so its unnormalised sum is
+    // the larger one and the old ranking picked it. Divided by the root of its
+    // seven genres it falls behind the title that is only about the genre this
+    // member actually favourited.
+    sqlx::query(
+        r#"INSERT INTO user_media (user_id, media_id, status, is_favorite)
+        SELECT $1::uuid, id, 'completed', TRUE FROM media WHERE tmdb_id = 672001"#,
+    )
+    .bind(&user_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO user_media (user_id, media_id, status, is_favorite)
+        SELECT $1::uuid, id, 'completed', FALSE FROM media WHERE tmdb_id = 672004"#,
+    )
+    .bind(user_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let req = actix_test::TestRequest::get()
+        .uri("/api/media/discovery?language=en")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let body: Value = actix_test::call_and_read_body_json(&app, req).await;
+
+    let first = body["recommendations"][0]["id"].as_i64().unwrap();
+    assert_eq!(
+        first, 672002,
+        "a title about the member's one genre should beat one tagged with seven"
+    );
+}
