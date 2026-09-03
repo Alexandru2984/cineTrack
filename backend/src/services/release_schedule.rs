@@ -191,7 +191,7 @@ pub async fn backfill_incomplete_seasons(
     Ok(summary)
 }
 
-#[derive(Debug, FromRow)]
+#[derive(Clone, Debug, FromRow)]
 struct ReleaseScheduleCandidate {
     id: Uuid,
     tmdb_id: i32,
@@ -231,11 +231,39 @@ fn success_delay(candidate: &ReleaseScheduleCandidate) -> chrono::Duration {
     }
 }
 
+/// Record a successful refresh and decide when to come back.
+///
+/// The cadence is computed from the status the refresh just wrote, not the one
+/// the candidate was loaded with. Those differ exactly when it matters most: a
+/// series that has gone from `Ended` back to `Returning Series` was selected
+/// carrying the old status, and deciding on that gave it the seven-day
+/// ended-series cadence at the moment it started airing again. `Harley Quinn`
+/// sat on a seven-day interval that way with `Returning Series` in the same
+/// row, so new episodes could arrive in the calendar up to a week late.
+///
+/// One extra read per refreshed title, against a provider call that has just
+/// happened anyway.
 async fn mark_success(
     pool: &PgPool,
     candidate: &ReleaseScheduleCandidate,
 ) -> Result<(), sqlx::Error> {
-    let next_attempt_at = Utc::now() + success_delay(candidate);
+    let refreshed = sqlx::query_as::<_, (Option<String>, Option<NaiveDate>)>(
+        "SELECT status, release_date FROM media WHERE id = $1",
+    )
+    .bind(candidate.id)
+    .fetch_optional(pool)
+    .await?;
+    let candidate = match refreshed {
+        Some((status, release_date)) => ReleaseScheduleCandidate {
+            status,
+            release_date,
+            ..candidate.clone()
+        },
+        // The title vanished between the refresh and here. Nothing to reschedule
+        // against but what we already had.
+        None => candidate.clone(),
+    };
+    let next_attempt_at = Utc::now() + success_delay(&candidate);
     sqlx::query(
         r#"INSERT INTO release_schedule_sync_state
             (media_id, outcome, consecutive_failures, last_attempt_at,
