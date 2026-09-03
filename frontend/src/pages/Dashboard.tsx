@@ -1,4 +1,4 @@
-import { useDiscovery } from '@/hooks/useMedia';
+import { useDiscovery, useDismissRecommendation } from '@/hooks/useMedia';
 import { useMyStats, useHeatmap } from '@/hooks/useStats';
 import { useActivityFeed } from '@/hooks/useSocial';
 import { useAuthStore } from '@/store/auth';
@@ -11,7 +11,7 @@ import type { TmdbSearchResult, TrackingStatus } from '@/types';
 import CalendarHeatmap from 'react-calendar-heatmap';
 import 'react-calendar-heatmap/dist/styles.css';
 import { Link } from 'react-router';
-import { Activity, Clock, Film, Flame, RefreshCw, Search, Sparkles, Tv } from 'lucide-react';
+import { Activity, Clock, Film, Flame, RefreshCw, Search, Sparkles, Tv, X } from 'lucide-react';
 
 export default function Dashboard() {
   const t = useT();
@@ -25,6 +25,7 @@ export default function Dashboard() {
   } = useDiscovery();
   const { data: stats } = useMyStats();
   const { data: heatmap } = useHeatmap();
+  const dismissRecommendation = useDismissRecommendation();
   const {
     data: activity,
     isLoading: activityLoading,
@@ -146,6 +147,12 @@ export default function Dashboard() {
               blank one this replaces. */}
           {hasNothingTracked && (discovery?.recommendations?.length ?? 0) === 0 ? null : (
           <MediaShelf
+            onDismiss={(item) =>
+              dismissRecommendation.mutate({
+                tmdb_id: item.id,
+                media_type: item.media_type === 'tv' ? 'tv' : 'movie',
+              })
+            }
             id="recommendations-heading"
             title={discovery?.personalized ? t('dashboard.forYou') : t('dashboard.recommended')}
             subtitle={
@@ -262,6 +269,9 @@ interface MediaShelfProps {
   emptyMessage: string;
   showQuickAdd?: boolean;
   trackingByMedia?: ReadonlyMap<string, TrackingStatus>;
+  /** Present only on the personalised shelf. The other shelves are not the
+   *  recommender's opinion, so there is nothing there to disagree with. */
+  onDismiss?: (item: TmdbSearchResult) => void;
 }
 
 function MediaShelf({
@@ -274,6 +284,7 @@ function MediaShelf({
   emptyMessage,
   showQuickAdd = false,
   trackingByMedia,
+  onDismiss,
 }: MediaShelfProps) {
   const t = useT();
   return (
@@ -306,6 +317,22 @@ function MediaShelf({
                   ) ?? null
                 }
               />
+              {/* Below the poster, not over it. Both top corners already carry
+                  a badge — the rating on the right, the media type on the left
+                  — so an overlay would land on one of them. */}
+              {onDismiss ? (
+                <button
+                  type="button"
+                  onClick={() => onDismiss(item)}
+                  aria-label={t('dashboard.notInterestedFor', {
+                    title: item.title ?? item.name ?? '',
+                  })}
+                  className="mt-1 flex w-full items-center justify-center gap-1 rounded-md py-1 text-xs text-[hsl(var(--muted-foreground))] transition-colors hover:bg-[hsl(var(--muted))] hover:text-[hsl(var(--foreground))]"
+                >
+                  <X className="h-3 w-3" aria-hidden="true" />
+                  {t('dashboard.notInterested')}
+                </button>
+              ) : null}
             </div>
           ))}
         </div>

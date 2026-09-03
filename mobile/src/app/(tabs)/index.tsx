@@ -9,6 +9,7 @@ import {
   Settings2,
   Tv,
   UploadCloud,
+  X,
   type LucideIcon,
 } from 'lucide-react-native';
 import { useMemo } from 'react';
@@ -33,7 +34,7 @@ import {
   useSetEpisodePlanned,
   useUpNext,
 } from '@/hooks/use-calendar';
-import { useDiscovery } from '@/hooks/use-media';
+import { useDiscovery, useDismissRecommendation } from '@/hooks/use-media';
 import { useNotificationSummary } from '@/hooks/use-notifications';
 import { useMyStats } from '@/hooks/use-stats';
 import { useT } from '@/hooks/use-t';
@@ -81,6 +82,7 @@ export default function HomeScreen() {
     watchlist.isRefetching ||
     discovery.isRefetching;
   const unreadCount = notificationSummary.data?.unread_count ?? 0;
+  const dismissRecommendation = useDismissRecommendation();
   const recommendations = useMemo(
     () => discovery.data?.recommendations.slice(0, 12) ?? [],
     [discovery.data],
@@ -341,7 +343,32 @@ upNextGroups.map((group) => (
               contentContainerStyle={styles.shelf}
             >
               {recommendations.map((item) => (
-                <MediaTile key={`${item.id}-${item.media_type}`} item={item} width={132} />
+                <View key={`${item.id}-${item.media_type}`}>
+                  <MediaTile item={item} width={132} />
+                  {/* Below the poster, not over it: both top corners already
+                      carry a badge, so an overlay would land on one. Only on
+                      this shelf — the others are not the recommender's opinion,
+                      so there is nothing there to disagree with. */}
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={t('home.notInterestedFor', {
+                      title: item.title ?? item.name ?? '',
+                    })}
+                    hitSlop={8}
+                    onPress={() =>
+                      dismissRecommendation.mutate({
+                        tmdb_id: item.id,
+                        media_type: item.media_type === 'tv' ? 'tv' : 'movie',
+                      })
+                    }
+                    style={({ pressed }) => [styles.dismiss, { opacity: pressed ? 0.5 : 1 }]}
+                  >
+                    <X color={theme.mutedText} size={12} />
+                    <AppText variant="caption" style={{ color: theme.mutedText }}>
+                      {t('home.notInterested')}
+                    </AppText>
+                  </Pressable>
+                </View>
               ))}
             </ScrollView>
           </View>
@@ -539,5 +566,14 @@ const styles = StyleSheet.create({
   shelf: {
     gap: spacing.md,
     paddingRight: spacing.lg,
+  },
+  // Always visible: there is no hover on a phone, so a control that only
+  // appears on interaction would never be found.
+  dismiss: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+    paddingVertical: spacing.xs,
   },
 });

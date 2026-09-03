@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 
+use crate::errors::AppError;
 use chrono::NaiveDate;
 use sqlx::{FromRow, PgPool};
 use uuid::Uuid;
@@ -74,6 +75,13 @@ async fn load_preferences(pool: &PgPool, user_id: Uuid) -> Result<Vec<Preference
                     END
                     + CASE
                         WHEN tracked.status = 'completed' THEN 2
+                        -- The watchlist, which this used to discard entirely.
+                        -- It is 30% of what a member tracks here and the most
+                        -- direct statement of intent they can make: finishing
+                        -- something says it held their attention, but adding it
+                        -- says they chose it. Weighted above `completed` and
+                        -- below `is_favorite` for that reason.
+                        WHEN tracked.status = 'plan_to_watch' THEN 3
                         WHEN tracked.status = 'watching' THEN 1
                         ELSE 0
                     END
@@ -91,17 +99,56 @@ async fn load_preferences(pool: &PgPool, user_id: Uuid) -> Result<Vec<Preference
               AND (
                   tracked.is_favorite
                   OR tracked.rating >= 6
-                  OR tracked.status IN ('completed', 'watching')
+                  OR tracked.status IN ('completed', 'watching', 'plan_to_watch')
               )
+        ),
+        -- The only way a member can say no.
+        --
+        -- Everything above is a way of saying yes — favourited, rated,
+        -- finished, started, added. Dismissing a recommendation is the one
+        -- signal that a genre was wrong, and without it the profile could only
+        -- ever grow.
+        --
+        -- Weighted -2, against +4 for a favourite. Deliberately quieter than
+        -- approval: dismissing one film in a genre says less than favouriting
+        -- one does. The magnitudes make that concrete rather than hopeful — a
+        -- settled profile here carries Drama at 803, so one dismissal moves it
+        -- by a quarter of a per cent and it would take 402 of them to reach
+        -- zero. A member with two tracked titles feels a single no immediately,
+        -- which is the right way round: responsive while there is little to go
+        -- on, steady once there is a lot.
+        dismissed_genres AS (
+            SELECT
+                NULLIF(btrim(genre.value ->> 'id'), '') AS genre_id,
+                NULLIF(btrim(genre.value ->> 'name'), '') AS genre_name,
+                -2::double precision AS weight
+            FROM discovery_dismissals dismissal
+            JOIN media seed ON seed.id = dismissal.media_id
+            CROSS JOIN LATERAL jsonb_array_elements(
+                CASE
+                    WHEN jsonb_typeof(seed.genres) = 'array' THEN seed.genres
+                    ELSE '[]'::jsonb
+                END
+            ) AS genre(value)
+            WHERE dismissal.user_id = $1
+        ),
+        combined AS (
+            SELECT * FROM weighted_genres
+            UNION ALL
+            SELECT * FROM dismissed_genres
         )
         SELECT
             genre_id,
             MIN(genre_name) AS genre_name,
             SUM(weight)::double precision AS weight
-        FROM weighted_genres
+        FROM combined
         WHERE genre_id IS NOT NULL
           AND genre_name IS NOT NULL
         GROUP BY genre_id
+        -- A genre dismissed into negative territory is not a preference, and
+        -- feeding it forward would subtract from every candidate carrying it
+        -- rather than simply not favouring it.
+        HAVING SUM(weight) > 0
         ORDER BY weight DESC, genre_name
         LIMIT $2"#,
     )
@@ -175,6 +222,15 @@ async fn load_recommendations(
                   WHERE tracked.user_id = $3
                     AND tracked.media_id = media.id
               )
+              -- Asked not to see it. Genre weight alone would not be enough:
+              -- a dismissed title can still carry a member's strongest genres
+              -- and come straight back to the top of the row.
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM discovery_dismissals dismissal
+                  WHERE dismissal.user_id = $3
+                    AND dismissal.media_id = media.id
+              )
             ORDER BY inventory.popularity DESC, media.tmdb_id
             LIMIT $6
         ), tv_candidates AS MATERIALIZED (
@@ -208,6 +264,15 @@ async fn load_recommendations(
                   WHERE tracked.user_id = $3
                     AND tracked.media_id = media.id
               )
+              -- Asked not to see it. Genre weight alone would not be enough:
+              -- a dismissed title can still carry a member's strongest genres
+              -- and come straight back to the top of the row.
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM discovery_dismissals dismissal
+                  WHERE dismissal.user_id = $3
+                    AND dismissal.media_id = media.id
+              )
             ORDER BY inventory.popularity DESC, media.tmdb_id
             LIMIT $6
         ), candidate_pool AS (
@@ -229,21 +294,41 @@ async fn load_recommendations(
             candidate.backdrop_path,
             candidate.release_date,
             candidate.vote_average,
-            COALESCE((
-                SELECT SUM(preference.weight)
-                FROM (
-                    SELECT DISTINCT genre.value ->> 'id' AS genre_id
-                    FROM jsonb_array_elements(
-                        CASE
-                            WHEN jsonb_typeof(candidate.genres) = 'array'
-                                THEN candidate.genres
-                            ELSE '[]'::jsonb
-                        END
-                    ) AS genre(value)
-                ) AS candidate_genre
-                JOIN preferences preference
-                  USING (genre_id)
-            ), 0)::double precision AS affinity
+            -- Matched preference weight, divided by the square root of how
+            -- many genres the candidate carries.
+            --
+            -- The plain sum rewarded breadth rather than fit. Candidates here
+            -- carry between zero and seven genres and average 2.2, so a
+            -- seven-genre title could accumulate seven weights while a focused
+            -- one collected at most a single weight — and won on that alone.
+            -- The square root keeps matching several of a member's genres worth
+            -- more than matching one, without letting a title win by being
+            -- about everything.
+            (
+                COALESCE((
+                    SELECT SUM(preference.weight)
+                    FROM (
+                        SELECT DISTINCT genre.value ->> 'id' AS genre_id
+                        FROM jsonb_array_elements(
+                            CASE
+                                WHEN jsonb_typeof(candidate.genres) = 'array'
+                                    THEN candidate.genres
+                                ELSE '[]'::jsonb
+                            END
+                        ) AS genre(value)
+                    ) AS candidate_genre
+                    JOIN preferences preference
+                      USING (genre_id)
+                ), 0)
+                / SQRT(GREATEST(
+                    CASE
+                        WHEN jsonb_typeof(candidate.genres) = 'array'
+                            THEN jsonb_array_length(candidate.genres)
+                        ELSE 0
+                    END,
+                    1
+                ))
+            )::double precision AS affinity
         FROM candidate_pool candidate
         ORDER BY
             affinity DESC,
@@ -378,9 +463,25 @@ struct SeedRow {
     title: String,
 }
 
-/// Pick the viewer's single strongest library signal to seed a "because you
-/// watched" row: favorites and highly-rated completed titles rank first, ties
-/// broken by how recently they were touched.
+/// Pick what a "because you watched" row is built from.
+///
+/// The score separates less than the shape suggests. With no ratings recorded
+/// anywhere it collapses to favourite plus completed, which leaves 22 titles
+/// tied at the top for a typical member here — so `updated_at` decides, and the
+/// row is in practice "the favourite you touched most recently". That is a
+/// reasonable answer and worth stating plainly rather than calling it the
+/// strongest signal in the library.
+///
+/// Every write to `updated_at` comes from the member: marking an episode
+/// watched, editing tracking, or the automatic completion that follows
+/// finishing a series. No background job moves it, so recency here means
+/// theirs.
+///
+/// The status clause is what stops the row lying. Favourite, rating and
+/// `completed` are alternatives, so without it a favourited item still sitting
+/// on the watchlist could seed a row that says "because you watched" something
+/// nobody watched. No member has favourited a watchlist entry yet; nothing
+/// prevented it either.
 async fn load_seed(pool: &PgPool, user_id: Uuid) -> Result<Option<SeedRow>, sqlx::Error> {
     sqlx::query_as::<_, SeedRow>(
         r#"SELECT m.tmdb_id, m.media_type, m.title
@@ -388,6 +489,7 @@ async fn load_seed(pool: &PgPool, user_id: Uuid) -> Result<Option<SeedRow>, sqlx
         JOIN media m ON m.id = um.media_id
         WHERE um.user_id = $1
           AND m.tmdb_id > 0
+          AND um.status IN ('completed', 'watching')
           AND (um.is_favorite OR um.rating >= 7 OR um.status = 'completed')
         ORDER BY
             (
@@ -499,6 +601,52 @@ async fn load_because_you_watched(
         seed_title: seed.title,
         results,
     })
+}
+
+/// Record that a member does not want to see a title again.
+///
+/// Idempotent: dismissing twice is the same as dismissing once, which matters
+/// because the interface fires this from a card that may still be on screen
+/// when the list refreshes.
+///
+/// Takes the catalogue id rather than a TMDB id so a dismissal cannot outlive
+/// the row it refers to — the foreign key removes it when the title goes.
+pub async fn dismiss_recommendation(
+    pool: &PgPool,
+    user_id: Uuid,
+    tmdb_id: i32,
+    media_type: &str,
+) -> Result<(), AppError> {
+    let affected = sqlx::query(
+        r#"INSERT INTO discovery_dismissals (user_id, media_id)
+        SELECT $1, media.id
+        FROM media
+        WHERE media.tmdb_id = $2 AND media.media_type = $3
+        ON CONFLICT (user_id, media_id) DO NOTHING"#,
+    )
+    .bind(user_id)
+    .bind(tmdb_id)
+    .bind(media_type)
+    .execute(pool)
+    .await?;
+
+    // Nothing inserted and nothing conflicting means the title is not in the
+    // catalogue. Answering 404 rather than 204 keeps a typo from looking like
+    // it worked.
+    if affected.rows_affected() == 0 {
+        let known = sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS (SELECT 1 FROM media WHERE tmdb_id = $1 AND media_type = $2)",
+        )
+        .bind(tmdb_id)
+        .bind(media_type)
+        .fetch_one(pool)
+        .await?;
+        if !known {
+            return Err(AppError::NotFound("Title not found".to_string()));
+        }
+    }
+
+    Ok(())
 }
 
 pub async fn load_discovery(

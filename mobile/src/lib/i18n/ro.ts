@@ -252,6 +252,8 @@ export const ro: Dictionary = {
     hours: 'Ore',
     episodes: 'Episoade',
     becauseYouWatched: 'Pentru că ai văzut {title}',
+    notInterested: 'Nu mă interesează',
+    notInterestedFor: 'Nu mă interesează {title}',
     forYou: 'Pentru tine',
     discover: 'Descoperă',
   },

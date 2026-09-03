@@ -250,6 +250,8 @@ export const en = {
     hours: 'Hours',
     episodes: 'Episodes',
     becauseYouWatched: 'Because you watched {title}',
+    notInterested: 'Not interested',
+    notInterestedFor: 'Not interested in {title}',
     forYou: 'For you',
     discover: 'Discover',
   },

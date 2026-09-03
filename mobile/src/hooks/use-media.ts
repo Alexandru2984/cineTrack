@@ -53,6 +53,26 @@ export function useDiscovery() {
   });
 }
 
+/** Tell the recommender a suggestion was wrong.
+ *
+ *  Invalidates discovery so the shelf refills without the dismissed title. The
+ *  backend is idempotent, so a double tap while the shelf is refreshing is not
+ *  an error. */
+export function useDismissRecommendation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (item: { tmdb_id: number; media_type: string }) => {
+      const type = item.media_type === 'tv' ? 'tv' : 'movie';
+      return apiRequest<void>(`/media/discovery/dismiss/${type}/${item.tmdb_id}`, {
+        method: 'POST',
+      });
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['discovery'] });
+    },
+  });
+}
+
 export function useMediaDetail(id: string, type: MediaType) {
   const language = usePreferredLanguage();
   return useQuery({

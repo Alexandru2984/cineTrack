@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@/hooks/useMedia', () => ({
   useDiscovery: () => mocks.useDiscovery(),
+  useDismissRecommendation: () => ({ mutate: vi.fn(), isPending: false }),
 }));
 
 vi.mock('@/hooks/useStats', () => ({
