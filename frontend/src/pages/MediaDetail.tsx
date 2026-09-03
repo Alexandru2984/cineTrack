@@ -76,7 +76,7 @@ export default function MediaDetail() {
   const { id } = useParams<{ id: string }>();
   const [searchParams] = useSearchParams();
   const type = searchParams.get('type') || 'movie';
-  const { data: media, isLoading } = useMediaDetail(id!, type);
+  const { data: media, isLoading, isError, error } = useMediaDetail(id!, type);
   usePageTitle(media?.title);
   const [seasonSelection, setSeasonSelection] = useState<{
     mediaId: string;
@@ -117,6 +117,19 @@ export default function MediaDetail() {
   const [listFeedback, setListFeedback] = useState<string | null>(null);
 
   if (isLoading) return <LoadingSpinner />;
+  // A failed request and a title that does not exist are different things, and
+  // this said "not found" for both — telling somebody the film is missing when
+  // their connection dropped, with nothing to retry.
+  if (isError) {
+    return (
+      <div className="mx-auto flex min-h-[60dvh] max-w-xl flex-col items-center justify-center gap-4 px-4 text-center">
+        <h1 className="text-xl font-semibold">{t('media.unavailable')}</h1>
+        <p className="text-sm text-[hsl(var(--muted-foreground))]">
+          {getApiErrorMessage(error, t('media.unavailableHint'))}
+        </p>
+      </div>
+    );
+  }
   if (!media) return <div className="text-center py-16">{t('media.notFound')}</div>;
 
   const mediaKey = `${mediaType}:${media.tmdb_id}`;

@@ -427,6 +427,8 @@ export const ro: Dictionary = {
     activityPrivate: 'Această activitate este privată. Este necesară o cerere de urmărire acceptată.',
   },
   media: {
+    unavailable: 'Titlul nu a putut fi încărcat',
+    unavailableHint: 'Cererea a eșuat. Verifică conexiunea și încearcă din nou.',
     unmarkWatched: 'Scoate din vizionate',
     unmarkCodeWatched: 'Scoți {code} din vizionate?',
     unmarkHint: 'Se șterge înregistrarea de vizionare a acestui episod, inclusiv revizionările importate. Îl poți marca din nou oricând.',
