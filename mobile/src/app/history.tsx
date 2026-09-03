@@ -436,12 +436,20 @@ export default function HistoryScreen() {
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
           style={[styles.overlay, { backgroundColor: theme.overlay }]}
         >
-          <Pressable style={styles.overlayPressable} onPress={closeLog}>
+          <Pressable
+            // Not a control: the dimmed backdrop behind a sheet. Announcing
+            // it as a button would be noise, so it leaves the tree entirely.
+            accessible={false}
+            style={styles.overlayPressable} onPress={closeLog}>
             <SafeAreaView
               edges={['bottom']}
               style={[styles.sheet, { backgroundColor: theme.elevated }]}
             >
-              <Pressable onPress={(event) => event.stopPropagation()}>
+              <Pressable
+                // Not a control: a wrapper that exists only to stop taps reaching the backdrop. Announcing
+                // it as a button would be noise, so it leaves the tree entirely.
+                accessible={false}
+                onPress={(event) => event.stopPropagation()}>
                 <View style={styles.sheetHeader}>
                   <View style={styles.sheetTitle}>
                     <AppText variant="section">

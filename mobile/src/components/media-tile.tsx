@@ -61,8 +61,15 @@ export function MediaTile({
             { backgroundColor: theme.surface, borderColor: theme.border },
           ]}
         >
+          {/* The poster is decorative: the title is a sibling of it. */}
           {uri ? (
-            <Image source={{ uri }} contentFit="cover" transition={120} style={styles.image} />
+            <Image
+              accessible={false}
+              source={{ uri }}
+              contentFit="cover"
+              transition={120}
+              style={styles.image}
+            />
           ) : (
             <Film color={theme.mutedText} size={30} />
           )}

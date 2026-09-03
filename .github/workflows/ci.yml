@@ -428,6 +428,10 @@ jobs:
       - name: Validate client type parity
         run: scripts/tests/client_type_parity_test.py
 
+      # The phone's counterpart to the web client's axe sweep over every route.
+      - name: Validate mobile accessibility
+        run: scripts/tests/mobile_accessibility_test.py
+
       - name: Validate edge security contact
         run: scripts/tests/edge_security_config_test.sh
 

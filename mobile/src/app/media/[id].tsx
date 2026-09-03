@@ -298,7 +298,10 @@ export default function MediaDetailScreen() {
         contentContainerStyle={styles.content}
       >
         {backdrop ? (
+          // Decorative: a backdrop carries no information the page does not
+          // already state in text.
           <Image
+            accessible={false}
             source={{ uri: backdrop }}
             contentFit="cover"
             transition={120}

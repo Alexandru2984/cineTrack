@@ -14,7 +14,14 @@ export function UserAvatar({ uri, size = 48 }: { uri: string | null; size?: numb
       ]}
     >
       {uri ? (
-        <Image source={{ uri }} contentFit="cover" transition={120} style={styles.image} />
+        // Decorative: every avatar sits next to the name it belongs to.
+        <Image
+          accessible={false}
+          source={{ uri }}
+          contentFit="cover"
+          transition={120}
+          style={styles.image}
+        />
       ) : (
         <UserRound color={theme.mutedText} size={Math.max(18, size / 2)} />
       )}

@@ -91,6 +91,9 @@ export function ListEditorSheet({
         style={[styles.overlay, { backgroundColor: theme.overlay }]}
       >
         <Pressable
+          // Not a control: the dimmed backdrop behind a sheet. Announcing
+          // it as a button would be noise, so it leaves the tree entirely.
+          accessible={false}
           style={styles.overlayPressable}
           onPress={() => {
             if (!pending) onClose();
@@ -104,7 +107,11 @@ export function ListEditorSheet({
               keyboardShouldPersistTaps="handled"
               contentContainerStyle={styles.sheetContent}
             >
-              <Pressable onPress={(event) => event.stopPropagation()}>
+              <Pressable
+                // Not a control: a wrapper that exists only to stop taps reaching the backdrop. Announcing
+                // it as a button would be noise, so it leaves the tree entirely.
+                accessible={false}
+                onPress={(event) => event.stopPropagation()}>
               <View style={styles.header}>
                 <View style={styles.headerCopy}>
                   <AppText variant="section">

@@ -153,6 +153,7 @@ export default function LibraryScreen() {
         renderItem={({ item }) => (
           <View style={[styles.row, { borderBottomColor: theme.border }]}>
             <Pressable
+              accessibilityRole="button"
               onPress={() =>
                 router.push({
                   pathname: '/media/[id]',
@@ -251,6 +252,9 @@ export default function LibraryScreen() {
         onRequestClose={() => setStatusItem(null)}
       >
         <Pressable
+          // Not a control: the dimmed backdrop behind a sheet. Announcing
+          // it as a button would be noise, so it leaves the tree entirely.
+          accessible={false}
           style={[styles.overlay, { backgroundColor: theme.overlay }]}
           onPress={() => setStatusItem(null)}
         >
@@ -258,7 +262,11 @@ export default function LibraryScreen() {
             edges={['bottom']}
             style={[styles.sheet, { backgroundColor: theme.elevated }]}
           >
-            <Pressable onPress={(event) => event.stopPropagation()}>
+            <Pressable
+              // Not a control: a wrapper that exists only to stop taps reaching the backdrop. Announcing
+              // it as a button would be noise, so it leaves the tree entirely.
+              accessible={false}
+              onPress={(event) => event.stopPropagation()}>
               <View style={styles.sheetHeader}>
                 <AppText variant="section">{t('library.trackingStatus')}</AppText>
                 <AppText muted numberOfLines={1}>
@@ -270,6 +278,7 @@ export default function LibraryScreen() {
                   const selected = statusItem?.status === option.value;
                   return (
                     <Pressable
+                      accessibilityRole="button"
                       key={option.value}
                       onPress={() => {
                         if (!statusItem) return;

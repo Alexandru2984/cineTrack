@@ -42,7 +42,10 @@ export function Poster({
   }
 
   return (
+    // Decorative: a poster never appears without its title beside it, so
+    // announcing it again only lengthens what a screen reader reads out.
     <Image
+      accessible={false}
       source={{ uri }}
       contentFit="cover"
       transition={120}
