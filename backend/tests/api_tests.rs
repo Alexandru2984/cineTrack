@@ -13190,7 +13190,9 @@ async fn test_season_backfill_selects_only_gaps_in_started_shows() {
         "only the incomplete seasons of a started, undropped show belong here"
     );
     assert!(
-        candidates.iter().all(|candidate| candidate.tmdb_id == 780001),
+        candidates
+            .iter()
+            .all(|candidate| candidate.tmdb_id == 780001),
         "the provider id must travel with the season it belongs to"
     );
 
