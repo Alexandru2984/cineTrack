@@ -17,13 +17,38 @@ upstream fixes them instead of accumulating forever.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 MOBILE = Path(__file__).resolve().parent.parent
 LOCKFILE = MOBILE / "package-lock.json"
 AUDIT_LEVEL = "high"
+
+# One `npm audit` can take five minutes before it fails, and the CI step that
+# started this did exactly that. `--fetch-retries` is not what bounds it:
+# `--fetch-timeout` defaults to 300000ms, so a request the endpoint never
+# answers hangs for the full five minutes on the first try. Both are set below,
+# and the retrying happens here instead, where the total is predictable.
+#
+# Worst case is now three 30-second attempts plus 15 seconds of backoff, and the
+# common case — the endpoint answering 503 immediately, which is what it did on
+# 2026-09-04 — is a few seconds.
+AUDIT_ATTEMPTS = 3
+AUDIT_BACKOFF_SECONDS = 5
+AUDIT_FETCH_TIMEOUT_MS = 30000
+
+
+class AuditUnavailable(Exception):
+    """npm answered, but not with an audit.
+
+    Kept separate from every other failure because it is the only one where the
+    gate has learned nothing at all — not "no advisories", not "an advisory";
+    nothing. What to do about that is a different decision from what to do about
+    a finding, and it needs its own type to stay that way.
+    """
 
 # (package, advisory) -> (reviewed version, why it is accepted)
 #
@@ -80,9 +105,37 @@ def installed_version(package: str) -> str | None:
 
 
 def audit_findings() -> dict[tuple[str, str], str]:
-    """Map (package, advisory) -> title for every high or critical finding."""
+    """Map (package, advisory) -> title for every high or critical finding.
+
+    Retries a registry that is not answering, because it usually is again a
+    moment later: `registry.npmjs.org/-/npm/v1/security/advisories/bulk`
+    returned 503 for several minutes on 2026-09-04 and was fine on the next
+    call.
+    """
+    unavailable = ""
+    for attempt in range(1, AUDIT_ATTEMPTS + 1):
+        try:
+            return audit_findings_once()
+        except AuditUnavailable as error:
+            unavailable = str(error)
+            if attempt < AUDIT_ATTEMPTS:
+                time.sleep(AUDIT_BACKOFF_SECONDS * attempt)
+    raise AuditUnavailable(unavailable)
+
+
+def audit_findings_once() -> dict[tuple[str, str], str]:
+    """One `npm audit`, parsed. Raises AuditUnavailable if it did not answer."""
     result = subprocess.run(
-        ["npm", "audit", "--json", f"--audit-level={AUDIT_LEVEL}"],
+        # The retrying belongs to the caller above, where a failed attempt is
+        # bounded and the total is visible in one place.
+        [
+            "npm",
+            "audit",
+            "--json",
+            f"--audit-level={AUDIT_LEVEL}",
+            "--fetch-retries=0",
+            f"--fetch-timeout={AUDIT_FETCH_TIMEOUT_MS}",
+        ],
         capture_output=True,
         text=True,
         cwd=MOBILE,
@@ -115,10 +168,7 @@ def audit_findings() -> dict[tuple[str, str], str]:
     # An empty `vulnerabilities` is a legitimate answer; a missing one is not.
     if "vulnerabilities" not in report:
         message = report.get("message") or json.dumps(report.get("error", report))[:400]
-        raise SystemExit(
-            f"npm audit returned no report (exit {result.returncode}): {message}\n"
-            f"stderr: {result.stderr.strip()[:400]}"
-        )
+        raise AuditUnavailable(f"exit {result.returncode}: {message}")
 
     findings: dict[tuple[str, str], str] = {}
     for vulnerability in report.get("vulnerabilities", {}).values():
@@ -149,20 +199,44 @@ def unreachable_formats_present() -> list[Path]:
 
     Only what Metro can bundle counts, so the search starts at the mobile
     project rather than the repository root.
+
+    `os.walk` rather than `rglob` because pruning has to happen before the
+    descent, not after it: `rglob("*")` walks every file in `node_modules` and
+    `.git` and only then discards them, which is several hundred thousand
+    `stat` calls to answer a question about three PNGs.
     """
+    skip = {"node_modules", ".git"}
     found: list[Path] = []
-    for path in MOBILE.rglob("*"):
-        if not path.is_file():
-            continue
-        if "node_modules" in path.parts or ".git" in path.parts:
-            continue
-        if path.suffix.lower() in UNREACHABLE_FORMATS:
-            found.append(path.relative_to(MOBILE))
+    for directory, subdirectories, filenames in os.walk(MOBILE):
+        subdirectories[:] = [name for name in subdirectories if name not in skip]
+        for filename in filenames:
+            if Path(filename).suffix.lower() in UNREACHABLE_FORMATS:
+                found.append((Path(directory) / filename).relative_to(MOBILE))
     return found
 
 
 def main() -> int:
-    findings = audit_findings()
+    try:
+        findings = audit_findings()
+    except AuditUnavailable as error:
+        # Blocking here would be the wrong trade. The gate has no information
+        # either way during an npm outage, and failing every pull request in the
+        # repository until somebody else's service recovers is the exact
+        # pathology `advisory-sweep.yml` was written to stop — an answer that
+        # changes without anybody touching this code, breaking work that has
+        # nothing to do with it.
+        #
+        # It is loud, it is narrow — only the one shape npm returns for an
+        # endpoint failure reaches here, never a parsed finding — and the daily
+        # sweep runs the same audit against main, so anything missed while the
+        # endpoint was down is picked up within a day.
+        print(f"::warning::npm's advisory endpoint did not answer; this gate did not run ({error})")
+        print(
+            f"npm audit was unreachable after {AUDIT_ATTEMPTS} attempts: {error}",
+            file=sys.stderr,
+        )
+        return 0
+
     errors: list[str] = []
 
     if any(package == "image-size" for package, _ in ACCEPTED):
