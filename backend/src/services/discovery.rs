@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use crate::errors::AppError;
-use chrono::NaiveDate;
+use chrono::{NaiveDate, Utc};
 use sqlx::{FromRow, PgPool};
 use uuid::Uuid;
 
@@ -348,8 +348,22 @@ async fn load_recommendations(
     .await
 }
 
+/// The popular rows, minus anything already in this member's library.
+///
+/// The exclusion is the point. Measured on production before it was added, four
+/// of the twelve popular series and four of the twelve popular films were shows
+/// the member was already watching — a third of a discovery surface spent
+/// telling somebody about something they had already found. Every other row on
+/// this page already drops what you track; this was the one that did not, so a
+/// title disappeared from your recommendations the moment you added it and sat
+/// on in Popular.
+///
+/// Filtered in SQL rather than afterwards so the row still comes back full: the
+/// database skips them and keeps taking the next most popular title, where
+/// trimming in Rust would leave eight cards where twelve were asked for.
 async fn load_popular(
     pool: &PgPool,
+    user_id: Uuid,
     language_code: Option<&str>,
     region_code: Option<&str>,
 ) -> Result<Vec<DiscoveryRow>, sqlx::Error> {
@@ -406,6 +420,11 @@ async fn load_popular(
                   AND inventory.video = FALSE
                   AND media.metadata_level = 'detail'
                   AND media.poster_path IS NOT NULL
+                  AND NOT EXISTS (
+                      SELECT 1 FROM user_media tracked
+                      WHERE tracked.user_id = $4
+                        AND tracked.media_id = media.id
+                  )
                 ORDER BY
                     inventory.popularity DESC,
                     media.tmdb_vote_average DESC NULLS LAST,
@@ -436,6 +455,11 @@ async fn load_popular(
                   AND inventory.video = FALSE
                   AND media.metadata_level = 'detail'
                   AND media.poster_path IS NOT NULL
+                  AND NOT EXISTS (
+                      SELECT 1 FROM user_media tracked
+                      WHERE tracked.user_id = $4
+                        AND tracked.media_id = media.id
+                  )
                 ORDER BY
                     inventory.popularity DESC,
                     media.tmdb_vote_average DESC NULLS LAST,
@@ -452,15 +476,16 @@ async fn load_popular(
     .bind(language_code)
     .bind(region_code)
     .bind(SECTION_SIZE)
+    .bind(user_id)
     .fetch_all(pool)
     .await
 }
 
 #[derive(FromRow)]
-struct SeedRow {
-    tmdb_id: i32,
-    media_type: String,
-    title: String,
+pub struct SeedRow {
+    pub tmdb_id: i32,
+    pub media_type: String,
+    pub title: String,
 }
 
 /// Pick what a "because you watched" row is built from.
@@ -482,28 +507,120 @@ struct SeedRow {
 /// on the watchlist could seed a row that says "because you watched" something
 /// nobody watched. No member has favourited a watchlist entry yet; nothing
 /// prevented it either.
-async fn load_seed(pool: &PgPool, user_id: Uuid) -> Result<Option<SeedRow>, sqlx::Error> {
+/// How many of the strongest candidates the daily seed is drawn from.
+///
+/// Twenty is wide enough that the row is not the same all season and narrow
+/// enough that it still draws on things you actually liked.
+const SEED_POOL_SIZE: i64 = 20;
+
+/// The title the "because you watched" row is built from.
+///
+/// Three properties, and each one was a bug without the others.
+///
+/// **It moves.** Ranking alone picked one title and kept it: the score below
+/// saturates — a favourite you have finished scores 5, and so does every other
+/// one — so the `updated_at` tiebreak decided, and a member with 522 eligible
+/// titles saw the same seed for months.
+///
+/// **It holds still within a day.** Re-drawing per request is the same bug from
+/// the other side: React Query refetches, and the heading would change under the
+/// reader mid-scroll.
+///
+/// **It follows what you are actually watching.** A plain rotation fixed the
+/// first two and broke this one, giving a show last seen in 2017 the same
+/// chance as one finished last week — the eligible pool for that member spanned
+/// 2017 to 2026. So candidates are weighted by how recently they were watched
+/// and how hard, and the draw is weighted rather than uniform.
+///
+/// The weight is `base × recency × intensity`:
+///
+/// * `base` is the existing signal — favourite, rating, finished.
+/// * `recency` is `1 + 12/(1 + days/14)`: about 13 for something watched today,
+///   5 at a month, 1.4 at a year, 1.05 at nine years. Old favourites still
+///   surface; they just stop being the common answer.
+/// * `intensity` is `1 + min(episodes in the last 60 days, 20)/10`, so a
+///   binge counts for up to three times a passing watch. Scoped to the recent
+///   window on purpose: an unscoped version ranked a 2017 marathon fourth,
+///   above shows watched in 2025.
+///
+/// The draw itself is Efraimidis–Spirakis — order by `u^(1/weight)` for a
+/// uniform `u` — with `u` taken from a hash of the member, the date and the
+/// title. No stored state, no clock beyond the date, and two members with the
+/// same library do not march in step.
+/// The seed for a given day. Public so the rotation can be tested on real
+/// dates rather than against a copy of this query, which would pass whatever
+/// this did.
+pub async fn recommendation_seed(
+    pool: &PgPool,
+    user_id: Uuid,
+    on: NaiveDate,
+) -> Result<Option<SeedRow>, sqlx::Error> {
     sqlx::query_as::<_, SeedRow>(
-        r#"SELECT m.tmdb_id, m.media_type, m.title
-        FROM user_media um
-        JOIN media m ON m.id = um.media_id
-        WHERE um.user_id = $1
-          AND m.tmdb_id > 0
-          AND um.status IN ('completed', 'watching')
-          AND (um.is_favorite OR um.rating >= 7 OR um.status = 'completed')
-        ORDER BY
+        r#"WITH activity AS (
+            -- When each title was last watched, and how hard it was watched
+            -- lately. `last_watched` falls back to the tracking row for films
+            -- and for anything tracked without logging episodes.
+            SELECT
+                wh.media_id,
+                max(wh.watched_at) AS last_watched,
+                count(*) FILTER (WHERE wh.watched_at > NOW() - INTERVAL '60 days')
+                    AS recent_episodes
+            FROM watch_history wh
+            WHERE wh.user_id = $1
+            GROUP BY wh.media_id
+        ),
+        eligible AS (
+            SELECT
+                m.tmdb_id,
+                m.media_type,
+                m.title,
+                (
+                    CASE WHEN um.is_favorite THEN 4 ELSE 0 END
+                    + CASE WHEN um.rating >= 8 THEN 2 WHEN um.rating >= 7 THEN 1 ELSE 0 END
+                    + CASE WHEN um.status = 'completed' THEN 1 ELSE 0 END
+                )::double precision
+                * (
+                    1 + 12.0 / (
+                        1 + EXTRACT(
+                            EPOCH FROM (NOW() - COALESCE(a.last_watched, um.updated_at))
+                        ) / 86400 / 14
+                    )
+                )
+                * (1 + LEAST(COALESCE(a.recent_episodes, 0), 20) / 10.0) AS weight
+            FROM user_media um
+            JOIN media m ON m.id = um.media_id
+            LEFT JOIN activity a ON a.media_id = um.media_id
+            WHERE um.user_id = $1
+              AND m.tmdb_id > 0
+              AND um.status IN ('completed', 'watching')
+              AND (um.is_favorite OR um.rating >= 7 OR um.status = 'completed')
+            ORDER BY weight DESC, um.updated_at DESC, m.tmdb_id
+            LIMIT $2
+        )
+        SELECT tmdb_id, media_type, title
+        FROM eligible
+        -- Efraimidis-Spirakis: the largest u^(1/weight) wins, which draws in
+        -- proportion to weight. `+ 0.5` keeps u strictly positive, since
+        -- `0^(1/w)` is zero for every weight and would silently exclude
+        -- whichever title happened to hash to zero.
+        ORDER BY power(
             (
-                CASE WHEN um.is_favorite THEN 4 ELSE 0 END
-                + CASE WHEN um.rating >= 8 THEN 2 WHEN um.rating >= 7 THEN 1 ELSE 0 END
-                + CASE WHEN um.status = 'completed' THEN 1 ELSE 0 END
-            ) DESC,
-            um.updated_at DESC,
-            m.tmdb_id
+                ('x' || substr(md5($1::text || $3::date::text || tmdb_id::text), 1, 8))::bit(32)::bigint
+                + 0.5
+            ) / 4294967296.0,
+            1.0 / weight
+        ) DESC
         LIMIT 1"#,
     )
     .bind(user_id)
+    .bind(SEED_POOL_SIZE)
+    .bind(on)
     .fetch_optional(pool)
     .await
+}
+
+async fn load_seed(pool: &PgPool, user_id: Uuid) -> Result<Option<SeedRow>, sqlx::Error> {
+    recommendation_seed(pool, user_id, Utc::now().date_naive()).await
 }
 
 /// The TMDB ids the viewer already tracks for a media type, used to drop
@@ -665,7 +782,13 @@ pub async fn load_discovery(
         &preferences,
     )
     .await?;
-    let popular_rows = load_popular(pool, language_code.as_deref(), region_code.as_deref()).await?;
+    let popular_rows = load_popular(
+        pool,
+        user_id,
+        language_code.as_deref(),
+        region_code.as_deref(),
+    )
+    .await?;
     let because_you_watched =
         load_because_you_watched(pool, tmdb, user_id, language_code.as_deref()).await;
 
