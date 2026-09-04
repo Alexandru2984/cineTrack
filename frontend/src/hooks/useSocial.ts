@@ -92,26 +92,6 @@ export function useUnfollow() {
   });
 }
 
-export function useFollowers() {
-  return useQuery<UserSummary[]>({
-    queryKey: ['followers'],
-    queryFn: async () => {
-      const res = await api.get('/users/me/followers');
-      return res.data;
-    },
-  });
-}
-
-export function useFollowing() {
-  return useQuery<UserSummary[]>({
-    queryKey: ['following'],
-    queryFn: async () => {
-      const res = await api.get('/users/me/following');
-      return res.data;
-    },
-  });
-}
-
 export type UserConnectionKind = 'followers' | 'following';
 
 const CONNECTIONS_PAGE_SIZE = 50;

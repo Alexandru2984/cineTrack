@@ -2,7 +2,6 @@ import { useInfiniteQuery, useQuery, useMutation, useQueryClient } from '@tansta
 import api from '@/lib/api';
 import type {
   BulkWatchResponse,
-  HistoryItem,
   SeasonWatchProgress,
   TrackingItem,
   TrackingStatus,
@@ -154,31 +153,6 @@ export function useDeleteTracking() {
       await api.delete(`/tracking/${id}`);
     },
     onSuccess: () => invalidateTrackingState(qc),
-  });
-}
-
-export function useHistory() {
-  return useQuery<HistoryItem[]>({
-    queryKey: ['history'],
-    queryFn: async () => {
-      const res = await api.get('/history');
-      return res.data;
-    },
-  });
-}
-
-export function useCreateHistory() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (data: { media_id: string; episode_id?: string }) => {
-      const res = await api.post('/history', data);
-      return res.data;
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['history'] });
-      qc.invalidateQueries({ queryKey: ['stats'] });
-      qc.invalidateQueries({ queryKey: ['activity'] });
-    },
   });
 }
 
