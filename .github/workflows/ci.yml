@@ -89,6 +89,37 @@ jobs:
         with:
           persist-credentials: false
 
+      # The runner's disk is the thing that kills this job, and durability is
+      # the part we are paying for and do not need. This database lives inside
+      # a service container that is deleted when the job ends: nothing here is
+      # ever read back, so a crash-safe write is spent protecting data that is
+      # thrown away either way.
+      #
+      # It has now cost three runs. The last one wrote 12,893 buffers in a
+      # single 269-second checkpoint — about forty-seven a second, where a
+      # healthy machine does thousands — and the job died on the 45-minute
+      # limit with every one of its 168 tests already passed. Raising the limit
+      # was the previous answer and it bought one bad day; this removes the
+      # fsync those checkpoints were waiting on instead.
+      #
+      # All three are SIGHUP or user parameters, so a reload is enough and no
+      # restart is needed. None of them touch planning or results — the
+      # query-plan check below measures the same plans it always did.
+      - name: Stop paying for durability we throw away
+        run: |
+          set -euo pipefail
+          postgres_container=$(docker ps --filter publish=5433 --format '{{.ID}}' | head -n 1)
+          if [[ -z "$postgres_container" ]]; then
+            echo "::error::PostgreSQL service container was not found"
+            exit 1
+          fi
+          docker exec "$postgres_container" \
+            psql -U test_user -d cinetrack_test -X -q \
+            -c "ALTER SYSTEM SET fsync = 'off'" \
+            -c "ALTER SYSTEM SET full_page_writes = 'off'" \
+            -c "ALTER SYSTEM SET synchronous_commit = 'off'" \
+            -c "SELECT pg_reload_conf()"
+
       - name: Read the Rust version from the backend images
         run: echo "RUST_TOOLCHAIN=$(${{ github.workspace }}/scripts/rust_toolchain.sh)" >> "$GITHUB_ENV"
 
@@ -535,6 +566,24 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
+
+      # Same throwaway database, same reasoning as Backend Integration above:
+      # this container is deleted with the job, so an fsync here protects
+      # nothing. This job has its own history of being killed on the limit.
+      - name: Stop paying for durability we throw away
+        run: |
+          set -euo pipefail
+          postgres_container=$(docker ps --filter publish=5432 --format '{{.ID}}' | head -n 1)
+          if [[ -z "$postgres_container" ]]; then
+            echo "::error::PostgreSQL service container was not found"
+            exit 1
+          fi
+          docker exec "$postgres_container" \
+            psql -U test_user -d cinetrack_test -X -q \
+            -c "ALTER SYSTEM SET fsync = 'off'" \
+            -c "ALTER SYSTEM SET full_page_writes = 'off'" \
+            -c "ALTER SYSTEM SET synchronous_commit = 'off'" \
+            -c "SELECT pg_reload_conf()"
 
       - name: Read the Rust version from the backend images
         run: echo "RUST_TOOLCHAIN=$(${{ github.workspace }}/scripts/rust_toolchain.sh)" >> "$GITHUB_ENV"
