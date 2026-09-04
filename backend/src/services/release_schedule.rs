@@ -42,11 +42,12 @@ pub struct SeasonBackfillSummary {
     pub skipped_locked: bool,
 }
 
+/// A season of a started show whose episodes are missing or incomplete.
 #[derive(Debug, FromRow)]
-struct SeasonBackfillCandidate {
-    media_id: Uuid,
-    tmdb_id: i32,
-    season_number: i32,
+pub struct SeasonBackfillCandidate {
+    pub media_id: Uuid,
+    pub tmdb_id: i32,
+    pub season_number: i32,
 }
 
 /// Seasons of started shows whose episodes were never fetched, or were fetched
@@ -63,46 +64,87 @@ struct SeasonBackfillCandidate {
 /// fetching all of those would spend the whole provider budget on episodes that
 /// answer no question.
 const SEASON_BACKFILL_CANDIDATES: &str = r#"
-    WITH season_cache AS (
-        SELECT
-            seasons.media_id,
-            seasons.season_number,
-            seasons.episode_count,
-            seasons.episodes_cached_at,
-            COUNT(episodes.id) AS cached_count
-        FROM seasons
-        LEFT JOIN episodes ON episodes.season_id = seasons.id
-        GROUP BY seasons.id
+    -- The shows a member has actually started, and nothing else.
+    --
+    -- This has to come first, and it is the whole point of the shape. The
+    -- filters below cannot be pushed into an aggregate the planner cannot see
+    -- through, so counting episodes before narrowing meant aggregating all
+    -- 44,398 seasons against all 28,501 episodes on every run — a 38,424-row
+    -- sort, 12,630 buffers, to return nothing.
+    --
+    -- routes/calendar.rs already carries this fix and the note explaining it;
+    -- this copy of the query was simply never given the same treatment.
+    -- Measured on production: 169ms to 83ms at the median, and it now grows
+    -- with what people watch rather than with a catalogue that fills
+    -- continuously from TMDB. A faster variant existed — 54ms — and was not
+    -- taken, because it bought the difference with a plan that collapsed on a
+    -- differently shaped dataset. This is an hourly job; a stable plan is worth
+    -- more than thirty milliseconds.
+    WITH started AS (
+        SELECT DISTINCT media.id AS media_id, media.tmdb_id
+        FROM user_media tracked
+        JOIN media ON media.id = tracked.media_id AND media.media_type = 'tv'
+        -- Somebody has started this show, so a gap can actually block a queue.
+        --
+        -- A LATERAL probe rather than EXISTS, and the difference is not
+        -- cosmetic. Written as EXISTS the planner is free to run it the other
+        -- way round — aggregate the whole of `watch_history` and hash-join
+        -- outward — which is what it chose against the benchmark dataset:
+        -- 64,564 rows sequentially scanned to answer a question about a few
+        -- hundred. `LIMIT 1` inside a LATERAL leaves it no such choice, so this
+        -- probes the index once per tracked row on any data shape.
+        JOIN LATERAL (
+            SELECT 1 FROM watch_history
+            WHERE watch_history.user_id = tracked.user_id
+              AND watch_history.media_id = tracked.media_id
+            LIMIT 1
+        ) AS started_probe ON TRUE
+        WHERE tracked.status <> 'dropped'
     )
-    SELECT DISTINCT
-        media.id AS media_id,
-        media.tmdb_id,
-        season_cache.season_number
-    FROM season_cache
-    JOIN media ON media.id = season_cache.media_id AND media.media_type = 'tv'
-    JOIN user_media tracked
-      ON tracked.media_id = media.id
-     AND tracked.status <> 'dropped'
-    WHERE season_cache.season_number > 0
-      AND (
-          -- See the matching note in routes/calendar.rs: the cache timestamp is
-          -- not the test, and `episode_count = 0` is a real answer rather than
-          -- a missing one.
-          (season_cache.episode_count IS NULL AND season_cache.cached_count = 0)
-          OR (
-              season_cache.episode_count IS NOT NULL
-              AND season_cache.cached_count < season_cache.episode_count
-          )
-      )
-      -- Somebody has started this show, so the gap can actually block a queue.
-      AND EXISTS (
-          SELECT 1 FROM watch_history
-          WHERE watch_history.user_id = tracked.user_id
-            AND watch_history.media_id = media.id
-      )
-    ORDER BY media.id, season_cache.season_number
+    SELECT started.media_id, started.tmdb_id, seasons.season_number
+    FROM started
+    JOIN seasons
+      ON seasons.media_id = started.media_id
+     AND seasons.season_number > 0
+    -- How much of the season we hold, counted once per season through the
+    -- index. Written as `NOT EXISTS` plus a separate `COUNT` this was faster
+    -- here and fell over elsewhere: the planner hashed the `NOT EXISTS` into a
+    -- sequential scan of all 28,803 episodes against the benchmark dataset,
+    -- which is the shape that grows without bound. A LATERAL leaves it no
+    -- choice, and the plan then holds on both.
+    JOIN LATERAL (
+        SELECT count(*) AS cached
+        FROM episodes
+        WHERE episodes.season_id = seasons.id
+    ) AS held ON TRUE
+    -- See the matching note in routes/calendar.rs: the cache timestamp is not
+    -- the test, and `episode_count = 0` is a real answer rather than a missing
+    -- one.
+    WHERE (seasons.episode_count IS NULL AND held.cached = 0)
+       OR (seasons.episode_count IS NOT NULL AND held.cached < seasons.episode_count)
+    ORDER BY started.media_id, seasons.season_number
     LIMIT $1
 "#;
+
+/// The seasons [`backfill_incomplete_seasons`] would fetch, in the order it
+/// would fetch them.
+///
+/// Separate from the work it feeds so the selection can be tested on its own.
+/// The rules it encodes have each been wrong at least once — a season with zero
+/// announced episodes read as a gap and stuck every returning show behind it —
+/// and testing them through the provider round-trip means testing them barely
+/// at all.
+pub async fn season_backfill_candidates(
+    pool: &PgPool,
+    budget: u32,
+) -> Result<Vec<SeasonBackfillCandidate>, AppError> {
+    Ok(
+        sqlx::query_as::<_, SeasonBackfillCandidate>(SEASON_BACKFILL_CANDIDATES)
+            .bind(i64::from(budget))
+            .fetch_all(pool)
+            .await?,
+    )
+}
 
 /// Fill the season gaps that keep started shows out of the Up Next queue.
 ///
@@ -132,10 +174,7 @@ pub async fn backfill_incomplete_seasons(
         });
     }
 
-    let candidates = sqlx::query_as::<_, SeasonBackfillCandidate>(SEASON_BACKFILL_CANDIDATES)
-        .bind(i64::from(options.budget))
-        .fetch_all(pool)
-        .await?;
+    let candidates = season_backfill_candidates(pool, options.budget).await?;
 
     let mut summary = SeasonBackfillSummary {
         selected: candidates.len(),

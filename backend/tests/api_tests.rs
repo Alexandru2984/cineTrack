@@ -13073,3 +13073,130 @@ async fn dismissing_a_recommendation_hides_it_and_cools_its_genre() {
         .to_request();
     assert_eq!(actix_test::call_service(&app, req).await.status(), 404);
 }
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn test_season_backfill_selects_only_gaps_in_started_shows() {
+    use cinetrack::services::release_schedule::season_backfill_candidates;
+
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+
+    let user_id = sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO users (username, email)
+        VALUES ('backfilluser', 'backfill@mailbox.dev')
+        RETURNING id"#,
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    // Four shows, so the selection has something to reject as well as accept.
+    let mut media_ids = Vec::new();
+    for (tmdb_id, title) in [
+        (780001, "Started With Gap"),
+        (780002, "Started And Complete"),
+        (780003, "Never Started"),
+        (780004, "Dropped With Gap"),
+    ] {
+        media_ids.push(
+            sqlx::query_scalar::<_, Uuid>(
+                r#"INSERT INTO media (tmdb_id, media_type, title, status)
+                VALUES ($1, 'tv', $2, 'Returning Series')
+                RETURNING id"#,
+            )
+            .bind(tmdb_id)
+            .bind(title)
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+        );
+    }
+    let (with_gap, complete, never_started, dropped) =
+        (media_ids[0], media_ids[1], media_ids[2], media_ids[3]);
+
+    for (media_id, status) in [
+        (with_gap, "watching"),
+        (complete, "watching"),
+        (never_started, "plan_to_watch"),
+        (dropped, "dropped"),
+    ] {
+        sqlx::query("INSERT INTO user_media (user_id, media_id, status) VALUES ($1, $2, $3)")
+            .bind(user_id)
+            .bind(media_id)
+            .bind(status)
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+
+    // Watch history is what makes a show "started". `never_started` gets none.
+    for media_id in [with_gap, complete, dropped] {
+        sqlx::query("INSERT INTO watch_history (user_id, media_id) VALUES ($1, $2)")
+            .bind(user_id)
+            .bind(media_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+
+    // Seasons, and how many episodes we actually hold for each.
+    //
+    // The last two rows on `with_gap` are the cases the query's comments say
+    // have been got wrong before, and they must not be selected:
+    //  * season 0 is specials, outside the running order;
+    //  * `episode_count = 0` is a real answer from a season announced before it
+    //    is scheduled, and holding zero of zero is complete — reading it as a
+    //    gap parked every returning show behind a season that does not exist.
+    let seasons: [(Uuid, i32, Option<i32>, i32); 7] = [
+        (with_gap, 1, Some(3), 1), // holds 1 of 3 — the gap
+        (with_gap, 2, None, 0),    // never fetched, count unknown — a gap
+        (with_gap, 0, Some(5), 0), // specials, ignored
+        (with_gap, 4, Some(0), 0), // announced, not scheduled — complete
+        (complete, 1, Some(2), 2), // holds 2 of 2 — complete
+        (never_started, 1, Some(3), 0),
+        (dropped, 1, Some(3), 0),
+    ];
+    for (media_id, season_number, episode_count, held) in seasons {
+        let season_id = sqlx::query_scalar::<_, Uuid>(
+            r#"INSERT INTO seasons (media_id, season_number, episode_count)
+            VALUES ($1, $2, $3) RETURNING id"#,
+        )
+        .bind(media_id)
+        .bind(season_number)
+        .bind(episode_count)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        for episode_number in 1..=held {
+            sqlx::query("INSERT INTO episodes (season_id, episode_number) VALUES ($1, $2)")
+                .bind(season_id)
+                .bind(episode_number)
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+    }
+
+    let candidates = season_backfill_candidates(&pool, 40).await.unwrap();
+    let selected: Vec<(Uuid, i32)> = candidates
+        .iter()
+        .map(|candidate| (candidate.media_id, candidate.season_number))
+        .collect();
+
+    assert_eq!(
+        selected,
+        vec![(with_gap, 1), (with_gap, 2)],
+        "only the incomplete seasons of a started, undropped show belong here"
+    );
+    assert!(
+        candidates.iter().all(|candidate| candidate.tmdb_id == 780001),
+        "the provider id must travel with the season it belongs to"
+    );
+
+    // The budget is a limit, not a suggestion; the hourly job depends on it to
+    // bound how much of the provider allowance one run can spend.
+    let bounded = season_backfill_candidates(&pool, 1).await.unwrap();
+    assert_eq!(bounded.len(), 1);
+    assert_eq!(bounded[0].season_number, 1, "lowest season number first");
+}
