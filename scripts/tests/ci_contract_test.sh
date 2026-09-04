@@ -13,6 +13,22 @@ ci_path = root / ".github/workflows/ci.yml"
 ci = ci_path.read_text(encoding="utf-8")
 
 
+def without_comments(text: str) -> str:
+    """The file with its comment lines removed.
+
+    Assertions about what a workflow *does* have to read what it runs, not what
+    it says. A note explaining why a step is written the way it is otherwise
+    reads as another instance of the thing it describes — which broke two checks
+    in this file on the day they were written.
+    """
+    return "\n".join(
+        line for line in text.splitlines() if not line.lstrip().startswith("#")
+    )
+
+
+ci_steps = without_comments(ci)
+
+
 def fail(message: str) -> None:
     raise SystemExit(f"CI contract error: {message}")
 
@@ -35,8 +51,16 @@ for workflow_path in workflow_paths:
             f"{workflow_path.relative_to(root)}:{line_number} must pin {reference!r} to a full commit SHA",
         )
 
-    checkout_count = len(re.findall(r"uses:\s*actions/checkout@", workflow))
-    hardened_checkout_count = len(re.findall(r"persist-credentials:\s*false", workflow))
+    # Count settings, not mentions. A comment explaining *why* a checkout is
+    # unauthenticated reads as one more `persist-credentials: false` to a plain
+    # search, which broke this check the first time somebody wrote one down. It
+    # would fail the other way round too: a comment could make one real setting
+    # look like two and cover for a checkout that has none.
+    uncommented = "\n".join(
+        line for line in workflow.splitlines() if not line.lstrip().startswith("#")
+    )
+    checkout_count = len(re.findall(r"uses:\s*actions/checkout@", uncommented))
+    hardened_checkout_count = len(re.findall(r"persist-credentials:\s*false", uncommented))
     require(
         checkout_count == hardened_checkout_count,
         f"{workflow_path.relative_to(root)} must disable persisted credentials for every checkout",
@@ -115,10 +139,19 @@ require(
     "npm run check:bundle" in ci and "npm run check:bundle" in local_gate,
     "frontend transfer budgets must be gated in CI and locally",
 )
+# The audit level travels with the runner now, as its argument. Matching the
+# whole invocation keeps both halves of the requirement in one assertion: that
+# the frontend is audited at MODERATE, and that it goes through the runner
+# rather than a bare `npm audit` — which is what it was when npm's advisory
+# endpoint stalled for five minutes and took the job down with it.
+FRONTEND_AUDIT = "python3 ../scripts/npm_audit.py . moderate"
 require(
-    "npm audit --audit-level=moderate" in ci
-    and "npm audit --audit-level=moderate" in local_gate,
+    FRONTEND_AUDIT in ci and FRONTEND_AUDIT in local_gate,
     "frontend runtime and build dependencies must reject MODERATE advisories in CI and locally",
+)
+require(
+    "npm audit" not in ci_steps,
+    "npm audit must go through scripts/npm_audit.py, which bounds and retries it",
 )
 require(
     "npm audit --omit=dev" not in ci and "npm audit --omit=dev" not in local_gate,

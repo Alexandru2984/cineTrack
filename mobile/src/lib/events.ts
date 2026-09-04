@@ -15,6 +15,7 @@
 import { fetch as expoFetch } from 'expo/fetch';
 
 import { API_BASE_URL } from '@/lib/config';
+import { refreshSession } from '@/lib/session';
 
 const RECONNECT_BASE_MS = 1_000;
 const RECONNECT_MAX_MS = 30_000;
@@ -51,6 +52,7 @@ export function parseFrame(frame: string): ServerEventKind | null {
 export function connectEventStream(
   getToken: () => string | null,
   handlers: EventStreamHandlers,
+  refreshToken: () => Promise<unknown> = refreshSession,
 ): () => void {
   let stopped = false;
   let controller: AbortController | null = null;
@@ -77,6 +79,28 @@ export function connectEventStream(
         headers: { Authorization: `Bearer ${token}` },
         signal: controller.signal,
       });
+      if (response.status === 401) {
+        // The access token expired while the stream was open, or between a
+        // reconnect and this attempt. Retrying with the same token cannot
+        // succeed: this request is made directly with `expo/fetch` and never
+        // passes through the client in `lib/api`, which is what refreshes.
+        //
+        // Without this the stream sat in a 401 loop at the backoff ceiling
+        // until some unrelated query happened to refresh the session — a phone
+        // waking its radio every thirty seconds to be told no, and messages
+        // arriving only when something else asked. The web client already
+        // handles this; this copy never did.
+        try {
+          await refreshToken();
+        } catch {
+          // The session is genuinely gone. Back off rather than hammer.
+          return schedule();
+        }
+        // A refreshed session is not a failed attempt; reconnect promptly
+        // rather than waiting out a backoff earned by something else.
+        attempt = 0;
+        return schedule();
+      }
       if (!response.ok || !response.body) return schedule();
 
       // Connected. Whatever happened while disconnected is unknown, so resync

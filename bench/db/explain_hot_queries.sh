@@ -65,8 +65,16 @@ psql() {
   docker exec -i "$CONTAINER" psql -U test_user -d cinetrack_test -X -q "$@"
 }
 
+# A third argument names tables this particular case is expected to scan, and
+# why must be written above the call. It exists for one shape: a periodic job
+# whose driving set *is* a whole table, where reading all of it is the correct
+# plan and no index can change that. Every other case leaves it empty, and a
+# case that scans something the exemption does not name still fails.
+#
+# Do not reach for this to quiet a request path. The rule it bends is the one
+# this file exists to enforce.
 run_case() {
-  local name="$1" sql="$2" plan seq_tables ms
+  local name="$1" sql="$2" expected_seq="${3:-}" plan seq_tables unexpected ms
   plan="$(psql -c "EXPLAIN (ANALYZE, BUFFERS, COSTS OFF) $sql" 2>&1)" || {
     printf '%-28s ERROR\n%s\n' "$name" "$plan"
     return 1
@@ -77,9 +85,54 @@ run_case() {
   # it finds none, which is the good case, so it must not abort the run.
   seq_tables="$(grep -oE "Seq Scan on ($GROWING)" <<<"$plan" | awk '{print $4}' | sort -u | paste -sd, - || true)"
 
+  # Whatever it scanned that this case did not declare.
+  #
+  # Set arithmetic, done with arrays rather than by piping a comma-separated
+  # string through `grep -vxE`. That was the first version and it exempted
+  # everything: the here-string appends a newline, `grep` reads a newline in a
+  # pattern as separating alternatives, and one of the alternatives was then the
+  # empty string — which matches every line. It reported an undeclared
+  # sequential scan of `episodes` as "by design" and only a mutation test caught
+  # it.
+  local -a scanned=() allowed=() unexpected_list=() stale_list=()
+  [[ -n "$seq_tables" ]] && IFS=',' read -r -a scanned <<<"$seq_tables"
+  [[ -n "$expected_seq" ]] && IFS=',' read -r -a allowed <<<"$expected_seq"
+
+  local table declared found
+  for table in "${scanned[@]}"; do
+    found=""
+    for declared in "${allowed[@]}"; do
+      [[ "$table" == "$declared" ]] && found=yes && break
+    done
+    [[ -z "$found" ]] && unexpected_list+=("$table")
+  done
+
+  # A declared table that is no longer scanned is a failure too, for the same
+  # reason `check_audit_exceptions.py` fails on one: an exemption nobody has to
+  # revisit outlives the reasoning behind it, and the next real scan of that
+  # table then passes unnoticed.
+  for declared in "${allowed[@]}"; do
+    found=""
+    for table in "${scanned[@]}"; do
+      [[ "$table" == "$declared" ]] && found=yes && break
+    done
+    [[ -z "$found" ]] && stale_list+=("$declared")
+  done
+
+  local unexpected="" stale=""
+  (( ${#unexpected_list[@]} )) && unexpected="$(IFS=,; echo "${unexpected_list[*]}")"
+  (( ${#stale_list[@]} )) && stale="$(IFS=,; echo "${stale_list[*]}")"
+
   local verdict="indexed"
-  if [[ -n "$seq_tables" ]]; then
-    verdict="SEQ SCAN: $seq_tables"
+  if [[ -n "$expected_seq" && -z "$unexpected" ]]; then
+    verdict="indexed (scans $expected_seq by design)"
+  fi
+  if [[ -n "$unexpected" ]]; then
+    verdict="SEQ SCAN: $unexpected"
+    PLAN_FAILURES=$((PLAN_FAILURES + 1))
+  fi
+  if [[ -n "$stale" ]]; then
+    verdict="$verdict, STALE EXEMPTION: $stale no longer scanned"
     PLAN_FAILURES=$((PLAN_FAILURES + 1))
   fi
 
@@ -185,6 +238,42 @@ trap 'rm -f "$PLAN_LOG" "$REPORT"' EXIT
         SELECT 1 FROM watch_history wh
         WHERE wh.user_id = um.user_id AND wh.episode_id = ep.id)
     GROUP BY m.id LIMIT 20;"
+
+  # Season backfill: which started shows are missing episodes.
+  #
+  # Not a request path — it runs hourly — but it was 17.6% of all database time
+  # on production, more than any single query a person waits for. It got there
+  # by aggregating every season against every episode before narrowing to the
+  # handful of shows anybody watches, which is the fault this whole file exists
+  # to catch. Measured here so the shape cannot quietly come back.
+  #
+  # `user_media` is scanned by design and cannot be otherwise: this job asks
+  # "which tracked show is missing episodes" for every member at once, so every
+  # undropped row is in the answer's domain. There is no predicate to index —
+  # `status <> 'dropped'` excludes almost nothing — and no per-user key to seek
+  # on, because there is no user. Everything the scan feeds is indexed.
+  run_case "schedule: season backfill" "
+    WITH started AS (
+      SELECT DISTINCT m.id AS media_id, m.tmdb_id
+      FROM user_media um
+      JOIN media m ON m.id = um.media_id AND m.media_type = 'tv'
+      JOIN LATERAL (
+        SELECT 1 FROM watch_history wh
+        WHERE wh.user_id = um.user_id AND wh.media_id = um.media_id
+        LIMIT 1
+      ) AS started_probe ON TRUE
+      WHERE um.status <> 'dropped'
+    )
+    SELECT started.media_id, started.tmdb_id, se.season_number
+    FROM started
+    JOIN seasons se ON se.media_id = started.media_id AND se.season_number > 0
+    JOIN LATERAL (
+      SELECT count(*) AS cached FROM episodes e WHERE e.season_id = se.id
+    ) AS held ON TRUE
+    WHERE (se.episode_count IS NULL AND held.cached = 0)
+       OR (se.episode_count IS NOT NULL AND held.cached < se.episode_count)
+    ORDER BY started.media_id, se.season_number
+    LIMIT 40;" "user_media"
 
   # Inbox: rank the newest message and unread total for each peer. This is the
   # most expensive message read because it spans every conversation.

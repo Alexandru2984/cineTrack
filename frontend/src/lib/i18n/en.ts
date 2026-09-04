@@ -427,6 +427,8 @@ export const en = {
     unmarkWatched: 'Remove from watched',
     unmarkCodeWatched: 'Remove {code} from watched?',
     unmarkHint: 'This deletes the watch record for this episode, including any imported rewatches. You can mark it again at any time.',
+    unavailable: 'Could not load this title',
+    unavailableHint: 'The request failed. Check your connection and try again.',
     notFound: 'Media not found',
     overview: 'Overview',
     customList: 'Custom list',

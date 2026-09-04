@@ -16,14 +16,27 @@ upstream fixes them instead of accumulating forever.
 
 from __future__ import annotations
 
+import importlib.util
 import json
-import subprocess
+import os
 import sys
 from pathlib import Path
 
 MOBILE = Path(__file__).resolve().parent.parent
 LOCKFILE = MOBILE / "package-lock.json"
 AUDIT_LEVEL = "high"
+
+# Running `npm audit` safely — bounding the call, retrying an outage, and
+# telling "no advisories" apart from "no answer" — is the same problem in both
+# clients and lives in one place. See `scripts/npm_audit.py` for why each of
+# those three is necessary; all three were learned the same morning.
+_RUNNER = Path(__file__).resolve().parents[2] / "scripts/npm_audit.py"
+_SPEC = importlib.util.spec_from_file_location("npm_audit", _RUNNER)
+assert _SPEC is not None and _SPEC.loader is not None
+npm_audit = importlib.util.module_from_spec(_SPEC)
+_SPEC.loader.exec_module(npm_audit)
+
+AuditUnavailable = npm_audit.AuditUnavailable
 
 # (package, advisory) -> (reviewed version, why it is accepted)
 #
@@ -59,8 +72,6 @@ ACCEPTED = {
     ),
 }
 
-SEVERITIES = {"high", "critical"}
-
 
 def installed_version(package: str) -> str | None:
     """Resolve what the lockfile actually pins, so an upgrade breaks the entry."""
@@ -81,35 +92,8 @@ def installed_version(package: str) -> str | None:
 
 def audit_findings() -> dict[tuple[str, str], str]:
     """Map (package, advisory) -> title for every high or critical finding."""
-    result = subprocess.run(
-        ["npm", "audit", "--json", f"--audit-level={AUDIT_LEVEL}"],
-        capture_output=True,
-        text=True,
-        cwd=MOBILE,
-    )
-    # Anything unexpected here has to fail the build. A gate that cannot read
-    # the audit must not conclude there is nothing to report.
-    if not result.stdout.strip():
-        raise SystemExit(f"npm audit produced no output: {result.stderr.strip()}")
-
-    try:
-        report = json.loads(result.stdout)
-    except json.JSONDecodeError as error:
-        raise SystemExit(
-            f"npm audit did not return JSON ({error}); "
-            f"first bytes were {result.stdout[:120]!r}"
-        ) from error
-    findings: dict[tuple[str, str], str] = {}
-    for vulnerability in report.get("vulnerabilities", {}).values():
-        for via in vulnerability.get("via", []):
-            # A string entry only names another vulnerable package; the dict
-            # entries carry the actual advisory.
-            if not isinstance(via, dict) or via.get("severity") not in SEVERITIES:
-                continue
-            advisory = str(via.get("url", "")).rsplit("/", 1)[-1]
-            if advisory:
-                findings[(via.get("name", "?"), advisory)] = via.get("title", "")
-    return findings
+    report = npm_audit.audit(MOBILE, AUDIT_LEVEL)
+    return npm_audit.findings(report, AUDIT_LEVEL)
 
 
 #: The decoders both advisories live in. Metro dispatches on file type, so an
@@ -128,20 +112,29 @@ def unreachable_formats_present() -> list[Path]:
 
     Only what Metro can bundle counts, so the search starts at the mobile
     project rather than the repository root.
+
+    `os.walk` rather than `rglob` because pruning has to happen before the
+    descent, not after it: `rglob("*")` walks every file in `node_modules` and
+    `.git` and only then discards them, which is several hundred thousand
+    `stat` calls to answer a question about three PNGs.
     """
+    skip = {"node_modules", ".git"}
     found: list[Path] = []
-    for path in MOBILE.rglob("*"):
-        if not path.is_file():
-            continue
-        if "node_modules" in path.parts or ".git" in path.parts:
-            continue
-        if path.suffix.lower() in UNREACHABLE_FORMATS:
-            found.append(path.relative_to(MOBILE))
+    for directory, subdirectories, filenames in os.walk(MOBILE):
+        subdirectories[:] = [name for name in subdirectories if name not in skip]
+        for filename in filenames:
+            if Path(filename).suffix.lower() in UNREACHABLE_FORMATS:
+                found.append((Path(directory) / filename).relative_to(MOBILE))
     return found
 
 
 def main() -> int:
-    findings = audit_findings()
+    try:
+        findings = audit_findings()
+    except AuditUnavailable as error:
+        npm_audit.warn_unavailable(error)
+        return 0
+
     errors: list[str] = []
 
     if any(package == "image-size" for package, _ in ACCEPTED):

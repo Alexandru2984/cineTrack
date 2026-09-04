@@ -59,11 +59,20 @@ jobs:
       # cannot move behind your back and no major upgrade can arrive this way —
       # the sweep is for transitive packages, which is what every one of the
       # three incidents was.
+      #
+      # The audit is recorded either side of the fix because the fix is not
+      # confined to advisories: it re-resolves the tree, so anything with a
+      # newer release inside its declared range moves along with it. Without
+      # the comparison the sweep opens a pull request for that drift under a
+      # title that says it fixed advisories, which is how 2026-09-04 produced
+      # five Expo patch bumps and nothing else.
       - name: Apply fixable advisories
         run: |
           for project in frontend mobile; do
             echo "::group::$project"
+            npm --prefix "$project" audit --json > "/tmp/$project-before.json" || true
             npm --prefix "$project" audit fix --package-lock-only || true
+            npm --prefix "$project" audit --json > "/tmp/$project-after.json" || true
             echo "::endgroup::"
           done
 
@@ -84,6 +93,29 @@ jobs:
         run: |
           if git diff --quiet -- frontend/package-lock.json mobile/package-lock.json; then
             echo "no fixable advisories; nothing to open"
+            exit 0
+          fi
+
+          # The lockfile moving is not the question; whether an advisory went
+          # away is. Exit 1 means none did, and the tree gets reset rather than
+          # proposed. Exit 2 means an audit report was unreadable, which is not
+          # the same answer and must not pass for one.
+          set +e
+          RESOLVED=$(python3 scripts/advisory_sweep_resolved.py \
+            /tmp/frontend-before.json /tmp/frontend-after.json \
+            /tmp/mobile-before.json /tmp/mobile-after.json)
+          VERDICT=$?
+          set -e
+          echo "$RESOLVED"
+
+          if [[ $VERDICT -eq 2 ]]; then
+            echo "::error::the audit could not be read; refusing to guess"
+            exit 1
+          fi
+
+          if [[ $VERDICT -ne 0 ]]; then
+            git checkout -- frontend/package-lock.json mobile/package-lock.json
+            echo "lockfile drift with no advisory resolved; discarded"
             exit 0
           fi
 
@@ -119,11 +151,27 @@ jobs:
           ${SUMMARY}
           \`\`\`
 
+          Advisories this resolves:
+
+          \`\`\`
+          ${RESOLVED}
+          \`\`\`
+
           The audit output for both projects is in the run log, including
           anything the sweep could not fix.
           BODY
 
+          # `--head` is not optional here. The checkout runs with
+          # `persist-credentials: false` and the push above carries its own
+          # token, so the branch has no upstream and `gh` cannot infer what to
+          # open the pull request from. Without it the command aborts with
+          # "you must first push the current branch to a remote" *after* the
+          # push has already succeeded — which is exactly what happened on
+          # 2026-09-04: the branch landed, no pull request was opened, and the
+          # only sign was a red run nobody had a reason to open.
           gh pr create \
+            --base main \
+            --head "$BRANCH" \
             --title "fix(deps): apply fixable advisories" \
             --body-file /tmp/sweep-body.md
 
