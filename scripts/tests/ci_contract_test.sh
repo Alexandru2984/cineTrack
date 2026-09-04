@@ -35,8 +35,16 @@ for workflow_path in workflow_paths:
             f"{workflow_path.relative_to(root)}:{line_number} must pin {reference!r} to a full commit SHA",
         )
 
-    checkout_count = len(re.findall(r"uses:\s*actions/checkout@", workflow))
-    hardened_checkout_count = len(re.findall(r"persist-credentials:\s*false", workflow))
+    # Count settings, not mentions. A comment explaining *why* a checkout is
+    # unauthenticated reads as one more `persist-credentials: false` to a plain
+    # search, which broke this check the first time somebody wrote one down. It
+    # would fail the other way round too: a comment could make one real setting
+    # look like two and cover for a checkout that has none.
+    uncommented = "\n".join(
+        line for line in workflow.splitlines() if not line.lstrip().startswith("#")
+    )
+    checkout_count = len(re.findall(r"uses:\s*actions/checkout@", uncommented))
+    hardened_checkout_count = len(re.findall(r"persist-credentials:\s*false", uncommented))
     require(
         checkout_count == hardened_checkout_count,
         f"{workflow_path.relative_to(root)} must disable persisted credentials for every checkout",
