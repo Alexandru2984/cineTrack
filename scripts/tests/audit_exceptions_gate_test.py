@@ -1,14 +1,10 @@
 #!/usr/bin/env python3
-"""The mobile audit gate must not read a failed audit as a clean one.
+"""The mobile gate's exception policy.
 
-`npm audit --json` answers an unreachable registry with valid JSON that has no
-`vulnerabilities` key. Read through a plain `.get("vulnerabilities", {})` that
-looks exactly like a tree with nothing wrong with it, and the gate then reports
-every reviewed exception as stale — telling whoever reads the failure to delete
-the entries that are holding a real advisory under review.
-
-That is how the mobile job failed on 2026-09-04, so the distinction is tested
-rather than left to the next reader of the code.
+How `npm audit` is run — bounded, retried, and never letting an outage pass for
+a clean tree — is `scripts/npm_audit.py` and is tested in `npm_audit_test.py`.
+What is left here is the part specific to mobile: which advisories are accepted,
+on what grounds, and what happens when those grounds stop holding.
 """
 
 from __future__ import annotations
@@ -16,10 +12,8 @@ from __future__ import annotations
 import contextlib
 import importlib.util
 import io
-import json
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
 
 GATE = Path(__file__).resolve().parents[2] / "mobile/scripts/check_audit_exceptions.py"
 SPEC = importlib.util.spec_from_file_location("check_audit_exceptions", GATE)
@@ -27,140 +21,85 @@ assert SPEC is not None and SPEC.loader is not None
 gate = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(gate)
 
+REVIEWED = ("image-size", "GHSA-w3rx-r6r6-pgpr")
+
 
 class AuditGateTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.real_run = gate.subprocess.run
-        self.addCleanup(setattr, gate.subprocess, "run", self.real_run)
-        # The retry backoff is real seconds in CI and pointless here.
-        self.slept: list[float] = []
-        real_sleep = gate.time.sleep
-        self.addCleanup(setattr, gate.time, "sleep", real_sleep)
-        gate.time.sleep = self.slept.append  # type: ignore[assignment]
+        self.real_findings = gate.audit_findings
+        self.addCleanup(setattr, gate, "audit_findings", self.real_findings)
 
-    def stub_calls(self) -> int:
-        return self.calls
+    def stub_findings(self, findings: dict) -> None:
+        gate.audit_findings = lambda: findings  # type: ignore[assignment]
 
-    def stub_audit(self, payload: str, returncode: int = 1, stderr: str = "") -> None:
-        self.calls = 0
+    def run_main(self) -> tuple[int, str, str]:
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            code = gate.main()
+        return code, stdout.getvalue(), stderr.getvalue()
 
-        def fake_run(*_args: object, **_kwargs: object) -> SimpleNamespace:
-            self.calls += 1
-            return SimpleNamespace(stdout=payload, stderr=stderr, returncode=returncode)
+    def test_the_reviewed_advisories_pass(self) -> None:
+        self.stub_findings({key: "reviewed" for key in gate.ACCEPTED})
+        code, stdout, _ = self.run_main()
+        self.assertEqual(code, 0)
+        self.assertIn("reviewed exception", stdout)
 
-        gate.subprocess.run = fake_run  # type: ignore[assignment]
+    def test_an_unreviewed_advisory_fails(self) -> None:
+        findings = {key: "reviewed" for key in gate.ACCEPTED}
+        findings[("brand-new", "GHSA-not-reviewed")] = "nobody has looked at this"
+        self.stub_findings(findings)
+        code, _, stderr = self.run_main()
+        self.assertEqual(code, 1)
+        self.assertIn("unreviewed", stderr)
 
-    def unreachable_payload(self) -> str:
-        # Exactly what npm writes for a 503 from the advisory endpoint: valid
-        # JSON, no `vulnerabilities` key at all.
-        return json.dumps(
-            {
-                "message": (
-                    "503 Service Unavailable - POST https://registry.npmjs.org"
-                    "/-/npm/v1/security/advisories/bulk - Service Unavailable"
-                ),
-                "error": {"summary": "", "detail": ""},
-            }
-        )
-
-    def test_an_unreachable_registry_is_not_a_clean_tree(self) -> None:
-        self.stub_audit(self.unreachable_payload())
-        with self.assertRaises(gate.AuditUnavailable):
-            gate.audit_findings()
-
-    def test_an_unreachable_registry_is_retried_before_giving_up(self) -> None:
-        # The 503 that caused this cleared within minutes, so one bad answer
-        # must not be the whole story.
-        self.stub_audit(self.unreachable_payload())
-        with self.assertRaises(gate.AuditUnavailable):
-            gate.audit_findings()
-        self.assertEqual(self.stub_calls(), gate.AUDIT_ATTEMPTS)
-        self.assertEqual(len(self.slept), gate.AUDIT_ATTEMPTS - 1)
+    def test_an_exception_that_no_longer_applies_fails(self) -> None:
+        # Entries get deleted when upstream fixes them rather than accumulating,
+        # so a listed advisory that stopped appearing is an error.
+        self.stub_findings({REVIEWED: "still here"})
+        code, _, stderr = self.run_main()
+        self.assertEqual(code, 1)
+        self.assertIn("delete the stale exception", stderr)
 
     def test_an_outage_warns_rather_than_blocking_every_pull_request(self) -> None:
         # A gate that cannot reach the feed has learned nothing, and turning
         # that into a red build across the repository trades an unknown for a
         # certainty. It has to be loud, though.
-        self.stub_audit(self.unreachable_payload())
-        stdout = io.StringIO()
-        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(io.StringIO()):
-            self.assertEqual(gate.main(), 0)
-        self.assertIn("::warning::", stdout.getvalue())
-        self.assertIn("did not run", stdout.getvalue())
+        def unavailable() -> dict:
+            raise gate.AuditUnavailable("503 Service Unavailable")
 
-    def test_a_real_finding_still_fails_the_build(self) -> None:
-        # The escape hatch above must be reachable only by the unreachable
-        # shape, never by an advisory nobody has reviewed.
-        self.stub_audit(
-            json.dumps(
-                {
-                    "vulnerabilities": {
-                        "brand-new": {
-                            "via": [
-                                {
-                                    "name": "brand-new",
-                                    "title": "unreviewed",
-                                    "severity": "critical",
-                                    "url": "https://github.com/advisories/GHSA-not-reviewed",
-                                }
-                            ]
-                        }
-                    },
-                    "metadata": {},
-                }
+        gate.audit_findings = unavailable  # type: ignore[assignment]
+        code, stdout, _ = self.run_main()
+        self.assertEqual(code, 0)
+        self.assertIn("::warning::", stdout)
+        self.assertIn("did not run", stdout)
+
+    def test_the_accepted_versions_match_what_is_installed(self) -> None:
+        # The exception is pinned to the version that was reviewed; an upgrade
+        # has to force the assessment again rather than inherit the decision.
+        for package, _ in gate.ACCEPTED:
+            reviewed, _reason = gate.ACCEPTED[(package, _)]
+            self.assertEqual(
+                gate.installed_version(package),
+                reviewed,
+                f"{package} moved away from the reviewed version",
             )
-        )
-        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
-            self.assertEqual(gate.main(), 1)
 
-    def test_no_vulnerabilities_is_a_clean_tree(self) -> None:
-        # The other side of the line: npm really did answer, and the answer was
-        # that there is nothing to report.
-        self.stub_audit(json.dumps({"vulnerabilities": {}, "metadata": {}}), returncode=0)
-        self.assertEqual(gate.audit_findings(), {})
+    def test_no_asset_puts_the_vulnerable_decoders_back_in_reach(self) -> None:
+        # The image-size exception rests on there being no ICNS, JXL or HEIF
+        # file for Metro to hand to the vulnerable decoders.
+        self.assertEqual(gate.unreachable_formats_present(), [])
 
-    def test_advisories_are_read_from_a_real_report(self) -> None:
-        self.stub_audit(
-            json.dumps(
-                {
-                    "vulnerabilities": {
-                        "image-size": {
-                            "via": [
-                                "some-other-package",
-                                {
-                                    "name": "image-size",
-                                    "title": "ICNS parser allows denial of service",
-                                    "severity": "high",
-                                    "url": "https://github.com/advisories/GHSA-w3rx-r6r6-pgpr",
-                                },
-                                {
-                                    "name": "image-size",
-                                    "title": "moderate finding, below the gate",
-                                    "severity": "moderate",
-                                    "url": "https://github.com/advisories/GHSA-ignored-here",
-                                },
-                            ]
-                        }
-                    },
-                    "metadata": {},
-                }
-            )
-        )
-        findings = gate.audit_findings()
-        self.assertIn(("image-size", "GHSA-w3rx-r6r6-pgpr"), findings)
-        self.assertNotIn(("image-size", "GHSA-ignored-here"), findings)
-
-    def test_empty_output_still_fails(self) -> None:
-        self.stub_audit("", stderr="npm died")
-        with self.assertRaises(SystemExit) as raised:
-            gate.audit_findings()
-        self.assertIn("produced no output", str(raised.exception))
-
-    def test_non_json_output_still_fails(self) -> None:
-        self.stub_audit("<html>proxy error</html>")
-        with self.assertRaises(SystemExit) as raised:
-            gate.audit_findings()
-        self.assertIn("did not return JSON", str(raised.exception))
+    def test_the_asset_walk_does_not_descend_into_node_modules(self) -> None:
+        # It used to, with `rglob("*")` filtering after the descent: several
+        # hundred thousand stat calls to answer a question about three PNGs.
+        # Timing is not the assertion — the pruning is, and an ICNS inside
+        # node_modules is the thing it must not find.
+        planted = gate.MOBILE / "node_modules/.audit-gate-probe/icon.icns"
+        planted.parent.mkdir(parents=True, exist_ok=True)
+        planted.write_bytes(b"not really an icns")
+        self.addCleanup(lambda: (planted.unlink(missing_ok=True),
+                                 planted.parent.rmdir()))
+        self.assertEqual(gate.unreachable_formats_present(), [])
 
 
 if __name__ == "__main__":

@@ -189,8 +189,13 @@ jobs:
       - name: Enforce bundle budgets
         run: npm run check:bundle
 
+      # Not a bare `npm audit`. That is what this was, and on 2026-09-04 it
+      # spent five minutes on npm's default `--fetch-timeout` and then failed
+      # the job with a network timeout, on a diff that had nothing to do with
+      # it. The runner bounds the call, retries the outage, and refuses to read
+      # a registry error as a clean tree — see `scripts/npm_audit.py`.
       - name: Audit runtime and build dependencies
-        run: npm audit --audit-level=moderate
+        run: python3 ../scripts/npm_audit.py . moderate
 
   mobile:
     name: Mobile

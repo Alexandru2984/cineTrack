@@ -113,7 +113,7 @@ section "Frontend"
   npm test
   npm run build
   npm run check:bundle
-  npm audit --audit-level=moderate
+  python3 ../scripts/npm_audit.py . moderate
 )
 
 section "Mobile"
@@ -148,6 +148,7 @@ bash -n scripts/*.sh scripts/tests/*.sh
 python3 scripts/check_dependency_policy.py
 python3 scripts/tests/dependency_policy_test.py
 python3 scripts/tests/advisory_sweep_resolved_test.py
+python3 scripts/tests/npm_audit_test.py
 python3 scripts/tests/audit_exceptions_gate_test.py
 python3 scripts/tests/capacity_analysis_test.py
 python3 scripts/tests/check_embedded_python.py \

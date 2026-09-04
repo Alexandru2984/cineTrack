@@ -16,39 +16,27 @@ upstream fixes them instead of accumulating forever.
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
-import subprocess
 import sys
-import time
 from pathlib import Path
 
 MOBILE = Path(__file__).resolve().parent.parent
 LOCKFILE = MOBILE / "package-lock.json"
 AUDIT_LEVEL = "high"
 
-# One `npm audit` can take five minutes before it fails, and the CI step that
-# started this did exactly that. `--fetch-retries` is not what bounds it:
-# `--fetch-timeout` defaults to 300000ms, so a request the endpoint never
-# answers hangs for the full five minutes on the first try. Both are set below,
-# and the retrying happens here instead, where the total is predictable.
-#
-# Worst case is now three 30-second attempts plus 15 seconds of backoff, and the
-# common case — the endpoint answering 503 immediately, which is what it did on
-# 2026-09-04 — is a few seconds.
-AUDIT_ATTEMPTS = 3
-AUDIT_BACKOFF_SECONDS = 5
-AUDIT_FETCH_TIMEOUT_MS = 30000
+# Running `npm audit` safely — bounding the call, retrying an outage, and
+# telling "no advisories" apart from "no answer" — is the same problem in both
+# clients and lives in one place. See `scripts/npm_audit.py` for why each of
+# those three is necessary; all three were learned the same morning.
+_RUNNER = Path(__file__).resolve().parents[2] / "scripts/npm_audit.py"
+_SPEC = importlib.util.spec_from_file_location("npm_audit", _RUNNER)
+assert _SPEC is not None and _SPEC.loader is not None
+npm_audit = importlib.util.module_from_spec(_SPEC)
+_SPEC.loader.exec_module(npm_audit)
 
-
-class AuditUnavailable(Exception):
-    """npm answered, but not with an audit.
-
-    Kept separate from every other failure because it is the only one where the
-    gate has learned nothing at all — not "no advisories", not "an advisory";
-    nothing. What to do about that is a different decision from what to do about
-    a finding, and it needs its own type to stay that way.
-    """
+AuditUnavailable = npm_audit.AuditUnavailable
 
 # (package, advisory) -> (reviewed version, why it is accepted)
 #
@@ -84,8 +72,6 @@ ACCEPTED = {
     ),
 }
 
-SEVERITIES = {"high", "critical"}
-
 
 def installed_version(package: str) -> str | None:
     """Resolve what the lockfile actually pins, so an upgrade breaks the entry."""
@@ -105,82 +91,9 @@ def installed_version(package: str) -> str | None:
 
 
 def audit_findings() -> dict[tuple[str, str], str]:
-    """Map (package, advisory) -> title for every high or critical finding.
-
-    Retries a registry that is not answering, because it usually is again a
-    moment later: `registry.npmjs.org/-/npm/v1/security/advisories/bulk`
-    returned 503 for several minutes on 2026-09-04 and was fine on the next
-    call.
-    """
-    unavailable = ""
-    for attempt in range(1, AUDIT_ATTEMPTS + 1):
-        try:
-            return audit_findings_once()
-        except AuditUnavailable as error:
-            unavailable = str(error)
-            if attempt < AUDIT_ATTEMPTS:
-                time.sleep(AUDIT_BACKOFF_SECONDS * attempt)
-    raise AuditUnavailable(unavailable)
-
-
-def audit_findings_once() -> dict[tuple[str, str], str]:
-    """One `npm audit`, parsed. Raises AuditUnavailable if it did not answer."""
-    result = subprocess.run(
-        # The retrying belongs to the caller above, where a failed attempt is
-        # bounded and the total is visible in one place.
-        [
-            "npm",
-            "audit",
-            "--json",
-            f"--audit-level={AUDIT_LEVEL}",
-            "--fetch-retries=0",
-            f"--fetch-timeout={AUDIT_FETCH_TIMEOUT_MS}",
-        ],
-        capture_output=True,
-        text=True,
-        cwd=MOBILE,
-    )
-    # Anything unexpected here has to fail the build. A gate that cannot read
-    # the audit must not conclude there is nothing to report.
-    if not result.stdout.strip():
-        raise SystemExit(f"npm audit produced no output: {result.stderr.strip()}")
-
-    try:
-        report = json.loads(result.stdout)
-    except json.JSONDecodeError as error:
-        raise SystemExit(
-            f"npm audit did not return JSON ({error}); "
-            f"first bytes were {result.stdout[:120]!r}"
-        ) from error
-
-    # A registry it could not reach is still valid JSON, and the shape it
-    # returns is `{"message": ..., "error": {...}}` with no `vulnerabilities`
-    # at all. Read through `.get("vulnerabilities", {})` that is indistinguishable
-    # from a clean tree, so every exception below looks stale and the build fails
-    # telling you to delete them — which is the worst possible advice, because
-    # deleting a real exception is how a genuine advisory gets waved through
-    # later without anybody noticing.
-    #
-    # It is not hypothetical. On 2026-09-04 the mobile job spent five minutes in
-    # this call and then reported both reviewed image-size advisories as gone,
-    # while the same audit run anywhere else still listed them.
-    #
-    # An empty `vulnerabilities` is a legitimate answer; a missing one is not.
-    if "vulnerabilities" not in report:
-        message = report.get("message") or json.dumps(report.get("error", report))[:400]
-        raise AuditUnavailable(f"exit {result.returncode}: {message}")
-
-    findings: dict[tuple[str, str], str] = {}
-    for vulnerability in report.get("vulnerabilities", {}).values():
-        for via in vulnerability.get("via", []):
-            # A string entry only names another vulnerable package; the dict
-            # entries carry the actual advisory.
-            if not isinstance(via, dict) or via.get("severity") not in SEVERITIES:
-                continue
-            advisory = str(via.get("url", "")).rsplit("/", 1)[-1]
-            if advisory:
-                findings[(via.get("name", "?"), advisory)] = via.get("title", "")
-    return findings
+    """Map (package, advisory) -> title for every high or critical finding."""
+    report = npm_audit.audit(MOBILE, AUDIT_LEVEL)
+    return npm_audit.findings(report, AUDIT_LEVEL)
 
 
 #: The decoders both advisories live in. Metro dispatches on file type, so an
@@ -219,22 +132,7 @@ def main() -> int:
     try:
         findings = audit_findings()
     except AuditUnavailable as error:
-        # Blocking here would be the wrong trade. The gate has no information
-        # either way during an npm outage, and failing every pull request in the
-        # repository until somebody else's service recovers is the exact
-        # pathology `advisory-sweep.yml` was written to stop — an answer that
-        # changes without anybody touching this code, breaking work that has
-        # nothing to do with it.
-        #
-        # It is loud, it is narrow — only the one shape npm returns for an
-        # endpoint failure reaches here, never a parsed finding — and the daily
-        # sweep runs the same audit against main, so anything missed while the
-        # endpoint was down is picked up within a day.
-        print(f"::warning::npm's advisory endpoint did not answer; this gate did not run ({error})")
-        print(
-            f"npm audit was unreachable after {AUDIT_ATTEMPTS} attempts: {error}",
-            file=sys.stderr,
-        )
+        npm_audit.warn_unavailable(error)
         return 0
 
     errors: list[str] = []
