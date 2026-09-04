@@ -138,6 +138,29 @@ jobs:
           TEST_DATABASE_URL: postgres://test_user:test_pass@localhost:5433/cinetrack_test
         run: cargo test --test api_tests -- --ignored --test-threads=1
 
+      # Timestamped and bounded, because the alternative was thirty-six minutes
+      # of silence.
+      #
+      # This step writes nothing until it finishes, so when the job died on its
+      # limit there was no way to tell whether the seed or the measurements were
+      # at fault. It was the seed, and the spread is enormous for identical
+      # work: 14 seconds on one runner, 616 on another, 2,190 on the one that
+      # killed the job — the same 254 MB of WAL every time.
+      #
+      # Not something the database configuration can fix, and worth being
+      # precise about since the step above was written on the opposite belief.
+      # `fsync` really is off in these runs (the checkpoint log reports
+      # `sync=0.001 s`, `sync files=0`) and the *write* phase is still 269
+      # seconds. Nothing is waiting on a flush; the writes themselves are slow.
+      # That is the shared runner's disk on a bad day and nothing here changes
+      # it. Turning fsync off is still worth having — it removes a real cost —
+      # it just was not this one.
+      #
+      # So: bound each half, generously enough that a merely slow runner still
+      # passes, and fail with something a reader can act on instead of a
+      # `cancelled` that looks like an infrastructure blip. The job's own limit
+      # is 45 minutes and its tests take about eight, so these two leave room to
+      # report.
       - name: Database query-plan regressions
         run: |
           set -euo pipefail
@@ -149,10 +172,38 @@ jobs:
           bench_user_id=$(docker exec "$postgres_container" \
             psql -U test_user -d cinetrack_test -X -q -t -A \
             -c "INSERT INTO users (username, email, email_verified) VALUES ('bench-ci', 'bench-ci@example.invalid', TRUE) RETURNING id;")
-          docker exec -i "$postgres_container" \
+
+          echo "seeding benchmark data at $(date -u +%H:%M:%S)"
+          # `$?` has to be captured on its own line. Read inside `if ! cmd;
+          # then`, it is the status of the negation — always 0 — which would
+          # turn every failure here into a pass.
+          set +e
+          timeout 900 docker exec -i "$postgres_container" \
             psql -U test_user -d cinetrack_test -X -q -v user_id="'$bench_user_id'" \
             < ../bench/db/seed_bench_data.sql
-          BENCH_DB_PORT=5433 ../bench/db/explain_hot_queries.sh "$bench_user_id"
+          seed_status=$?
+          set -e
+          if (( seed_status == 124 )); then
+            echo "::error::seeding the benchmark data did not finish within 15 minutes; it normally takes under 30 seconds, so this runner's disk is the problem and not the diff"
+            exit 1
+          fi
+          if (( seed_status != 0 )); then
+            echo "::error::seeding the benchmark data failed with status $seed_status"
+            exit "$seed_status"
+          fi
+          echo "seeded at $(date -u +%H:%M:%S); measuring plans"
+
+          set +e
+          BENCH_DB_PORT=5433 timeout 300 ../bench/db/explain_hot_queries.sh "$bench_user_id"
+          plan_status=$?
+          set -e
+          if (( plan_status == 124 )); then
+            echo "::error::measuring the query plans did not finish within 5 minutes"
+          fi
+          if (( plan_status != 0 )); then
+            exit "$plan_status"
+          fi
+          echo "finished at $(date -u +%H:%M:%S)"
 
   frontend:
     name: Frontend

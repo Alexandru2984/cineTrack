@@ -131,9 +131,14 @@ require(
     "PostgreSQL integration tests must remain serial",
 )
 require(
-    "Database query-plan regressions" in ci
-    and 'BENCH_DB_PORT=5433 ../bench/db/explain_hot_queries.sh "$bench_user_id"' in ci,
-    "CI must reject regressed plans on the seeded PostgreSQL dataset",
+    "Database query-plan regressions" in ci_steps
+    and 'BENCH_DB_PORT=5433 timeout 300 ../bench/db/explain_hot_queries.sh "$bench_user_id"' in ci_steps,
+    "CI must reject regressed plans on the seeded PostgreSQL dataset, under a bound",
+)
+require(
+    "timeout 900 docker exec" in ci_steps,
+    "seeding the benchmark data must be bounded, so a slow runner fails as itself "
+    "rather than eating the job's budget and reporting as cancelled",
 )
 require(
     "npm run check:bundle" in ci and "npm run check:bundle" in local_gate,
