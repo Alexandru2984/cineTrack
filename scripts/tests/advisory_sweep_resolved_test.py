@@ -85,6 +85,27 @@ class AdvisorySweepResolvedTests(unittest.TestCase):
         self.assertEqual(result.returncode, 2)
         self.assertIn("cannot read audit report", result.stderr)
 
+    def test_a_registry_failure_is_not_a_clean_one(self) -> None:
+        # What npm actually writes when it cannot reach the advisory endpoint:
+        # valid JSON, no `vulnerabilities` key. Read as a report it says every
+        # advisory just vanished.
+        unreachable = json.dumps(
+            {
+                "message": "request to https://registry.npmjs.org/-/npm/v1/security/advisories/bulk failed",
+                "error": {"summary": "", "detail": ""},
+            }
+        )
+        before = report(("image-size", "GHSA-w3rx-r6r6-pgpr", "high"))
+        result = self.run_script(before, unreachable)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("not an audit report", result.stderr)
+
+    def test_an_empty_vulnerability_set_is_a_clean_one(self) -> None:
+        # The other side of the same line: nothing to report is a real answer.
+        before = report(("image-size", "GHSA-w3rx-r6r6-pgpr", "high"))
+        result = self.run_script(before, report())
+        self.assertEqual(result.returncode, 0)
+
     def test_a_missing_report_is_not_a_clean_one(self) -> None:
         result = subprocess.run(
             [sys.executable, str(SCRIPT), "/nonexistent/before.json", "/nonexistent/after.json"],

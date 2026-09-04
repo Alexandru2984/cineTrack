@@ -99,6 +99,27 @@ def audit_findings() -> dict[tuple[str, str], str]:
             f"npm audit did not return JSON ({error}); "
             f"first bytes were {result.stdout[:120]!r}"
         ) from error
+
+    # A registry it could not reach is still valid JSON, and the shape it
+    # returns is `{"message": ..., "error": {...}}` with no `vulnerabilities`
+    # at all. Read through `.get("vulnerabilities", {})` that is indistinguishable
+    # from a clean tree, so every exception below looks stale and the build fails
+    # telling you to delete them — which is the worst possible advice, because
+    # deleting a real exception is how a genuine advisory gets waved through
+    # later without anybody noticing.
+    #
+    # It is not hypothetical. On 2026-09-04 the mobile job spent five minutes in
+    # this call and then reported both reviewed image-size advisories as gone,
+    # while the same audit run anywhere else still listed them.
+    #
+    # An empty `vulnerabilities` is a legitimate answer; a missing one is not.
+    if "vulnerabilities" not in report:
+        message = report.get("message") or json.dumps(report.get("error", report))[:400]
+        raise SystemExit(
+            f"npm audit returned no report (exit {result.returncode}): {message}\n"
+            f"stderr: {result.stderr.strip()[:400]}"
+        )
+
     findings: dict[tuple[str, str], str] = {}
     for vulnerability in report.get("vulnerabilities", {}).values():
         for via in vulnerability.get("via", []):

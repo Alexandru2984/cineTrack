@@ -148,6 +148,7 @@ bash -n scripts/*.sh scripts/tests/*.sh
 python3 scripts/check_dependency_policy.py
 python3 scripts/tests/dependency_policy_test.py
 python3 scripts/tests/advisory_sweep_resolved_test.py
+python3 scripts/tests/audit_exceptions_gate_test.py
 python3 scripts/tests/capacity_analysis_test.py
 python3 scripts/tests/check_embedded_python.py \
   scripts/backup_to_r2.sh scripts/restore_from_r2.sh \

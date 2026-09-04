@@ -43,6 +43,15 @@ def advisories(path: Path) -> dict[str, str]:
         print(f"cannot read audit report {path}: {error}", file=sys.stderr)
         raise SystemExit(2) from error
 
+    # A registry npm could not reach still writes valid JSON: `{"message": ...,
+    # "error": {...}}`, with no `vulnerabilities` key. An empty set of
+    # vulnerabilities is a real answer and a missing one is not, and confusing
+    # the two here would read a failed audit as "everything got fixed".
+    if "vulnerabilities" not in report:
+        message = report.get("message") or json.dumps(report.get("error", report))[:200]
+        print(f"{path} is not an audit report: {message}", file=sys.stderr)
+        raise SystemExit(2)
+
     found: dict[str, str] = {}
     for vulnerability in report.get("vulnerabilities", {}).values():
         for via in vulnerability.get("via", []):
