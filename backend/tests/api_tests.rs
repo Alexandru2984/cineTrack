@@ -14036,3 +14036,189 @@ async fn replacing_the_key_backup_needs_the_account_password() {
         .to_request();
     assert_eq!(actix_test::call_service(&app, req).await.status(), 204);
 }
+
+/// The same rule about unaired episodes, whichever route is used.
+///
+/// L02 from the September audit. The calendar and season routes refuse an
+/// episode that has not aired; the generic `POST /history` did not, so the
+/// invariant held or not depending on which endpoint a client called. A future
+/// episode logged as watched feeds statistics, streaks and badges computed from
+/// this table.
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn logging_history_refuses_an_episode_that_has_not_aired() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (token, _, _) = register_user(&app, "airuser", "air@mailbox.dev", "Pass1234").await;
+
+    let media_id = sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO media (tmdb_id, media_type, title, status)
+        VALUES (690001, 'tv', 'Airing Show', 'Returning Series') RETURNING id"#,
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let season_id = sqlx::query_scalar::<_, Uuid>(
+        "INSERT INTO seasons (media_id, season_number) VALUES ($1, 1) RETURNING id",
+    )
+    .bind(media_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    let episode = |number: i32, air_date: &'static str| {
+        let pool = pool.clone();
+        async move {
+            sqlx::query_scalar::<_, Uuid>(
+                r#"INSERT INTO episodes (season_id, episode_number, air_date)
+                VALUES ($1, $2, $3::date) RETURNING id"#,
+            )
+            .bind(season_id)
+            .bind(number)
+            .bind(air_date)
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+        }
+    };
+    let aired = episode(1, "2020-01-01").await;
+    let unaired = episode(2, "2999-01-01").await;
+
+    let log = |episode_id: Uuid| {
+        let app = &app;
+        let token = token.clone();
+        async move {
+            let req = actix_test::TestRequest::post()
+                .uri("/api/history")
+                .insert_header(("Authorization", format!("Bearer {token}")))
+                .set_json(json!({ "media_id": media_id, "episode_id": episode_id }))
+                .peer_addr(peer_addr())
+                .to_request();
+            actix_test::call_service(app, req).await.status()
+        }
+    };
+
+    assert!(
+        log(aired).await.is_success(),
+        "an episode that has aired must still be loggable"
+    );
+    assert_eq!(
+        log(unaired).await,
+        400,
+        "the generic route logged an episode that has not aired"
+    );
+
+    // And nothing was written for it, so statistics cannot pick it up.
+    let logged =
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM watch_history WHERE episode_id = $1")
+            .bind(unaired)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(logged, 0);
+}
+
+/// A lock must not be extendable by somebody who never knew the password.
+///
+/// M08 from the September audit. Every failed attempt against an already-locked
+/// account moved the unlock time forward, so anyone who knew the address could
+/// hold the owner out indefinitely at one wrong guess every quarter of an hour
+/// — the owner's password was never wrong, and email recovery was the only way
+/// back. Escalation replaces extension: each consecutive lock lasts twice as
+/// long, so expiry still does not hand out an endless series of fresh guesses.
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn a_locked_account_cannot_be_held_locked_by_more_wrong_guesses() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (_, _, user_id) = register_user(&app, "lockuser", "lock@mailbox.dev", "Pass1234").await;
+    let user_uuid = Uuid::parse_str(&user_id).unwrap();
+
+    let attempt = |password: &'static str| {
+        let app = &app;
+        async move {
+            let req = actix_test::TestRequest::post()
+                .uri("/api/auth/login")
+                .set_json(json!({ "email": "lock@mailbox.dev", "password": password }))
+                .peer_addr(peer_addr())
+                .to_request();
+            actix_test::call_service(app, req).await.status()
+        }
+    };
+    let locked_until = || {
+        let pool = pool.clone();
+        async move {
+            sqlx::query_scalar::<_, Option<chrono::DateTime<chrono::Utc>>>(
+                "SELECT login_locked_until FROM users WHERE id = $1",
+            )
+            .bind(user_uuid)
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+        }
+    };
+
+    for _ in 0..5 {
+        attempt("WrongPass1").await;
+    }
+    let first = locked_until().await.expect("five failures should lock");
+
+    // More guessing while locked must not move the unlock time.
+    for _ in 0..5 {
+        attempt("WrongPass1").await;
+    }
+    let after = locked_until().await.expect("still locked");
+    assert_eq!(
+        first, after,
+        "wrong guesses against a locked account pushed the unlock time forward"
+    );
+
+    // The escalation level rose once, for the one lock that happened.
+    let level = sqlx::query_scalar::<_, i16>("SELECT login_lock_level FROM users WHERE id = $1")
+        .bind(user_uuid)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(level, 1);
+
+    // When the lock expires, the next one is longer rather than identical.
+    sqlx::query("UPDATE users SET login_locked_until = NOW() - INTERVAL '1 second' WHERE id = $1")
+        .bind(user_uuid)
+        .execute(&pool)
+        .await
+        .unwrap();
+    for _ in 0..5 {
+        attempt("WrongPass1").await;
+    }
+    let second = locked_until()
+        .await
+        .expect("a second run should lock again");
+    let second_len = second - chrono::Utc::now();
+    assert!(
+        second_len > chrono::Duration::minutes(20),
+        "the second lock was not longer than the first: {second_len}"
+    );
+
+    // And the owner, with the right password, is still refused while locked —
+    // the lock is real, not a formality.
+    assert_eq!(attempt("Pass1234").await, 401);
+
+    // Recovery clears both the lock and the escalation, so a recovered account
+    // does not inherit an hour-long lock from the attack it survived.
+    sqlx::query(
+        "UPDATE users SET login_locked_until = NULL, login_failed_attempts = 0 WHERE id = $1",
+    )
+    .bind(user_uuid)
+    .execute(&pool)
+    .await
+    .unwrap();
+    assert!(attempt("Pass1234").await.is_success());
+    let level = sqlx::query_scalar::<_, i16>("SELECT login_lock_level FROM users WHERE id = $1")
+        .bind(user_uuid)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(level, 0, "a successful sign-in should end the run");
+}
