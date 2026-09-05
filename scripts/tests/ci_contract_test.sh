@@ -140,6 +140,17 @@ require(
     "seeding the benchmark data must be bounded, so a slow runner fails as itself "
     "rather than eating the job's budget and reporting as cancelled",
 )
+# A seed that will not run is not a verdict on the change; a plan that regressed
+# is. The two must not be collapsed into one outcome in either direction.
+require(
+    "::warning::seeding the benchmark data did not finish" in ci_steps,
+    "a seed that times out must warn, not fail: it has measured nothing, and "
+    "blocking every branch on a runner's disk is the pathology advisory-sweep.yml exists to stop",
+)
+require(
+    "::error::measuring the query plans did not finish" in ci_steps,
+    "a plan measurement that hangs is still a failure; only the seed gets the warning",
+)
 require(
     "npm run check:bundle" in ci and "npm run check:bundle" in local_gate,
     "frontend transfer budgets must be gated in CI and locally",
