@@ -27,6 +27,14 @@ const EMAIL_CHANGE_COOLDOWN_SECONDS: i64 = 5 * 60;
 const LOGIN_FAILURE_LIMIT: i32 = 5;
 const LOGIN_FAILURE_WINDOW_SECONDS: i64 = 15 * 60;
 const LOGIN_LOCK_SECONDS: i64 = 15 * 60;
+/// The longest a run of failures can lock an account for.
+///
+/// The lock doubles with each consecutive lock — 15 minutes, 30, an hour, and
+/// so on — so expiry never hands out an unlimited series of fresh guessing
+/// batches. It stops at a day: past that the cost falls entirely on the owner,
+/// who can already recover by email, and a longer number protects nothing an
+/// attacker could not simply wait out.
+const LOGIN_LOCK_MAX_SECONDS: i64 = 24 * 60 * 60;
 /// A locked account is refused without hashing the submitted password, which
 /// would otherwise make the refusal measurably faster than a real verification
 /// and leak the lock state through timing. Roughly the cost of one Argon2 run.
@@ -667,14 +675,16 @@ pub async fn reset_password(
         .bind(stored.id)
         .execute(&mut *tx)
         .await?;
-    // Clearing the sign-in lock is what keeps lock extension safe: proving
-    // control of the inbox is the way back in for someone an attacker has
-    // deliberately kept locked out, so the lock can never become permanent.
+    // Proving control of the inbox is the way back in for someone an attacker
+    // has deliberately locked out. The level is reset with it, so the recovered
+    // account does not start its next run at an hour-long lock inherited from
+    // the attack it just survived.
     sqlx::query(
         "UPDATE users
          SET password_hash = $2,
              login_failed_attempts = 0,
              login_last_failed_at = NULL,
+             login_lock_level = 0,
              login_locked_until = NULL,
              updated_at = NOW()
          WHERE id = $1",
@@ -1049,40 +1059,72 @@ fn is_login_locked(locked_until: Option<chrono::DateTime<Utc>>) -> bool {
 
 async fn record_login_failure(pool: &PgPool, user_id: Uuid) -> Result<bool, AppError> {
     let locked = sqlx::query_scalar::<_, bool>(
-        // An attempt against an account that is already locked still counts:
-        // it holds the counter at the cap so the lock below is pushed forward.
-        // Skipping those rows let an attacker collect a fresh batch of guesses
-        // every time the original lock expired, indefinitely.
-        "WITH next_attempt AS (
+        // An attempt against an account that is already locked changes nothing.
+        //
+        // It used to move the unlock time forward, which held an attacker at a
+        // fresh batch of guesses — the property worth keeping — but also let
+        // anyone who knew the address keep the owner out for as long as they
+        // cared to, at one wrong password every quarter of an hour. The owner's
+        // password was never wrong and email recovery was the only way back.
+        //
+        // The batches are held down by escalation instead: each consecutive
+        // lock lasts twice as long as the last, to a ceiling. An attacker gets
+        // fewer guesses per unit of time the longer they try, and nobody can
+        // extend a lock that is already running.
+        "WITH current AS (
             SELECT id,
+                login_locked_until IS NOT NULL AND login_locked_until > NOW() AS locked,
                 CASE
-                    WHEN login_locked_until IS NOT NULL AND login_locked_until > NOW()
-                    THEN LEAST(login_failed_attempts + 1, $3)
                     WHEN login_last_failed_at IS NULL
                       OR login_last_failed_at < NOW() - ($2 * INTERVAL '1 second')
                     THEN 1
                     ELSE LEAST(login_failed_attempts + 1, $3)
-                END AS attempts
+                END AS attempts,
+                login_lock_level AS level
             FROM users
             WHERE id = $1
             FOR UPDATE
+        ),
+        next_state AS (
+            SELECT id,
+                locked,
+                attempts,
+                -- Doubling, capped, and computed from how many times this run
+                -- has already been locked.
+                LEAST($4 * POWER(2, LEAST(level, 20))::bigint, $5) AS lock_seconds,
+                LEAST(level + 1, 20) AS next_level
+            FROM current
         )
         UPDATE users AS target
-        SET login_failed_attempts = next_attempt.attempts,
-            login_last_failed_at = NOW(),
+        SET login_failed_attempts = CASE
+                WHEN next_state.locked THEN target.login_failed_attempts
+                ELSE next_state.attempts
+            END,
+            login_last_failed_at = CASE
+                WHEN next_state.locked THEN target.login_last_failed_at
+                ELSE NOW()
+            END,
             login_locked_until = CASE
-                WHEN next_attempt.attempts >= $3
-                THEN NOW() + ($4 * INTERVAL '1 second')
+                WHEN next_state.locked THEN target.login_locked_until
+                WHEN next_state.attempts >= $3
+                THEN NOW() + (next_state.lock_seconds * INTERVAL '1 second')
                 ELSE NULL
+            END,
+            login_lock_level = CASE
+                WHEN next_state.locked THEN target.login_lock_level
+                WHEN next_state.attempts >= $3 THEN next_state.next_level
+                ELSE target.login_lock_level
             END
-        FROM next_attempt
-        WHERE target.id = next_attempt.id
-        RETURNING target.login_locked_until IS NOT NULL",
+        FROM next_state
+        WHERE target.id = next_state.id
+        RETURNING target.login_locked_until IS NOT NULL
+              AND target.login_locked_until > NOW()",
     )
     .bind(user_id)
     .bind(LOGIN_FAILURE_WINDOW_SECONDS)
     .bind(LOGIN_FAILURE_LIMIT)
     .bind(LOGIN_LOCK_SECONDS)
+    .bind(LOGIN_LOCK_MAX_SECONDS)
     .fetch_optional(pool)
     .await?
     .unwrap_or(false);
@@ -1097,11 +1139,14 @@ async fn clear_login_failures(pool: &PgPool, user_id: Uuid) -> Result<(), AppErr
         "UPDATE users
          SET login_failed_attempts = 0,
              login_last_failed_at = NULL,
-             login_locked_until = NULL
+             login_locked_until = NULL,
+             -- The run is over, so the next one starts at the shortest lock.
+             login_lock_level = 0
          WHERE id = $1
            AND (login_failed_attempts <> 0
              OR login_last_failed_at IS NOT NULL
-             OR login_locked_until IS NOT NULL)",
+             OR login_locked_until IS NOT NULL
+             OR login_lock_level <> 0)",
     )
     .bind(user_id)
     .execute(pool)
