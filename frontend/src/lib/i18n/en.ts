@@ -291,7 +291,7 @@ export const en = {
     notAuthenticated:
       'Could not be checked against this account’s current key — it may have been sent before they changed it.',
     privacyNoticeEncrypted:
-      'Messages in this conversation are end-to-end encrypted. Văzute stores them but cannot read them. A message you report is revealed to moderators by you, and only that message.',
+      'Messages in this conversation are end-to-end encrypted. Văzute stores the ciphertext and does not read it. A message you report is revealed to moderators by you, and only that message.',
     encryptionRequired:
       'This conversation is encrypted and this device does not hold your key. Restore it to send messages.',
   },
@@ -326,7 +326,7 @@ export const en = {
     settingsAbsent:
       'Set it up here and it is ready before your first conversation. Without it, messages are stored in a form Văzute can read.',
     settingsReady:
-      'On, and this device holds your key. Messages with people who have also set it up are stored encrypted, and Văzute cannot read them.',
+      'On, and this device holds your key. Messages with people who have also set it up are stored encrypted, and Văzute does not read them.',
     settingsLocked:
       'Your account has keys, but this device does not hold them yet.',
     safetyNumber: 'Safety number',
@@ -600,7 +600,7 @@ export const en = {
       'Material changes receive a new version and may require renewed acceptance before community features can be used. Romanian law applies where permitted, without removing mandatory protections available in your country. If one provision is unenforceable, the remaining provisions continue to apply.',
     terms10Title: 'Direct messages',
     terms10Body:
-      'Direct messages are available only between accounts that follow each other. When both accounts have set up encryption, messages between them are end-to-end encrypted: Văzute stores them but cannot read them. Until then, messages are stored in a form Văzute can read, so do not use them for secrets or sensitive information. Either participant may report a received message; for an encrypted message the reporter discloses that message and proof of who wrote it, and for any report the content and relevant account context may be reviewed for safety. Losing both your password and your recovery code means losing access to encrypted messages, because nobody else holds a key to them. Blocking or ending a mutual follow stops new messages, while existing history may remain visible to both participants until an account is deleted or the service applies a lawful retention measure.',
+      'Direct messages are available only between accounts that follow each other. When both accounts have set up encryption, messages between them are end-to-end encrypted: Văzute stores the ciphertext and does not read it. Until then, messages are stored in a form Văzute can read, so do not use them for secrets or sensitive information. Either participant may report a received message; for an encrypted message the reporter discloses that message and proof of who wrote it, and for any report the content and relevant account context may be reviewed for safety. Losing both your password and your recovery code means losing access to encrypted messages, because nobody else holds a key to them. Blocking or ending a mutual follow stops new messages, while existing history may remain visible to both participants until an account is deleted or the service applies a lawful retention measure.',
     guidelinesTitle: 'Community Guidelines',
     guidelinesIntro:
       'Văzute should be a safe place to share viewing activity and lists. These rules apply to usernames, bios, avatars, public lists, direct messages, and every community interaction.',

@@ -77,12 +77,15 @@ export async function setupIdentity(userId: string, password: string): Promise<S
       wrapIdentity(identity, deriveWrappingKey(recoveryCode, recoverySalt, DEFAULT_KDF_COST)),
     ),
     recovery_kdf_salt: toHex(recoverySalt),
-    // Ignored on a first publication and required on a replacement, which is
-    // the only case where this route destroys anything. Sent unconditionally
-    // because the password is already in hand here — it is what wraps the key
-    // two lines above — so the request stays valid if replacing keys ever
-    // becomes something the interface offers.
-    current_password: password,
+    // Not sent. This is a first publication, where the server ignores it — and
+    // it used to travel in the same request as the wrapped key, its salt and its
+    // KDF cost, which is everything needed to unwrap the identity. An audit
+    // recovered both private keys from this one captured body.
+    //
+    // Removing it is not the fix. The same password reaches the server at sign
+    // in, so a hostile server can still pair it with the stored envelope; that
+    // is a protocol change, tracked separately. This only stops handing over
+    // the whole set in a single request that never needed it.
   });
 
   await saveIdentity(userId, identity, fingerprint);
