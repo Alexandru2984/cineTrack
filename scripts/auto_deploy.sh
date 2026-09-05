@@ -49,9 +49,18 @@ ENV_FILE="${AUTO_DEPLOY_ENV_FILE:-$REPO_DIR/.env.prod}"
 # rollback can fix. The public URL additionally crosses nginx and Cloudflare,
 # neither of which is in any image — if that fails while the containers are
 # fine, replacing the images reverts a good release and repairs nothing.
-LOCAL_BACKEND_URL="${AUTO_DEPLOY_LOCAL_BACKEND_URL:-http://127.0.0.1:8090/api/health}"
+#
+# Readiness, not liveness. `/api/health` answers from the process and says only
+# that it is running; `/api/health/ready` asks the database. A backend that
+# starts and then cannot reach PostgreSQL serves nothing a member wants and
+# still passes liveness, so a release like that was reported as deployed.
+#
+# Liveness stays the container's own healthcheck, deliberately: a probe that
+# fails when the database is down would restart-loop the API during a database
+# incident, which repairs nothing and removes the logs.
+LOCAL_BACKEND_URL="${AUTO_DEPLOY_LOCAL_BACKEND_URL:-http://127.0.0.1:8090/api/health/ready}"
 LOCAL_FRONTEND_URL="${AUTO_DEPLOY_LOCAL_FRONTEND_URL:-http://127.0.0.1:8091/}"
-PUBLIC_HEALTH_URL="${AUTO_DEPLOY_HEALTH_URL:-https://vazute.micutu.com/api/health}"
+PUBLIC_HEALTH_URL="${AUTO_DEPLOY_HEALTH_URL:-https://vazute.micutu.com/api/health/ready}"
 VHOST_DEPLOYED="${AUTO_DEPLOY_VHOST_DEPLOYED:-/etc/nginx/sites-available/vazute.micutu.com}"
 # Resolved from the remote rather than written with gh's `{owner}/{repo}`
 # placeholders: those are expanded by shelling out to git in the *current*
