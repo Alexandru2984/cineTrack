@@ -4999,7 +4999,16 @@ async fn test_local_discovery_personalizes_and_filters_catalog() {
         .iter()
         .map(|item| item["id"].as_i64().unwrap())
         .collect::<Vec<_>>();
-    assert_eq!(popular_movie_ids, [670003, 670001, 670002]);
+    // 670001 is "Tracked Drama": completed, favourited, rated 9. It used to be
+    // asserted here *and* in the exclusion list eight lines above — the same
+    // title dropped from recommendations for being tracked and kept in Popular
+    // for being popular. That inconsistency was visible on the real site, where
+    // a third of both popular rows were shows the member was already watching.
+    assert_eq!(popular_movie_ids, [670003, 670002]);
+    assert!(
+        !popular_movie_ids.contains(&670001),
+        "popular must not offer a title the member has already finished"
+    );
     let popular_show_ids = body["popular_shows"]
         .as_array()
         .unwrap()
@@ -13201,4 +13210,409 @@ async fn test_season_backfill_selects_only_gaps_in_started_shows() {
     let bounded = season_backfill_candidates(&pool, 1).await.unwrap();
     assert_eq!(bounded.len(), 1);
     assert_eq!(bounded[0].season_number, 1, "lowest season number first");
+}
+
+/// Popular is a discovery surface, so it must not spend its slots on titles the
+/// member already tracks.
+///
+/// Measured on production before this was added: four of the twelve popular
+/// series and four of the twelve popular films were shows the member was
+/// already watching. Every other row on that page already drops what you track,
+/// so a title vanished from your recommendations the moment you added it and
+/// sat on in Popular.
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn popular_excludes_what_the_member_already_tracks() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (token, _, user_id) =
+        register_user(&app, "popularuser", "popular@mailbox.dev", "Pass1234").await;
+
+    // Three of each type, so dropping the tracked one still leaves a full row
+    // rather than a hole where a card was.
+    sqlx::query(
+        r#"INSERT INTO media
+            (tmdb_id, media_type, title, genres, poster_path, metadata_level, tmdb_vote_average)
+        VALUES
+            (681001, 'tv', 'Tracked Series', '[]'::jsonb, '/a.jpg', 'detail', 8.0),
+            (681002, 'tv', 'Untracked Series', '[]'::jsonb, '/b.jpg', 'detail', 7.0),
+            (681003, 'tv', 'Third Series', '[]'::jsonb, '/c.jpg', 'detail', 6.0),
+            (681004, 'movie', 'Tracked Film', '[]'::jsonb, '/d.jpg', 'detail', 8.0),
+            (681005, 'movie', 'Untracked Film', '[]'::jsonb, '/e.jpg', 'detail', 7.0)"#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // The tracked ones are the most popular, so they would lead the row.
+    sqlx::query(
+        r#"INSERT INTO catalog_external_ids (tmdb_id, media_type, popularity, adult, video)
+        VALUES (681001, 'tv', 900, FALSE, FALSE),
+               (681002, 'tv', 20, FALSE, FALSE),
+               (681003, 'tv', 10, FALSE, FALSE),
+               (681004, 'movie', 900, FALSE, FALSE),
+               (681005, 'movie', 20, FALSE, FALSE)"#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // Any status counts as "already found it", including one only planned.
+    sqlx::query(
+        r#"INSERT INTO user_media (user_id, media_id, status)
+        SELECT $1::uuid, id,
+               CASE WHEN tmdb_id = 681001 THEN 'watching' ELSE 'plan_to_watch' END
+        FROM media WHERE tmdb_id IN (681001, 681004)"#,
+    )
+    .bind(user_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let req = actix_test::TestRequest::get()
+        .uri("/api/media/discovery?language=en")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let body: Value = actix_test::call_and_read_body_json(&app, req).await;
+
+    let ids = |key: &str| -> Vec<i64> {
+        body[key]
+            .as_array()
+            .unwrap_or_else(|| panic!("{key} should be a list, got {}", body[key]))
+            .iter()
+            .filter_map(|entry| entry["id"].as_i64())
+            .collect()
+    };
+    let mut popular_ids = ids("popular_shows");
+    popular_ids.extend(ids("popular_movies"));
+
+    assert!(
+        !popular_ids.contains(&681001) && !popular_ids.contains(&681004),
+        "popular still offered a tracked title: {popular_ids:?}"
+    );
+    assert!(
+        popular_ids.contains(&681002) && popular_ids.contains(&681005),
+        "dropping the tracked titles must not empty the row: {popular_ids:?}"
+    );
+}
+
+/// The "because you watched" seed has to move, and has to hold still.
+///
+/// Both halves are the requirement. The score it ranks by saturates — a
+/// favourite you have finished scores 5 and so does every other one — so the
+/// tiebreak decided, and one member with 522 eligible titles saw the same seed
+/// for months. Re-drawing it per request would be the opposite failure: React
+/// Query refetches, and the heading would change under the reader mid-scroll.
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn the_recommendation_seed_rotates_daily_and_holds_within_the_day() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (token, _, user_id) = register_user(&app, "seeduser", "seed@mailbox.dev", "Pass1234").await;
+
+    // Twelve titles that all score identically: favourite, completed, unrated.
+    // Under the old ordering the tiebreak picked one and never moved.
+    sqlx::query(
+        r#"INSERT INTO media (tmdb_id, media_type, title, genres, poster_path, metadata_level)
+        SELECT 682000 + n, 'tv', 'Seed Candidate ' || n, '[]'::jsonb, '/s.jpg', 'detail'
+        FROM generate_series(1, 12) AS n"#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO user_media (user_id, media_id, status, is_favorite)
+        SELECT $1::uuid, id, 'completed', TRUE FROM media WHERE tmdb_id BETWEEN 682001 AND 682012"#,
+    )
+    .bind(&user_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // Calls the production selection rather than a copy of its query: a copy
+    // would agree with whatever the code did, including doing nothing.
+    let seed_on = |day: &'static str| {
+        let pool = pool.clone();
+        let user = Uuid::parse_str(&user_id).expect("registered user id");
+        async move {
+            cinetrack::services::discovery::recommendation_seed(
+                &pool,
+                user,
+                day.parse::<chrono::NaiveDate>().expect("a date"),
+            )
+            .await
+            .expect("seed lookup")
+            .expect("a member with twelve favourites has a seed")
+            .tmdb_id
+        }
+    };
+
+    let today = seed_on("2026-09-05").await;
+    assert_eq!(
+        today,
+        seed_on("2026-09-05").await,
+        "the seed must not move within a day"
+    );
+
+    let mut seen = std::collections::HashSet::new();
+    for day in [
+        "2026-09-05",
+        "2026-09-06",
+        "2026-09-07",
+        "2026-09-08",
+        "2026-09-09",
+        "2026-09-10",
+        "2026-09-11",
+    ] {
+        seen.insert(seed_on(day).await);
+    }
+    assert!(
+        seen.len() > 1,
+        "the seed never changed across a week: {seen:?}"
+    );
+
+    // And the endpoint still answers with one of them.
+    let req = actix_test::TestRequest::get()
+        .uri("/api/media/discovery?language=en")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let body: Value = actix_test::call_and_read_body_json(&app, req).await;
+    if let Some(seed_id) = body["because_you_watched"]["seed_tmdb_id"].as_i64() {
+        assert!(
+            (682001..=682012).contains(&(seed_id as i32)),
+            "the seed came from outside the member's library: {seed_id}"
+        );
+    }
+}
+
+/// The seed must work for a library that is not the author's.
+///
+/// The rotation draws from the twenty strongest candidates, and the obvious way
+/// to get that wrong is to assume there are twenty. Production has members with
+/// 529 eligible titles, one with six, one with exactly one, and five with none,
+/// so all four shapes are covered here rather than the comfortable one.
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn the_recommendation_seed_fits_any_size_of_library() {
+    use cinetrack::services::discovery::recommendation_seed;
+
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+
+    let (_, _, empty_user) =
+        register_user(&app, "seedempty", "seedempty@mailbox.dev", "Pass1234").await;
+    let (_, _, single_user) =
+        register_user(&app, "seedsingle", "seedsingle@mailbox.dev", "Pass1234").await;
+    let (_, _, small_user) =
+        register_user(&app, "seedsmall", "seedsmall@mailbox.dev", "Pass1234").await;
+    let (_, _, twin_user) =
+        register_user(&app, "seedtwin", "seedtwin@mailbox.dev", "Pass1234").await;
+    let as_uuid = |id: &str| Uuid::parse_str(id).expect("registered user id");
+
+    sqlx::query(
+        r#"INSERT INTO media (tmdb_id, media_type, title, genres, poster_path, metadata_level)
+        SELECT 683000 + n, 'tv', 'Library Title ' || n, '[]'::jsonb, '/l.jpg', 'detail'
+        FROM generate_series(1, 6) AS n"#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // One title for the single-title member; six for the small one; the same six
+    // for the twin, so the two libraries are identical.
+    sqlx::query(
+        r#"INSERT INTO user_media (user_id, media_id, status, is_favorite)
+        SELECT $1::uuid, id, 'completed', TRUE FROM media WHERE tmdb_id = 683001"#,
+    )
+    .bind(&single_user)
+    .execute(&pool)
+    .await
+    .unwrap();
+    for owner in [&small_user, &twin_user] {
+        sqlx::query(
+            r#"INSERT INTO user_media (user_id, media_id, status, is_favorite)
+            SELECT $1::uuid, id, 'completed', TRUE
+            FROM media WHERE tmdb_id BETWEEN 683001 AND 683006"#,
+        )
+        .bind(owner)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+
+    let days = [
+        "2026-09-05",
+        "2026-09-06",
+        "2026-09-07",
+        "2026-09-08",
+        "2026-09-09",
+        "2026-09-10",
+        "2026-09-11",
+        "2026-09-12",
+    ];
+    let pick = |user: Uuid, day: &'static str| {
+        let pool = pool.clone();
+        async move {
+            recommendation_seed(&pool, user, day.parse().expect("a date"))
+                .await
+                .expect("seed lookup")
+        }
+    };
+
+    // Nothing eligible: no seed, and no error. The row is simply absent.
+    for day in days {
+        assert!(
+            pick(as_uuid(&empty_user), day).await.is_none(),
+            "a member with an empty library must not get a seed"
+        );
+    }
+
+    // Exactly one eligible: that one, every day. A pool of twenty over a set of
+    // one is not an error and must not become an empty row.
+    for day in days {
+        let seed = pick(as_uuid(&single_user), day)
+            .await
+            .expect("one eligible title is still a seed");
+        assert_eq!(seed.tmdb_id, 683001);
+    }
+
+    // Six eligible: still rotates. The pool size is a ceiling, not a floor.
+    let mut small_seen = std::collections::HashSet::new();
+    for day in days {
+        small_seen.insert(
+            pick(as_uuid(&small_user), day)
+                .await
+                .expect("six eligible titles is a seed")
+                .tmdb_id,
+        );
+    }
+    assert!(
+        small_seen.len() > 1,
+        "a six-title library never rotated: {small_seen:?}"
+    );
+    assert!(
+        small_seen.iter().all(|id| (683001..=683006).contains(id)),
+        "the seed came from outside the member's own library: {small_seen:?}"
+    );
+
+    // Two members, identical libraries. The rotation is keyed on the member as
+    // well as the day, so they must not march in step.
+    let mut differed = false;
+    for day in days {
+        let small = pick(as_uuid(&small_user), day).await.unwrap().tmdb_id;
+        let twin = pick(as_uuid(&twin_user), day).await.unwrap().tmdb_id;
+        if small != twin {
+            differed = true;
+        }
+    }
+    assert!(
+        differed,
+        "two members with the same library saw the same seed every day; \
+         the rotation is not keyed on who is asking"
+    );
+}
+
+/// The seed has to follow what the member is actually watching.
+///
+/// A plain daily rotation fixed "it never changes" and broke this: one member's
+/// eligible pool spanned 2017 to 2026, and a show last seen nine years ago drew
+/// as often as one finished last week. The draw is weighted by how recently a
+/// title was watched and how hard, so "because you watched" is about something
+/// the reader can still remember watching.
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn the_recommendation_seed_follows_recent_watching() {
+    use cinetrack::services::discovery::recommendation_seed;
+
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+
+    // A fixed id, not a registered one. The draw is a hash of the member, the
+    // date and the title, so a member whose id is random makes the sample
+    // random too — and this test asserts a property of sixty draws. Registered,
+    // it failed about one run in eight, which is the kind of test that teaches
+    // people to hit re-run.
+    let user_id = Uuid::parse_str("aaaaaaaa-0000-4000-8000-00000000d0e5").unwrap();
+    sqlx::query(
+        r#"INSERT INTO users (id, username, email, email_verified)
+        VALUES ($1, 'seedrecent', 'seedrecent@mailbox.dev', TRUE)"#,
+    )
+    .bind(user_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let user = user_id.to_string();
+
+    // Two shows the member rates identically: same status, same favourite flag,
+    // so the base score cannot separate them. Only the watching does.
+    sqlx::query(
+        r#"INSERT INTO media (tmdb_id, media_type, title, genres, poster_path, metadata_level)
+        VALUES (684001, 'tv', 'Binged Last Week', '[]'::jsonb, '/r.jpg', 'detail'),
+               (684002, 'tv', 'Finished Years Ago', '[]'::jsonb, '/o.jpg', 'detail')"#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO user_media (user_id, media_id, status, is_favorite, updated_at)
+        SELECT $1::uuid, id, 'completed', TRUE,
+               CASE WHEN tmdb_id = 684001 THEN NOW() - INTERVAL '5 days'
+                    ELSE NOW() - INTERVAL '8 years' END
+        FROM media WHERE tmdb_id IN (684001, 684002)"#,
+    )
+    .bind(&user)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // Twenty episodes in the last week for one; twenty episodes eight years ago
+    // for the other. Same total, so this measures recency and not volume.
+    sqlx::query(
+        r#"INSERT INTO watch_history (user_id, media_id, watched_at)
+        SELECT $1::uuid, m.id,
+               CASE WHEN m.tmdb_id = 684001 THEN NOW() - (n || ' hours')::interval
+                    ELSE NOW() - INTERVAL '8 years' - (n || ' hours')::interval END
+        FROM media m CROSS JOIN generate_series(1, 20) AS n
+        WHERE m.tmdb_id IN (684001, 684002)"#,
+    )
+    .bind(&user)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // Two hundred days of draws. The weighting is a bias, not a rule, so this
+    // asserts a shape rather than every single day — and with the id fixed
+    // above, the same two hundred draws happen on every run.
+    let mut recent_days = 0;
+    let mut old_days = 0;
+    let start = chrono::NaiveDate::from_ymd_opt(2026, 9, 5).unwrap();
+    for offset in 0..200 {
+        let day = start + chrono::Duration::days(offset);
+        let seed = recommendation_seed(&pool, user_id, day)
+            .await
+            .expect("seed lookup")
+            .expect("two eligible titles is a seed");
+        match seed.tmdb_id {
+            684001 => recent_days += 1,
+            684002 => old_days += 1,
+            other => panic!("seed came from outside the library: {other}"),
+        }
+    }
+
+    assert!(
+        recent_days > old_days * 3,
+        "the recently binged show should dominate: {recent_days} recent vs {old_days} old"
+    );
+    // And the old favourite is not banished outright — surfacing one now and
+    // then is the point of a rotation.
+    assert!(
+        old_days > 0,
+        "the old favourite was banished entirely; surfacing one now and then is \
+         the point of a rotation ({recent_days} recent vs {old_days} old)"
+    );
 }
