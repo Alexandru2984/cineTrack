@@ -251,6 +251,23 @@ if [[ -z "$checks" ]]; then
   exit 0
 fi
 
+# The verification a release may not ship without, by exact name.
+#
+# One name, because one job already means all of them: `CI Gate` is defined as
+# "require every CI job to succeed", so naming it is the aggregate verdict
+# rather than a list that has to be kept in step with the workflow.
+#
+# It has to be named at all because the gate below refused zero checks and a
+# partial page and then accepted any non-empty remainder — "every verdict I saw
+# was good", which is not "the verification I require happened". During a
+# rename, or a window where only a fast scanner has registered, the set that
+# arrives can be real, complete, green, and not include the tests.
+#
+# A rename now makes a deploy wait and say which name is missing. That is a
+# five-second fix, against a release that shipped on the strength of a secret
+# scan.
+REQUIRED_CHECKS=("CI Gate")
+
 # Drop the checks this revision cannot have affected, before judging the rest.
 waived=()
 if [[ -n "$current" && "$current" != unknown ]] \
@@ -283,6 +300,34 @@ if [[ -z "$checks" ]]; then
   report waiting_ci "$target"
   exit 0
 fi
+
+# Named evidence, not "whatever turned up".
+#
+# The gate refused zero checks and a partial page, then accepted any non-empty
+# remainder. That is "every verdict I saw was good", which is not the same as
+# "the verification I require happened". During a workflow rename, or a window
+# where only a fast scanner has registered, the set that arrives can be real,
+# complete, green — and not include the tests.
+#
+# So the checks that must exist are named. A rename is then a deploy that waits
+# and says which name it is missing, which is a five-second fix, rather than a
+# release that shipped on the strength of a secret scan.
+for required in "${REQUIRED_CHECKS[@]}"; do
+  verdict="$(awk -F'\t' -v want="$required" '$1 == want { print $2 "/" $3 }' <<<"$checks")"
+  if [[ -z "$verdict" ]]; then
+    say "no '$required' check for ${target:0:8}; the required verification has not run"
+    report waiting_ci "$target"
+    exit 0
+  fi
+  # `skipped` and `neutral` are accepted from ordinary jobs, which is right —
+  # a job that had nothing to do did not fail. They are not accepted from this
+  # one: a release verdict that was skipped verified nothing.
+  if [[ "$verdict" == completed/skipped || "$verdict" == completed/neutral ]]; then
+    say "'$required' for ${target:0:8} was $verdict; the release verdict must be a real pass"
+    report blocked_ci "$target"
+    exit 0
+  fi
+done
 
 pending="$(awk -F'\t' '$2 != "completed"' <<<"$checks" || true)"
 if [[ -n "$pending" ]]; then

@@ -452,6 +452,29 @@ for variable in LOCAL_BACKEND_URL PUBLIC_HEALTH_URL; do
   fi
 done
 
+# A release verdict must exist and must be a real pass.
+#
+# M13. The gate accepted any non-empty set of good verdicts, so a window where
+# only a scanner had registered read as approval. These two fixtures are the
+# shapes that used to pass and must not.
+ONLY_SCANNER="$WORK_DIR/only-scanner.json"
+checks_fixture "$ONLY_SCANNER" "Secret Scan:completed:success"
+out="$(run_deploy "$CODE_ONLY" "$BASE" "$ONLY_SCANNER" "$NO_STATUS" 1)"
+if is_state "$out" waiting_ci; then
+  pass "a green set without the release verdict does not ship"
+else
+  fail "a green set without the release verdict was accepted"
+fi
+
+SKIPPED_GATE="$WORK_DIR/skipped-gate.json"
+checks_fixture "$SKIPPED_GATE" "CI Gate:completed:skipped" "Backend:completed:success"
+out="$(run_deploy "$CODE_ONLY" "$BASE" "$SKIPPED_GATE" "$NO_STATUS" 1)"
+if is_state "$out" blocked_ci; then
+  pass "a skipped release verdict does not ship"
+else
+  fail "a skipped release verdict was accepted"
+fi
+
 if (( FAILURES > 0 )); then
   printf '\n%d contract(s) failed\n' "$FAILURES"
   exit 1
