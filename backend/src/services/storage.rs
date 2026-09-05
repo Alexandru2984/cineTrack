@@ -117,8 +117,71 @@ impl StorageService {
         Ok(())
     }
 
+    /// Remove every object under a prefix.
+    ///
+    /// Avatar keys carry a per-upload nonce so two uploads cannot overwrite or
+    /// delete each other's object, which means "this member's avatars" is no
+    /// longer a short list of known extensions that can be deleted blind. It is
+    /// whatever is there, so removal has to ask.
+    ///
+    /// Used where the answer must be complete — deleting an avatar, deleting an
+    /// account — rather than on the upload path, which knows the exact key it
+    /// is replacing.
+    pub async fn delete_prefix(&self, prefix: &str) -> anyhow::Result<()> {
+        let mut continuation: Option<String> = None;
+        let mut first_error: Option<anyhow::Error> = None;
+
+        loop {
+            let mut request = self
+                .client
+                .list_objects_v2()
+                .bucket(&self.bucket)
+                .prefix(prefix);
+            if let Some(token) = continuation.as_ref() {
+                request = request.continuation_token(token);
+            }
+            let page = request
+                .send()
+                .await
+                .context("R2 list for prefix delete failed")?;
+
+            for object in page.contents() {
+                if let Some(key) = object.key() {
+                    if let Err(error) = self.delete(key).await {
+                        // Keep going: one object that will not go away must not
+                        // leave the rest of the member's images behind it.
+                        if first_error.is_none() {
+                            first_error = Some(error.context(format!("failed to delete {key}")));
+                        }
+                    }
+                }
+            }
+
+            if page.is_truncated().unwrap_or(false) {
+                continuation = page.next_continuation_token().map(str::to_string);
+                if continuation.is_none() {
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+
+        match first_error {
+            Some(error) => Err(error),
+            None => Ok(()),
+        }
+    }
+
+    /// Every avatar this member has, whatever it is keyed as.
+    ///
+    /// Covers both the versioned keys written now and the single
+    /// `avatars/{id}.{ext}` written before them, so an account deleted today
+    /// does not leave an image uploaded last year.
     pub async fn delete_avatar_variants(&self, user_id: uuid::Uuid) -> anyhow::Result<()> {
-        self.delete_avatar_variants_except(user_id, None).await
+        let versioned = self.delete_prefix(&format!("avatars/{user_id}/")).await;
+        let legacy = self.delete_avatar_variants_except(user_id, None).await;
+        versioned.and(legacy)
     }
 
     pub async fn delete_other_avatar_variants(
@@ -162,12 +225,91 @@ impl StorageService {
             None => format!("{}/api/assets/{key}", self.proxy_origin),
         }
     }
+
+    /// The object a stored `avatar_url` points at, if it points at one of ours.
+    ///
+    /// Uploads keep the key they replaced so they can delete exactly that, and
+    /// the row holds a URL rather than a key. A URL from some other origin, or
+    /// one shaped differently from what `public_url` writes, yields `None`
+    /// rather than a guess — deleting an object because a string looked close
+    /// enough is not a trade worth making.
+    pub fn key_from_public_url(&self, url: &str) -> Option<String> {
+        avatar_key_from_public_url(url, self.public_base_url.as_deref(), &self.proxy_origin)
+    }
+}
+
+/// The object a stored `avatar_url` points at, if it points at one of ours.
+///
+/// Split from the service because it is pure string work and the service owns
+/// an S3 client no unit test can build. Getting this wrong permissively deletes
+/// somebody else's object and strictly leaves litter, so anything that is not
+/// recognisably one of ours yields `None` rather than a guess.
+fn avatar_key_from_public_url(
+    url: &str,
+    public_base_url: Option<&str>,
+    proxy_origin: &str,
+) -> Option<String> {
+    // Uploads append `?v=` so caches do not serve the previous image.
+    let without_query = url.split('?').next().unwrap_or(url);
+    let key = match public_base_url {
+        Some(base) => without_query.strip_prefix(&format!("{base}/"))?,
+        None => without_query.strip_prefix(&format!("{proxy_origin}/api/assets/"))?,
+    };
+    // Nothing outside the avatar prefix, and nothing that climbs out of it.
+    if !key.starts_with("avatars/") || key.contains("..") {
+        return None;
+    }
+    Some(key.to_string())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use uuid::Uuid;
+
+    /// A stored avatar URL round-trips back to the object it names.
+    #[test]
+    fn public_urls_map_back_to_their_key() {
+        let base = Some("https://cdn.example.test");
+        let origin = "https://site.example";
+        let key = "avatars/11111111-1111-4111-8111-111111111111/2222222222224444.jpg";
+
+        assert_eq!(
+            avatar_key_from_public_url(&format!("https://cdn.example.test/{key}"), base, origin)
+                .as_deref(),
+            Some(key)
+        );
+        // Uploads append a cache-busting query; the object is the same.
+        assert_eq!(
+            avatar_key_from_public_url(
+                &format!("https://cdn.example.test/{key}?v=abc"),
+                base,
+                origin
+            )
+            .as_deref(),
+            Some(key)
+        );
+        // And through the proxy origin, when no bucket domain is configured.
+        assert_eq!(
+            avatar_key_from_public_url(&format!("{origin}/api/assets/{key}"), None, origin)
+                .as_deref(),
+            Some(key)
+        );
+
+        // Anything else is not ours to delete.
+        for foreign in [
+            "https://elsewhere.test/avatars/x.jpg",
+            "https://cdn.example.test/posters/w500/x.jpg",
+            "https://cdn.example.test/avatars/../backups/dump.gz",
+            "https://cdn.example.test/backups/dump.gz",
+        ] {
+            assert_eq!(
+                avatar_key_from_public_url(foreign, base, origin),
+                None,
+                "{foreign} was treated as an object this service may delete"
+            );
+        }
+    }
 
     #[tokio::test]
     #[ignore = "requires production R2 credentials"]
