@@ -31,6 +31,31 @@ fn refresh_cookie_from_response<B>(resp: &actix_web::dev::ServiceResponse<B>) ->
         .to_string()
 }
 
+/// Mint a password reset token the way `forgot_password` does, and hand back the
+/// plaintext the email would have carried.
+///
+/// The stored form is a hash, so a test cannot read a real one back out. This
+/// writes the same row through the same hashing the service uses.
+async fn issue_reset_token(pool: &PgPool, user_id: Uuid) -> String {
+    let token = cinetrack::utils::jwt::generate_refresh_token();
+    let token_hash = cinetrack::utils::jwt::hash_refresh_token(&token);
+    sqlx::query(
+        r#"INSERT INTO password_reset_tokens (user_id, token_hash, expires_at)
+        VALUES ($1, $2, NOW() + INTERVAL '1 hour')
+        ON CONFLICT (user_id) DO UPDATE
+        SET token_hash = EXCLUDED.token_hash,
+            expires_at = EXCLUDED.expires_at,
+            consumed_at = NULL,
+            created_at = NOW()"#,
+    )
+    .bind(user_id)
+    .bind(token_hash)
+    .execute(pool)
+    .await
+    .unwrap();
+    token
+}
+
 fn test_db_url() -> String {
     std::env::var("TEST_DATABASE_URL")
         .unwrap_or_else(|_| "postgres://test_user:test_pass@127.0.0.1:55433/cinetrack_test".into())
@@ -2588,12 +2613,24 @@ async fn test_locked_account_does_not_reveal_a_correct_password() {
     );
 }
 
-/// Attempts made while locked have to push the lock further out. Without that
-/// the lock expires on its original schedule and hands the attacker a fresh
-/// batch of guesses every window, forever.
+/// Attempts made while locked must change nothing.
+///
+/// This test asserted the opposite until the September 2026 audit, and the
+/// reason it did is still good: if a lock simply expires on schedule, an
+/// attacker collects a fresh batch of guesses every window, forever. Pushing
+/// the lock forward stopped that.
+///
+/// It also handed anyone who knew the address an indefinite lockout of somebody
+/// whose password was never wrong, at one guess every quarter of an hour, with
+/// email recovery as the only way back. So the batches are held down by
+/// escalation instead — each consecutive lock lasts twice as long, to a ceiling
+/// — and the lock itself is no longer extendable by someone who knows nothing.
+///
+/// `a_locked_account_cannot_be_held_locked_by_more_wrong_guesses` covers the
+/// escalation. This one covers the half that changed here.
 #[actix_web::test]
 #[ignore = "requires test DB"]
-async fn test_attempts_during_a_lock_extend_it() {
+async fn test_attempts_during_a_lock_do_not_extend_it() {
     let pool = setup_pool().await;
     clean_db(&pool).await;
     let app = actix_test::init_service(create_app(pool.clone())).await;
@@ -2613,12 +2650,20 @@ async fn test_attempts_during_a_lock_extend_it() {
             .await
             .unwrap();
 
-    // Move the lock close to expiry, then knock again.
-    sqlx::query(
-        "UPDATE users SET login_locked_until = NOW() + INTERVAL '5 seconds' WHERE email = $1",
+    assert!(
+        first > chrono::Utc::now(),
+        "five failures should have locked the account"
+    );
+
+    // Move the lock close to expiry, then knock again. This is the moment the
+    // old behaviour reached for: one wrong guess here used to buy another
+    // fifteen minutes, and repeating it held the owner out indefinitely.
+    let near_expiry: chrono::DateTime<chrono::Utc> = sqlx::query_scalar(
+        "UPDATE users SET login_locked_until = NOW() + INTERVAL '5 seconds'
+         WHERE email = $1 RETURNING login_locked_until",
     )
     .bind("extend@mailbox.dev")
-    .execute(&pool)
+    .fetch_one(&pool)
     .await
     .unwrap();
     let (status, _) = login_json(
@@ -2634,9 +2679,9 @@ async fn test_attempts_during_a_lock_extend_it() {
             .fetch_one(&pool)
             .await
             .unwrap();
-    assert!(
-        extended > chrono::Utc::now() + chrono::Duration::minutes(10),
-        "the lock was not pushed forward: {extended} (originally {first})"
+    assert_eq!(
+        extended, near_expiry,
+        "a wrong guess against a locked account moved the unlock time"
     );
 }
 
@@ -6626,6 +6671,9 @@ async fn rewrapping_the_backup_leaves_the_published_keys_alone() {
             "password_wrapped_key": "1a".repeat(64),
             "password_kdf_salt": "2b".repeat(16),
             "password_kdf": { "memory_kib": 19456, "iterations": 2, "parallelism": 1 },
+            // Replacing the backup destroys the only copy a password can open,
+            // so it costs more than a live token. See M16.
+            "current_password": "Pass1234",
         }))
         .peer_addr(peer_addr())
         .to_request();
@@ -6687,6 +6735,9 @@ async fn rewrapping_without_a_backup_is_refused() {
             "password_wrapped_key": "1a".repeat(64),
             "password_kdf_salt": "2b".repeat(16),
             "password_kdf": { "memory_kib": 19456, "iterations": 2, "parallelism": 1 },
+            // Replacing the backup destroys the only copy a password can open,
+            // so it costs more than a live token. See M16.
+            "current_password": "Pass1234",
         }))
         .peer_addr(peer_addr())
         .to_request();
@@ -13614,5 +13665,666 @@ async fn the_recommendation_seed_follows_recent_watching() {
         old_days > 0,
         "the old favourite was banished entirely; surfacing one now and then is \
          the point of a rotation ({recent_days} recent vs {old_days} old)"
+    );
+}
+
+/// Revoking a session must end the session, not the row the list happened to name.
+///
+/// H02 from the September audit. `family_id` is the session identity: it
+/// survives rotation and it is what an access token carries as `sid`. Revoking
+/// updated only the row, so a device that had already rotated kept its
+/// successor. The owner was told the session was revoked and it was not — the
+/// access side was cut for 75 minutes and the family then became usable again.
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn revoking_a_rotated_session_ends_the_whole_family() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+
+    let (token, refresh_zero, user_id) =
+        register_user(&app, "revokeuser", "revoke@mailbox.dev", "Pass1234").await;
+    let user_uuid = Uuid::parse_str(&user_id).unwrap();
+
+    // What the owner's session list showed before anything moved.
+    let listed_session_id = sqlx::query_scalar::<_, Uuid>(
+        "SELECT id FROM refresh_tokens WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1",
+    )
+    .bind(user_uuid)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let family =
+        sqlx::query_scalar::<_, Uuid>("SELECT family_id FROM refresh_tokens WHERE id = $1")
+            .bind(listed_session_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+
+    // The device rotates. R0 is consumed; R1 is live and carries the same family.
+    let rotate = |refresh: String| {
+        let app = &app;
+        async move {
+            let req = actix_test::TestRequest::post()
+                .uri("/api/auth/mobile/refresh")
+                .set_json(json!({ "refresh_token": refresh }))
+                .peer_addr(peer_addr())
+                .to_request();
+            let resp = actix_test::call_service(app, req).await;
+            let status = resp.status();
+            let body: Value = actix_test::read_body_json(resp).await;
+            (status, body)
+        }
+    };
+    let (status, rotated) = rotate(refresh_zero.clone()).await;
+    assert_eq!(status, 200, "the first rotation should succeed: {rotated}");
+    let refresh_one = rotated["refresh_token"].as_str().unwrap().to_string();
+
+    // The owner clicks revoke on the row the stale list is still showing.
+    let req = actix_test::TestRequest::delete()
+        .uri(&format!("/api/auth/sessions/{listed_session_id}"))
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(
+        resp.status(),
+        200,
+        "revoking a session the list showed must not 404 just because it rotated since"
+    );
+
+    // The successor must be dead. Before the fix it rotated happily.
+    let (status, body) = rotate(refresh_one.clone()).await;
+    assert_eq!(
+        status, 401,
+        "the rotated successor survived a revocation the owner was told succeeded: {body}"
+    );
+
+    // And it must stay dead once the 75-minute access-token entry has gone,
+    // which is the window the old behaviour recovered in.
+    sqlx::query("DELETE FROM access_token_revocations WHERE subject_id = $1")
+        .bind(family)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (status, body) = rotate(refresh_one).await;
+    assert_eq!(
+        status, 401,
+        "the family came back once the access-token revocation expired: {body}"
+    );
+
+    // The durable verdict is what makes that true, and it is scoped to one family.
+    let recorded = sqlx::query_scalar::<_, i64>(
+        "SELECT count(*) FROM revoked_refresh_families WHERE user_id = $1 AND family_id = $2",
+    )
+    .bind(user_uuid)
+    .bind(family)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(recorded, 1);
+
+    // A second sign-in is a different family and must be unaffected.
+    let req = actix_test::TestRequest::post()
+        .uri("/api/auth/mobile/login")
+        .set_json(json!({ "email": "revoke@mailbox.dev", "password": "Pass1234" }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200, "an unrelated sign-in must still work");
+    let fresh: Value = actix_test::read_body_json(resp).await;
+    let (status, body) = rotate(fresh["refresh_token"].as_str().unwrap().to_string()).await;
+    assert_eq!(
+        status, 200,
+        "revoking one session must not touch another: {body}"
+    );
+}
+
+/// Recovering an account must cancel what the old password authorised.
+///
+/// H03 from the September audit. An attacker holding the old password requests
+/// a move of the account's email to their own address and keeps the link. The
+/// owner resets their password and signs every device out — the recovery that
+/// is supposed to end it. The link was still valid afterwards, so confirming it
+/// handed over the address the account recovers through.
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn recovering_an_account_cancels_a_pending_email_change() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+
+    let (token, _, user_id) =
+        register_user(&app, "recoveruser", "owner@mailbox.dev", "Pass1234").await;
+    let user_uuid = Uuid::parse_str(&user_id).unwrap();
+
+    // The attacker, holding the old password, starts a move to their address.
+    let req = actix_test::TestRequest::post()
+        .uri("/api/auth/email/change")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .set_json(json!({ "current_password": "Pass1234", "new_email": "attacker@mailbox.dev" }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200, "the change request should be accepted");
+
+    let pending = sqlx::query_scalar::<_, i64>(
+        "SELECT count(*) FROM email_change_tokens WHERE user_id = $1 AND consumed_at IS NULL",
+    )
+    .bind(user_uuid)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(pending, 1, "a pending change should exist to be cancelled");
+
+    // The owner recovers the account: password reset, sessions revoked.
+    let req = actix_test::TestRequest::post()
+        .uri("/api/auth/password/forgot")
+        .set_json(json!({ "email": "owner@mailbox.dev" }))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 200);
+
+    // The reset token is delivered by email; the test reads what was stored.
+    let reset_token = issue_reset_token(&pool, user_uuid).await;
+    let req = actix_test::TestRequest::post()
+        .uri("/api/auth/password/reset")
+        .set_json(json!({ "token": reset_token, "new_password": "NewPass5678" }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200, "the owner's reset should succeed");
+
+    // The link the attacker is holding must now be dead.
+    let still_pending = sqlx::query_scalar::<_, i64>(
+        "SELECT count(*) FROM email_change_tokens WHERE user_id = $1 AND consumed_at IS NULL",
+    )
+    .bind(user_uuid)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        still_pending, 0,
+        "a pending email change survived the account recovery meant to end the compromise"
+    );
+
+    let email = sqlx::query_scalar::<_, String>("SELECT email FROM users WHERE id = $1")
+        .bind(user_uuid)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        email, "owner@mailbox.dev",
+        "the recovery address must still belong to the owner"
+    );
+}
+
+/// Changing a password must cancel a reset link already in flight.
+///
+/// The other direction of the same fault: a link sent to the address being
+/// left behind must not outlive the credential change.
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn changing_a_password_cancels_a_reset_link_in_flight() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+
+    let (token, _, user_id) =
+        register_user(&app, "inflightuser", "inflight@mailbox.dev", "Pass1234").await;
+    let user_uuid = Uuid::parse_str(&user_id).unwrap();
+
+    let reset_token = issue_reset_token(&pool, user_uuid).await;
+
+    let req = actix_test::TestRequest::patch()
+        .uri("/api/auth/password")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .set_json(json!({ "current_password": "Pass1234", "new_password": "NewPass5678" }))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 200);
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/auth/password/reset")
+        .set_json(json!({ "token": reset_token, "new_password": "AnotherPass9" }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_ne!(
+        resp.status(),
+        200,
+        "a reset link issued before the password changed must not still work"
+    );
+}
+
+/// Changing a password must re-seal the identity backup, not try to afterwards.
+///
+/// M01 from the September audit. Both clients sent `PATCH /auth/password` and
+/// then `PUT /encryption/keys/backup`. The first call revokes every token
+/// including the one making it, so the second could not authenticate; the error
+/// was swallowed and the backup stayed sealed under the password nobody would
+/// use again. Nothing looked wrong until somebody restored on a new device and
+/// their new password did not open it.
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn changing_a_password_reseals_the_key_backup_in_one_transaction() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (token, _, user_id) =
+        register_user(&app, "resealuser", "reseal@mailbox.dev", "Pass1234").await;
+    let user_uuid = Uuid::parse_str(&user_id).unwrap();
+
+    let req = actix_test::TestRequest::put()
+        .uri("/api/encryption/keys")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .set_json(publish_keys_body(&"1".repeat(64)))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 200);
+
+    let sealed_before = sqlx::query_scalar::<_, Vec<u8>>(
+        "SELECT password_wrapped_key FROM user_key_backups WHERE user_id = $1",
+    )
+    .bind(user_uuid)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    // The change carries the new envelope, the way a client that cannot make a
+    // second authenticated call has to.
+    let req = actix_test::TestRequest::patch()
+        .uri("/api/auth/password")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .set_json(json!({
+            "current_password": "Pass1234",
+            "new_password": "NewPass5678",
+            "key_backup": {
+                "password_wrapped_key": "ab".repeat(48),
+                "password_kdf_salt": "cd".repeat(16),
+                "password_kdf": { "memory_kib": 65536, "iterations": 3, "parallelism": 1 },
+            }
+        }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200, "the password change should succeed");
+
+    let sealed_after = sqlx::query_scalar::<_, Vec<u8>>(
+        "SELECT password_wrapped_key FROM user_key_backups WHERE user_id = $1",
+    )
+    .bind(user_uuid)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_ne!(
+        sealed_before, sealed_after,
+        "the backup is still sealed under the old password"
+    );
+    assert_eq!(sealed_after, hex::decode("ab".repeat(48)).unwrap());
+
+    // And it committed with the change, not beside it: the sessions really are
+    // gone, so there was no second authenticated call available to make.
+    let live = sqlx::query_scalar::<_, i64>(
+        "SELECT count(*) FROM refresh_tokens WHERE user_id = $1 AND revoked_at IS NULL",
+    )
+    .bind(user_uuid)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(live, 0);
+}
+
+/// Replacing the key backup must cost more than a stolen access token.
+///
+/// M16. The route validated the shape of the blob and nothing else, so any live
+/// token could overwrite the only copy a password can open — sabotaging
+/// restoration for an account whose identity it never held.
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn replacing_the_key_backup_needs_the_account_password() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (token, _, user_id) =
+        register_user(&app, "backupuser", "backup@mailbox.dev", "Pass1234").await;
+    let user_uuid = Uuid::parse_str(&user_id).unwrap();
+
+    let req = actix_test::TestRequest::put()
+        .uri("/api/encryption/keys")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .set_json(publish_keys_body(&"1".repeat(64)))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 200);
+
+    let original = sqlx::query_scalar::<_, Vec<u8>>(
+        "SELECT password_wrapped_key FROM user_key_backups WHERE user_id = $1",
+    )
+    .bind(user_uuid)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    let sabotage = json!({
+        "password_wrapped_key": "ff".repeat(48),
+        "password_kdf_salt": "ee".repeat(16),
+        "password_kdf": { "memory_kib": 65536, "iterations": 3, "parallelism": 1 },
+    });
+
+    // A live token and no password: this used to succeed.
+    let req = actix_test::TestRequest::put()
+        .uri("/api/encryption/keys/backup")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .set_json(sabotage.clone())
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_ne!(
+        resp.status(),
+        204,
+        "a stolen access token must not be able to replace the key backup"
+    );
+
+    // A wrong password is refused too, so the check is the password and not the
+    // presence of the field.
+    let mut wrong = sabotage.clone();
+    wrong["current_password"] = json!("AttackerPass9");
+    let req = actix_test::TestRequest::put()
+        .uri("/api/encryption/keys/backup")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .set_json(wrong)
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_ne!(actix_test::call_service(&app, req).await.status(), 204);
+
+    // Nothing was written by either attempt.
+    let after = sqlx::query_scalar::<_, Vec<u8>>(
+        "SELECT password_wrapped_key FROM user_key_backups WHERE user_id = $1",
+    )
+    .bind(user_uuid)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        original, after,
+        "a refused request still changed the backup"
+    );
+
+    // With the password, the owner can still rotate it.
+    let mut allowed = sabotage;
+    allowed["current_password"] = json!("Pass1234");
+    let req = actix_test::TestRequest::put()
+        .uri("/api/encryption/keys/backup")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .set_json(allowed)
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 204);
+}
+
+/// The same rule about unaired episodes, whichever route is used.
+///
+/// L02 from the September audit. The calendar and season routes refuse an
+/// episode that has not aired; the generic `POST /history` did not, so the
+/// invariant held or not depending on which endpoint a client called. A future
+/// episode logged as watched feeds statistics, streaks and badges computed from
+/// this table.
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn logging_history_refuses_an_episode_that_has_not_aired() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (token, _, _) = register_user(&app, "airuser", "air@mailbox.dev", "Pass1234").await;
+
+    let media_id = sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO media (tmdb_id, media_type, title, status)
+        VALUES (690001, 'tv', 'Airing Show', 'Returning Series') RETURNING id"#,
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let season_id = sqlx::query_scalar::<_, Uuid>(
+        "INSERT INTO seasons (media_id, season_number) VALUES ($1, 1) RETURNING id",
+    )
+    .bind(media_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    let episode = |number: i32, air_date: &'static str| {
+        let pool = pool.clone();
+        async move {
+            sqlx::query_scalar::<_, Uuid>(
+                r#"INSERT INTO episodes (season_id, episode_number, air_date)
+                VALUES ($1, $2, $3::date) RETURNING id"#,
+            )
+            .bind(season_id)
+            .bind(number)
+            .bind(air_date)
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+        }
+    };
+    let aired = episode(1, "2020-01-01").await;
+    let unaired = episode(2, "2999-01-01").await;
+
+    let log = |episode_id: Uuid| {
+        let app = &app;
+        let token = token.clone();
+        async move {
+            let req = actix_test::TestRequest::post()
+                .uri("/api/history")
+                .insert_header(("Authorization", format!("Bearer {token}")))
+                .set_json(json!({ "media_id": media_id, "episode_id": episode_id }))
+                .peer_addr(peer_addr())
+                .to_request();
+            actix_test::call_service(app, req).await.status()
+        }
+    };
+
+    assert!(
+        log(aired).await.is_success(),
+        "an episode that has aired must still be loggable"
+    );
+    assert_eq!(
+        log(unaired).await,
+        400,
+        "the generic route logged an episode that has not aired"
+    );
+
+    // And nothing was written for it, so statistics cannot pick it up.
+    let logged =
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM watch_history WHERE episode_id = $1")
+            .bind(unaired)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(logged, 0);
+}
+
+/// A lock must not be extendable by somebody who never knew the password.
+///
+/// M08 from the September audit. Every failed attempt against an already-locked
+/// account moved the unlock time forward, so anyone who knew the address could
+/// hold the owner out indefinitely at one wrong guess every quarter of an hour
+/// — the owner's password was never wrong, and email recovery was the only way
+/// back. Escalation replaces extension: each consecutive lock lasts twice as
+/// long, so expiry still does not hand out an endless series of fresh guesses.
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn a_locked_account_cannot_be_held_locked_by_more_wrong_guesses() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (_, _, user_id) = register_user(&app, "lockuser", "lock@mailbox.dev", "Pass1234").await;
+    let user_uuid = Uuid::parse_str(&user_id).unwrap();
+
+    let attempt = |password: &'static str| {
+        let app = &app;
+        async move {
+            let req = actix_test::TestRequest::post()
+                .uri("/api/auth/login")
+                .set_json(json!({ "email": "lock@mailbox.dev", "password": password }))
+                .peer_addr(peer_addr())
+                .to_request();
+            actix_test::call_service(app, req).await.status()
+        }
+    };
+    let locked_until = || {
+        let pool = pool.clone();
+        async move {
+            sqlx::query_scalar::<_, Option<chrono::DateTime<chrono::Utc>>>(
+                "SELECT login_locked_until FROM users WHERE id = $1",
+            )
+            .bind(user_uuid)
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+        }
+    };
+
+    for _ in 0..5 {
+        attempt("WrongPass1").await;
+    }
+    let first = locked_until().await.expect("five failures should lock");
+
+    // More guessing while locked must not move the unlock time.
+    for _ in 0..5 {
+        attempt("WrongPass1").await;
+    }
+    let after = locked_until().await.expect("still locked");
+    assert_eq!(
+        first, after,
+        "wrong guesses against a locked account pushed the unlock time forward"
+    );
+
+    // The escalation level rose once, for the one lock that happened.
+    let level = sqlx::query_scalar::<_, i16>("SELECT login_lock_level FROM users WHERE id = $1")
+        .bind(user_uuid)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(level, 1);
+
+    // When the lock expires, the next one is longer rather than identical.
+    sqlx::query("UPDATE users SET login_locked_until = NOW() - INTERVAL '1 second' WHERE id = $1")
+        .bind(user_uuid)
+        .execute(&pool)
+        .await
+        .unwrap();
+    for _ in 0..5 {
+        attempt("WrongPass1").await;
+    }
+    let second = locked_until()
+        .await
+        .expect("a second run should lock again");
+    let second_len = second - chrono::Utc::now();
+    assert!(
+        second_len > chrono::Duration::minutes(20),
+        "the second lock was not longer than the first: {second_len}"
+    );
+
+    // And the owner, with the right password, is still refused while locked —
+    // the lock is real, not a formality.
+    assert_eq!(attempt("Pass1234").await, 401);
+
+    // Recovery clears both the lock and the escalation, so a recovered account
+    // does not inherit an hour-long lock from the attack it survived.
+    sqlx::query(
+        "UPDATE users SET login_locked_until = NULL, login_failed_attempts = 0 WHERE id = $1",
+    )
+    .bind(user_uuid)
+    .execute(&pool)
+    .await
+    .unwrap();
+    assert!(attempt("Pass1234").await.is_success());
+    let level = sqlx::query_scalar::<_, i16>("SELECT login_lock_level FROM users WHERE id = $1")
+        .bind(user_uuid)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(level, 0, "a successful sign-in should end the run");
+}
+
+/// An export must carry what an encrypted message actually is.
+///
+/// M14 from the September audit. The export selected `body`, which is NULL for
+/// an encrypted message: every encrypted conversation came out as a list of
+/// nulls. Somebody downloading their data before deleting the account got a
+/// file that looked complete and held none of their messages.
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn the_account_export_carries_encrypted_message_envelopes() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+
+    let (sender_token, _, sender_id) =
+        register_user(&app, "exporter", "exporter@mailbox.dev", "Pass1234").await;
+    let (recipient_token, _, recipient_id) =
+        register_user(&app, "exportpeer", "exportpeer@mailbox.dev", "Pass1234").await;
+    let sender_uuid = Uuid::parse_str(&sender_id).unwrap();
+    let recipient_uuid = Uuid::parse_str(&recipient_id).unwrap();
+    make_mutual_followers(&pool, sender_uuid, recipient_uuid).await;
+
+    let signer = TestSigner::new();
+    publish_signer_keys(&app, &sender_token, &signer, &"a".repeat(64)).await;
+    publish_signer_keys(&app, &recipient_token, &TestSigner::new(), &"b".repeat(64)).await;
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/messages/exportpeer")
+        .insert_header(("Authorization", format!("Bearer {sender_token}")))
+        .set_json(encrypted_body(&signer, Uuid::new_v4()))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert!(resp.status().is_success(), "the encrypted send should work");
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/users/me/export")
+        .insert_header(("Authorization", format!("Bearer {sender_token}")))
+        .set_json(json!({ "password": "Pass1234" }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let export: Value = actix_test::call_and_read_body_json(&app, req).await;
+
+    let messages = export["direct_messages"]
+        .as_array()
+        .expect("the export should list direct messages");
+    assert_eq!(messages.len(), 1);
+    let message = &messages[0];
+
+    assert_eq!(message["encrypted"], true);
+    assert!(
+        message["body"].is_null(),
+        "an encrypted message has no plaintext column, which is the whole point"
+    );
+
+    let envelope = &message["envelope"];
+    assert_eq!(envelope["ciphertext"], "11".repeat(64));
+    assert_eq!(envelope["nonce"], "22".repeat(12));
+    assert_eq!(envelope["sender_ephemeral_key"], "33".repeat(32));
+    assert_eq!(envelope["sender_copy"], "66".repeat(48));
+    for field in [
+        "sender_signing_key",
+        "franking_commitment",
+        "franking_signature",
+    ] {
+        assert!(
+            envelope[field].is_string(),
+            "the export omits {field}, so the message cannot be opened from it"
+        );
+    }
+
+    // The key that opens it is deliberately absent: one leaked download must not
+    // be the whole history.
+    let serialised = export.to_string();
+    assert!(
+        !serialised.contains("password_wrapped_key")
+            && !serialised.contains("recovery_wrapped_key"),
+        "the export contains the wrapped identity"
     );
 }

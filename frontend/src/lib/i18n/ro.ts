@@ -286,6 +286,8 @@ export const ro: Dictionary = {
     lockedPreview: 'Blocat',
     undecryptable: 'Acest mesaj nu poate fi deschis pe acest dispozitiv',
     encryptedLabel: 'Criptat cap-coadă',
+    unplaceableKey:
+      'Mesajul este semnat cu o cheie pe care nu o putem asocia acestui cont. Este ascuns până alegi să îl arăți; asta se întâmplă și legitim, după ce cineva își rotește cheile.',
     notFromSender:
       'Acest mesaj nu a fost semnat de acest cont. Este ascuns pentru că s-ar putea să nu fie de la el.',
     malformedMessage:
@@ -293,7 +295,7 @@ export const ro: Dictionary = {
     notAuthenticated:
       'Nu a putut fi verificat cu cheia actuală a acestui cont — poate a fost trimis înainte ca ea să fie schimbată.',
     privacyNoticeEncrypted:
-      'Mesajele din această conversație sunt criptate cap-coadă. Văzute le stochează, dar nu le poate citi. Un mesaj pe care îl raportezi este dezvăluit moderatorilor de către tine, și doar acel mesaj.',
+      'Mesajele din această conversație sunt criptate cap-coadă. Văzute stochează textul cifrat și nu îl citește. Un mesaj pe care îl raportezi este dezvăluit moderatorilor de către tine, și doar acel mesaj.',
     encryptionRequired:
       'Conversația este criptată, iar acest dispozitiv nu are cheia ta. Restaureaz-o pentru a trimite mesaje.',
   },
@@ -329,7 +331,7 @@ export const ro: Dictionary = {
     settingsAbsent:
       'Activeaz-o aici și e gata înainte de prima conversație. Fără ea, mesajele sunt stocate într-o formă pe care Văzute o poate citi.',
     settingsReady:
-      'Activă, iar acest dispozitiv îți deține cheia. Mesajele cu cei care au activat-o și ei sunt stocate criptat, iar Văzute nu le poate citi.',
+      'Activă, iar acest dispozitiv îți deține cheia. Mesajele cu cei care au activat-o și ei sunt stocate criptat, iar Văzute nu le citește.',
     settingsLocked:
       'Contul tău are chei, dar acest dispozitiv nu le deține încă.',
     safetyNumber: 'Număr de siguranță',
@@ -603,7 +605,7 @@ export const ro: Dictionary = {
       'Modificările importante primesc o versiune nouă și pot necesita o nouă acceptare înainte de folosirea funcțiilor comunitare. Se aplică legea română unde este permis, fără eliminarea protecțiilor obligatorii din țara ta. Dacă o prevedere nu poate fi aplicată, celelalte rămân valabile.',
     terms10Title: 'Mesaje directe',
     terms10Body:
-      'Mesajele directe sunt disponibile numai între conturi care se urmăresc reciproc. Când ambele conturi au criptarea activată, mesajele dintre ele sunt criptate cap-coadă: Văzute le stochează, dar nu le poate citi. Până atunci, mesajele sunt stocate într-o formă pe care Văzute o poate citi, așadar nu le folosi pentru secrete sau informații sensibile. Oricare participant poate raporta un mesaj primit; pentru un mesaj criptat, cel care raportează dezvăluie acel mesaj și dovada cine l-a scris, iar pentru orice raportare conținutul și contextul relevant al contului pot fi analizate pentru siguranță. Dacă pierzi și parola, și codul de recuperare, pierzi accesul la mesajele criptate, pentru că nimeni altcineva nu are o cheie pentru ele. Blocarea sau încetarea urmăririi reciproce oprește mesajele noi, iar istoricul existent poate rămâne vizibil ambilor participanți până la ștergerea unui cont sau aplicarea de către serviciu a unei măsuri legale de păstrare.',
+      'Mesajele directe sunt disponibile numai între conturi care se urmăresc reciproc. Când ambele conturi au criptarea activată, mesajele dintre ele sunt criptate cap-coadă: Văzute stochează textul cifrat și nu îl citește. Până atunci, mesajele sunt stocate într-o formă pe care Văzute o poate citi, așadar nu le folosi pentru secrete sau informații sensibile. Oricare participant poate raporta un mesaj primit; pentru un mesaj criptat, cel care raportează dezvăluie acel mesaj și dovada cine l-a scris, iar pentru orice raportare conținutul și contextul relevant al contului pot fi analizate pentru siguranță. Dacă pierzi și parola, și codul de recuperare, pierzi accesul la mesajele criptate, pentru că nimeni altcineva nu are o cheie pentru ele. Blocarea sau încetarea urmăririi reciproce oprește mesajele noi, iar istoricul existent poate rămâne vizibil ambilor participanți până la ștergerea unui cont sau aplicarea de către serviciu a unei măsuri legale de păstrare.',
     guidelinesTitle: 'Regulile comunității',
     guidelinesIntro:
       'Văzute trebuie să fie un loc sigur pentru distribuirea activității de vizionare și a listelor. Regulile se aplică numelor de utilizator, biografiilor, avatarurilor, listelor publice, mesajelor directe și tuturor interacțiunilor comunitare.',
@@ -766,6 +768,9 @@ export const ro: Dictionary = {
   },
   settings: {
     title: 'Setări',
+    signOutAndForgetKeys: 'Deconectare și ștergerea cheilor de mesaje',
+    signOutAndForgetKeysHint:
+      'Folosește asta pe un dispozitiv comun sau împrumutat. Ca să citești din nou mesajele criptate vei avea nevoie de parolă sau de codul de recuperare.',
     signOut: 'Deconectare',
     aboutLink: 'Despre & surse de date',
     privacyTitle: 'Confidențialitatea profilului',

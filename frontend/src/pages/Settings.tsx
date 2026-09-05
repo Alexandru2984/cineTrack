@@ -98,24 +98,41 @@ function SignOutCard() {
   const navigate = useNavigate();
   const logout = useLogout();
 
-  const handleSignOut = async () => {
-    await logout.mutateAsync();
+  const handleSignOut = async (forgetKeys = false) => {
+    await logout.mutateAsync({ forgetKeys });
     navigate('/login', { replace: true });
   };
 
   return (
-    <button
-      type="button"
-      disabled={logout.isPending}
-      onClick={() => void handleSignOut()}
-      className="flex h-12 w-full items-center justify-between border-y border-[hsl(var(--border))] px-1 text-sm font-medium text-[hsl(var(--destructive))] disabled:opacity-50"
-    >
-      <span className="flex items-center gap-2">
-        <LogOut className="h-5 w-5" aria-hidden="true" />
-        {t('settings.signOut')}
-      </span>
-      <ChevronRight className="h-4 w-4" aria-hidden="true" />
-    </button>
+    <div className="border-y border-[hsl(var(--border))]">
+      <button
+        type="button"
+        disabled={logout.isPending}
+        onClick={() => void handleSignOut(false)}
+        className="flex h-12 w-full items-center justify-between px-1 text-sm font-medium text-[hsl(var(--destructive))] disabled:opacity-50"
+      >
+        <span className="flex items-center gap-2">
+          <LogOut className="h-5 w-5" aria-hidden="true" />
+          {t('settings.signOut')}
+        </span>
+        <ChevronRight className="h-4 w-4" aria-hidden="true" />
+      </button>
+      {/* The shared-device answer, offered rather than assumed. Signing out
+          keeps the message keys so the next sign-in does not ask for a password
+          or a recovery code; on a borrowed browser that hands the next person
+          every past message. */}
+      <button
+        type="button"
+        disabled={logout.isPending}
+        onClick={() => void handleSignOut(true)}
+        className="flex w-full flex-col items-start gap-0.5 border-t border-[hsl(var(--border))] px-1 py-2 text-left text-sm font-medium text-[hsl(var(--destructive))] disabled:opacity-50"
+      >
+        <span>{t('settings.signOutAndForgetKeys')}</span>
+        <span className="text-xs font-normal text-[hsl(var(--muted-foreground))]">
+          {t('settings.signOutAndForgetKeysHint')}
+        </span>
+      </button>
+    </div>
   );
 }
 

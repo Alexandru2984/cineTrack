@@ -173,6 +173,7 @@ scripts/tests/mobile_accessibility_test.py
 scripts/tests/calendar_feed_log_safety_test.sh
 scripts/tests/edge_security_config_test.sh
 scripts/tests/nginx_unfurl_routing_test.sh
+scripts/tests/nginx_proxy_headers_test.sh
 scripts/tests/spa_public_pages_test.sh
 scripts/tests/rust_toolchain_test.sh
 scripts/tests/deployment_hardening_test.sh

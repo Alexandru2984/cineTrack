@@ -1,3 +1,10 @@
+> **Topology, checked 2026-09-05.** Cloudflare terminates TLS and proxies to
+> this host's nginx on 443, which forwards to the two loopback ports. There is
+> no Cloudflare Tunnel for this project: no `cloudflared` configuration,
+> ingress, or service exists in the repository or on the host. An audit drew a
+> tunnel into its diagram from the documented topology alone, so it is stated
+> here plainly rather than left to be inferred.
+
 # nginx / edge topology
 
 Văzute serves from **host nginx** (systemd on the VPS), fronted by Cloudflare.

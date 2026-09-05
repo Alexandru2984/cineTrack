@@ -8,6 +8,7 @@ import api from '@/lib/api';
 // are a third of a megabyte that only setting up or restoring actually needs.
 // Type-only imports are erased and cost nothing.
 import type { IdentityKeyPair, KdfCost } from '@/lib/crypto/core';
+import { deriveWrappingKeyOffThread } from '@/lib/crypto/derive';
 import { loadIdentity, saveIdentity } from '@/lib/crypto/storage';
 import type { KeyBackup, KeyStatus, PeerPublicKeys } from '@/types';
 
@@ -45,7 +46,6 @@ export async function setupIdentity(userId: string, password: string): Promise<S
   const {
     DEFAULT_KDF_COST,
     SALT_BYTES,
-    deriveWrappingKey,
     fingerprint: computeFingerprint,
     generateIdentity,
     generateRecoveryCode,
@@ -60,12 +60,17 @@ export async function setupIdentity(userId: string, password: string): Promise<S
   const passwordSalt = randomSalt(SALT_BYTES);
   const recoverySalt = randomSalt(SALT_BYTES);
 
+  const [passwordKey, recoveryKey] = await Promise.all([
+    deriveWrappingKeyOffThread(password, passwordSalt, DEFAULT_KDF_COST),
+    deriveWrappingKeyOffThread(recoveryCode, recoverySalt, DEFAULT_KDF_COST),
+  ]);
+
   await api.put('/encryption/keys', {
     exchange_public_key: toHex(identity.exchangePublicKey),
     signing_public_key: toHex(identity.signingPublicKey),
     key_fingerprint: fingerprint,
     password_wrapped_key: toHex(
-      wrapIdentity(identity, deriveWrappingKey(password, passwordSalt, DEFAULT_KDF_COST)),
+      wrapIdentity(identity, passwordKey),
     ),
     password_kdf_salt: toHex(passwordSalt),
     password_kdf: {
@@ -74,15 +79,18 @@ export async function setupIdentity(userId: string, password: string): Promise<S
       parallelism: DEFAULT_KDF_COST.parallelism,
     },
     recovery_wrapped_key: toHex(
-      wrapIdentity(identity, deriveWrappingKey(recoveryCode, recoverySalt, DEFAULT_KDF_COST)),
+      wrapIdentity(identity, recoveryKey),
     ),
     recovery_kdf_salt: toHex(recoverySalt),
-    // Ignored on a first publication and required on a replacement, which is
-    // the only case where this route destroys anything. Sent unconditionally
-    // because the password is already in hand here — it is what wraps the key
-    // two lines above — so the request stays valid if replacing keys ever
-    // becomes something the interface offers.
-    current_password: password,
+    // Not sent. This is a first publication, where the server ignores it — and
+    // it used to travel in the same request as the wrapped key, its salt and its
+    // KDF cost, which is everything needed to unwrap the identity. An audit
+    // recovered both private keys from this one captured body.
+    //
+    // Removing it is not the fix. The same password reaches the server at sign
+    // in, so a hostile server can still pair it with the stored envelope; that
+    // is a protocol change, tracked separately. This only stops handing over
+    // the whole set in a single request that never needed it.
   });
 
   await saveIdentity(userId, identity, fingerprint);
@@ -104,19 +112,47 @@ export async function setupIdentity(userId: string, password: string): Promise<S
  *  Returns whether it happened. A device that does not hold the key cannot
  *  re-seal it, and that is a real outcome the caller has to be able to report
  *  rather than an error to swallow. */
+/// Seal the identity under a new password, without sending it anywhere.
+///
+/// The caller hands the result to whichever request is authorised to store it.
+/// Re-sealing used to be its own call made straight after a password change —
+/// which revokes the token that would have carried it, so it could not
+/// authenticate and failed silently, leaving the backup sealed under a password
+/// nobody would use again.
+export async function sealBackupForPassword(
+  identity: IdentityKeyPair,
+  password: string,
+): Promise<{
+  password_wrapped_key: string;
+  password_kdf_salt: string;
+  password_kdf: { memory_kib: number; iterations: number; parallelism: number };
+}> {
+  const { DEFAULT_KDF_COST, SALT_BYTES, toHex, wrapIdentity } = await core();
+  const salt = randomSalt(SALT_BYTES);
+  const key = await deriveWrappingKeyOffThread(password, salt, DEFAULT_KDF_COST);
+  return {
+    password_wrapped_key: toHex(wrapIdentity(identity, key)),
+    password_kdf_salt: toHex(salt),
+    password_kdf: {
+      memory_kib: DEFAULT_KDF_COST.memoryKib,
+      iterations: DEFAULT_KDF_COST.iterations,
+      parallelism: DEFAULT_KDF_COST.parallelism,
+    },
+  };
+}
+
 export async function rewrapBackup(
   identity: IdentityKeyPair | null,
   newPassword: string,
 ): Promise<boolean> {
   if (!identity) return false;
 
-  const { DEFAULT_KDF_COST, SALT_BYTES, deriveWrappingKey, toHex, wrapIdentity } = await core();
+  const { DEFAULT_KDF_COST, SALT_BYTES, toHex, wrapIdentity } = await core();
   const salt = randomSalt(SALT_BYTES);
+  const key = await deriveWrappingKeyOffThread(newPassword, salt, DEFAULT_KDF_COST);
 
   await api.put('/encryption/keys/backup', {
-    password_wrapped_key: toHex(
-      wrapIdentity(identity, deriveWrappingKey(newPassword, salt, DEFAULT_KDF_COST)),
-    ),
+    password_wrapped_key: toHex(wrapIdentity(identity, key)),
     password_kdf_salt: toHex(salt),
     password_kdf: {
       memory_kib: DEFAULT_KDF_COST.memoryKib,
@@ -149,7 +185,6 @@ export async function restoreIdentity(
   kind: 'password' | 'recovery',
 ): Promise<{ identity: IdentityKeyPair; fingerprint: string }> {
   const {
-    deriveWrappingKey,
     fingerprint: computeFingerprint,
     fromHex,
     unwrapIdentity,
@@ -166,7 +201,11 @@ export async function restoreIdentity(
   // Both copies were wrapped with the same cost. The recovery half has no
   // parameters of its own in the response, and inventing different ones here
   // would make the code unusable on the device that generated it.
-  const wrappingKey = deriveWrappingKey(secret, fromHex(salt), costFromApi(backup.password_kdf));
+  const wrappingKey = await deriveWrappingKeyOffThread(
+    secret,
+    fromHex(salt),
+    costFromApi(backup.password_kdf),
+  );
 
   let identity: IdentityKeyPair;
   try {

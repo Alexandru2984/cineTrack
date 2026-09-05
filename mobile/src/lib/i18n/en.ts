@@ -87,6 +87,8 @@ export const en = {
     lockedPreview: 'Locked',
     undecryptable: 'This message cannot be opened on this device',
     encryptedLabel: 'End-to-end encrypted',
+    unplaceableKey:
+      'This message is signed with a key we cannot place against this account. It is hidden until you choose to show it; that happens legitimately after someone rotates their keys.',
     notFromSender:
       'This message was not signed by this account. It is hidden because it may not be from them.',
     malformedMessage:
@@ -94,7 +96,7 @@ export const en = {
     notAuthenticated:
       'Could not be checked against this account’s current key — it may have been sent before they changed it.',
     privacyNoticeEncrypted:
-      'Messages in this conversation are end-to-end encrypted. Văzute stores them but cannot read them. A message you report is revealed to moderators by you, and only that message.',
+      'Messages in this conversation are end-to-end encrypted. Văzute stores the ciphertext and does not read it. A message you report is revealed to moderators by you, and only that message.',
     encryptionRequired:
       'This conversation is encrypted and this device does not hold your key. Restore it to send messages.',
   },
@@ -129,7 +131,7 @@ export const en = {
     settingsAbsent:
       'Set it up here and it is ready before your first conversation. Without it, messages are stored in a form Văzute can read.',
     settingsReady:
-      'On, and this device holds your key. Messages with people who have also set it up are stored encrypted, and Văzute cannot read them.',
+      'On, and this device holds your key. Messages with people who have also set it up are stored encrypted, and Văzute does not read them.',
     settingsLocked:
       'Your account has keys, but this device does not hold them yet.',
     setupTitle: 'Turn on end-to-end encryption',

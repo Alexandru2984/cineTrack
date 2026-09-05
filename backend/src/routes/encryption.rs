@@ -14,6 +14,7 @@
 //! comparing it out of band is what turns an undetectable attack into an
 //! obvious one. Same trade as Signal's safety numbers.
 
+use crate::config::Config;
 use actix_web::{web, HttpRequest, HttpResponse};
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -222,6 +223,7 @@ async fn publish_keys(
 /// blob nothing can open.
 async fn rewrap_key_backup(
     pool: web::Data<PgPool>,
+    config: web::Data<Config>,
     req: HttpRequest,
     body: web::Json<RewrapBackupRequest>,
 ) -> Result<HttpResponse, AppError> {
@@ -231,6 +233,28 @@ async fn rewrap_key_backup(
     data.password_kdf
         .validate_cost()
         .map_err(|error| AppError::BadRequest(describe(&error)))?;
+
+    // Step up before destroying anything. This route replaces the only copy of
+    // the identity a password can open, and validating the shape of a blob is
+    // not evidence that it still holds the key — a stolen access token was the
+    // entire authorisation, so it could sabotage restoration for an account it
+    // had never held the identity for.
+    //
+    // The ordinary path no longer comes through here at all: re-sealing after a
+    // password change now travels with the change itself, in one transaction.
+    let user = sqlx::query_as::<_, crate::models::User>("SELECT * FROM users WHERE id = $1")
+        .bind(user_id)
+        .fetch_optional(pool.get_ref())
+        .await?
+        .ok_or_else(|| AppError::NotFound("User not found".to_string()))?;
+    crate::services::auth::confirm_sensitive_action(
+        pool.get_ref(),
+        config.get_ref(),
+        &user,
+        &data.current_password,
+        data.totp_code.as_deref(),
+    )
+    .await?;
 
     let wrapped = hex::decode(&data.password_wrapped_key)
         .map_err(|_| AppError::BadRequest("Invalid wrapped key encoding".to_string()))?;

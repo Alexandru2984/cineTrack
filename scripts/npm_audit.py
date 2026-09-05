@@ -155,7 +155,11 @@ def main(argv: list[str]) -> int:
 
     reported = findings(report, audit_level)
     if not reported:
-        print(f"npm audit found no {audit_level}+ advisories in {project}")
+        # Said explicitly, because "npm audit passed" and "npm audit did not run"
+        # look identical in a release log otherwise — and the second one is what
+        # the outage path above produces. An audit in September 2026 raised that
+        # a green gate expresses an acceptance policy, not an inventory.
+        print(f"npm audit ran against {project} and found no {audit_level}+ advisories")
         return 0
 
     for (package, advisory), description in sorted(reported.items()):

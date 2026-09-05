@@ -121,8 +121,14 @@ export async function saveIdentity(
 
 /** Forget this account's keys on this device.
  *
- *  Called on sign-out. Without it, signing out of a shared browser would leave
- *  every past message readable by whoever signs in next. */
+ *  Not called on sign-out by default, and the comment here used to say it was.
+ *  Signing out keeps the keys so the next sign-in does not need the password or
+ *  the recovery code again — which is the right default on a device somebody
+ *  owns, and the wrong one on a shared browser, where the next person can read
+ *  every past message.
+ *
+ *  So the choice is made where it can be made honestly: `useLogout` takes it,
+ *  and the interface offers both. This function is what the second one calls. */
 export async function forgetIdentity(userId: string): Promise<void> {
   try {
     await withStore('readwrite', (store) => store.delete(userId));

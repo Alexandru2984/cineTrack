@@ -1,6 +1,6 @@
 use chrono::{Duration, Utc};
 use rand::TryRng;
-use sqlx::PgPool;
+use sqlx::{PgPool, Postgres, Transaction};
 use std::time::Duration as StdDuration;
 use tokio::time::Instant;
 use uuid::Uuid;
@@ -27,6 +27,14 @@ const EMAIL_CHANGE_COOLDOWN_SECONDS: i64 = 5 * 60;
 const LOGIN_FAILURE_LIMIT: i32 = 5;
 const LOGIN_FAILURE_WINDOW_SECONDS: i64 = 15 * 60;
 const LOGIN_LOCK_SECONDS: i64 = 15 * 60;
+/// The longest a run of failures can lock an account for.
+///
+/// The lock doubles with each consecutive lock — 15 minutes, 30, an hour, and
+/// so on — so expiry never hands out an unlimited series of fresh guessing
+/// batches. It stops at a day: past that the cost falls entirely on the owner,
+/// who can already recover by email, and a longer number protects nothing an
+/// attacker could not simply wait out.
+const LOGIN_LOCK_MAX_SECONDS: i64 = 24 * 60 * 60;
 /// A locked account is refused without hashing the submitted password, which
 /// would otherwise make the refusal measurably faster than a real verification
 /// and leak the lock state through timing. Roughly the cost of one Argon2 run.
@@ -169,8 +177,10 @@ pub async fn login(
         .as_ref()
         .filter(|candidate| is_login_locked(candidate.login_locked_until))
     {
-        // Extend the lock, otherwise it expires on schedule no matter how hard
-        // the account is being hammered and hands out fresh batches of guesses.
+        // Counted, but the running lock is not moved: extending it let anyone
+        // who knew the address hold the owner out indefinitely. Fresh batches
+        // of guesses are held down by escalation instead — see
+        // `record_login_failure`.
         record_login_failure(pool, locked_candidate.id).await?;
         crate::metrics::record_security_event(crate::metrics::SecurityEvent::LoginRejected);
         tokio::time::sleep_until(respond_at).await;
@@ -323,6 +333,7 @@ pub async fn refresh_token(
         // token they already hold is what they are using right now. Cut it off
         // in the same transaction, or the theft we just detected keeps working
         // for another fifteen minutes.
+        cancel_pending_credential_actions(&mut tx, stored.user_id).await?;
         revocation::revoke_user(&mut tx, stored.user_id).await?;
         tx.commit().await?;
         crate::metrics::record_security_event(crate::metrics::SecurityEvent::RefreshTokenReuse);
@@ -332,6 +343,30 @@ pub async fn refresh_token(
     }
 
     if stored.revoked_at.is_some() {
+        tx.commit().await?;
+        return Err(AppError::Unauthorized("Invalid refresh token".to_string()));
+    }
+
+    // The row can look live and still belong to a session the owner ended.
+    // Revocation updates every row of the family, but a rotation committing
+    // alongside it inserts a successor that statement never saw, so the family
+    // verdict is recorded separately and checked here — before anything is
+    // issued, inside the transaction holding this row.
+    let family_revoked = sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS (
+             SELECT 1 FROM revoked_refresh_families
+             WHERE user_id = $1 AND family_id = $2
+         )",
+    )
+    .bind(stored.user_id)
+    .bind(stored.family_id)
+    .fetch_one(&mut *tx)
+    .await?;
+    if family_revoked {
+        sqlx::query("UPDATE refresh_tokens SET revoked_at = NOW() WHERE id = $1")
+            .bind(stored.id)
+            .execute(&mut *tx)
+            .await?;
         tx.commit().await?;
         return Err(AppError::Unauthorized("Invalid refresh token".to_string()));
     }
@@ -431,10 +466,12 @@ pub async fn change_password(
     config: &Config,
     security: &SecurityContext<'_>,
     user_id: Uuid,
-    current_password: &str,
-    new_password: &str,
-    totp_code: Option<&str>,
+    request: &crate::dto::auth::ChangePasswordRequest,
 ) -> Result<(), AppError> {
+    let current_password = request.current_password.as_str();
+    let new_password = request.new_password.as_str();
+    let totp_code = request.totp_code.as_deref();
+    let key_backup = request.key_backup.as_ref();
     let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = $1")
         .bind(user_id)
         .fetch_optional(pool)
@@ -451,15 +488,45 @@ pub async fn change_password(
         .bind(&new_hash)
         .execute(&mut *tx)
         .await?;
+
+    // The identity backup is re-sealed here, in the same transaction, because
+    // this request is the last moment the caller is authenticated: the
+    // revocation below invalidates the very token that carried it. Sent
+    // afterwards it could not authenticate, failed silently, and left the
+    // backup sealed under the password nobody would use again — discovered only
+    // by somebody restoring on a new device and finding the new password did
+    // not work.
+    if let Some(backup) = key_backup {
+        backup
+            .password_kdf
+            .validate_cost()
+            .map_err(|error| AppError::BadRequest(format!("{error:?}")))?;
+        let wrapped = hex::decode(&backup.password_wrapped_key)
+            .map_err(|_| AppError::BadRequest("Invalid wrapped key encoding".to_string()))?;
+        let salt = hex::decode(&backup.password_kdf_salt)
+            .map_err(|_| AppError::BadRequest("Invalid salt encoding".to_string()))?;
+        sqlx::query(
+            r#"UPDATE user_key_backups SET
+                password_wrapped_key = $2,
+                password_kdf_salt = $3,
+                password_kdf_memory_kib = $4,
+                password_kdf_iterations = $5,
+                password_kdf_parallelism = $6,
+                updated_at = NOW()
+            WHERE user_id = $1"#,
+        )
+        .bind(user_id)
+        .bind(&wrapped)
+        .bind(&salt)
+        .bind(backup.password_kdf.memory_kib)
+        .bind(backup.password_kdf.iterations)
+        .bind(backup.password_kdf.parallelism)
+        .execute(&mut *tx)
+        .await?;
+    }
+
     sqlx::query(
         "UPDATE refresh_tokens SET revoked_at = NOW() WHERE user_id = $1 AND revoked_at IS NULL",
-    )
-    .bind(user_id)
-    .execute(&mut *tx)
-    .await?;
-    sqlx::query(
-        "UPDATE password_reset_tokens SET consumed_at = NOW()
-         WHERE user_id = $1 AND consumed_at IS NULL",
     )
     .bind(user_id)
     .execute(&mut *tx)
@@ -467,6 +534,11 @@ pub async fn change_password(
     // Changing a password after a compromise has to end the attacker's access
     // immediately. Revoking only the refresh tokens would leave whatever access
     // token they already hold working until it expired.
+    //
+    // Reset links were already cancelled here; that statement moved into the
+    // helper, which also covers the pending email change this path used to
+    // leave standing.
+    cancel_pending_credential_actions(&mut tx, user_id).await?;
     revocation::revoke_user(&mut tx, user_id).await?;
     security_activity::record_in_transaction(
         &mut tx,
@@ -605,14 +677,16 @@ pub async fn reset_password(
         .bind(stored.id)
         .execute(&mut *tx)
         .await?;
-    // Clearing the sign-in lock is what keeps lock extension safe: proving
-    // control of the inbox is the way back in for someone an attacker has
-    // deliberately kept locked out, so the lock can never become permanent.
+    // Proving control of the inbox is the way back in for someone an attacker
+    // has deliberately locked out. The level is reset with it, so the recovered
+    // account does not start its next run at an hour-long lock inherited from
+    // the attack it just survived.
     sqlx::query(
         "UPDATE users
          SET password_hash = $2,
              login_failed_attempts = 0,
              login_last_failed_at = NULL,
+             login_lock_level = 0,
              login_locked_until = NULL,
              updated_at = NOW()
          WHERE id = $1",
@@ -629,6 +703,7 @@ pub async fn reset_password(
     .await?;
     // A reset is the recovery path for an account someone else controls, so it
     // has to take the access tokens too, not just the refresh tokens.
+    cancel_pending_credential_actions(&mut tx, stored.user_id).await?;
     revocation::revoke_user(&mut tx, stored.user_id).await?;
     security_activity::record_in_transaction(
         &mut tx,
@@ -986,40 +1061,72 @@ fn is_login_locked(locked_until: Option<chrono::DateTime<Utc>>) -> bool {
 
 async fn record_login_failure(pool: &PgPool, user_id: Uuid) -> Result<bool, AppError> {
     let locked = sqlx::query_scalar::<_, bool>(
-        // An attempt against an account that is already locked still counts:
-        // it holds the counter at the cap so the lock below is pushed forward.
-        // Skipping those rows let an attacker collect a fresh batch of guesses
-        // every time the original lock expired, indefinitely.
-        "WITH next_attempt AS (
+        // An attempt against an account that is already locked changes nothing.
+        //
+        // It used to move the unlock time forward, which held an attacker at a
+        // fresh batch of guesses — the property worth keeping — but also let
+        // anyone who knew the address keep the owner out for as long as they
+        // cared to, at one wrong password every quarter of an hour. The owner's
+        // password was never wrong and email recovery was the only way back.
+        //
+        // The batches are held down by escalation instead: each consecutive
+        // lock lasts twice as long as the last, to a ceiling. An attacker gets
+        // fewer guesses per unit of time the longer they try, and nobody can
+        // extend a lock that is already running.
+        "WITH current AS (
             SELECT id,
+                login_locked_until IS NOT NULL AND login_locked_until > NOW() AS locked,
                 CASE
-                    WHEN login_locked_until IS NOT NULL AND login_locked_until > NOW()
-                    THEN LEAST(login_failed_attempts + 1, $3)
                     WHEN login_last_failed_at IS NULL
                       OR login_last_failed_at < NOW() - ($2 * INTERVAL '1 second')
                     THEN 1
                     ELSE LEAST(login_failed_attempts + 1, $3)
-                END AS attempts
+                END AS attempts,
+                login_lock_level AS level
             FROM users
             WHERE id = $1
             FOR UPDATE
+        ),
+        next_state AS (
+            SELECT id,
+                locked,
+                attempts,
+                -- Doubling, capped, and computed from how many times this run
+                -- has already been locked.
+                LEAST($4 * POWER(2, LEAST(level, 20))::bigint, $5) AS lock_seconds,
+                LEAST(level + 1, 20) AS next_level
+            FROM current
         )
         UPDATE users AS target
-        SET login_failed_attempts = next_attempt.attempts,
-            login_last_failed_at = NOW(),
+        SET login_failed_attempts = CASE
+                WHEN next_state.locked THEN target.login_failed_attempts
+                ELSE next_state.attempts
+            END,
+            login_last_failed_at = CASE
+                WHEN next_state.locked THEN target.login_last_failed_at
+                ELSE NOW()
+            END,
             login_locked_until = CASE
-                WHEN next_attempt.attempts >= $3
-                THEN NOW() + ($4 * INTERVAL '1 second')
+                WHEN next_state.locked THEN target.login_locked_until
+                WHEN next_state.attempts >= $3
+                THEN NOW() + (next_state.lock_seconds * INTERVAL '1 second')
                 ELSE NULL
+            END,
+            login_lock_level = CASE
+                WHEN next_state.locked THEN target.login_lock_level
+                WHEN next_state.attempts >= $3 THEN next_state.next_level
+                ELSE target.login_lock_level
             END
-        FROM next_attempt
-        WHERE target.id = next_attempt.id
-        RETURNING target.login_locked_until IS NOT NULL",
+        FROM next_state
+        WHERE target.id = next_state.id
+        RETURNING target.login_locked_until IS NOT NULL
+              AND target.login_locked_until > NOW()",
     )
     .bind(user_id)
     .bind(LOGIN_FAILURE_WINDOW_SECONDS)
     .bind(LOGIN_FAILURE_LIMIT)
     .bind(LOGIN_LOCK_SECONDS)
+    .bind(LOGIN_LOCK_MAX_SECONDS)
     .fetch_optional(pool)
     .await?
     .unwrap_or(false);
@@ -1034,11 +1141,14 @@ async fn clear_login_failures(pool: &PgPool, user_id: Uuid) -> Result<(), AppErr
         "UPDATE users
          SET login_failed_attempts = 0,
              login_last_failed_at = NULL,
-             login_locked_until = NULL
+             login_locked_until = NULL,
+             -- The run is over, so the next one starts at the shortest lock.
+             login_lock_level = 0
          WHERE id = $1
            AND (login_failed_attempts <> 0
              OR login_last_failed_at IS NOT NULL
-             OR login_locked_until IS NOT NULL)",
+             OR login_locked_until IS NOT NULL
+             OR login_lock_level <> 0)",
     )
     .bind(user_id)
     .execute(pool)
@@ -1544,8 +1654,45 @@ pub async fn list_sessions_for_refresh_token(
 
 /// Revoke a single session by id. Scoped to the owner so one user cannot revoke
 /// another's session; a missing/foreign id yields NotFound (no enumeration).
+/// Cancel every pending action that an older credential authorised.
+///
+/// H03 from the September audit. Changing or resetting a password revoked
+/// sessions but left `email_change_tokens` alone, so a link requested with the
+/// old password stayed valid across the recovery meant to end the compromise.
+/// Confirming it afterwards moved the account's email — and with it, the
+/// recovery address — to whoever asked for it.
+///
+/// Runs inside the caller's transaction, so the credential change and the
+/// cancellation commit together or not at all. A partial version of this would
+/// be worse than none: it would report a recovery that had not fully happened.
+async fn cancel_pending_credential_actions(
+    tx: &mut Transaction<'_, Postgres>,
+    user_id: Uuid,
+) -> Result<(), AppError> {
+    sqlx::query(
+        "UPDATE email_change_tokens SET consumed_at = NOW()
+         WHERE user_id = $1 AND consumed_at IS NULL",
+    )
+    .bind(user_id)
+    .execute(&mut **tx)
+    .await?;
+
+    // The other direction, and the audit is right that it matters: a reset link
+    // already sent to the address being replaced must not survive the move.
+    sqlx::query(
+        "UPDATE password_reset_tokens SET consumed_at = NOW()
+         WHERE user_id = $1 AND consumed_at IS NULL",
+    )
+    .bind(user_id)
+    .execute(&mut **tx)
+    .await?;
+
+    Ok(())
+}
+
 pub async fn revoke_session(
     pool: &PgPool,
+    config: &Config,
     client: &ClientInfo,
     user_id: Uuid,
     session_id: Uuid,
@@ -1554,10 +1701,14 @@ pub async fn revoke_session(
     // `session_id` addresses one refresh_tokens row, but revocation addresses
     // the family that row belongs to — that is the identity the access token
     // carries, and the one that survives rotation.
+    //
+    // The row is resolved to a family and nothing more. It is deliberately not
+    // required to be live: the interface lists sessions, the device rotates,
+    // and the owner then clicks revoke on a row that has since been consumed.
+    // Refusing that click was the bug — it reported success while revoking a
+    // link the device had already replaced.
     let family_id = sqlx::query_scalar::<_, Uuid>(
-        "UPDATE refresh_tokens SET revoked_at = NOW()
-         WHERE id = $1 AND user_id = $2 AND revoked_at IS NULL
-         RETURNING family_id",
+        "SELECT family_id FROM refresh_tokens WHERE id = $1 AND user_id = $2",
     )
     .bind(session_id)
     .bind(user_id)
@@ -1567,6 +1718,49 @@ pub async fn revoke_session(
     let Some(family_id) = family_id else {
         return Err(AppError::NotFound("Session not found".to_string()));
     };
+
+    // Consumed is not the same as ended, and the difference is the whole fix.
+    // A row the device has already rotated past is a live session addressed by
+    // an older name — revoke it. A family that has already been revoked has
+    // nothing left to end, and saying so is the existing contract.
+    let already_revoked = sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS (
+             SELECT 1 FROM revoked_refresh_families
+             WHERE user_id = $1 AND family_id = $2
+         )",
+    )
+    .bind(user_id)
+    .bind(family_id)
+    .fetch_one(&mut *tx)
+    .await?;
+    if already_revoked {
+        return Err(AppError::NotFound("Session not found".to_string()));
+    }
+
+    // Every link in the chain, not the one that was named.
+    sqlx::query(
+        "UPDATE refresh_tokens SET revoked_at = NOW()
+         WHERE user_id = $1 AND family_id = $2 AND revoked_at IS NULL",
+    )
+    .bind(user_id)
+    .bind(family_id)
+    .execute(&mut *tx)
+    .await?;
+
+    // And durably, because a rotation committing right now inserts a successor
+    // the statement above could not see. Rotation checks this before issuing.
+    sqlx::query(
+        "INSERT INTO revoked_refresh_families (user_id, family_id, expires_at)
+         VALUES ($1, $2, NOW() + make_interval(days => $3::int))
+         ON CONFLICT (user_id, family_id) DO UPDATE
+             SET revoked_at = NOW(), expires_at = EXCLUDED.expires_at",
+    )
+    .bind(user_id)
+    .bind(family_id)
+    .bind(i32::try_from(config.jwt_refresh_expiry_days).unwrap_or(90))
+    .execute(&mut *tx)
+    .await?;
+
     revocation::revoke_sessions(&mut tx, &[family_id]).await?;
     security_activity::record_in_transaction(
         &mut tx,

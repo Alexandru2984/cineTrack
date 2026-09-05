@@ -1,6 +1,28 @@
 # Dedicated backup credentials
 
-## Why
+> **Status, verified 2026-09-05 against the live host.** This is done. The
+> backups upload with `BACKUP_R2_*` to a dedicated `vazute-backups` bucket, and
+> the isolation was checked in both directions rather than assumed: the
+> application's key gets `403 AccessDenied` listing the backup bucket, and the
+> backup key gets `403` listing the application bucket. `REQUIRE_ENCRYPTED_BACKUPS`
+> and `REQUIRE_DEDICATED_BACKUP_CREDENTIALS` are both `true`, and every archive
+> in the bucket is `.age`.
+>
+> The section below describes the state this replaced. It is kept because the
+> reasoning still explains *why* the separation matters — but it is history, not
+> a description of the system. An external audit in September 2026 read it as
+> current and raised a High finding on that basis, which is the cost of leaving
+> a fixed problem written in the present tense.
+>
+> **What is still open**, and is the part worth attention: the Age identity that
+> decrypts these archives lives on the same VPS the archives protect
+> (`BACKUP_AGE_IDENTITY_FILE`), so losing the host loses the ability to read
+> them. The off-site copy has also been failing — Google Drive returns
+> `storageQuotaExceeded` — which the `cinetrack_backup_offsite_mirrored` alert
+> reports. Until both are addressed there is one copy, encrypted with a key that
+> dies with the machine.
+
+## Why (historical)
 
 Backups currently upload with `R2_ACCESS_KEY_ID` — the same key the running
 application uses for avatars and the poster cache. Anything that compromises the
