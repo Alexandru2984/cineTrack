@@ -548,6 +548,12 @@ jobs:
       - name: Validate link-preview routing
         run: scripts/tests/nginx_unfurl_routing_test.sh
 
+      # Real nginx, real vhost text, a stub that reports the headers it was
+      # handed. A grep finds the directives in the server block and calls the
+      # vhost fine; what matters is whether the child location kept them.
+      - name: Proxy headers reach the upstream
+        run: scripts/tests/nginx_proxy_headers_test.sh
+
       # Also behavioural: the defect was a directory redirect nginx builds from
       # its own address, which no reading of the file reveals.
       - name: Validate public page addresses
