@@ -102,7 +102,7 @@ export function Navbar() {
   }, [notificationsOpen]);
 
   const handleLogout = () => {
-    logoutMutation.mutate(undefined, {
+    logoutMutation.mutate({}, {
       onSuccess: () => navigate('/login', { replace: true }),
     });
   };

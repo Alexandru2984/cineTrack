@@ -50,8 +50,18 @@ export function useLogin() {
 
 export function useLogout() {
   const logout = useAuthStore((s) => s.logout);
+  const clearKeys = useEncryptionStore((s) => s.clear);
+  const userId = useAuthStore((s) => s.user?.id ?? null);
   return useMutation({
-    mutationFn: endSession,
+    // `forgetKeys` is the shared-device answer. Keeping them is the default
+    // because forgetting costs a password or a recovery code on the next
+    // sign-in, which is the wrong tax on a device somebody owns — but leaving
+    // them behind on a borrowed browser hands the next person every past
+    // message, so it has to be offered rather than decided here.
+    mutationFn: async ({ forgetKeys = false }: { forgetKeys?: boolean } = {}) => {
+      await endSession();
+      if (forgetKeys) await clearKeys(userId);
+    },
     onSuccess: () => logout(),
   });
 }

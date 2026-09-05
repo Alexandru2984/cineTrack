@@ -765,6 +765,9 @@ export const en = {
   },
   settings: {
     title: 'Settings',
+    signOutAndForgetKeys: 'Sign out and forget message keys',
+    signOutAndForgetKeysHint:
+      'Use this on a shared or borrowed device. Reading your encrypted messages again will need your password or recovery code.',
     signOut: 'Sign out',
     aboutLink: 'About & data sources',
     privacyTitle: 'Profile privacy',

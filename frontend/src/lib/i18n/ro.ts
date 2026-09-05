@@ -768,6 +768,9 @@ export const ro: Dictionary = {
   },
   settings: {
     title: 'Setări',
+    signOutAndForgetKeys: 'Deconectare și ștergerea cheilor de mesaje',
+    signOutAndForgetKeysHint:
+      'Folosește asta pe un dispozitiv comun sau împrumutat. Ca să citești din nou mesajele criptate vei avea nevoie de parolă sau de codul de recuperare.',
     signOut: 'Deconectare',
     aboutLink: 'Despre & surse de date',
     privacyTitle: 'Confidențialitatea profilului',
