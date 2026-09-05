@@ -183,9 +183,30 @@ jobs:
             < ../bench/db/seed_bench_data.sql
           seed_status=$?
           set -e
+          # A seed that will not finish is not a verdict on the change.
+          #
+          # This step answers one question — did this diff regress a query plan
+          # — and it cannot answer it without data. Three times in a day the
+          # seed took long enough to kill the job on runners where the same
+          # SQL, the same 254 MB, normally lands in fourteen seconds. None of
+          # those three had anything to do with the diff, and one of them
+          # blocked production for three and a half hours.
+          #
+          # So this exits without an answer rather than with the wrong one. It
+          # is deliberately narrow: only a *timeout while seeding* takes this
+          # path. A seed that fails for any other reason, a plan that
+          # sequentially scans a growing table, a query over budget — each of
+          # those still fails the job, on every branch, because each of those
+          # is a real answer.
+          #
+          # What it costs: a run that takes this path checked nothing, and if
+          # the seed broke permanently the check would go quiet. The warning is
+          # the guard, and the plan check runs on every pull request and every
+          # merge, so a genuine regression has many chances to be caught by the
+          # runs that do seed.
           if (( seed_status == 124 )); then
-            echo "::error::seeding the benchmark data did not finish within 15 minutes; it normally takes under 30 seconds, so this runner's disk is the problem and not the diff"
-            exit 1
+            echo "::warning::seeding the benchmark data did not finish within 15 minutes on this runner; it normally takes under 30 seconds. The query-plan check did not run, and this is not a finding about the change."
+            exit 0
           fi
           if (( seed_status != 0 )); then
             echo "::error::seeding the benchmark data failed with status $seed_status"
