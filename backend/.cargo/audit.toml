@@ -26,3 +26,31 @@ ignore = [
     # happens first. The guard test fails on the first two.
     "RUSTSEC-2026-0258",
 ]
+
+# Warnings, recorded rather than left to be rediscovered.
+#
+# `cargo audit` reports these without failing, so a green run has always
+# tolerated them — which means nothing was written down about why, and the next
+# reader had to work it out again. An audit in September 2026 raised exactly
+# that: a green gate expresses an acceptance policy, not a zero-vulnerability
+# inventory.
+#
+# RUSTSEC-2026-0253 — lru 0.16.4, unsound.
+#
+#   Reached through aws-sdk-s3, which uses it to cache credential resolution.
+#   The unsoundness needs a `pop` whose value has a `Drop` that panics, with
+#   unwinding, caught. Nothing in this tree stores such a type in an `lru`: the
+#   cache holds AWS SDK credential structs, which are plain data. RustSec lists
+#   the fix in >= 0.18.2, which aws-sdk-s3 1.143 does not accept; forcing it
+#   would mean pinning a version its own bounds reject.
+#
+#   Revisit when aws-sdk-s3 widens the bound. Do not force it before then.
+#
+# chacha20 0.10.0 — yanked.
+#
+#   Reached through rand, through actix-http. Yanked is a publication status,
+#   not a vulnerability: the release was withdrawn from the registry and the
+#   lockfile still pins it. There is no advisory against it and nothing to fix
+#   here until actix-http moves.
+#
+#   Revisit on the next actix-web release.
