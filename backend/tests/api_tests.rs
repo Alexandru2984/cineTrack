@@ -14222,3 +14222,83 @@ async fn a_locked_account_cannot_be_held_locked_by_more_wrong_guesses() {
         .unwrap();
     assert_eq!(level, 0, "a successful sign-in should end the run");
 }
+
+/// An export must carry what an encrypted message actually is.
+///
+/// M14 from the September audit. The export selected `body`, which is NULL for
+/// an encrypted message: every encrypted conversation came out as a list of
+/// nulls. Somebody downloading their data before deleting the account got a
+/// file that looked complete and held none of their messages.
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn the_account_export_carries_encrypted_message_envelopes() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+
+    let (sender_token, _, sender_id) =
+        register_user(&app, "exporter", "exporter@mailbox.dev", "Pass1234").await;
+    let (recipient_token, _, recipient_id) =
+        register_user(&app, "exportpeer", "exportpeer@mailbox.dev", "Pass1234").await;
+    let sender_uuid = Uuid::parse_str(&sender_id).unwrap();
+    let recipient_uuid = Uuid::parse_str(&recipient_id).unwrap();
+    make_mutual_followers(&pool, sender_uuid, recipient_uuid).await;
+
+    let signer = TestSigner::new();
+    publish_signer_keys(&app, &sender_token, &signer, &"a".repeat(64)).await;
+    publish_signer_keys(&app, &recipient_token, &TestSigner::new(), &"b".repeat(64)).await;
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/messages/exportpeer")
+        .insert_header(("Authorization", format!("Bearer {sender_token}")))
+        .set_json(encrypted_body(&signer, Uuid::new_v4()))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert!(resp.status().is_success(), "the encrypted send should work");
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/users/me/export")
+        .insert_header(("Authorization", format!("Bearer {sender_token}")))
+        .set_json(json!({ "password": "Pass1234" }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let export: Value = actix_test::call_and_read_body_json(&app, req).await;
+
+    let messages = export["direct_messages"]
+        .as_array()
+        .expect("the export should list direct messages");
+    assert_eq!(messages.len(), 1);
+    let message = &messages[0];
+
+    assert_eq!(message["encrypted"], true);
+    assert!(
+        message["body"].is_null(),
+        "an encrypted message has no plaintext column, which is the whole point"
+    );
+
+    let envelope = &message["envelope"];
+    assert_eq!(envelope["ciphertext"], "11".repeat(64));
+    assert_eq!(envelope["nonce"], "22".repeat(12));
+    assert_eq!(envelope["sender_ephemeral_key"], "33".repeat(32));
+    assert_eq!(envelope["sender_copy"], "66".repeat(48));
+    for field in [
+        "sender_signing_key",
+        "franking_commitment",
+        "franking_signature",
+    ] {
+        assert!(
+            envelope[field].is_string(),
+            "the export omits {field}, so the message cannot be opened from it"
+        );
+    }
+
+    // The key that opens it is deliberately absent: one leaked download must not
+    // be the whole history.
+    let serialised = export.to_string();
+    assert!(
+        !serialised.contains("password_wrapped_key")
+            && !serialised.contains("recovery_wrapped_key"),
+        "the export contains the wrapped identity"
+    );
+}
