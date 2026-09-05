@@ -57,36 +57,56 @@ async fn read_field(
     Ok(buf)
 }
 
-/// Parse the TV Time GDPR `rewatched_episode.csv` (unquoted, comma-separated).
-/// Best-effort: unknown/short rows are skipped.
-fn parse_rewatches(bytes: &[u8]) -> Result<Vec<RewatchRow>, AppError> {
-    let text = String::from_utf8_lossy(bytes);
-    let mut lines = text.lines();
-    let Some(header) = lines.next() else {
-        return Ok(Vec::new());
+/// Parse the TV Time GDPR `rewatched_episode.csv`.
+///
+/// Through a real CSV reader, not `split(',')`. A comma inside a quoted field
+/// is data, and titles have commas in them: `"Love, Death & Robots"` shifted
+/// every field after the title, the season number then failed to parse, and the
+/// row was dropped. Silently — the job reported success while some rewatches
+/// simply were not there, which shows up later as wrong statistics and streaks
+/// rather than as an import error.
+///
+/// Rejections are counted and the first few explained, because "some rows did
+/// not import" is only useful if it says which and why.
+fn parse_rewatches(bytes: &[u8]) -> Result<(Vec<RewatchRow>, RewatchRejections), AppError> {
+    let mut reader = csv::ReaderBuilder::new()
+        .has_headers(true)
+        .flexible(true)
+        .from_reader(bytes);
+
+    let headers = match reader.headers() {
+        Ok(headers) => headers.clone(),
+        // An unreadable header means nothing below it can be placed.
+        Err(_) => return Ok((Vec::new(), RewatchRejections::default())),
     };
-    let cols: Vec<&str> = header.split(',').map(|c| c.trim()).collect();
-    let idx = |name: &str| cols.iter().position(|c| *c == name);
+    let idx = |name: &str| headers.iter().position(|c| c.trim() == name);
     let (Some(i_name), Some(i_season), Some(i_ep), Some(i_created)) = (
         idx("tv_show_name"),
         idx("episode_season_number"),
         idx("episode_number"),
         idx("created_at"),
     ) else {
-        return Ok(Vec::new());
+        return Ok((Vec::new(), RewatchRejections::default()));
     };
     let max_idx = i_name.max(i_season).max(i_ep).max(i_created);
 
     let mut out = Vec::new();
-    for line in lines {
-        let f: Vec<&str> = line.split(',').collect();
-        if f.len() <= max_idx {
+    let mut rejections = RewatchRejections::default();
+    for (number, record) in reader.records().enumerate() {
+        let line = number + 2; // one-based, past the header
+        let Ok(record) = record else {
+            rejections.note(line, "the row could not be read as CSV");
+            continue;
+        };
+        if record.len() <= max_idx {
+            rejections.note(line, "the row has fewer columns than the header");
             continue;
         }
         let (Ok(season), Ok(episode)) = (
-            f[i_season].trim().parse::<i32>(),
-            f[i_ep].trim().parse::<i32>(),
+            record[i_season].trim().parse::<i32>(),
+            record[i_ep].trim().parse::<i32>(),
         ) else {
+            rejections.note(line, "the season or episode number is not a number");
             continue;
         };
         if out.len() == MAX_REWATCH_ROWS {
@@ -95,13 +115,34 @@ fn parse_rewatches(bytes: &[u8]) -> Result<Vec<RewatchRow>, AppError> {
             ));
         }
         out.push(RewatchRow {
-            show_name: f[i_name].trim().to_string(),
+            show_name: record[i_name].trim().to_string(),
             season_number: season,
             episode_number: episode,
-            created_at: f[i_created].trim().to_string(),
+            created_at: record[i_created].trim().to_string(),
         });
     }
-    Ok(out)
+    Ok((out, rejections))
+}
+
+/// What the parser could not place, and why.
+///
+/// Bounded on purpose: a malformed export should not turn into a megabyte of
+/// explanation. The count is complete; the reasons are a sample.
+#[derive(Debug, Default)]
+pub struct RewatchRejections {
+    pub count: usize,
+    pub reasons: Vec<String>,
+}
+
+impl RewatchRejections {
+    const MAX_REASONS: usize = 5;
+
+    fn note(&mut self, line: usize, reason: &str) {
+        self.count += 1;
+        if self.reasons.len() < Self::MAX_REASONS {
+            self.reasons.push(format!("line {line}: {reason}"));
+        }
+    }
 }
 
 fn validate_import_payload(
@@ -286,11 +327,22 @@ async fn start_import(
             .map_err(|_| AppError::BadRequest("Invalid movies.json".to_string()))?,
         _ => Vec::new(),
     };
-    let rewatches = rewatch_bytes
+    let (rewatches, rewatch_rejections) = rewatch_bytes
         .as_deref()
         .map(parse_rewatches)
         .transpose()?
         .unwrap_or_default();
+    if rewatch_rejections.count > 0 {
+        // Not an error: an export can carry rows this importer has no use for.
+        // But it stops being silent, because "the import worked" while some
+        // rewatches were dropped shows up later as wrong statistics, with
+        // nothing to trace it to.
+        log::info!(
+            "import: {} rewatch row(s) rejected; {}",
+            rewatch_rejections.count,
+            rewatch_rejections.reasons.join("; ")
+        );
+    }
 
     if shows.is_empty() && movies.is_empty() {
         return Err(AppError::BadRequest(
@@ -423,7 +475,8 @@ mod tests {
         let csv = "user_id,episode_id,cpt,created_at,updated_at,tv_show_name,episode_season_number,episode_number\n\
                    11472396,297892,1,2018-12-25 00:18:11,2018-12-25 00:18:11,Prison Break,1,2\n\
                    11472396,306139,1,2018-12-25 00:18:11,2018-12-25 00:18:11,Tokyo Ghoul,2,5\n";
-        let rows = parse_rewatches(csv.as_bytes()).unwrap();
+        let (rows, rejected) = parse_rewatches(csv.as_bytes()).unwrap();
+        assert_eq!(rejected.count, 0);
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0].show_name, "Prison Break");
         assert_eq!(rows[0].season_number, 1);
@@ -437,14 +490,52 @@ mod tests {
                    Good Show,1,1,2020-01-01 00:00:00\n\
                    ,,,\n\
                    Truncated\n";
-        let rows = parse_rewatches(csv.as_bytes()).unwrap();
+        let (rows, rejected) = parse_rewatches(csv.as_bytes()).unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].show_name, "Good Show");
+        // Rejected rather than ignored, and countable.
+        assert_eq!(rejected.count, 2);
+        assert!(rejected
+            .reasons
+            .iter()
+            .any(|reason| reason.starts_with("line 3")));
+    }
+
+    /// A comma inside a quoted title is data, not a separator.
+    ///
+    /// This is the whole of M15. `split(',')` shifted every field after the
+    /// title, the season number then failed to parse, and the row vanished
+    /// without a word — while the job reported success.
+    #[test]
+    fn parse_rewatches_keeps_titles_containing_commas() {
+        let csv = "tv_show_name,episode_season_number,episode_number,created_at\n\
+                   \"Love, Death & Robots\",3,4,2024-05-01 10:00:00\n\
+                   \"He said \"\"hi\"\", then left\",1,2,2024-05-02 10:00:00\n\
+                   Plain Title,2,3,2024-05-03 10:00:00\n";
+        let (rows, rejected) = parse_rewatches(csv.as_bytes()).unwrap();
+        assert_eq!(rejected.count, 0, "{:?}", rejected.reasons);
+        assert_eq!(rows.len(), 3);
+        assert_eq!(rows[0].show_name, "Love, Death & Robots");
+        assert_eq!(rows[0].season_number, 3);
+        assert_eq!(rows[0].episode_number, 4);
+        assert_eq!(rows[1].show_name, "He said \"hi\", then left");
+        assert_eq!(rows[2].show_name, "Plain Title");
+    }
+
+    /// A quoted field may contain the line separator too.
+    #[test]
+    fn parse_rewatches_keeps_titles_containing_newlines() {
+        let csv = "tv_show_name,episode_season_number,episode_number,created_at\n\
+                   \"Two\nLines\",1,1,2024-05-01 10:00:00\n";
+        let (rows, rejected) = parse_rewatches(csv.as_bytes()).unwrap();
+        assert_eq!(rejected.count, 0);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].show_name, "Two\nLines");
     }
 
     #[test]
     fn parse_rewatches_empty_without_header() {
-        assert!(parse_rewatches(b"").unwrap().is_empty());
+        assert!(parse_rewatches(b"").unwrap().0.is_empty());
     }
 
     #[test]
