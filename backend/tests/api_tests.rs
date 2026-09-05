@@ -2613,12 +2613,24 @@ async fn test_locked_account_does_not_reveal_a_correct_password() {
     );
 }
 
-/// Attempts made while locked have to push the lock further out. Without that
-/// the lock expires on its original schedule and hands the attacker a fresh
-/// batch of guesses every window, forever.
+/// Attempts made while locked must change nothing.
+///
+/// This test asserted the opposite until the September 2026 audit, and the
+/// reason it did is still good: if a lock simply expires on schedule, an
+/// attacker collects a fresh batch of guesses every window, forever. Pushing
+/// the lock forward stopped that.
+///
+/// It also handed anyone who knew the address an indefinite lockout of somebody
+/// whose password was never wrong, at one guess every quarter of an hour, with
+/// email recovery as the only way back. So the batches are held down by
+/// escalation instead — each consecutive lock lasts twice as long, to a ceiling
+/// — and the lock itself is no longer extendable by someone who knows nothing.
+///
+/// `a_locked_account_cannot_be_held_locked_by_more_wrong_guesses` covers the
+/// escalation. This one covers the half that changed here.
 #[actix_web::test]
 #[ignore = "requires test DB"]
-async fn test_attempts_during_a_lock_extend_it() {
+async fn test_attempts_during_a_lock_do_not_extend_it() {
     let pool = setup_pool().await;
     clean_db(&pool).await;
     let app = actix_test::init_service(create_app(pool.clone())).await;
@@ -2638,12 +2650,20 @@ async fn test_attempts_during_a_lock_extend_it() {
             .await
             .unwrap();
 
-    // Move the lock close to expiry, then knock again.
-    sqlx::query(
-        "UPDATE users SET login_locked_until = NOW() + INTERVAL '5 seconds' WHERE email = $1",
+    assert!(
+        first > chrono::Utc::now(),
+        "five failures should have locked the account"
+    );
+
+    // Move the lock close to expiry, then knock again. This is the moment the
+    // old behaviour reached for: one wrong guess here used to buy another
+    // fifteen minutes, and repeating it held the owner out indefinitely.
+    let near_expiry: chrono::DateTime<chrono::Utc> = sqlx::query_scalar(
+        "UPDATE users SET login_locked_until = NOW() + INTERVAL '5 seconds'
+         WHERE email = $1 RETURNING login_locked_until",
     )
     .bind("extend@mailbox.dev")
-    .execute(&pool)
+    .fetch_one(&pool)
     .await
     .unwrap();
     let (status, _) = login_json(
@@ -2659,9 +2679,9 @@ async fn test_attempts_during_a_lock_extend_it() {
             .fetch_one(&pool)
             .await
             .unwrap();
-    assert!(
-        extended > chrono::Utc::now() + chrono::Duration::minutes(10),
-        "the lock was not pushed forward: {extended} (originally {first})"
+    assert_eq!(
+        extended, near_expiry,
+        "a wrong guess against a locked account moved the unlock time"
     );
 }
 
@@ -6651,6 +6671,9 @@ async fn rewrapping_the_backup_leaves_the_published_keys_alone() {
             "password_wrapped_key": "1a".repeat(64),
             "password_kdf_salt": "2b".repeat(16),
             "password_kdf": { "memory_kib": 19456, "iterations": 2, "parallelism": 1 },
+            // Replacing the backup destroys the only copy a password can open,
+            // so it costs more than a live token. See M16.
+            "current_password": "Pass1234",
         }))
         .peer_addr(peer_addr())
         .to_request();
@@ -6712,6 +6735,9 @@ async fn rewrapping_without_a_backup_is_refused() {
             "password_wrapped_key": "1a".repeat(64),
             "password_kdf_salt": "2b".repeat(16),
             "password_kdf": { "memory_kib": 19456, "iterations": 2, "parallelism": 1 },
+            // Replacing the backup destroys the only copy a password can open,
+            // so it costs more than a live token. See M16.
+            "current_password": "Pass1234",
         }))
         .peer_addr(peer_addr())
         .to_request();

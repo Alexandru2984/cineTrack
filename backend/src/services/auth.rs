@@ -177,8 +177,10 @@ pub async fn login(
         .as_ref()
         .filter(|candidate| is_login_locked(candidate.login_locked_until))
     {
-        // Extend the lock, otherwise it expires on schedule no matter how hard
-        // the account is being hammered and hands out fresh batches of guesses.
+        // Counted, but the running lock is not moved: extending it let anyone
+        // who knew the address hold the owner out indefinitely. Fresh batches
+        // of guesses are held down by escalation instead — see
+        // `record_login_failure`.
         record_login_failure(pool, locked_candidate.id).await?;
         crate::metrics::record_security_event(crate::metrics::SecurityEvent::LoginRejected);
         tokio::time::sleep_until(respond_at).await;
