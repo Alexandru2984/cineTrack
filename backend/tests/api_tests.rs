@@ -13531,10 +13531,22 @@ async fn the_recommendation_seed_follows_recent_watching() {
 
     let pool = setup_pool().await;
     clean_db(&pool).await;
-    let app = actix_test::init_service(create_app(pool.clone())).await;
-    let (_, _, user) =
-        register_user(&app, "seedrecent", "seedrecent@mailbox.dev", "Pass1234").await;
-    let user_id = Uuid::parse_str(&user).expect("registered user id");
+
+    // A fixed id, not a registered one. The draw is a hash of the member, the
+    // date and the title, so a member whose id is random makes the sample
+    // random too — and this test asserts a property of sixty draws. Registered,
+    // it failed about one run in eight, which is the kind of test that teaches
+    // people to hit re-run.
+    let user_id = Uuid::parse_str("aaaaaaaa-0000-4000-8000-00000000d0e5").unwrap();
+    sqlx::query(
+        r#"INSERT INTO users (id, username, email, email_verified)
+        VALUES ($1, 'seedrecent', 'seedrecent@mailbox.dev', TRUE)"#,
+    )
+    .bind(user_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let user = user_id.to_string();
 
     // Two shows the member rates identically: same status, same favourite flag,
     // so the base score cannot separate them. Only the watching does.
@@ -13573,12 +13585,13 @@ async fn the_recommendation_seed_follows_recent_watching() {
     .await
     .unwrap();
 
-    // Sixty days of draws. The weighting is a bias, not a rule, so this asserts
-    // a clear majority rather than every single day.
+    // Two hundred days of draws. The weighting is a bias, not a rule, so this
+    // asserts a shape rather than every single day — and with the id fixed
+    // above, the same two hundred draws happen on every run.
     let mut recent_days = 0;
     let mut old_days = 0;
     let start = chrono::NaiveDate::from_ymd_opt(2026, 9, 5).unwrap();
-    for offset in 0..60 {
+    for offset in 0..200 {
         let day = start + chrono::Duration::days(offset);
         let seed = recommendation_seed(&pool, user_id, day)
             .await
@@ -13598,7 +13611,8 @@ async fn the_recommendation_seed_follows_recent_watching() {
     // And the old favourite is not banished outright — surfacing one now and
     // then is the point of a rotation.
     assert!(
-        recent_days < 60,
-        "the rotation collapsed onto a single title again"
+        old_days > 0,
+        "the old favourite was banished entirely; surfacing one now and then is \
+         the point of a rotation ({recent_days} recent vs {old_days} old)"
     );
 }
