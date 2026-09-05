@@ -8,6 +8,7 @@ import api from '@/lib/api';
 // are a third of a megabyte that only setting up or restoring actually needs.
 // Type-only imports are erased and cost nothing.
 import type { IdentityKeyPair, KdfCost } from '@/lib/crypto/core';
+import { deriveWrappingKeyOffThread } from '@/lib/crypto/derive';
 import { loadIdentity, saveIdentity } from '@/lib/crypto/storage';
 import type { KeyBackup, KeyStatus, PeerPublicKeys } from '@/types';
 
@@ -45,7 +46,6 @@ export async function setupIdentity(userId: string, password: string): Promise<S
   const {
     DEFAULT_KDF_COST,
     SALT_BYTES,
-    deriveWrappingKey,
     fingerprint: computeFingerprint,
     generateIdentity,
     generateRecoveryCode,
@@ -60,12 +60,17 @@ export async function setupIdentity(userId: string, password: string): Promise<S
   const passwordSalt = randomSalt(SALT_BYTES);
   const recoverySalt = randomSalt(SALT_BYTES);
 
+  const [passwordKey, recoveryKey] = await Promise.all([
+    deriveWrappingKeyOffThread(password, passwordSalt, DEFAULT_KDF_COST),
+    deriveWrappingKeyOffThread(recoveryCode, recoverySalt, DEFAULT_KDF_COST),
+  ]);
+
   await api.put('/encryption/keys', {
     exchange_public_key: toHex(identity.exchangePublicKey),
     signing_public_key: toHex(identity.signingPublicKey),
     key_fingerprint: fingerprint,
     password_wrapped_key: toHex(
-      wrapIdentity(identity, deriveWrappingKey(password, passwordSalt, DEFAULT_KDF_COST)),
+      wrapIdentity(identity, passwordKey),
     ),
     password_kdf_salt: toHex(passwordSalt),
     password_kdf: {
@@ -74,7 +79,7 @@ export async function setupIdentity(userId: string, password: string): Promise<S
       parallelism: DEFAULT_KDF_COST.parallelism,
     },
     recovery_wrapped_key: toHex(
-      wrapIdentity(identity, deriveWrappingKey(recoveryCode, recoverySalt, DEFAULT_KDF_COST)),
+      wrapIdentity(identity, recoveryKey),
     ),
     recovery_kdf_salt: toHex(recoverySalt),
     // Not sent. This is a first publication, where the server ignores it — and
@@ -122,12 +127,11 @@ export async function sealBackupForPassword(
   password_kdf_salt: string;
   password_kdf: { memory_kib: number; iterations: number; parallelism: number };
 }> {
-  const { DEFAULT_KDF_COST, SALT_BYTES, deriveWrappingKey, toHex, wrapIdentity } = await core();
+  const { DEFAULT_KDF_COST, SALT_BYTES, toHex, wrapIdentity } = await core();
   const salt = randomSalt(SALT_BYTES);
+  const key = await deriveWrappingKeyOffThread(password, salt, DEFAULT_KDF_COST);
   return {
-    password_wrapped_key: toHex(
-      wrapIdentity(identity, deriveWrappingKey(password, salt, DEFAULT_KDF_COST)),
-    ),
+    password_wrapped_key: toHex(wrapIdentity(identity, key)),
     password_kdf_salt: toHex(salt),
     password_kdf: {
       memory_kib: DEFAULT_KDF_COST.memoryKib,
@@ -143,13 +147,12 @@ export async function rewrapBackup(
 ): Promise<boolean> {
   if (!identity) return false;
 
-  const { DEFAULT_KDF_COST, SALT_BYTES, deriveWrappingKey, toHex, wrapIdentity } = await core();
+  const { DEFAULT_KDF_COST, SALT_BYTES, toHex, wrapIdentity } = await core();
   const salt = randomSalt(SALT_BYTES);
+  const key = await deriveWrappingKeyOffThread(newPassword, salt, DEFAULT_KDF_COST);
 
   await api.put('/encryption/keys/backup', {
-    password_wrapped_key: toHex(
-      wrapIdentity(identity, deriveWrappingKey(newPassword, salt, DEFAULT_KDF_COST)),
-    ),
+    password_wrapped_key: toHex(wrapIdentity(identity, key)),
     password_kdf_salt: toHex(salt),
     password_kdf: {
       memory_kib: DEFAULT_KDF_COST.memoryKib,
@@ -182,7 +185,6 @@ export async function restoreIdentity(
   kind: 'password' | 'recovery',
 ): Promise<{ identity: IdentityKeyPair; fingerprint: string }> {
   const {
-    deriveWrappingKey,
     fingerprint: computeFingerprint,
     fromHex,
     unwrapIdentity,
@@ -199,7 +201,11 @@ export async function restoreIdentity(
   // Both copies were wrapped with the same cost. The recovery half has no
   // parameters of its own in the response, and inventing different ones here
   // would make the code unusable on the device that generated it.
-  const wrappingKey = deriveWrappingKey(secret, fromHex(salt), costFromApi(backup.password_kdf));
+  const wrappingKey = await deriveWrappingKeyOffThread(
+    secret,
+    fromHex(salt),
+    costFromApi(backup.password_kdf),
+  );
 
   let identity: IdentityKeyPair;
   try {
