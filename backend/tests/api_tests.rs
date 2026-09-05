@@ -31,6 +31,31 @@ fn refresh_cookie_from_response<B>(resp: &actix_web::dev::ServiceResponse<B>) ->
         .to_string()
 }
 
+/// Mint a password reset token the way `forgot_password` does, and hand back the
+/// plaintext the email would have carried.
+///
+/// The stored form is a hash, so a test cannot read a real one back out. This
+/// writes the same row through the same hashing the service uses.
+async fn issue_reset_token(pool: &PgPool, user_id: Uuid) -> String {
+    let token = cinetrack::utils::jwt::generate_refresh_token();
+    let token_hash = cinetrack::utils::jwt::hash_refresh_token(&token);
+    sqlx::query(
+        r#"INSERT INTO password_reset_tokens (user_id, token_hash, expires_at)
+        VALUES ($1, $2, NOW() + INTERVAL '1 hour')
+        ON CONFLICT (user_id) DO UPDATE
+        SET token_hash = EXCLUDED.token_hash,
+            expires_at = EXCLUDED.expires_at,
+            consumed_at = NULL,
+            created_at = NOW()"#,
+    )
+    .bind(user_id)
+    .bind(token_hash)
+    .execute(pool)
+    .await
+    .unwrap();
+    token
+}
+
 fn test_db_url() -> String {
     std::env::var("TEST_DATABASE_URL")
         .unwrap_or_else(|_| "postgres://test_user:test_pass@127.0.0.1:55433/cinetrack_test".into())
@@ -13614,5 +13639,234 @@ async fn the_recommendation_seed_follows_recent_watching() {
         old_days > 0,
         "the old favourite was banished entirely; surfacing one now and then is \
          the point of a rotation ({recent_days} recent vs {old_days} old)"
+    );
+}
+
+/// Revoking a session must end the session, not the row the list happened to name.
+///
+/// H02 from the September audit. `family_id` is the session identity: it
+/// survives rotation and it is what an access token carries as `sid`. Revoking
+/// updated only the row, so a device that had already rotated kept its
+/// successor. The owner was told the session was revoked and it was not — the
+/// access side was cut for 75 minutes and the family then became usable again.
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn revoking_a_rotated_session_ends_the_whole_family() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+
+    let (token, refresh_zero, user_id) =
+        register_user(&app, "revokeuser", "revoke@mailbox.dev", "Pass1234").await;
+    let user_uuid = Uuid::parse_str(&user_id).unwrap();
+
+    // What the owner's session list showed before anything moved.
+    let listed_session_id = sqlx::query_scalar::<_, Uuid>(
+        "SELECT id FROM refresh_tokens WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1",
+    )
+    .bind(user_uuid)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let family =
+        sqlx::query_scalar::<_, Uuid>("SELECT family_id FROM refresh_tokens WHERE id = $1")
+            .bind(listed_session_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+
+    // The device rotates. R0 is consumed; R1 is live and carries the same family.
+    let rotate = |refresh: String| {
+        let app = &app;
+        async move {
+            let req = actix_test::TestRequest::post()
+                .uri("/api/auth/mobile/refresh")
+                .set_json(json!({ "refresh_token": refresh }))
+                .peer_addr(peer_addr())
+                .to_request();
+            let resp = actix_test::call_service(app, req).await;
+            let status = resp.status();
+            let body: Value = actix_test::read_body_json(resp).await;
+            (status, body)
+        }
+    };
+    let (status, rotated) = rotate(refresh_zero.clone()).await;
+    assert_eq!(status, 200, "the first rotation should succeed: {rotated}");
+    let refresh_one = rotated["refresh_token"].as_str().unwrap().to_string();
+
+    // The owner clicks revoke on the row the stale list is still showing.
+    let req = actix_test::TestRequest::delete()
+        .uri(&format!("/api/auth/sessions/{listed_session_id}"))
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(
+        resp.status(),
+        200,
+        "revoking a session the list showed must not 404 just because it rotated since"
+    );
+
+    // The successor must be dead. Before the fix it rotated happily.
+    let (status, body) = rotate(refresh_one.clone()).await;
+    assert_eq!(
+        status, 401,
+        "the rotated successor survived a revocation the owner was told succeeded: {body}"
+    );
+
+    // And it must stay dead once the 75-minute access-token entry has gone,
+    // which is the window the old behaviour recovered in.
+    sqlx::query("DELETE FROM access_token_revocations WHERE subject_id = $1")
+        .bind(family)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (status, body) = rotate(refresh_one).await;
+    assert_eq!(
+        status, 401,
+        "the family came back once the access-token revocation expired: {body}"
+    );
+
+    // The durable verdict is what makes that true, and it is scoped to one family.
+    let recorded = sqlx::query_scalar::<_, i64>(
+        "SELECT count(*) FROM revoked_refresh_families WHERE user_id = $1 AND family_id = $2",
+    )
+    .bind(user_uuid)
+    .bind(family)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(recorded, 1);
+
+    // A second sign-in is a different family and must be unaffected.
+    let req = actix_test::TestRequest::post()
+        .uri("/api/auth/mobile/login")
+        .set_json(json!({ "email": "revoke@mailbox.dev", "password": "Pass1234" }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200, "an unrelated sign-in must still work");
+    let fresh: Value = actix_test::read_body_json(resp).await;
+    let (status, body) = rotate(fresh["refresh_token"].as_str().unwrap().to_string()).await;
+    assert_eq!(
+        status, 200,
+        "revoking one session must not touch another: {body}"
+    );
+}
+
+/// Recovering an account must cancel what the old password authorised.
+///
+/// H03 from the September audit. An attacker holding the old password requests
+/// a move of the account's email to their own address and keeps the link. The
+/// owner resets their password and signs every device out — the recovery that
+/// is supposed to end it. The link was still valid afterwards, so confirming it
+/// handed over the address the account recovers through.
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn recovering_an_account_cancels_a_pending_email_change() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+
+    let (token, _, user_id) =
+        register_user(&app, "recoveruser", "owner@mailbox.dev", "Pass1234").await;
+    let user_uuid = Uuid::parse_str(&user_id).unwrap();
+
+    // The attacker, holding the old password, starts a move to their address.
+    let req = actix_test::TestRequest::post()
+        .uri("/api/auth/email/change")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .set_json(json!({ "current_password": "Pass1234", "new_email": "attacker@mailbox.dev" }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200, "the change request should be accepted");
+
+    let pending = sqlx::query_scalar::<_, i64>(
+        "SELECT count(*) FROM email_change_tokens WHERE user_id = $1 AND consumed_at IS NULL",
+    )
+    .bind(user_uuid)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(pending, 1, "a pending change should exist to be cancelled");
+
+    // The owner recovers the account: password reset, sessions revoked.
+    let req = actix_test::TestRequest::post()
+        .uri("/api/auth/password/forgot")
+        .set_json(json!({ "email": "owner@mailbox.dev" }))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 200);
+
+    // The reset token is delivered by email; the test reads what was stored.
+    let reset_token = issue_reset_token(&pool, user_uuid).await;
+    let req = actix_test::TestRequest::post()
+        .uri("/api/auth/password/reset")
+        .set_json(json!({ "token": reset_token, "new_password": "NewPass5678" }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200, "the owner's reset should succeed");
+
+    // The link the attacker is holding must now be dead.
+    let still_pending = sqlx::query_scalar::<_, i64>(
+        "SELECT count(*) FROM email_change_tokens WHERE user_id = $1 AND consumed_at IS NULL",
+    )
+    .bind(user_uuid)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        still_pending, 0,
+        "a pending email change survived the account recovery meant to end the compromise"
+    );
+
+    let email = sqlx::query_scalar::<_, String>("SELECT email FROM users WHERE id = $1")
+        .bind(user_uuid)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        email, "owner@mailbox.dev",
+        "the recovery address must still belong to the owner"
+    );
+}
+
+/// Changing a password must cancel a reset link already in flight.
+///
+/// The other direction of the same fault: a link sent to the address being
+/// left behind must not outlive the credential change.
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn changing_a_password_cancels_a_reset_link_in_flight() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+
+    let (token, _, user_id) =
+        register_user(&app, "inflightuser", "inflight@mailbox.dev", "Pass1234").await;
+    let user_uuid = Uuid::parse_str(&user_id).unwrap();
+
+    let reset_token = issue_reset_token(&pool, user_uuid).await;
+
+    let req = actix_test::TestRequest::patch()
+        .uri("/api/auth/password")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .set_json(json!({ "current_password": "Pass1234", "new_password": "NewPass5678" }))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 200);
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/auth/password/reset")
+        .set_json(json!({ "token": reset_token, "new_password": "AnotherPass9" }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_ne!(
+        resp.status(),
+        200,
+        "a reset link issued before the password changed must not still work"
     );
 }
