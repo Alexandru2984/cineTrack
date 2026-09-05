@@ -513,12 +513,33 @@ async fn export_account_data(
     .fetch_all(&mut *tx)
     .await?;
 
+    // The envelope, not just the plaintext column.
+    //
+    // An encrypted message has `body` NULL — the content is the ciphertext and
+    // the fields needed to open it. Exporting only `body` produced a file where
+    // every encrypted conversation was a list of nulls, which is the opposite
+    // of what somebody downloading their data before deleting the account is
+    // asking for. Hex rather than raw bytes so the file stays JSON.
+    //
+    // The private key is deliberately not here. It is wrapped by a password and
+    // a recovery code the member holds; putting it in a plain download would
+    // turn one leaked file into the whole history.
     let direct_messages = sqlx::query_scalar::<_, serde_json::Value>(
         r#"SELECT jsonb_build_object(
             'id', message.id,
             'direction', CASE WHEN message.sender_id = $1 THEN 'sent' ELSE 'received' END,
             'peer_username', peer.username,
             'body', message.body,
+            'encrypted', message.ciphertext IS NOT NULL,
+            'envelope', CASE WHEN message.ciphertext IS NULL THEN NULL ELSE jsonb_build_object(
+                'ciphertext', encode(message.ciphertext, 'hex'),
+                'nonce', encode(message.nonce, 'hex'),
+                'sender_ephemeral_key', encode(message.sender_ephemeral_key, 'hex'),
+                'sender_copy', encode(message.sender_copy, 'hex'),
+                'sender_signing_key', encode(message.sender_signing_key, 'hex'),
+                'franking_commitment', encode(message.franking_commitment, 'hex'),
+                'franking_signature', encode(message.franking_signature, 'hex')
+            ) END,
             'read_at', message.read_at,
             'created_at', message.created_at
         )
