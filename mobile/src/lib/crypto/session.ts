@@ -108,6 +108,35 @@ export async function setupIdentity(userId: string, password: string): Promise<S
  *  Returns whether it happened. A device that does not hold the key cannot
  *  re-seal it, and that is a real outcome the caller has to be able to report
  *  rather than an error to swallow. */
+/// Seal the identity under a new password, without sending it anywhere.
+///
+/// The caller hands the result to whichever request is authorised to store it.
+/// Re-sealing used to be its own call made straight after a password change —
+/// which revokes the token that would have carried it, so it could not
+/// authenticate and failed silently, leaving the backup sealed under a password
+/// nobody would use again.
+export async function sealBackupForPassword(
+  identity: IdentityKeyPair,
+  password: string,
+): Promise<{
+  password_wrapped_key: string;
+  password_kdf_salt: string;
+  password_kdf: { memory_kib: number; iterations: number; parallelism: number };
+}> {
+  const salt = randomSalt(SALT_BYTES);
+  return {
+    password_wrapped_key: toHex(
+      wrapIdentity(identity, deriveWrappingKey(password, salt, DEFAULT_KDF_COST)),
+    ),
+    password_kdf_salt: toHex(salt),
+    password_kdf: {
+      memory_kib: DEFAULT_KDF_COST.memoryKib,
+      iterations: DEFAULT_KDF_COST.iterations,
+      parallelism: DEFAULT_KDF_COST.parallelism,
+    },
+  };
+}
+
 export async function rewrapBackup(
   identity: IdentityKeyPair | null,
   newPassword: string,

@@ -13870,3 +13870,169 @@ async fn changing_a_password_cancels_a_reset_link_in_flight() {
         "a reset link issued before the password changed must not still work"
     );
 }
+
+/// Changing a password must re-seal the identity backup, not try to afterwards.
+///
+/// M01 from the September audit. Both clients sent `PATCH /auth/password` and
+/// then `PUT /encryption/keys/backup`. The first call revokes every token
+/// including the one making it, so the second could not authenticate; the error
+/// was swallowed and the backup stayed sealed under the password nobody would
+/// use again. Nothing looked wrong until somebody restored on a new device and
+/// their new password did not open it.
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn changing_a_password_reseals_the_key_backup_in_one_transaction() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (token, _, user_id) =
+        register_user(&app, "resealuser", "reseal@mailbox.dev", "Pass1234").await;
+    let user_uuid = Uuid::parse_str(&user_id).unwrap();
+
+    let req = actix_test::TestRequest::put()
+        .uri("/api/encryption/keys")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .set_json(publish_keys_body(&"1".repeat(64)))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 200);
+
+    let sealed_before = sqlx::query_scalar::<_, Vec<u8>>(
+        "SELECT password_wrapped_key FROM user_key_backups WHERE user_id = $1",
+    )
+    .bind(user_uuid)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    // The change carries the new envelope, the way a client that cannot make a
+    // second authenticated call has to.
+    let req = actix_test::TestRequest::patch()
+        .uri("/api/auth/password")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .set_json(json!({
+            "current_password": "Pass1234",
+            "new_password": "NewPass5678",
+            "key_backup": {
+                "password_wrapped_key": "ab".repeat(48),
+                "password_kdf_salt": "cd".repeat(16),
+                "password_kdf": { "memory_kib": 65536, "iterations": 3, "parallelism": 1 },
+            }
+        }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200, "the password change should succeed");
+
+    let sealed_after = sqlx::query_scalar::<_, Vec<u8>>(
+        "SELECT password_wrapped_key FROM user_key_backups WHERE user_id = $1",
+    )
+    .bind(user_uuid)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_ne!(
+        sealed_before, sealed_after,
+        "the backup is still sealed under the old password"
+    );
+    assert_eq!(sealed_after, hex::decode("ab".repeat(48)).unwrap());
+
+    // And it committed with the change, not beside it: the sessions really are
+    // gone, so there was no second authenticated call available to make.
+    let live = sqlx::query_scalar::<_, i64>(
+        "SELECT count(*) FROM refresh_tokens WHERE user_id = $1 AND revoked_at IS NULL",
+    )
+    .bind(user_uuid)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(live, 0);
+}
+
+/// Replacing the key backup must cost more than a stolen access token.
+///
+/// M16. The route validated the shape of the blob and nothing else, so any live
+/// token could overwrite the only copy a password can open — sabotaging
+/// restoration for an account whose identity it never held.
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn replacing_the_key_backup_needs_the_account_password() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (token, _, user_id) =
+        register_user(&app, "backupuser", "backup@mailbox.dev", "Pass1234").await;
+    let user_uuid = Uuid::parse_str(&user_id).unwrap();
+
+    let req = actix_test::TestRequest::put()
+        .uri("/api/encryption/keys")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .set_json(publish_keys_body(&"1".repeat(64)))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 200);
+
+    let original = sqlx::query_scalar::<_, Vec<u8>>(
+        "SELECT password_wrapped_key FROM user_key_backups WHERE user_id = $1",
+    )
+    .bind(user_uuid)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    let sabotage = json!({
+        "password_wrapped_key": "ff".repeat(48),
+        "password_kdf_salt": "ee".repeat(16),
+        "password_kdf": { "memory_kib": 65536, "iterations": 3, "parallelism": 1 },
+    });
+
+    // A live token and no password: this used to succeed.
+    let req = actix_test::TestRequest::put()
+        .uri("/api/encryption/keys/backup")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .set_json(sabotage.clone())
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_ne!(
+        resp.status(),
+        204,
+        "a stolen access token must not be able to replace the key backup"
+    );
+
+    // A wrong password is refused too, so the check is the password and not the
+    // presence of the field.
+    let mut wrong = sabotage.clone();
+    wrong["current_password"] = json!("AttackerPass9");
+    let req = actix_test::TestRequest::put()
+        .uri("/api/encryption/keys/backup")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .set_json(wrong)
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_ne!(actix_test::call_service(&app, req).await.status(), 204);
+
+    // Nothing was written by either attempt.
+    let after = sqlx::query_scalar::<_, Vec<u8>>(
+        "SELECT password_wrapped_key FROM user_key_backups WHERE user_id = $1",
+    )
+    .bind(user_uuid)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        original, after,
+        "a refused request still changed the backup"
+    );
+
+    // With the password, the owner can still rotate it.
+    let mut allowed = sabotage;
+    allowed["current_password"] = json!("Pass1234");
+    let req = actix_test::TestRequest::put()
+        .uri("/api/encryption/keys/backup")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .set_json(allowed)
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 204);
+}

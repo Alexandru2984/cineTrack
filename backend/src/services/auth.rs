@@ -456,10 +456,12 @@ pub async fn change_password(
     config: &Config,
     security: &SecurityContext<'_>,
     user_id: Uuid,
-    current_password: &str,
-    new_password: &str,
-    totp_code: Option<&str>,
+    request: &crate::dto::auth::ChangePasswordRequest,
 ) -> Result<(), AppError> {
+    let current_password = request.current_password.as_str();
+    let new_password = request.new_password.as_str();
+    let totp_code = request.totp_code.as_deref();
+    let key_backup = request.key_backup.as_ref();
     let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = $1")
         .bind(user_id)
         .fetch_optional(pool)
@@ -476,6 +478,43 @@ pub async fn change_password(
         .bind(&new_hash)
         .execute(&mut *tx)
         .await?;
+
+    // The identity backup is re-sealed here, in the same transaction, because
+    // this request is the last moment the caller is authenticated: the
+    // revocation below invalidates the very token that carried it. Sent
+    // afterwards it could not authenticate, failed silently, and left the
+    // backup sealed under the password nobody would use again — discovered only
+    // by somebody restoring on a new device and finding the new password did
+    // not work.
+    if let Some(backup) = key_backup {
+        backup
+            .password_kdf
+            .validate_cost()
+            .map_err(|error| AppError::BadRequest(format!("{error:?}")))?;
+        let wrapped = hex::decode(&backup.password_wrapped_key)
+            .map_err(|_| AppError::BadRequest("Invalid wrapped key encoding".to_string()))?;
+        let salt = hex::decode(&backup.password_kdf_salt)
+            .map_err(|_| AppError::BadRequest("Invalid salt encoding".to_string()))?;
+        sqlx::query(
+            r#"UPDATE user_key_backups SET
+                password_wrapped_key = $2,
+                password_kdf_salt = $3,
+                password_kdf_memory_kib = $4,
+                password_kdf_iterations = $5,
+                password_kdf_parallelism = $6,
+                updated_at = NOW()
+            WHERE user_id = $1"#,
+        )
+        .bind(user_id)
+        .bind(&wrapped)
+        .bind(&salt)
+        .bind(backup.password_kdf.memory_kib)
+        .bind(backup.password_kdf.iterations)
+        .bind(backup.password_kdf.parallelism)
+        .execute(&mut *tx)
+        .await?;
+    }
+
     sqlx::query(
         "UPDATE refresh_tokens SET revoked_at = NOW() WHERE user_id = $1 AND revoked_at IS NULL",
     )

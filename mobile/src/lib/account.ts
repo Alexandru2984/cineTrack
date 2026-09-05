@@ -1,5 +1,5 @@
 import { apiRequest } from '@/lib/api';
-import { rewrapBackup } from '@/lib/crypto/session';
+import { sealBackupForPassword } from '@/lib/crypto/session';
 import { useEncryptionStore } from '@/store/encryption';
 import { ApiError, rawRequest } from '@/lib/http';
 import { readRefreshToken } from '@/lib/secure-session';
@@ -95,28 +95,23 @@ export async function changeAccountPassword(
   totpCode?: string,
 ) {
   const code = totpCode?.trim();
+
+  // Sealed before the request and carried by it. Sending it afterwards could
+  // not work: the change revokes the token that would authorise it, so the
+  // follow-up failed silently and the backup stayed sealed under the old
+  // password — found only by somebody restoring on a new device.
+  const identity = useEncryptionStore.getState().identity;
+  const keyBackup = identity ? await sealBackupForPassword(identity, newPassword) : undefined;
+
   await apiRequest<{ message: string }>('/auth/password', {
     method: 'PATCH',
     body: {
       current_password: currentPassword,
       new_password: newPassword,
       ...(code ? { totp_code: code } : {}),
+      ...(keyBackup ? { key_backup: keyBackup } : {}),
     },
   });
-
-  // Re-seal the encryption key here, in the one moment both halves exist: the
-  // key is in memory and the new password is in hand. It cannot wait, because
-  // the next line ends the session.
-  //
-  // Failure is not allowed to undo a password change that already succeeded.
-  // The recovery code still opens the backup, so the cost of giving up here is
-  // one confusing restore, against reporting a password change as failed when
-  // it was not.
-  try {
-    await rewrapBackup(useEncryptionStore.getState().identity, newPassword);
-  } catch {
-    // Deliberately swallowed; see above.
-  }
 
   await clearLocalSession();
 }
