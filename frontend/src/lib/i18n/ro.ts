@@ -286,6 +286,8 @@ export const ro: Dictionary = {
     lockedPreview: 'Blocat',
     undecryptable: 'Acest mesaj nu poate fi deschis pe acest dispozitiv',
     encryptedLabel: 'Criptat cap-coadă',
+    unplaceableKey:
+      'Mesajul este semnat cu o cheie pe care nu o putem asocia acestui cont. Este ascuns până alegi să îl arăți; asta se întâmplă și legitim, după ce cineva își rotește cheile.',
     notFromSender:
       'Acest mesaj nu a fost semnat de acest cont. Este ascuns pentru că s-ar putea să nu fie de la el.',
     malformedMessage:

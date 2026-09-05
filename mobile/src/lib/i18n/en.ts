@@ -87,6 +87,8 @@ export const en = {
     lockedPreview: 'Locked',
     undecryptable: 'This message cannot be opened on this device',
     encryptedLabel: 'End-to-end encrypted',
+    unplaceableKey:
+      'This message is signed with a key we cannot place against this account. It is hidden until you choose to show it; that happens legitimately after someone rotates their keys.',
     notFromSender:
       'This message was not signed by this account. It is hidden because it may not be from them.',
     malformedMessage:
