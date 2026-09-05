@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import api from '@/lib/api';
+import api, { endSession } from '@/lib/api';
 import { rewrapBackup } from '@/lib/crypto/session';
 import { useAuthStore } from '@/store/auth';
 import { useEncryptionStore } from '@/store/encryption';
@@ -51,9 +51,7 @@ export function useLogin() {
 export function useLogout() {
   const logout = useAuthStore((s) => s.logout);
   return useMutation({
-    mutationFn: async () => {
-      await api.post('/auth/logout').catch(() => {});
-    },
+    mutationFn: endSession,
     onSuccess: () => logout(),
   });
 }
