@@ -498,12 +498,20 @@ async fn list_security_activity(
 
 async fn revoke_session(
     pool: web::Data<PgPool>,
+    config: web::Data<Config>,
     req: HttpRequest,
     path: web::Path<uuid::Uuid>,
 ) -> Result<HttpResponse, AppError> {
     let user_id = require_auth(&req).await?;
     let client = client_info(&req);
-    services::auth::revoke_session(pool.get_ref(), &client, user_id, path.into_inner()).await?;
+    services::auth::revoke_session(
+        pool.get_ref(),
+        config.get_ref(),
+        &client,
+        user_id,
+        path.into_inner(),
+    )
+    .await?;
     Ok(HttpResponse::Ok().json(serde_json::json!({"message": "Session revoked"})))
 }
 

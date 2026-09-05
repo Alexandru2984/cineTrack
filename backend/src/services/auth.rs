@@ -1,6 +1,6 @@
 use chrono::{Duration, Utc};
 use rand::TryRng;
-use sqlx::PgPool;
+use sqlx::{PgPool, Postgres, Transaction};
 use std::time::Duration as StdDuration;
 use tokio::time::Instant;
 use uuid::Uuid;
@@ -323,6 +323,7 @@ pub async fn refresh_token(
         // token they already hold is what they are using right now. Cut it off
         // in the same transaction, or the theft we just detected keeps working
         // for another fifteen minutes.
+        cancel_pending_credential_actions(&mut tx, stored.user_id).await?;
         revocation::revoke_user(&mut tx, stored.user_id).await?;
         tx.commit().await?;
         crate::metrics::record_security_event(crate::metrics::SecurityEvent::RefreshTokenReuse);
@@ -332,6 +333,30 @@ pub async fn refresh_token(
     }
 
     if stored.revoked_at.is_some() {
+        tx.commit().await?;
+        return Err(AppError::Unauthorized("Invalid refresh token".to_string()));
+    }
+
+    // The row can look live and still belong to a session the owner ended.
+    // Revocation updates every row of the family, but a rotation committing
+    // alongside it inserts a successor that statement never saw, so the family
+    // verdict is recorded separately and checked here — before anything is
+    // issued, inside the transaction holding this row.
+    let family_revoked = sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS (
+             SELECT 1 FROM revoked_refresh_families
+             WHERE user_id = $1 AND family_id = $2
+         )",
+    )
+    .bind(stored.user_id)
+    .bind(stored.family_id)
+    .fetch_one(&mut *tx)
+    .await?;
+    if family_revoked {
+        sqlx::query("UPDATE refresh_tokens SET revoked_at = NOW() WHERE id = $1")
+            .bind(stored.id)
+            .execute(&mut *tx)
+            .await?;
         tx.commit().await?;
         return Err(AppError::Unauthorized("Invalid refresh token".to_string()));
     }
@@ -457,16 +482,14 @@ pub async fn change_password(
     .bind(user_id)
     .execute(&mut *tx)
     .await?;
-    sqlx::query(
-        "UPDATE password_reset_tokens SET consumed_at = NOW()
-         WHERE user_id = $1 AND consumed_at IS NULL",
-    )
-    .bind(user_id)
-    .execute(&mut *tx)
-    .await?;
     // Changing a password after a compromise has to end the attacker's access
     // immediately. Revoking only the refresh tokens would leave whatever access
     // token they already hold working until it expired.
+    //
+    // Reset links were already cancelled here; that statement moved into the
+    // helper, which also covers the pending email change this path used to
+    // leave standing.
+    cancel_pending_credential_actions(&mut tx, user_id).await?;
     revocation::revoke_user(&mut tx, user_id).await?;
     security_activity::record_in_transaction(
         &mut tx,
@@ -629,6 +652,7 @@ pub async fn reset_password(
     .await?;
     // A reset is the recovery path for an account someone else controls, so it
     // has to take the access tokens too, not just the refresh tokens.
+    cancel_pending_credential_actions(&mut tx, stored.user_id).await?;
     revocation::revoke_user(&mut tx, stored.user_id).await?;
     security_activity::record_in_transaction(
         &mut tx,
@@ -1544,8 +1568,45 @@ pub async fn list_sessions_for_refresh_token(
 
 /// Revoke a single session by id. Scoped to the owner so one user cannot revoke
 /// another's session; a missing/foreign id yields NotFound (no enumeration).
+/// Cancel every pending action that an older credential authorised.
+///
+/// H03 from the September audit. Changing or resetting a password revoked
+/// sessions but left `email_change_tokens` alone, so a link requested with the
+/// old password stayed valid across the recovery meant to end the compromise.
+/// Confirming it afterwards moved the account's email — and with it, the
+/// recovery address — to whoever asked for it.
+///
+/// Runs inside the caller's transaction, so the credential change and the
+/// cancellation commit together or not at all. A partial version of this would
+/// be worse than none: it would report a recovery that had not fully happened.
+async fn cancel_pending_credential_actions(
+    tx: &mut Transaction<'_, Postgres>,
+    user_id: Uuid,
+) -> Result<(), AppError> {
+    sqlx::query(
+        "UPDATE email_change_tokens SET consumed_at = NOW()
+         WHERE user_id = $1 AND consumed_at IS NULL",
+    )
+    .bind(user_id)
+    .execute(&mut **tx)
+    .await?;
+
+    // The other direction, and the audit is right that it matters: a reset link
+    // already sent to the address being replaced must not survive the move.
+    sqlx::query(
+        "UPDATE password_reset_tokens SET consumed_at = NOW()
+         WHERE user_id = $1 AND consumed_at IS NULL",
+    )
+    .bind(user_id)
+    .execute(&mut **tx)
+    .await?;
+
+    Ok(())
+}
+
 pub async fn revoke_session(
     pool: &PgPool,
+    config: &Config,
     client: &ClientInfo,
     user_id: Uuid,
     session_id: Uuid,
@@ -1554,10 +1615,14 @@ pub async fn revoke_session(
     // `session_id` addresses one refresh_tokens row, but revocation addresses
     // the family that row belongs to — that is the identity the access token
     // carries, and the one that survives rotation.
+    //
+    // The row is resolved to a family and nothing more. It is deliberately not
+    // required to be live: the interface lists sessions, the device rotates,
+    // and the owner then clicks revoke on a row that has since been consumed.
+    // Refusing that click was the bug — it reported success while revoking a
+    // link the device had already replaced.
     let family_id = sqlx::query_scalar::<_, Uuid>(
-        "UPDATE refresh_tokens SET revoked_at = NOW()
-         WHERE id = $1 AND user_id = $2 AND revoked_at IS NULL
-         RETURNING family_id",
+        "SELECT family_id FROM refresh_tokens WHERE id = $1 AND user_id = $2",
     )
     .bind(session_id)
     .bind(user_id)
@@ -1567,6 +1632,49 @@ pub async fn revoke_session(
     let Some(family_id) = family_id else {
         return Err(AppError::NotFound("Session not found".to_string()));
     };
+
+    // Consumed is not the same as ended, and the difference is the whole fix.
+    // A row the device has already rotated past is a live session addressed by
+    // an older name — revoke it. A family that has already been revoked has
+    // nothing left to end, and saying so is the existing contract.
+    let already_revoked = sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS (
+             SELECT 1 FROM revoked_refresh_families
+             WHERE user_id = $1 AND family_id = $2
+         )",
+    )
+    .bind(user_id)
+    .bind(family_id)
+    .fetch_one(&mut *tx)
+    .await?;
+    if already_revoked {
+        return Err(AppError::NotFound("Session not found".to_string()));
+    }
+
+    // Every link in the chain, not the one that was named.
+    sqlx::query(
+        "UPDATE refresh_tokens SET revoked_at = NOW()
+         WHERE user_id = $1 AND family_id = $2 AND revoked_at IS NULL",
+    )
+    .bind(user_id)
+    .bind(family_id)
+    .execute(&mut *tx)
+    .await?;
+
+    // And durably, because a rotation committing right now inserts a successor
+    // the statement above could not see. Rotation checks this before issuing.
+    sqlx::query(
+        "INSERT INTO revoked_refresh_families (user_id, family_id, expires_at)
+         VALUES ($1, $2, NOW() + make_interval(days => $3::int))
+         ON CONFLICT (user_id, family_id) DO UPDATE
+             SET revoked_at = NOW(), expires_at = EXCLUDED.expires_at",
+    )
+    .bind(user_id)
+    .bind(family_id)
+    .bind(i32::try_from(config.jwt_refresh_expiry_days).unwrap_or(90))
+    .execute(&mut *tx)
+    .await?;
+
     revocation::revoke_sessions(&mut tx, &[family_id]).await?;
     security_activity::record_in_transaction(
         &mut tx,
