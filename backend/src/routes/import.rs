@@ -282,6 +282,18 @@ async fn start_import(
 ) -> Result<HttpResponse, AppError> {
     let user_id = require_auth(&req).await?;
 
+    // The slot is taken before a byte is read, not after the payload has been
+    // buffered and parsed.
+    //
+    // Two slots bounded the *work*, but each request could hold 24 MiB of body
+    // plus its parsed form before ever asking for one, so the memory ceiling
+    // was set by how many uploads arrived at once rather than by anything here.
+    // The container has 512 MiB. Refusing early costs a caller one retry;
+    // refusing late costs everybody the process.
+    let permit = Arc::clone(&IMPORT_SLOTS).try_acquire_owned().map_err(|_| {
+        AppError::TooManyRequests("The import service is busy; try again later".to_string())
+    })?;
+
     let mut shows_bytes: Option<Vec<u8>> = None;
     let mut movies_bytes: Option<Vec<u8>> = None;
     let mut rewatch_bytes: Option<Vec<u8>> = None;
@@ -368,10 +380,6 @@ async fn start_import(
         .map_err(|_| AppError::BadRequest("Import is too large".to_string()))?;
     quota::ensure_tracking_capacity(tracking_count, incoming_titles)?;
     quota::ensure_history_capacity(history_count, incoming_history_events)?;
-
-    let permit = Arc::clone(&IMPORT_SLOTS).try_acquire_owned().map_err(|_| {
-        AppError::TooManyRequests("The import service is busy; try again later".to_string())
-    })?;
 
     // One non-failed import per user keeps history idempotent. The partial
     // unique index makes this reservation atomic across concurrent requests.

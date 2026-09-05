@@ -1,3 +1,5 @@
+use std::sync::LazyLock;
+
 use anyhow::Context;
 use aws_sdk_s3::config::{
     Credentials, Region, RequestChecksumCalculation, ResponseChecksumValidation,
@@ -5,10 +7,26 @@ use aws_sdk_s3::config::{
 use aws_sdk_s3::primitives::ByteStream;
 use aws_sdk_s3::Client;
 use aws_smithy_types::timeout::TimeoutConfig;
+use tokio::sync::Semaphore;
 
 use crate::config::R2Config;
 
 pub const AVATAR_EXTENSIONS: &[&str] = &["png", "jpg", "webp", "gif"];
+
+/// How many object reads may be in flight at once.
+///
+/// Each one holds its whole object in memory — up to `MAX_AVATAR_BYTES` or
+/// `MAX_POSTER_BYTES` — and the per-object limit says nothing about how many
+/// arrive together. The API container has 512 MiB, so a grid of cards on a
+/// cold cache could ask for more of it than exists. Eight is roughly 120 MiB
+/// at the largest allowed object, which leaves the rest of the process room.
+///
+/// Waiting is the right behaviour here rather than refusing: these are image
+/// reads behind a cache, and a short queue is invisible where a 503 is not.
+const CONCURRENT_OBJECT_READS: usize = 8;
+
+static OBJECT_READ_SLOTS: LazyLock<Semaphore> =
+    LazyLock::new(|| Semaphore::new(CONCURRENT_OBJECT_READS));
 
 /// Thin wrapper over a Cloudflare R2 (S3-compatible) bucket. Cheap to clone.
 #[derive(Clone)]
@@ -68,6 +86,13 @@ impl StorageService {
     }
 
     pub async fn get(&self, key: &str, max_bytes: usize) -> anyhow::Result<Option<Vec<u8>>> {
+        // Held for the whole read, including the body collection below, because
+        // that is the part that holds the object in memory.
+        let _slot = OBJECT_READ_SLOTS
+            .acquire()
+            .await
+            .context("object read budget closed")?;
+
         let output = match self
             .client
             .get_object()
@@ -103,7 +128,10 @@ impl StorageService {
         if bytes.len() > max_bytes {
             anyhow::bail!("R2 object exceeds the allowed size");
         }
-        Ok(Some(bytes.to_vec()))
+        // `into()` rather than `to_vec()`: the aggregated body is the only owner
+        // here, so this hands the buffer over instead of copying it a second
+        // time. At fifteen megabytes the difference is worth the word.
+        Ok(Some(bytes.into()))
     }
 
     pub async fn delete(&self, key: &str) -> anyhow::Result<()> {
