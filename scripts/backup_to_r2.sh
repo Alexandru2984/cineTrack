@@ -20,8 +20,17 @@ BACKUP_PREFIX="${BACKUP_PREFIX:-backups/}"
 STATE_DIR="${BACKUP_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/cinetrack}"
 LOCK_FILE="${LOCK_FILE:-$STATE_DIR/backup.lock}"
 METRICS_FILE="${BACKUP_METRICS_FILE:-$STATE_DIR/backup.prom}"
-REQUIRE_ENCRYPTION="${REQUIRE_ENCRYPTED_BACKUPS:-false}"
-REQUIRE_DEDICATED_CREDENTIALS="${REQUIRE_DEDICATED_BACKUP_CREDENTIALS:-false}"
+# Both default to on. They used to default to off, which meant the safe
+# configuration was the one an operator had to remember to ask for: a missing
+# Age recipient produced a readable archive with a warning nobody reads, and a
+# missing dedicated key silently fell back to the application's own — the key an
+# attacker who reached the app already holds, in the bucket holding the
+# backups. Failing the run is the louder and cheaper failure.
+#
+# Set either to false deliberately, and only for a run where the weaker
+# guarantee is understood.
+REQUIRE_ENCRYPTION="${REQUIRE_ENCRYPTED_BACKUPS:-true}"
+REQUIRE_DEDICATED_CREDENTIALS="${REQUIRE_DEDICATED_BACKUP_CREDENTIALS:-true}"
 RCLONE_CONFIG_FILE="${BACKUP_RCLONE_CONFIG:-${RCLONE_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/rclone/rclone.conf}}"
 
 umask 077

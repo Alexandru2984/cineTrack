@@ -14063,6 +14063,64 @@ async fn replacing_the_key_backup_needs_the_account_password() {
     assert_eq!(actix_test::call_service(&app, req).await.status(), 204);
 }
 
+/// The public avatar route has to reach the keys uploads actually write.
+///
+/// Uploads moved to `avatars/{user}/{nonce}.ext` so a private profile's avatar
+/// could not be fetched by anyone who had seen the account id. The route still
+/// matched a single path segment, so it stopped matching them entirely: the
+/// object was there, the row pointed at it, and the proxy answered an empty 404
+/// from the router before any handler ran. Every avatar uploaded after that
+/// change was unreachable wherever no separate bucket domain is configured.
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn the_avatar_route_reaches_both_key_shapes() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+
+    // Neither object exists and storage is not configured in tests, so the
+    // interesting difference is not the status but whether a handler ran at
+    // all: the router's own 404 carries no body, and every handler here answers
+    // with a JSON error.
+    for uri in [
+        // What earlier uploads wrote, still referenced by rows nobody replaced.
+        "/api/assets/avatars/11111111-1111-4111-8111-111111111111.jpg",
+        // What uploads write now.
+        "/api/assets/avatars/11111111-1111-4111-8111-111111111111\
+         /22222222-2222-4222-8222-222222222222.jpg",
+    ] {
+        let uri: String = uri.split_whitespace().collect();
+        let req = actix_test::TestRequest::get()
+            .uri(&uri)
+            .peer_addr(peer_addr())
+            .to_request();
+        let resp = actix_test::call_service(&app, req).await;
+        let body = actix_test::read_body(resp).await;
+        assert!(
+            !body.is_empty(),
+            "no handler ran for {uri}: the router refused it before the key was ever validated"
+        );
+    }
+
+    // And the tail match did not open the prefix: a key that is not two UUIDs
+    // is still refused.
+    for uri in [
+        "/api/assets/avatars/11111111-1111-4111-8111-111111111111/../posters/w500/x.jpg",
+        "/api/assets/avatars/not-a-uuid/22222222-2222-4222-8222-222222222222.jpg",
+        "/api/assets/avatars/11111111-1111-4111-8111-111111111111/a/b.jpg",
+    ] {
+        let req = actix_test::TestRequest::get()
+            .uri(uri)
+            .peer_addr(peer_addr())
+            .to_request();
+        let status = actix_test::call_service(&app, req).await.status();
+        assert!(
+            status.is_client_error(),
+            "{uri} should be refused, got {status}"
+        );
+    }
+}
+
 /// The same rule about unaired episodes, whichever route is used.
 ///
 /// L02 from the September audit. The calendar and season routes refuse an

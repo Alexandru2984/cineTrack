@@ -6,7 +6,9 @@
 > application's key gets `403 AccessDenied` listing the backup bucket, and the
 > backup key gets `403` listing the application bucket. `REQUIRE_ENCRYPTED_BACKUPS`
 > and `REQUIRE_DEDICATED_BACKUP_CREDENTIALS` are both `true`, and every archive
-> in the bucket is `.age`.
+> in the bucket is `.age`. Since then both also *default* to `true` in the
+> script, so a run that loses those variables fails instead of quietly
+> producing a readable archive with the application's own key.
 >
 > The section below describes the state this replaced. It is kept because the
 > reasoning still explains *why* the separation matters — but it is history, not
