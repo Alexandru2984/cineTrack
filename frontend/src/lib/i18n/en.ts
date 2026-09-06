@@ -301,14 +301,14 @@ export const en = {
     setupTitle: 'Turn on end-to-end encryption',
     setupBody:
       'Your messages will be encrypted on your device and readable only by you and the person you write to. Văzute will store them without being able to read them.',
+    setupHint:
+      'You will be given a recovery code. It is the only thing that unlocks your key on another device, and nobody else has a copy — not even us.',
     setupAction: 'Set up encryption',
     password: 'Your account password',
-    passwordHint:
-      'Used to protect your key so you can restore it on another device. It is never sent anywhere.',
     working: 'Working…',
     recoveryTitle: 'Save your recovery code',
     recoveryBody:
-      'This code restores your messages if you forget your password. It is shown once and nobody else has a copy — not even us. Store it somewhere safe.',
+      'This code is the only thing that unlocks your messages on another device. It is shown once and nobody else has a copy — not even us. Store it somewhere safe.',
     recoveryConfirm: 'I have saved it',
     copy: 'Copy',
     copied: 'Copied',
@@ -324,6 +324,20 @@ export const en = {
     unavailable:
       'This browser cannot store encryption keys, so encrypted messaging is unavailable here. A private window often causes this.',
     failed: 'Encryption could not be set up',
+    passwordUnavailable:
+      'Your account no longer keeps a copy that your password opens. Use your recovery code.',
+    rotateTitle: 'Recovery code',
+    rotateBody:
+      'Replace it if you think somebody else has seen it. The old code stops working immediately.',
+    rotateUpgradeBody:
+      'Your key is also stored in a second copy that your account password opens — and your password reaches our servers every time you sign in. Save a new recovery code and that copy is deleted, leaving nothing here we could open.',
+    rotateAction: 'Generate a new code',
+    rotateLocked:
+      'This device does not hold your key, so it cannot seal it under a new code. Unlock it here first.',
+    rotateFailed: 'The code could not be replaced. Check your password and try again.',
+    newCodeTitle: 'Your new recovery code',
+    newCodeBody:
+      'The old code no longer works. This one is shown once and nobody else has a copy — not even us. Store it somewhere safe.',
     settingsTitle: 'Message encryption',
     settingsAbsent:
       'Set it up here and it is ready before your first conversation. Without it, messages are stored in a form Văzute can read.',
@@ -602,7 +616,7 @@ export const en = {
       'Material changes receive a new version and may require renewed acceptance before community features can be used. Romanian law applies where permitted, without removing mandatory protections available in your country. If one provision is unenforceable, the remaining provisions continue to apply.',
     terms10Title: 'Direct messages',
     terms10Body:
-      'Direct messages are available only between accounts that follow each other. When both accounts have set up encryption, messages between them are end-to-end encrypted: Văzute stores the ciphertext and does not read it. Until then, messages are stored in a form Văzute can read, so do not use them for secrets or sensitive information. Either participant may report a received message; for an encrypted message the reporter discloses that message and proof of who wrote it, and for any report the content and relevant account context may be reviewed for safety. Losing both your password and your recovery code means losing access to encrypted messages, because nobody else holds a key to them. Blocking or ending a mutual follow stops new messages, while existing history may remain visible to both participants until an account is deleted or the service applies a lawful retention measure.',
+      'Direct messages are available only between accounts that follow each other. When both accounts have set up encryption, messages between them are end-to-end encrypted: Văzute stores the ciphertext and does not read it. Until then, messages are stored in a form Văzute can read, so do not use them for secrets or sensitive information. Either participant may report a received message; for an encrypted message the reporter discloses that message and proof of who wrote it, and for any report the content and relevant account context may be reviewed for safety. Losing your recovery code means losing access to encrypted messages, because nobody else holds a key to them — not even Văzute. Blocking or ending a mutual follow stops new messages, while existing history may remain visible to both participants until an account is deleted or the service applies a lawful retention measure.',
     guidelinesTitle: 'Community Guidelines',
     guidelinesIntro:
       'Văzute should be a safe place to share viewing activity and lists. These rules apply to usernames, bios, avatars, public lists, direct messages, and every community interaction.',
@@ -737,7 +751,7 @@ export const en = {
     data7: 'Release alerts, when enabled: an Expo push token, platform, app version, time-zone offset, enablement time, and a short-lived delivery record containing the relevant title and release.',
     data8: 'Community safety data: blocked-account relationships, submitted report reason and optional details, a server-side snapshot of the reported profile or public list, report status, and accountable moderator decision notes.',
     data9: 'Direct-message data: sender and recipient, delivery and read timestamps, and a random idempotency identifier used to prevent duplicate sends. Message text is stored in readable form only until both accounts have set up encryption; after that Văzute stores ciphertext it cannot read. A reported plaintext message is copied into the safety report for review; a reported encrypted message is disclosed by the reporter, together with the key that proves what the sender wrote.',
-    data10: 'Encryption key material, when encryption is set up: your public keys and their fingerprint, and two copies of your private key sealed by your password and by your recovery code. Văzute stores the sealed copies and cannot open either — losing both secrets means losing access to encrypted messages.',
+    data10: 'Encryption key material, when encryption is set up: your public keys and their fingerprint, and one copy of your private key sealed by your recovery code. That code is generated on your device and never sent to Văzute, so the sealed copy is one Văzute cannot open — and losing the code means losing access to encrypted messages. Accounts set up before September 2026 may still hold a second copy sealed by the account password; saving a new recovery code in settings deletes it.',
     s3Title: 'How data is used',
     use1: 'Data is used to authenticate accounts, synchronize the library across devices, build calendars and statistics, provide social features and direct messages, deliver password-reset and account-security messages, send release alerts requested by the user, prevent abuse, diagnose failures, and protect the service. For users in the EEA, these activities rely on performance of the service contract and legitimate interests in security and reliability. Văzute does not sell personal data or use advertising or behavioral analytics. Cloudflare Web Analytics provides aggregate web-traffic measurements at the network edge.',
     use2: 'Văzute keeps self-hosted aggregate counters for a fixed set of successful feature actions, such as viewing the annual recap or starting an import. These counters are retained for 30 days and contain no user or device identifier, IP address, search, title, per-action timestamp, or other free-form property. The counters alone cannot identify an account or device.',

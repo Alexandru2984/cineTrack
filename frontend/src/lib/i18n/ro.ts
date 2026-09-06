@@ -303,14 +303,14 @@ export const ro: Dictionary = {
     setupTitle: 'Activează criptarea cap-coadă',
     setupBody:
       'Mesajele tale vor fi criptate pe dispozitiv și vor putea fi citite doar de tine și de persoana căreia îi scrii. Văzute le va stoca fără să le poată citi.',
+    setupHint:
+      'Vei primi un cod de recuperare. E singurul lucru care îți deblochează cheia pe alt dispozitiv, iar nimeni altcineva nu are o copie — nici noi.',
     setupAction: 'Activează criptarea',
     password: 'Parola contului tău',
-    passwordHint:
-      'Folosită ca să-ți protejeze cheia, ca s-o poți restaura pe alt dispozitiv. Nu este trimisă nicăieri.',
     working: 'Se lucrează…',
     recoveryTitle: 'Salvează codul de recuperare',
     recoveryBody:
-      'Codul îți restaurează mesajele dacă îți uiți parola. Se afișează o singură dată și nimeni altcineva nu are o copie — nici noi. Păstrează-l la loc sigur.',
+      'Codul e singurul lucru care îți deblochează mesajele pe alt dispozitiv. Se afișează o singură dată și nimeni altcineva nu are o copie — nici noi. Păstrează-l la loc sigur.',
     recoveryConfirm: 'L-am salvat',
     copy: 'Copiază',
     copied: 'Copiat',
@@ -327,6 +327,20 @@ export const ro: Dictionary = {
     unavailable:
       'Acest browser nu poate stoca chei de criptare, deci mesajele criptate nu sunt disponibile aici. De obicei o fereastră privată cauzează asta.',
     failed: 'Criptarea nu a putut fi activată',
+    passwordUnavailable:
+      'Contul tău nu mai păstrează o copie pe care parola s-o poată deschide. Folosește codul de recuperare.',
+    rotateTitle: 'Cod de recuperare',
+    rotateBody:
+      'Înlocuiește-l dacă crezi că l-a văzut altcineva. Codul vechi încetează să funcționeze imediat.',
+    rotateUpgradeBody:
+      'Cheia ta e stocată și într-o a doua copie, pe care o deschide parola contului — iar parola ajunge la serverele noastre de fiecare dată când te autentifici. Salvează un cod de recuperare nou și copia aceea se șterge, ca să nu mai rămână aici nimic ce am putea deschide.',
+    rotateAction: 'Generează un cod nou',
+    rotateLocked:
+      'Acest dispozitiv nu îți deține cheia, deci nu o poate sigila cu un cod nou. Deblocheaz-o mai întâi aici.',
+    rotateFailed: 'Codul nu a putut fi înlocuit. Verifică parola și încearcă din nou.',
+    newCodeTitle: 'Noul tău cod de recuperare',
+    newCodeBody:
+      'Codul vechi nu mai funcționează. Acesta se afișează o singură dată și nimeni altcineva nu are o copie — nici noi. Păstrează-l la loc sigur.',
     settingsTitle: 'Criptarea mesajelor',
     settingsAbsent:
       'Activeaz-o aici și e gata înainte de prima conversație. Fără ea, mesajele sunt stocate într-o formă pe care Văzute o poate citi.',
@@ -605,7 +619,7 @@ export const ro: Dictionary = {
       'Modificările importante primesc o versiune nouă și pot necesita o nouă acceptare înainte de folosirea funcțiilor comunitare. Se aplică legea română unde este permis, fără eliminarea protecțiilor obligatorii din țara ta. Dacă o prevedere nu poate fi aplicată, celelalte rămân valabile.',
     terms10Title: 'Mesaje directe',
     terms10Body:
-      'Mesajele directe sunt disponibile numai între conturi care se urmăresc reciproc. Când ambele conturi au criptarea activată, mesajele dintre ele sunt criptate cap-coadă: Văzute stochează textul cifrat și nu îl citește. Până atunci, mesajele sunt stocate într-o formă pe care Văzute o poate citi, așadar nu le folosi pentru secrete sau informații sensibile. Oricare participant poate raporta un mesaj primit; pentru un mesaj criptat, cel care raportează dezvăluie acel mesaj și dovada cine l-a scris, iar pentru orice raportare conținutul și contextul relevant al contului pot fi analizate pentru siguranță. Dacă pierzi și parola, și codul de recuperare, pierzi accesul la mesajele criptate, pentru că nimeni altcineva nu are o cheie pentru ele. Blocarea sau încetarea urmăririi reciproce oprește mesajele noi, iar istoricul existent poate rămâne vizibil ambilor participanți până la ștergerea unui cont sau aplicarea de către serviciu a unei măsuri legale de păstrare.',
+      'Mesajele directe sunt disponibile numai între conturi care se urmăresc reciproc. Când ambele conturi au criptarea activată, mesajele dintre ele sunt criptate cap-coadă: Văzute stochează textul cifrat și nu îl citește. Până atunci, mesajele sunt stocate într-o formă pe care Văzute o poate citi, așadar nu le folosi pentru secrete sau informații sensibile. Oricare participant poate raporta un mesaj primit; pentru un mesaj criptat, cel care raportează dezvăluie acel mesaj și dovada cine l-a scris, iar pentru orice raportare conținutul și contextul relevant al contului pot fi analizate pentru siguranță. Dacă pierzi codul de recuperare, pierzi accesul la mesajele criptate, pentru că nimeni altcineva nu are o cheie pentru ele — nici Văzute. Blocarea sau încetarea urmăririi reciproce oprește mesajele noi, iar istoricul existent poate rămâne vizibil ambilor participanți până la ștergerea unui cont sau aplicarea de către serviciu a unei măsuri legale de păstrare.',
     guidelinesTitle: 'Regulile comunității',
     guidelinesIntro:
       'Văzute trebuie să fie un loc sigur pentru distribuirea activității de vizionare și a listelor. Regulile se aplică numelor de utilizator, biografiilor, avatarurilor, listelor publice, mesajelor directe și tuturor interacțiunilor comunitare.',
@@ -740,7 +754,7 @@ export const ro: Dictionary = {
     data7: 'Alerte de lansare, când sunt activate: un token push Expo, platforma, versiunea aplicației, decalajul de fus orar, momentul activării și o înregistrare temporară de livrare care conține titlul și lansarea relevante.',
     data8: 'Date privind siguranța comunității: relații între conturile blocate, motivul și detaliile opționale ale raportării, o captură creată de server a profilului sau listei publice raportate, starea raportării și notele justificabile ale deciziei de moderare.',
     data9: 'Date din mesaje directe: expeditorul și destinatarul, momentele trimiterii și citirii și un identificator aleatoriu de idempotență folosit pentru prevenirea trimiterilor duplicate. Textul mesajului este stocat într-o formă lizibilă doar până când ambele conturi au criptarea activată; după aceea Văzute stochează un text cifrat pe care nu îl poate citi. Un mesaj text raportat este copiat în raportarea de siguranță pentru analiză; un mesaj criptat raportat este dezvăluit de cel care raportează, împreună cu cheia care dovedește ce a scris expeditorul.',
-    data10: 'Material criptografic, când criptarea este activată: cheile tale publice și amprenta lor, plus două copii ale cheii tale private sigilate cu parola ta și cu codul de recuperare. Văzute stochează copiile sigilate și nu poate deschide niciuna — dacă pierzi ambele secrete, pierzi accesul la mesajele criptate.',
+    data10: 'Material criptografic, când criptarea este activată: cheile tale publice și amprenta lor, plus o copie a cheii tale private sigilată cu codul de recuperare. Codul e generat pe dispozitivul tău și nu ajunge niciodată la Văzute, deci copia sigilată e una pe care Văzute nu o poate deschide — iar dacă pierzi codul, pierzi accesul la mesajele criptate. Conturile create înainte de septembrie 2026 pot păstra încă o a doua copie sigilată cu parola contului; salvarea unui cod de recuperare nou din setări o șterge.',
     s3Title: 'Cum sunt folosite datele',
     use1: 'Datele sunt folosite pentru autentificarea conturilor, sincronizarea bibliotecii între dispozitive, construirea calendarelor și a statisticilor, oferirea funcțiilor sociale și a mesajelor directe, livrarea mesajelor de resetare a parolei și de securitate a contului, trimiterea alertelor de lansare cerute de utilizator, prevenirea abuzului, diagnosticarea erorilor și protejarea serviciului. Pentru utilizatorii din SEE, aceste activități se bazează pe executarea contractului de serviciu și pe interesele legitime de securitate și fiabilitate. Văzute nu vinde date personale și nu folosește publicitate sau analiză comportamentală. Cloudflare Web Analytics oferă măsurători agregate ale traficului web la marginea rețelei.',
     use2: 'Văzute păstrează contoare agregate găzduite pe cont propriu pentru un set fix de acțiuni reușite, precum vizualizarea retrospectivei anuale sau începerea unui import. Aceste contoare se păstrează 30 de zile și nu conțin niciun identificator de utilizator sau dispozitiv, adresă IP, căutare, titlu, moment per acțiune sau altă proprietate liberă. Contoarele singure nu pot identifica un cont sau un dispozitiv.',

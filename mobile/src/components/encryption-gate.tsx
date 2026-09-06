@@ -5,10 +5,18 @@ import { Pressable, StyleSheet, TextInput, View } from 'react-native';
 import { AppButton } from '@/components/app-button';
 import { AppText } from '@/components/app-text';
 import { radius, spacing } from '@/constants/theme';
-import { useRestoreEncryption, useSetupEncryption } from '@/hooks/use-encryption';
+import {
+  usePasswordCopyState,
+  useRestoreEncryption,
+  useSetupEncryption,
+} from '@/hooks/use-encryption';
 import { useT } from '@/hooks/use-t';
 import { useTheme } from '@/hooks/use-theme';
-import { KeyMismatchError, WrongSecretError } from '@/lib/crypto/session';
+import {
+  KeyMismatchError,
+  PasswordRestoreUnavailableError,
+  WrongSecretError,
+} from '@/lib/crypto/session';
 import { useEncryptionStore } from '@/store/encryption';
 
 function Panel({ children }: { children: React.ReactNode }) {
@@ -24,7 +32,17 @@ function Panel({ children }: { children: React.ReactNode }) {
  *
  *  Nobody else has a copy — that is the point, and it is also why this stays on
  *  screen until the user says they have it rather than passing by in a toast. */
-function RecoveryCode({ code, onDone }: { code: string; onDone: () => void }) {
+export function RecoveryCode({
+  code,
+  onDone,
+  title,
+  body,
+}: {
+  code: string;
+  onDone: () => void;
+  title?: string;
+  body?: string;
+}) {
   const t = useT();
   const theme = useTheme();
 
@@ -32,10 +50,10 @@ function RecoveryCode({ code, onDone }: { code: string; onDone: () => void }) {
     <Panel>
       <View style={styles.heading}>
         <KeyRound color={theme.text} size={16} />
-        <AppText variant="section">{t('encryption.recoveryTitle')}</AppText>
+        <AppText variant="section">{title ?? t('encryption.recoveryTitle')}</AppText>
       </View>
       <AppText variant="caption" style={{ color: theme.mutedText }}>
-        {t('encryption.recoveryBody')}
+        {body ?? t('encryption.recoveryBody')}
       </AppText>
       <AppText selectable style={[styles.code, { backgroundColor: theme.background }]}>
         {code}
@@ -48,10 +66,15 @@ function RecoveryCode({ code, onDone }: { code: string; onDone: () => void }) {
   );
 }
 
+/** Turning encryption on.
+ *
+ *  It used to ask for the account password, to seal a second copy of the key
+ *  with it. Nothing is derived from the password any more, so there is nothing
+ *  to ask for: the button generates the identity and the recovery code that
+ *  opens it. */
 function SetupForm() {
   const t = useT();
   const theme = useTheme();
-  const [password, setPassword] = useState('');
   const [recoveryCode, setRecoveryCode] = useState<string | null>(null);
   const setup = useSetupEncryption();
 
@@ -68,17 +91,8 @@ function SetupForm() {
       <AppText variant="caption" style={{ color: theme.mutedText }}>
         {t('encryption.setupBody')}
       </AppText>
-      <TextInput
-        accessibilityLabel={t('encryption.password')}
-        placeholder={t('encryption.password')}
-        placeholderTextColor={theme.mutedText}
-        secureTextEntry
-        value={password}
-        onChangeText={setPassword}
-        style={[styles.input, { borderColor: theme.border, color: theme.text }]}
-      />
       <AppText variant="caption" style={{ color: theme.mutedText }}>
-        {t('encryption.passwordHint')}
+        {t('encryption.setupHint')}
       </AppText>
       {setup.isError ? (
         <AppText variant="caption" style={{ color: theme.danger }}>
@@ -87,13 +101,10 @@ function SetupForm() {
       ) : null}
       <AppButton
         label={setup.isPending ? t('encryption.working') : t('encryption.setupAction')}
-        disabled={!password || setup.isPending}
+        disabled={setup.isPending}
         onPress={() =>
-          setup.mutate(password, {
-            onSuccess: (result) => {
-              setPassword('');
-              setRecoveryCode(result.recoveryCode);
-            },
+          setup.mutate(undefined, {
+            onSuccess: (result) => setRecoveryCode(result.recoveryCode),
           })
         }
       />
@@ -104,13 +115,25 @@ function SetupForm() {
 function RestoreForm() {
   const t = useT();
   const theme = useTheme();
-  const [kind, setKind] = useState<'password' | 'recovery'>('password');
+  // The password is offered only to accounts that still have a copy it opens —
+  // everyone set up since the copy was removed, and everyone who has completed
+  // the upgrade, has the recovery code and nothing else. Offering a choice that
+  // cannot work would send people hunting for a password that was never going
+  // to unlock anything.
+  const { data: hasPasswordCopy = false } = usePasswordCopyState();
+  const [kind, setKind] = useState<'password' | 'recovery'>('recovery');
   const [secret, setSecret] = useState('');
   const restore = useRestoreEncryption();
+
+  const options = hasPasswordCopy ? (['password', 'recovery'] as const) : (['recovery'] as const);
+  const active = hasPasswordCopy ? kind : 'recovery';
 
   const errorMessage = () => {
     if (restore.error instanceof WrongSecretError) return t('encryption.wrongSecret');
     if (restore.error instanceof KeyMismatchError) return t('encryption.keyMismatch');
+    if (restore.error instanceof PasswordRestoreUnavailableError) {
+      return t('encryption.passwordUnavailable');
+    }
     return t('encryption.failed');
   };
 
@@ -124,11 +147,11 @@ function RestoreForm() {
         {t('encryption.restoreBody')}
       </AppText>
       <View style={styles.actions}>
-        {(['password', 'recovery'] as const).map((option) => (
+        {options.map((option) => (
           <Pressable
             key={option}
             accessibilityRole="button"
-            accessibilityState={{ selected: kind === option }}
+            accessibilityState={{ selected: active === option }}
             onPress={() => {
               setKind(option);
               setSecret('');
@@ -137,7 +160,7 @@ function RestoreForm() {
             style={({ pressed }) => [
               styles.choice,
               {
-                borderColor: kind === option ? theme.primary : theme.border,
+                borderColor: active === option ? theme.primary : theme.border,
                 opacity: pressed ? 0.6 : 1,
               },
             ]}
@@ -152,11 +175,13 @@ function RestoreForm() {
       </View>
       <TextInput
         accessibilityLabel={
-          kind === 'password' ? t('encryption.password') : t('encryption.recoveryCode')
+          active === 'password' ? t('encryption.password') : t('encryption.recoveryCode')
         }
-        placeholder={kind === 'password' ? t('encryption.password') : t('encryption.recoveryCode')}
+        placeholder={
+          active === 'password' ? t('encryption.password') : t('encryption.recoveryCode')
+        }
         placeholderTextColor={theme.mutedText}
-        secureTextEntry={kind === 'password'}
+        secureTextEntry={active === 'password'}
         autoCapitalize="none"
         value={secret}
         onChangeText={setSecret}
@@ -170,7 +195,9 @@ function RestoreForm() {
       <AppButton
         label={restore.isPending ? t('encryption.working') : t('encryption.restoreAction')}
         disabled={!secret || restore.isPending}
-        onPress={() => restore.mutate({ secret, kind }, { onSuccess: () => setSecret('') })}
+        onPress={() =>
+          restore.mutate({ secret, kind: active }, { onSuccess: () => setSecret('') })
+        }
       />
     </Panel>
   );

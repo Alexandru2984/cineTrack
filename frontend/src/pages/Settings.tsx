@@ -118,9 +118,9 @@ function SignOutCard() {
         <ChevronRight className="h-4 w-4" aria-hidden="true" />
       </button>
       {/* The shared-device answer, offered rather than assumed. Signing out
-          keeps the message keys so the next sign-in does not ask for a password
-          or a recovery code; on a borrowed browser that hands the next person
-          every past message. */}
+          keeps the message keys so the next sign-in does not ask for a recovery
+          code; on a borrowed browser that hands the next person every past
+          message. */}
       <button
         type="button"
         disabled={logout.isPending}

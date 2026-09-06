@@ -546,11 +546,15 @@ export interface KeyStatus {
 }
 
 export interface KeyBackup {
-  password_wrapped_key: string;
-  password_kdf_salt: string;
-  password_kdf: KdfParameters;
+  /** Present only for accounts set up before the password copy was removed,
+   *  and only until their owner saves a fresh recovery code. A client offers
+   *  the password option exactly when this is here. */
+  password_wrapped_key: string | null;
+  password_kdf_salt: string | null;
+  password_kdf: KdfParameters | null;
   recovery_wrapped_key: string;
   recovery_kdf_salt: string;
+  recovery_kdf: KdfParameters;
   updated_at: string;
 }
 

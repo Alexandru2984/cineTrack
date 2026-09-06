@@ -1,6 +1,4 @@
 import { apiRequest } from '@/lib/api';
-import { sealBackupForPassword } from '@/lib/crypto/session';
-import { useEncryptionStore } from '@/store/encryption';
 import { ApiError, rawRequest } from '@/lib/http';
 import { readRefreshToken } from '@/lib/secure-session';
 import { clearLocalSession } from '@/lib/session';
@@ -96,20 +94,17 @@ export async function changeAccountPassword(
 ) {
   const code = totpCode?.trim();
 
-  // Sealed before the request and carried by it. Sending it afterwards could
-  // not work: the change revokes the token that would authorise it, so the
-  // follow-up failed silently and the backup stayed sealed under the old
-  // password — found only by somebody restoring on a new device.
-  const identity = useEncryptionStore.getState().identity;
-  const keyBackup = identity ? await sealBackupForPassword(identity, newPassword) : undefined;
-
+  // Nothing to re-seal. The stored copy of the identity is sealed under the
+  // recovery code, which this change has no bearing on. It used to be sealed
+  // under the password as well, and carrying a fresh wrap in this request was
+  // the only way to keep that copy openable — the change revokes the token a
+  // follow-up call would have needed.
   await apiRequest<{ message: string }>('/auth/password', {
     method: 'PATCH',
     body: {
       current_password: currentPassword,
       new_password: newPassword,
       ...(code ? { totp_code: code } : {}),
-      ...(keyBackup ? { key_backup: keyBackup } : {}),
     },
   });
 

@@ -137,14 +137,14 @@ export const ro: Dictionary = {
     setupTitle: 'Activează criptarea cap-coadă',
     setupBody:
       'Mesajele tale vor fi criptate pe dispozitiv și vor putea fi citite doar de tine și de persoana căreia îi scrii. Văzute le va stoca fără să le poată citi.',
+    setupHint:
+      'Vei primi un cod de recuperare. E singurul lucru care îți deblochează cheia pe alt dispozitiv, iar nimeni altcineva nu are o copie — nici noi.',
     setupAction: 'Activează criptarea',
     password: 'Parola contului tău',
-    passwordHint:
-      'Folosită ca să-ți protejeze cheia, ca s-o poți restaura pe alt dispozitiv. Nu este trimisă nicăieri.',
     working: 'Se lucrează…',
     recoveryTitle: 'Salvează codul de recuperare',
     recoveryBody:
-      'Codul îți restaurează mesajele dacă îți uiți parola. Se afișează o singură dată și nimeni altcineva nu are o copie — nici noi. Păstrează-l la loc sigur.',
+      'Codul e singurul lucru care îți deblochează mesajele pe alt dispozitiv. Se afișează o singură dată și nimeni altcineva nu are o copie — nici noi. Păstrează-l la loc sigur.',
     recoveryConfirm: 'L-am salvat',
     copy: 'Copiază',
     copied: 'Copiat',
@@ -161,6 +161,20 @@ export const ro: Dictionary = {
     unavailable:
       'Acest browser nu poate stoca chei de criptare, deci mesajele criptate nu sunt disponibile aici. De obicei o fereastră privată cauzează asta.',
     failed: 'Criptarea nu a putut fi activată',
+    passwordUnavailable:
+      'Contul tău nu mai păstrează o copie pe care parola s-o poată deschide. Folosește codul de recuperare.',
+    rotateTitle: 'Cod de recuperare',
+    rotateBody:
+      'Înlocuiește-l dacă crezi că l-a văzut altcineva. Codul vechi încetează să funcționeze imediat.',
+    rotateUpgradeBody:
+      'Cheia ta e stocată și într-o a doua copie, pe care o deschide parola contului — iar parola ajunge la serverele noastre de fiecare dată când te autentifici. Salvează un cod de recuperare nou și copia aceea se șterge, ca să nu mai rămână aici nimic ce am putea deschide.',
+    rotateAction: 'Generează un cod nou',
+    rotateLocked:
+      'Acest dispozitiv nu îți deține cheia, deci nu o poate sigila cu un cod nou. Deblocheaz-o mai întâi aici.',
+    rotateFailed: 'Codul nu a putut fi înlocuit. Verifică parola și încearcă din nou.',
+    newCodeTitle: 'Noul tău cod de recuperare',
+    newCodeBody:
+      'Codul vechi nu mai funcționează. Acesta se afișează o singură dată și nimeni altcineva nu are o copie — nici noi. Păstrează-l la loc sigur.',
     safetyNumber: 'Număr de siguranță',
     safetyNumberHint:
       'Compară-l cu cealaltă persoană pe alt canal. Numere identice înseamnă că nimeni nu stă între voi.',

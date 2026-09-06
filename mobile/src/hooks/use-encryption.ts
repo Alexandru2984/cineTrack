@@ -5,7 +5,9 @@ import { apiRequest } from '@/lib/api';
 import {
   fetchPeerKeys,
   loadStoredIdentity,
+  passwordCopyStillExists,
   restoreIdentity,
+  rotateRecoveryCode,
   setupIdentity,
 } from '@/lib/crypto/session';
 import { storageIsAvailable } from '@/lib/crypto/storage';
@@ -15,6 +17,7 @@ import type { KeyStatus, PeerPublicKeys } from '@/types';
 
 export const encryptionKeys = {
   status: ['encryption', 'status'] as const,
+  backup: ['encryption', 'backup'] as const,
   peer: (username: string) => ['encryption', 'peer', username.toLowerCase()] as const,
 };
 
@@ -100,13 +103,61 @@ export function useSetupEncryption() {
   const setIdentity = useEncryptionStore((state) => state.setIdentity);
 
   return useMutation({
-    mutationFn: async (password: string) => {
+    mutationFn: async () => {
       if (!userId) throw new Error('not-authenticated');
-      return setupIdentity(userId, password);
+      return setupIdentity(userId);
     },
     onSuccess: (result) => {
       setIdentity(result.identity, result.fingerprint);
       void queryClient.invalidateQueries({ queryKey: encryptionKeys.status });
+    },
+  });
+}
+
+/** Whether this account still carries the copy of its key that the password
+ *  opens.
+ *
+ *  Only accounts set up before that copy was removed do, and only until their
+ *  owner saves a fresh recovery code. Two screens need the answer — the restore
+ *  form, to decide whether to offer the password at all, and settings, to
+ *  decide whether to prompt for the upgrade — so it is asked once and cached.
+ *  Rotating the code invalidates it. */
+export function usePasswordCopyState() {
+  const authStatus = useAuthStore((state) => state.status);
+  const hasKeys = useKeyStatus().data?.has_keys ?? false;
+  return useQuery<boolean>({
+    queryKey: encryptionKeys.backup,
+    queryFn: passwordCopyStillExists,
+    enabled: hasLocalSession(authStatus) && hasKeys,
+    staleTime: Infinity,
+  });
+}
+
+/** Seal the identity under a brand-new recovery code and drop the password
+ *  copy.
+ *
+ *  The old code stops working as soon as this resolves, so the caller must show
+ *  the new one — there is no second chance to read it. */
+export function useRotateRecoveryCode() {
+  const queryClient = useQueryClient();
+  const identity = useEncryptionStore((state) => state.identity);
+
+  return useMutation({
+    mutationFn: async ({
+      currentPassword,
+      totpCode,
+    }: {
+      currentPassword: string;
+      totpCode?: string;
+    }) => {
+      // Only a device holding the key can seal it under a new code. This is
+      // reachable only when the store says the identity is here, but the check
+      // is what makes that a guarantee rather than an assumption.
+      if (!identity) throw new Error('identity-locked');
+      return rotateRecoveryCode(identity, currentPassword, totpCode);
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: encryptionKeys.backup });
     },
   });
 }

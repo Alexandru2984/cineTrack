@@ -9,10 +9,10 @@
  *  the user.
  *
  *  The alternative — keeping only the wrapped key and deriving the wrapping key
- *  from the password on every page load — would cost an Argon2id derivation and
- *  a password prompt per session. In practice that is not a stricter product,
- *  it is an abandoned one: people turn off the feature that asks them for a
- *  password ten times a day, and a feature nobody enables protects nothing.
+ *  from the recovery code on every page load — would cost an Argon2id
+ *  derivation and a prompt per session. In practice that is not a stricter
+ *  product, it is an abandoned one: people turn off the feature that asks them
+ *  for a code ten times a day, and a feature nobody enables protects nothing.
  *
  *  IndexedDB rather than localStorage for two reasons that do matter: it stores
  *  the raw bytes without a base64 round trip, and it is not swept up by the
@@ -122,8 +122,8 @@ export async function saveIdentity(
 /** Forget this account's keys on this device.
  *
  *  Not called on sign-out by default, and the comment here used to say it was.
- *  Signing out keeps the keys so the next sign-in does not need the password or
- *  the recovery code again — which is the right default on a device somebody
+ *  Signing out keeps the keys so the next sign-in does not need the recovery
+ *  code again — which is the right default on a device somebody
  *  owns, and the wrong one on a shared browser, where the next person can read
  *  every past message.
  *

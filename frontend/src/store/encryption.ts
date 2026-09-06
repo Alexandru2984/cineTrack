@@ -16,7 +16,7 @@ export type EncryptionStatus =
   /** Keys exist on this device and are usable. */
   | 'ready'
   /** The account has published keys but this device does not hold them. The
-   *  user must restore with their password or recovery code. */
+   *  user must restore with their recovery code. */
   | 'locked'
   /** The account has never set up encryption. */
   | 'absent'
@@ -35,8 +35,8 @@ interface EncryptionState {
    *  deliberate: records are keyed by user id and only ever loaded for the
    *  signed-in account, so another person signing in on the same browser
    *  cannot reach them — while the same person signing back in is not made to
-   *  retype a password to read their own history. Deleting the keys is for
-   *  when the user asks, which is a different action from signing out. */
+   *  retype a recovery code to read their own history. Deleting the keys is
+   *  for when the user asks, which is a different action from signing out. */
   clear: (userId: string | null) => Promise<void>;
 }
 
