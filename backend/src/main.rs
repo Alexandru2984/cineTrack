@@ -47,6 +47,7 @@ enum RunMode {
     HydrateCatalog,
     SyncReleaseSchedules,
     RepairCatalog,
+    RekeyAvatars,
     Migrate,
     CheckConfig,
     CheckSmtp,
@@ -128,13 +129,14 @@ async fn main() -> std::io::Result<()> {
         [argument] if argument == "--hydrate-catalog" => RunMode::HydrateCatalog,
         [argument] if argument == "--sync-release-schedules" => RunMode::SyncReleaseSchedules,
         [argument] if argument == "--repair-catalog" => RunMode::RepairCatalog,
+        [argument] if argument == "--rekey-avatars" => RunMode::RekeyAvatars,
         [argument] if argument == "--migrate" => RunMode::Migrate,
         [argument] if argument == "--check-config" => RunMode::CheckConfig,
         [argument] if argument == "--check-smtp" => RunMode::CheckSmtp,
         _ => {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
-                "supported arguments are --healthcheck, --hydrate-catalog, --sync-release-schedules, --repair-catalog, --migrate, --check-config and --check-smtp",
+                "supported arguments are --healthcheck, --hydrate-catalog, --sync-release-schedules, --repair-catalog, --rekey-avatars, --migrate, --check-config and --check-smtp",
             ));
         }
     };
@@ -262,6 +264,41 @@ async fn main() -> std::io::Result<()> {
             summary.failures,
             summary.skipped_locked,
         );
+        return Ok(());
+    }
+
+    if matches!(mode, RunMode::RekeyAvatars) {
+        // One-off, and idempotent, so it is safe to run again after a partial
+        // pass. Avatars written before uploads used a nonce sit at a key
+        // derived from the account id, which is not secret — so a private
+        // profile's picture was served to anyone who asked for the obvious URL.
+        let Some(r2) = config.r2.as_ref() else {
+            return Err(std::io::Error::other(
+                "R2 is not configured, so there is nothing to rekey",
+            ));
+        };
+        let storage = cinetrack::services::storage::StorageService::new(r2, &config.frontend_url)
+            .map_err(std::io::Error::other)?;
+        let outcome = cinetrack::services::avatar_rekey::rekey_guessable_avatars(&pool, &storage)
+            .await
+            .map_err(|error| {
+                log::error!("Avatar rekey failed: {error}");
+                std::io::Error::other("avatar rekey failed")
+            })?;
+        log::info!(
+            "Avatar rekey complete: examined={} moved={} skipped={} failed={}",
+            outcome.examined,
+            outcome.moved,
+            outcome.skipped,
+            outcome.failed,
+        );
+        if outcome.failed > 0 {
+            // A partial pass is not a success: the avatars that failed are the
+            // ones still reachable by guessing, which is the whole point.
+            return Err(std::io::Error::other(
+                "some avatars could not be moved; see the errors above",
+            ));
+        }
         return Ok(());
     }
 
