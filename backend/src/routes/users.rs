@@ -521,9 +521,9 @@ async fn export_account_data(
     // of what somebody downloading their data before deleting the account is
     // asking for. Hex rather than raw bytes so the file stays JSON.
     //
-    // The private key is deliberately not here. It is wrapped by a password and
-    // a recovery code the member holds; putting it in a plain download would
-    // turn one leaked file into the whole history.
+    // The private key is deliberately not here. It is wrapped by a recovery
+    // code the member holds and nobody else has; putting it in a plain download
+    // would turn one leaked file into the whole history.
     let direct_messages = sqlx::query_scalar::<_, serde_json::Value>(
         r#"SELECT jsonb_build_object(
             'id', message.id,

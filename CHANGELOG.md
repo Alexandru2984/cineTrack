@@ -19,9 +19,9 @@ and release versions follow semantic versioning.
 - Automated WCAG A/AA scans and WebKit/iPhone coverage in the web E2E gate.
 - End-to-end encrypted direct messages on web and mobile. Once both accounts
   have set up encryption, Văzute stores their messages without being able to
-  read them. Keys are generated on the device; the server holds two copies of
-  the private key sealed by the account password and by a recovery code shown
-  once, and can open neither. Losing both means losing access to encrypted
+  read them. Keys are generated on the device; the server holds one copy of the
+  private key, sealed by a recovery code that is generated on the device, shown
+  once, and never sent. Losing that code means losing access to encrypted
   history, because nobody else holds a key.
 - Safety numbers, so two people can confirm through another channel that the
   key directory gave each of them the right key.
@@ -64,6 +64,23 @@ and release versions follow semantic versioning.
 
 ### Security
 
+- The encrypted key backup is no longer sealed under the account password. It
+  used to be sealed twice — once under a recovery code the server never sees,
+  and once under a key derived from the account password, which the server
+  receives in plaintext on every sign-in. That second copy was one the server
+  could open, so "Văzute cannot read your messages" described how much work an
+  operator would have to do rather than what the protocol allowed. New accounts
+  store the recovery-code copy only. Accounts that already have the password
+  copy keep it until their owner saves a fresh recovery code from Settings →
+  Message encryption, which writes the new wrap and deletes the old copy in one
+  transaction; taking it away on deploy would have locked out anyone who had
+  mislaid their code. The cost is real and deliberate: restoring on a new device
+  now needs the recovery code, and a forgotten password is no longer a way back
+  in.
+- Changing a password no longer carries a re-sealed key backup. Nothing is
+  derived from the password any more, so there is nothing to re-seal — and the
+  step that used to fail silently, leaving a backup sealed under a password
+  nobody would use again, no longer exists.
 - Plain-text messages are refused once both accounts have published keys. The
   choice between plain text and an encrypted envelope is made by the client,
   which is the only side that knows whether it can encrypt — so the server

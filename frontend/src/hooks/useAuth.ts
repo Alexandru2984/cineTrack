@@ -1,6 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import api, { endSession } from '@/lib/api';
-import { sealBackupForPassword } from '@/lib/crypto/session';
 import { useAuthStore } from '@/store/auth';
 import { useEncryptionStore } from '@/store/encryption';
 import type { AuthResponse, SecurityActivity, Session, User } from '@/types';
@@ -54,8 +53,8 @@ export function useLogout() {
   const userId = useAuthStore((s) => s.user?.id ?? null);
   return useMutation({
     // `forgetKeys` is the shared-device answer. Keeping them is the default
-    // because forgetting costs a password or a recovery code on the next
-    // sign-in, which is the wrong tax on a device somebody owns — but leaving
+    // because forgetting costs a recovery code on the next sign-in, which is
+    // the wrong tax on a device somebody owns — but leaving
     // them behind on a borrowed browser hands the next person every past
     // message, so it has to be offered rather than decided here.
     mutationFn: async ({ forgetKeys = false }: { forgetKeys?: boolean } = {}) => {
@@ -211,22 +210,18 @@ export function useDisableTwoFactor() {
 
 export function useChangePassword() {
   const logout = useAuthStore((s) => s.logout);
-  const identity = useEncryptionStore((s) => s.identity);
   return useMutation({
     mutationFn: async (data: {
       current_password: string;
       new_password: string;
       totp_code?: string;
     }) => {
-      // Sealed before the request and carried by it. Sending it afterwards
-      // could not work: the change revokes the token that would authorise it,
-      // so the follow-up failed silently and the backup stayed sealed under the
-      // old password — found only by somebody restoring on a new device.
-      const key_backup = identity
-        ? await sealBackupForPassword(identity, data.new_password)
-        : undefined;
-
-      const res = await api.patch('/auth/password', { ...data, key_backup });
+      // Nothing to re-seal. The stored copy of the identity is sealed under the
+      // recovery code, which this change has no bearing on. It used to be
+      // sealed under the password as well, and carrying a fresh wrap in this
+      // request was the only way to keep that copy openable — the change
+      // revokes the token a follow-up call would have needed.
+      const res = await api.patch('/auth/password', data);
       return res.data as { message: string };
     },
     // The backend revokes every refresh token and clears the current cookie.

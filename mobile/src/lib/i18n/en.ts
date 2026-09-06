@@ -137,14 +137,14 @@ export const en = {
     setupTitle: 'Turn on end-to-end encryption',
     setupBody:
       'Your messages will be encrypted on your device and readable only by you and the person you write to. Văzute will store them without being able to read them.',
+    setupHint:
+      'You will be given a recovery code. It is the only thing that unlocks your key on another device, and nobody else has a copy — not even us.',
     setupAction: 'Set up encryption',
     password: 'Your account password',
-    passwordHint:
-      'Used to protect your key so you can restore it on another device. It is never sent anywhere.',
     working: 'Working…',
     recoveryTitle: 'Save your recovery code',
     recoveryBody:
-      'This code restores your messages if you forget your password. It is shown once and nobody else has a copy — not even us. Store it somewhere safe.',
+      'This code is the only thing that unlocks your messages on another device. It is shown once and nobody else has a copy — not even us. Store it somewhere safe.',
     recoveryConfirm: 'I have saved it',
     copy: 'Copy',
     copied: 'Copied',
@@ -160,6 +160,20 @@ export const en = {
     unavailable:
       'This browser cannot store encryption keys, so encrypted messaging is unavailable here. A private window often causes this.',
     failed: 'Encryption could not be set up',
+    passwordUnavailable:
+      'Your account no longer keeps a copy that your password opens. Use your recovery code.',
+    rotateTitle: 'Recovery code',
+    rotateBody:
+      'Replace it if you think somebody else has seen it. The old code stops working immediately.',
+    rotateUpgradeBody:
+      'Your key is also stored in a second copy that your account password opens — and your password reaches our servers every time you sign in. Save a new recovery code and that copy is deleted, leaving nothing here we could open.',
+    rotateAction: 'Generate a new code',
+    rotateLocked:
+      'This device does not hold your key, so it cannot seal it under a new code. Unlock it here first.',
+    rotateFailed: 'The code could not be replaced. Check your password and try again.',
+    newCodeTitle: 'Your new recovery code',
+    newCodeBody:
+      'The old code no longer works. This one is shown once and nobody else has a copy — not even us. Store it somewhere safe.',
     safetyNumber: 'Safety number',
     safetyNumberHint:
       'Compare this with the other person through another channel. Matching numbers mean nobody is sitting between you.',

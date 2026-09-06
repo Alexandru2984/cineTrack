@@ -6634,10 +6634,10 @@ async fn plaintext_is_refused_once_both_sides_have_keys() {
 #[actix_web::test]
 #[ignore = "requires test DB"]
 async fn rewrapping_the_backup_leaves_the_published_keys_alone() {
-    // A password change re-seals the same key under a new secret. Publishing
-    // replaces the key itself and bumps the generation so peers re-verify —
-    // announcing that here would send everybody to check a safety number that
-    // had not moved.
+    // Rotating the recovery code re-seals the same key under a new secret.
+    // Publishing replaces the key itself and bumps the generation so peers
+    // re-verify — announcing that here would send everybody to check a safety
+    // number that had not moved.
     let pool = setup_pool().await;
     clean_db(&pool).await;
     let app = actix_test::init_service(create_app(pool.clone())).await;
@@ -6668,11 +6668,11 @@ async fn rewrapping_the_backup_leaves_the_published_keys_alone() {
         .uri("/api/encryption/keys/backup")
         .insert_header(("Authorization", format!("Bearer {token}")))
         .set_json(json!({
-            "password_wrapped_key": "1a".repeat(64),
-            "password_kdf_salt": "2b".repeat(16),
-            "password_kdf": { "memory_kib": 19456, "iterations": 2, "parallelism": 1 },
-            // Replacing the backup destroys the only copy a password can open,
-            // so it costs more than a live token. See M16.
+            "recovery_wrapped_key": "1a".repeat(64),
+            "recovery_kdf_salt": "2b".repeat(16),
+            "recovery_kdf": { "memory_kib": 19456, "iterations": 2, "parallelism": 1 },
+            // Replacing the backup destroys the only copy there is, so it costs
+            // more than a live token. See M16.
             "current_password": "Pass1234",
         }))
         .peer_addr(peer_addr())
@@ -6691,11 +6691,9 @@ async fn rewrapping_the_backup_leaves_the_published_keys_alone() {
         "re-sealing must not look like a key rotation"
     );
 
-    // The password copy moved; the recovery copy did not. It is sealed under a
-    // code the password change has no bearing on, and rewriting it here could
-    // only lose it.
-    let backup: (Vec<u8>, Vec<u8>, Vec<u8>) = sqlx::query_as(
-        "SELECT password_wrapped_key, password_kdf_salt, recovery_wrapped_key
+    // The recovery copy moved, and no password copy appeared beside it.
+    let backup: (Vec<u8>, Vec<u8>, Option<Vec<u8>>) = sqlx::query_as(
+        "SELECT recovery_wrapped_key, recovery_kdf_salt, password_wrapped_key
          FROM user_key_backups WHERE user_id = $1",
     )
     .bind(user_id)
@@ -6704,7 +6702,10 @@ async fn rewrapping_the_backup_leaves_the_published_keys_alone() {
     .unwrap();
     assert_eq!(hex::encode(&backup.0), "1a".repeat(64));
     assert_eq!(hex::encode(&backup.1), "2b".repeat(16));
-    assert_eq!(hex::encode(&backup.2), "ee".repeat(64));
+    assert!(
+        backup.2.is_none(),
+        "nothing here should write a copy the account password opens"
+    );
 
     // And the change is visible to the person whose account it is.
     let kind: String = sqlx::query_scalar(
@@ -6732,11 +6733,11 @@ async fn rewrapping_without_a_backup_is_refused() {
         .uri("/api/encryption/keys/backup")
         .insert_header(("Authorization", format!("Bearer {token}")))
         .set_json(json!({
-            "password_wrapped_key": "1a".repeat(64),
-            "password_kdf_salt": "2b".repeat(16),
-            "password_kdf": { "memory_kib": 19456, "iterations": 2, "parallelism": 1 },
-            // Replacing the backup destroys the only copy a password can open,
-            // so it costs more than a live token. See M16.
+            "recovery_wrapped_key": "1a".repeat(64),
+            "recovery_kdf_salt": "2b".repeat(16),
+            "recovery_kdf": { "memory_kib": 19456, "iterations": 2, "parallelism": 1 },
+            // Replacing the backup destroys the only copy there is, so it costs
+            // more than a live token. See M16.
             "current_password": "Pass1234",
         }))
         .peer_addr(peer_addr())
@@ -7814,11 +7815,9 @@ fn publish_keys_body(fingerprint: &str) -> Value {
         "exchange_public_key": "aa".repeat(32),
         "signing_public_key": "bb".repeat(32),
         "key_fingerprint": fingerprint,
-        "password_wrapped_key": "cc".repeat(64),
-        "password_kdf_salt": "dd".repeat(16),
-        "password_kdf": { "memory_kib": 19456, "iterations": 2, "parallelism": 1 },
         "recovery_wrapped_key": "ee".repeat(64),
         "recovery_kdf_salt": "ff".repeat(16),
+        "recovery_kdf": { "memory_kib": 19456, "iterations": 2, "parallelism": 1 },
     })
 }
 
@@ -7929,8 +7928,12 @@ async fn a_key_backup_is_returned_only_to_its_owner() {
         .peer_addr(peer_addr())
         .to_request();
     let body: Value = actix_test::call_and_read_body_json(&app, req).await;
-    assert_eq!(body["password_wrapped_key"], "cc".repeat(64));
-    assert_eq!(body["password_kdf"]["memory_kib"], 19456);
+    assert_eq!(body["recovery_wrapped_key"], "ee".repeat(64));
+    assert_eq!(body["recovery_kdf"]["memory_kib"], 19456);
+    // Nothing sealed under the account password: an account set up now has one
+    // copy, and it is the one this server cannot open.
+    assert!(body["password_wrapped_key"].is_null());
+    assert!(body["password_kdf"].is_null());
 
     // Another account has its own (absent) backup, never this one's.
     let req = actix_test::TestRequest::get()
@@ -7995,7 +7998,7 @@ async fn weak_key_backup_parameters_are_refused() {
     let (token, _, _) = register_user(&app, "weakkdf", "weakkdf@mailbox.dev", "Pass1234").await;
 
     let mut body = publish_keys_body(&"5".repeat(64));
-    body["password_kdf"] = json!({ "memory_kib": 1024, "iterations": 1, "parallelism": 1 });
+    body["recovery_kdf"] = json!({ "memory_kib": 1024, "iterations": 1, "parallelism": 1 });
 
     let req = actix_test::TestRequest::put()
         .uri("/api/encryption/keys")
@@ -13897,17 +13900,17 @@ async fn changing_a_password_cancels_a_reset_link_in_flight() {
     );
 }
 
-/// Changing a password must re-seal the identity backup, not try to afterwards.
+/// Changing a password must leave the identity backup untouched.
 ///
-/// M01 from the September audit. Both clients sent `PATCH /auth/password` and
-/// then `PUT /encryption/keys/backup`. The first call revokes every token
-/// including the one making it, so the second could not authenticate; the error
-/// was swallowed and the backup stayed sealed under the password nobody would
-/// use again. Nothing looked wrong until somebody restored on a new device and
-/// their new password did not open it.
+/// M01 from the September audit, and its resolution. The backup used to be
+/// sealed under the password as well as the recovery code, so a password change
+/// had to carry a fresh envelope with it — the change revokes the token a
+/// follow-up call would have needed, and both clients were making that call and
+/// swallowing its failure. Nothing is derived from the password any more, so
+/// there is nothing left to re-seal and nothing left to get wrong.
 #[actix_web::test]
 #[ignore = "requires test DB"]
-async fn changing_a_password_reseals_the_key_backup_in_one_transaction() {
+async fn changing_a_password_leaves_the_key_backup_alone() {
     let pool = setup_pool().await;
     clean_db(&pool).await;
     let app = actix_test::init_service(create_app(pool.clone())).await;
@@ -13924,15 +13927,16 @@ async fn changing_a_password_reseals_the_key_backup_in_one_transaction() {
     assert_eq!(actix_test::call_service(&app, req).await.status(), 200);
 
     let sealed_before = sqlx::query_scalar::<_, Vec<u8>>(
-        "SELECT password_wrapped_key FROM user_key_backups WHERE user_id = $1",
+        "SELECT recovery_wrapped_key FROM user_key_backups WHERE user_id = $1",
     )
     .bind(user_uuid)
     .fetch_one(&pool)
     .await
     .unwrap();
 
-    // The change carries the new envelope, the way a client that cannot make a
-    // second authenticated call has to.
+    // An envelope is not accepted any more. `deny_unknown_fields` refuses the
+    // field outright, which is what makes an old client fail loudly instead of
+    // believing it re-sealed something.
     let req = actix_test::TestRequest::patch()
         .uri("/api/auth/password")
         .insert_header(("Authorization", format!("Bearer {token}")))
@@ -13947,24 +13951,34 @@ async fn changing_a_password_reseals_the_key_backup_in_one_transaction() {
         }))
         .peer_addr(peer_addr())
         .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 400);
+
+    let req = actix_test::TestRequest::patch()
+        .uri("/api/auth/password")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .set_json(json!({
+            "current_password": "Pass1234",
+            "new_password": "NewPass5678",
+        }))
+        .peer_addr(peer_addr())
+        .to_request();
     let resp = actix_test::call_service(&app, req).await;
     assert_eq!(resp.status(), 200, "the password change should succeed");
 
     let sealed_after = sqlx::query_scalar::<_, Vec<u8>>(
-        "SELECT password_wrapped_key FROM user_key_backups WHERE user_id = $1",
+        "SELECT recovery_wrapped_key FROM user_key_backups WHERE user_id = $1",
     )
     .bind(user_uuid)
     .fetch_one(&pool)
     .await
     .unwrap();
-    assert_ne!(
+    assert_eq!(
         sealed_before, sealed_after,
-        "the backup is still sealed under the old password"
+        "a password change must not touch a key it has no part in sealing"
     );
-    assert_eq!(sealed_after, hex::decode("ab".repeat(48)).unwrap());
 
-    // And it committed with the change, not beside it: the sessions really are
-    // gone, so there was no second authenticated call available to make.
+    // And the sessions really are gone, which is why a follow-up call could
+    // never have re-sealed anything in the first place.
     let live = sqlx::query_scalar::<_, i64>(
         "SELECT count(*) FROM refresh_tokens WHERE user_id = $1 AND revoked_at IS NULL",
     )
@@ -13999,7 +14013,7 @@ async fn replacing_the_key_backup_needs_the_account_password() {
     assert_eq!(actix_test::call_service(&app, req).await.status(), 200);
 
     let original = sqlx::query_scalar::<_, Vec<u8>>(
-        "SELECT password_wrapped_key FROM user_key_backups WHERE user_id = $1",
+        "SELECT recovery_wrapped_key FROM user_key_backups WHERE user_id = $1",
     )
     .bind(user_uuid)
     .fetch_one(&pool)
@@ -14007,9 +14021,9 @@ async fn replacing_the_key_backup_needs_the_account_password() {
     .unwrap();
 
     let sabotage = json!({
-        "password_wrapped_key": "ff".repeat(48),
-        "password_kdf_salt": "ee".repeat(16),
-        "password_kdf": { "memory_kib": 65536, "iterations": 3, "parallelism": 1 },
+        "recovery_wrapped_key": "ff".repeat(48),
+        "recovery_kdf_salt": "ee".repeat(16),
+        "recovery_kdf": { "memory_kib": 65536, "iterations": 3, "parallelism": 1 },
     });
 
     // A live token and no password: this used to succeed.
@@ -14040,7 +14054,7 @@ async fn replacing_the_key_backup_needs_the_account_password() {
 
     // Nothing was written by either attempt.
     let after = sqlx::query_scalar::<_, Vec<u8>>(
-        "SELECT password_wrapped_key FROM user_key_backups WHERE user_id = $1",
+        "SELECT recovery_wrapped_key FROM user_key_backups WHERE user_id = $1",
     )
     .bind(user_uuid)
     .fetch_one(&pool)
@@ -14119,6 +14133,143 @@ async fn the_avatar_route_reaches_both_key_shapes() {
             "{uri} should be refused, got {status}"
         );
     }
+}
+
+/// Setting up encryption must not leave behind a copy the server can open.
+///
+/// H01 from the September audit. The private key was sealed twice — once under
+/// the recovery code, once under a key derived from the account password. The
+/// password arrives here in plaintext on every sign-in, so the second copy was
+/// one this server could open at will, and the product's claim that it cannot
+/// read messages was a claim about effort rather than about the protocol.
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn publishing_keys_stores_no_copy_the_password_opens() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (token, _, user_id) =
+        register_user(&app, "onecopy", "onecopy@mailbox.dev", "Pass1234").await;
+    let user_uuid = Uuid::parse_str(&user_id).unwrap();
+
+    let req = actix_test::TestRequest::put()
+        .uri("/api/encryption/keys")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .set_json(publish_keys_body(&"1".repeat(64)))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 200);
+
+    let copies: (Option<Vec<u8>>, Vec<u8>) = sqlx::query_as(
+        "SELECT password_wrapped_key, recovery_wrapped_key
+         FROM user_key_backups WHERE user_id = $1",
+    )
+    .bind(user_uuid)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(
+        copies.0.is_none(),
+        "the copy the account password opens must not be written at all"
+    );
+    assert_eq!(hex::encode(&copies.1), "ee".repeat(64));
+
+    // And the route refuses to be talked back into writing one: an old client
+    // sending the fields it used to send fails loudly rather than silently
+    // reinstating what the audit was about.
+    let mut old_client = publish_keys_body(&"2".repeat(64));
+    old_client["password_wrapped_key"] = json!("cc".repeat(64));
+    old_client["password_kdf_salt"] = json!("dd".repeat(16));
+    old_client["password_kdf"] = json!({ "memory_kib": 19456, "iterations": 2, "parallelism": 1 });
+    old_client["current_password"] = json!("Pass1234");
+    let req = actix_test::TestRequest::put()
+        .uri("/api/encryption/keys")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .set_json(old_client)
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 400);
+}
+
+/// An account that predates the removal keeps its password copy until its owner
+/// has a recovery code they have actually saved — and loses it the moment they
+/// do.
+///
+/// Deleting it on deploy would have been the shorter change and the wrong one:
+/// somebody who set encryption up and mislaid their recovery code is relying on
+/// that copy right now, and taking it away would lock them out of their own
+/// history to close a finding they never heard about.
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn a_legacy_password_copy_survives_until_a_new_recovery_code_is_saved() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (token, _, user_id) =
+        register_user(&app, "legacycopy", "legacy@mailbox.dev", "Pass1234").await;
+    let user_uuid = Uuid::parse_str(&user_id).unwrap();
+
+    let req = actix_test::TestRequest::put()
+        .uri("/api/encryption/keys")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .set_json(publish_keys_body(&"1".repeat(64)))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 200);
+
+    // What such an account looks like: written by a client from before the
+    // change, which no route can produce any more.
+    sqlx::query(
+        "UPDATE user_key_backups SET
+            password_wrapped_key = $2, password_kdf_salt = $3,
+            password_kdf_memory_kib = 19456, password_kdf_iterations = 2,
+            password_kdf_parallelism = 1
+         WHERE user_id = $1",
+    )
+    .bind(user_uuid)
+    .bind(hex::decode("cc".repeat(64)).unwrap())
+    .bind(hex::decode("dd".repeat(16)).unwrap())
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // The client is told the copy is there, which is what makes it offer the
+    // password on the restore screen at all.
+    let req = actix_test::TestRequest::get()
+        .uri("/api/encryption/keys/backup")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let body: Value = actix_test::call_and_read_body_json(&app, req).await;
+    assert_eq!(body["password_wrapped_key"], "cc".repeat(64));
+    assert_eq!(body["password_kdf"]["iterations"], 2);
+
+    // Saving a new recovery code is the upgrade, and it takes the old copy with
+    // it in the same statement.
+    let req = actix_test::TestRequest::put()
+        .uri("/api/encryption/keys/backup")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .set_json(json!({
+            "recovery_wrapped_key": "9a".repeat(64),
+            "recovery_kdf_salt": "8b".repeat(16),
+            "recovery_kdf": { "memory_kib": 19456, "iterations": 2, "parallelism": 1 },
+            "current_password": "Pass1234",
+        }))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 204);
+
+    let req = actix_test::TestRequest::get()
+        .uri("/api/encryption/keys/backup")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let body: Value = actix_test::call_and_read_body_json(&app, req).await;
+    assert!(
+        body["password_wrapped_key"].is_null() && body["password_kdf"].is_null(),
+        "the upgrade must leave nothing the account password opens"
+    );
+    assert_eq!(body["recovery_wrapped_key"], "9a".repeat(64));
 }
 
 /// The same rule about unaired episodes, whichever route is used.

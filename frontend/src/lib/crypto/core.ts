@@ -412,7 +412,7 @@ export function decryptMessage(
   };
 }
 
-/** Derive the key that wraps a backup, from a password or a recovery code.
+/** Derive the key that wraps a backup, from the recovery code.
  *
  *  The cost is a parameter because it belongs to the backup being opened, not
  *  to the client opening it. Tests also lower it: the algorithm is identical at

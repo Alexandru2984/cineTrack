@@ -10,7 +10,7 @@ import api from '@/lib/api';
 import type { IdentityKeyPair, KdfCost } from '@/lib/crypto/core';
 import { deriveWrappingKeyOffThread } from '@/lib/crypto/derive';
 import { loadIdentity, saveIdentity } from '@/lib/crypto/storage';
-import type { KeyBackup, KeyStatus, PeerPublicKeys } from '@/types';
+import type { KdfParameters, KeyBackup, KeyStatus, PeerPublicKeys } from '@/types';
 
 const core = () => import('@/lib/crypto/core');
 
@@ -18,7 +18,7 @@ function randomSalt(saltBytes: number): Uint8Array {
   return crypto.getRandomValues(new Uint8Array(saltBytes));
 }
 
-function costFromApi(kdf: KeyBackup['password_kdf']): KdfCost {
+function costFromApi(kdf: KdfParameters): KdfCost {
   return {
     memoryKib: kdf.memory_kib,
     iterations: kdf.iterations,
@@ -29,20 +29,23 @@ function costFromApi(kdf: KeyBackup['password_kdf']): KdfCost {
 export interface SetupResult {
   identity: IdentityKeyPair;
   fingerprint: string;
-  /** Shown once and never recoverable afterwards. The server stores only what
-   *  this code wraps, so a user who loses both it and their password loses
+  /** Shown once and never recoverable afterwards. It is the only thing that
+   *  opens the stored copy of the private key, so a user who loses it loses
    *  their message history — which is the cost of the server not being able to
    *  read it. */
   recoveryCode: string;
 }
 
-/** Create an identity, publish its public half, and store two wrapped copies of
+/** Create an identity, publish its public half, and store one wrapped copy of
  *  its private half.
  *
- *  Two copies, not one, because the two failure modes are different: a
- *  forgotten password is common and recoverable, and a password change would
- *  otherwise destroy the backup. The recovery code survives both. */
-export async function setupIdentity(userId: string, password: string): Promise<SetupResult> {
+ *  One copy, under the recovery code. There used to be a second under a key
+ *  derived from the account password, which made losing the password
+ *  survivable — but the password reaches the server on every sign-in, so that
+ *  copy was one the server could open, and the promise that it cannot read
+ *  messages was not true of the protocol. The recovery code is generated here
+ *  and never leaves the device. */
+export async function setupIdentity(userId: string): Promise<SetupResult> {
   const {
     DEFAULT_KDF_COST,
     SALT_BYTES,
@@ -57,110 +60,87 @@ export async function setupIdentity(userId: string, password: string): Promise<S
   const recoveryCode = generateRecoveryCode();
   const fingerprint = computeFingerprint(identity.exchangePublicKey, identity.signingPublicKey);
 
-  const passwordSalt = randomSalt(SALT_BYTES);
   const recoverySalt = randomSalt(SALT_BYTES);
-
-  const [passwordKey, recoveryKey] = await Promise.all([
-    deriveWrappingKeyOffThread(password, passwordSalt, DEFAULT_KDF_COST),
-    deriveWrappingKeyOffThread(recoveryCode, recoverySalt, DEFAULT_KDF_COST),
-  ]);
+  const recoveryKey = await deriveWrappingKeyOffThread(
+    recoveryCode,
+    recoverySalt,
+    DEFAULT_KDF_COST,
+  );
 
   await api.put('/encryption/keys', {
     exchange_public_key: toHex(identity.exchangePublicKey),
     signing_public_key: toHex(identity.signingPublicKey),
     key_fingerprint: fingerprint,
-    password_wrapped_key: toHex(
-      wrapIdentity(identity, passwordKey),
-    ),
-    password_kdf_salt: toHex(passwordSalt),
-    password_kdf: {
+    recovery_wrapped_key: toHex(wrapIdentity(identity, recoveryKey)),
+    recovery_kdf_salt: toHex(recoverySalt),
+    recovery_kdf: {
       memory_kib: DEFAULT_KDF_COST.memoryKib,
       iterations: DEFAULT_KDF_COST.iterations,
       parallelism: DEFAULT_KDF_COST.parallelism,
     },
-    recovery_wrapped_key: toHex(
-      wrapIdentity(identity, recoveryKey),
-    ),
-    recovery_kdf_salt: toHex(recoverySalt),
-    // Not sent. This is a first publication, where the server ignores it — and
-    // it used to travel in the same request as the wrapped key, its salt and its
-    // KDF cost, which is everything needed to unwrap the identity. An audit
-    // recovered both private keys from this one captured body.
-    //
-    // Removing it is not the fix. The same password reaches the server at sign
-    // in, so a hostile server can still pair it with the stored envelope; that
-    // is a protocol change, tracked separately. This only stops handing over
-    // the whole set in a single request that never needed it.
   });
 
   await saveIdentity(userId, identity, fingerprint);
   return { identity, fingerprint, recoveryCode };
 }
 
-/** Re-seal the private key under a new password.
- *
- *  Called when the account password changes. Without it the stored copy still
- *  opens under the old password, so the next device to restore is refused with
- *  the password its owner believes is correct — recoverable through the
- *  recovery code, but bewildering, and nothing on that screen suggests reaching
- *  for it.
- *
- *  Only the password copy moves. The recovery copy is sealed under a code this
- *  change has no bearing on, and the identity keys themselves are untouched, so
- *  no peer is told to re-verify a safety number that has not moved.
- *
- *  Returns whether it happened. A device that does not hold the key cannot
- *  re-seal it, and that is a real outcome the caller has to be able to report
- *  rather than an error to swallow. */
-/// Seal the identity under a new password, without sending it anywhere.
-///
-/// The caller hands the result to whichever request is authorised to store it.
-/// Re-sealing used to be its own call made straight after a password change —
-/// which revokes the token that would have carried it, so it could not
-/// authenticate and failed silently, leaving the backup sealed under a password
-/// nobody would use again.
-export async function sealBackupForPassword(
-  identity: IdentityKeyPair,
-  password: string,
-): Promise<{
-  password_wrapped_key: string;
-  password_kdf_salt: string;
-  password_kdf: { memory_kib: number; iterations: number; parallelism: number };
-}> {
-  const { DEFAULT_KDF_COST, SALT_BYTES, toHex, wrapIdentity } = await core();
-  const salt = randomSalt(SALT_BYTES);
-  const key = await deriveWrappingKeyOffThread(password, salt, DEFAULT_KDF_COST);
-  return {
-    password_wrapped_key: toHex(wrapIdentity(identity, key)),
-    password_kdf_salt: toHex(salt),
-    password_kdf: {
-      memory_kib: DEFAULT_KDF_COST.memoryKib,
-      iterations: DEFAULT_KDF_COST.iterations,
-      parallelism: DEFAULT_KDF_COST.parallelism,
-    },
-  };
+/** This account's stored backup, as the server holds it. */
+export async function fetchKeyBackup(): Promise<KeyBackup> {
+  const response = await api.get<KeyBackup>('/encryption/keys/backup');
+  return response.data;
 }
 
-export async function rewrapBackup(
-  identity: IdentityKeyPair | null,
-  newPassword: string,
-): Promise<boolean> {
-  if (!identity) return false;
+/** Whether the server still holds a copy of this identity that the account
+ *  password opens.
+ *
+ *  True only for accounts set up before that copy was removed and whose owner
+ *  has not yet saved a fresh recovery code. It is what both the restore screen
+ *  and the settings prompt branch on, and false for every account created
+ *  since. A backup that does not exist at all counts as false: there is nothing
+ *  to upgrade. */
+export async function passwordCopyStillExists(): Promise<boolean> {
+  try {
+    return Boolean((await fetchKeyBackup()).password_wrapped_key);
+  } catch {
+    return false;
+  }
+}
 
-  const { DEFAULT_KDF_COST, SALT_BYTES, toHex, wrapIdentity } = await core();
+/** Replace the stored copy with one sealed under a brand-new recovery code, and
+ *  drop the copy the password opens.
+ *
+ *  This is the upgrade path for accounts that predate the removal, and the
+ *  ordinary way to rotate a code that was written down somewhere it should not
+ *  have been. The old code stops working the moment this returns, so the caller
+ *  has to show the new one before anything else.
+ *
+ *  Needs the account password because it destroys the only copy there is: a
+ *  stolen access token could otherwise make an account unrestorable without
+ *  ever holding its identity. */
+export async function rotateRecoveryCode(
+  identity: IdentityKeyPair,
+  currentPassword: string,
+  totpCode?: string,
+): Promise<string> {
+  const { DEFAULT_KDF_COST, SALT_BYTES, generateRecoveryCode, toHex, wrapIdentity } = await core();
+
+  const recoveryCode = generateRecoveryCode();
   const salt = randomSalt(SALT_BYTES);
-  const key = await deriveWrappingKeyOffThread(newPassword, salt, DEFAULT_KDF_COST);
+  const key = await deriveWrappingKeyOffThread(recoveryCode, salt, DEFAULT_KDF_COST);
 
   await api.put('/encryption/keys/backup', {
-    password_wrapped_key: toHex(wrapIdentity(identity, key)),
-    password_kdf_salt: toHex(salt),
-    password_kdf: {
+    recovery_wrapped_key: toHex(wrapIdentity(identity, key)),
+    recovery_kdf_salt: toHex(salt),
+    recovery_kdf: {
       memory_kib: DEFAULT_KDF_COST.memoryKib,
       iterations: DEFAULT_KDF_COST.iterations,
       parallelism: DEFAULT_KDF_COST.parallelism,
     },
+    current_password: currentPassword,
+    ...(totpCode ? { totp_code: totpCode } : {}),
   });
-  return true;
+
+  return recoveryCode;
 }
 
 export class WrongSecretError extends Error {
@@ -177,35 +157,54 @@ export class KeyMismatchError extends Error {
   }
 }
 
-/** Recover the identity on a device that does not have it, from the password or
- *  the recovery code. */
+/** Asked to restore with the password on an account that has no password copy.
+ *
+ *  Separate from a wrong password: nothing the user types can succeed, so
+ *  telling them to check it and try again would be a lie. */
+export class PasswordRestoreUnavailableError extends Error {
+  constructor() {
+    super('password-restore-unavailable');
+    this.name = 'PasswordRestoreUnavailableError';
+  }
+}
+
+/** Recover the identity on a device that does not have it.
+ *
+ *  From the recovery code, or — for accounts that predate its removal and have
+ *  not yet completed the upgrade — from the password. */
 export async function restoreIdentity(
   userId: string,
   secret: string,
   kind: 'password' | 'recovery',
 ): Promise<{ identity: IdentityKeyPair; fingerprint: string }> {
-  const {
-    fingerprint: computeFingerprint,
-    fromHex,
-    unwrapIdentity,
-  } = await core();
+  const { fingerprint: computeFingerprint, fromHex, unwrapIdentity } = await core();
 
   const [backup, status] = await Promise.all([
-    api.get<KeyBackup>('/encryption/keys/backup').then((response) => response.data),
+    fetchKeyBackup(),
     api.get<KeyStatus>('/encryption/keys').then((response) => response.data),
   ]);
 
-  const wrapped =
-    kind === 'password' ? backup.password_wrapped_key : backup.recovery_wrapped_key;
-  const salt = kind === 'password' ? backup.password_kdf_salt : backup.recovery_kdf_salt;
-  // Both copies were wrapped with the same cost. The recovery half has no
-  // parameters of its own in the response, and inventing different ones here
-  // would make the code unusable on the device that generated it.
-  const wrappingKey = await deriveWrappingKeyOffThread(
-    secret,
-    fromHex(salt),
-    costFromApi(backup.password_kdf),
-  );
+  // Each copy carries its own cost now. The recovery half used to borrow the
+  // password half's parameters, which cannot survive the password half going
+  // away — and reading them from the wrong copy would derive a key that opens
+  // nothing, indistinguishable here from a wrong secret.
+  let wrapped: string;
+  let salt: string;
+  let cost: KdfParameters;
+  if (kind === 'password') {
+    if (!backup.password_wrapped_key || !backup.password_kdf_salt || !backup.password_kdf) {
+      throw new PasswordRestoreUnavailableError();
+    }
+    wrapped = backup.password_wrapped_key;
+    salt = backup.password_kdf_salt;
+    cost = backup.password_kdf;
+  } else {
+    wrapped = backup.recovery_wrapped_key;
+    salt = backup.recovery_kdf_salt;
+    cost = backup.recovery_kdf;
+  }
+
+  const wrappingKey = await deriveWrappingKeyOffThread(secret, fromHex(salt), costFromApi(cost));
 
   let identity: IdentityKeyPair;
   try {

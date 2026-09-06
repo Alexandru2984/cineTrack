@@ -3,6 +3,7 @@ import { act, cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { EncryptionSettingsCard } from '@/components/EncryptionSettingsCard';
+import { encryptionKeys } from '@/hooks/useEncryption';
 import { useEncryptionStore } from '@/store/encryption';
 
 /** The regression this exists for.
@@ -30,13 +31,17 @@ type Status = 'loading' | 'ready' | 'locked' | 'absent' | 'unavailable';
 
 // The restore and setup forms are react-query mutations, so they need a client
 // even though nothing here submits one.
-function renderAt(status: Status) {
+function renderAt(status: Status, hasPasswordCopy = false) {
   act(() => {
     useEncryptionStore.setState({ status });
   });
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
+  // Whether the account still carries a copy of its key that the password
+  // opens. Seeded rather than fetched: the query is answered from cache, and
+  // what these tests are about is which forms that answer produces.
+  client.setQueryData(encryptionKeys.backup, hasPasswordCopy);
   return render(
     <QueryClientProvider client={client}>
       <EncryptionSettingsCard />
@@ -58,10 +63,35 @@ describe('EncryptionSettingsCard', () => {
     renderAt('locked');
 
     expect(screen.getByRole('heading', { name: /restore your encryption key/i })).toBeInTheDocument();
-    // Both routes back in, because somebody who has forgotten their password
-    // still has the recovery code, and vice versa.
+    // The recovery code, and only the recovery code. The password used to open
+    // a second copy of the key; it opens nothing now, so offering it would send
+    // somebody hunting for a password that was never going to work.
+    expect(screen.getByRole('button', { name: /use my recovery code/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /use my password/i })).not.toBeInTheDocument();
+  });
+
+  it('still offers the password to an account that has not finished the upgrade', () => {
+    // Set up before the password copy was removed and never rotated since:
+    // that copy is what this person has, and taking the option away would lock
+    // them out to close a finding they never heard about.
+    renderAt('locked', true);
+
     expect(screen.getByRole('button', { name: /use my password/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /use my recovery code/i })).toBeInTheDocument();
+  });
+
+  it('offers a new recovery code once this device holds the key', () => {
+    renderAt('ready');
+
+    // Rotating is only possible from a device that can seal the key again, so
+    // the form appears exactly here.
+    expect(screen.getByRole('button', { name: /generate a new code/i })).toBeInTheDocument();
+  });
+
+  it('explains why the upgrade is worth doing while the old copy is still there', () => {
+    renderAt('ready', true);
+
+    expect(screen.getByText(/your account password opens/i)).toBeInTheDocument();
   });
 
   it('says encryption is on rather than going blank', () => {
