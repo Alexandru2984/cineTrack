@@ -162,20 +162,42 @@ async fn create_history(
         return Err(AppError::BadRequest("Media not found".to_string()));
     }
 
-    // Validate episode_id if provided
+    // Validate episode_id if provided, and that it has actually aired.
+    //
+    // The calendar and season routes have always refused an unaired episode;
+    // this one did not, so the same rule held or not depending on which
+    // endpoint a client happened to call. An episode that has not aired cannot
+    // have been watched, and letting it through puts a future date into
+    // statistics, streaks and badges that are computed from this table.
+    //
+    // `episode_has_aired` is the same function those routes use — including its
+    // treatment of a NULL air date as aired, since a date nobody has published
+    // is not evidence that the episode is in the future.
     if let Some(ep_id) = data.episode_id {
-        let ep_exists = sqlx::query_scalar::<_, bool>(
-            "SELECT EXISTS(SELECT 1 FROM episodes e JOIN seasons s ON e.season_id = s.id WHERE e.id = $1 AND s.media_id = $2)"
+        let episode = sqlx::query_scalar::<_, bool>(
+            r#"SELECT episode_has_aired(episodes.air_date, media.origin_country)
+            FROM episodes
+            JOIN seasons ON seasons.id = episodes.season_id
+            JOIN media ON media.id = seasons.media_id
+            WHERE episodes.id = $1 AND seasons.media_id = $2"#,
         )
         .bind(ep_id)
         .bind(data.media_id)
-        .fetch_one(pool.get_ref())
+        .fetch_optional(pool.get_ref())
         .await?;
 
-        if !ep_exists {
-            return Err(AppError::BadRequest(
-                "Episode not found for this media".to_string(),
-            ));
+        match episode {
+            None => {
+                return Err(AppError::BadRequest(
+                    "Episode not found for this media".to_string(),
+                ))
+            }
+            Some(false) => {
+                return Err(AppError::BadRequest(
+                    "Episode has not aired yet".to_string(),
+                ))
+            }
+            Some(true) => {}
         }
     }
 

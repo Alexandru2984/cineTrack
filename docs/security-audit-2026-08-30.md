@@ -91,6 +91,15 @@ memory only, and actively clears the key used by older versions
 (`store/auth.ts:19`). The refresh cookie is `HttpOnly`, `Secure` in production,
 `SameSite=Strict`, path-scoped.
 
+> **Superseded on 2026-09-05.** The paragraph below was true when written and
+> is not now: `advisory-sweep.yml` has a job with `contents: write` and
+> `pull-requests: write`, added so the daily sweep can open its own pull
+> request, and CodeQL holds `security-events: write` to publish results. Both
+> are deliberate and neither is a finding — but a later audit read this
+> paragraph as a current inventory, which is what a dated report is not. The
+> live permissions are in the workflow files; this document describes
+> 2026-08-30 and nothing after it.
+
 **CI supply chain.** Every workflow declares `contents: read` and nothing more.
 Every action is pinned to a full commit SHA. All nine checkouts set
 `persist-credentials: false`. There is no `pull_request_target` or

@@ -34,7 +34,7 @@ export type MessageContent =
    *  variant rather than carried with a flag beside it: a caller cannot render
    *  what it was never handed, and every path that draws a message goes through
    *  here. */
-  | { kind: 'untrusted'; reason: 'forged' | 'malformed' };
+  | { kind: 'untrusted'; reason: 'forged' | 'malformed' | 'unrecognised' };
 
 interface Envelope {
   ciphertext?: string | null;
@@ -118,14 +118,30 @@ function inspect(
 
 /** What the reader is shown, given what the checks concluded.
  *
- *  Both refusals hide the text rather than annotating it. A forged message is
+ *  Every refusal hides the text rather than annotating it. A forged message is
  *  not from the person it names, and drawing it in their thread is the whole
  *  attack. A message whose commitment does not open is one its recipient can
  *  never report — a sender can encrypt abuse while committing to something
- *  innocuous — so displaying it hands over the abuse and withholds the remedy. */
+ *  innocuous — so displaying it hands over the abuse and withholds the remedy.
+ *
+ *  `unrecognised` was shown, with a warning underneath, and that was the gap.
+ *  The difference between `forged` and `unrecognised` is whether the signature
+ *  fails under the key the *envelope declares* — a field the server fills in.
+ *  A server that wants a message read simply declares a key nobody has on
+ *  record, and the verdict softens from "not from them" to "we cannot place
+ *  this", which drew the text. The reader then decides whether a message
+ *  attributed to a contact is real, from a warning in small print.
+ *
+ *  So it is withheld too. The cost is real and deliberate: history signed with
+ *  a key that has since been rotated away is legitimate and is now hidden until
+ *  the reader asks for it. That is the right side to be wrong on — the
+ *  alternative is showing text that nothing places with its supposed author. */
 function present(content: DecryptedContent): MessageContent {
   if (content.authenticity === 'forged') return { kind: 'untrusted', reason: 'forged' };
   if (content.commitmentVerified === false) return { kind: 'untrusted', reason: 'malformed' };
+  if (content.authenticity === 'unrecognised') {
+    return { kind: 'untrusted', reason: 'unrecognised' };
+  }
   return { kind: 'encrypted', content };
 }
 

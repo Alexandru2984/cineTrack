@@ -435,6 +435,46 @@ else
   fail "an unknown deployed revision was rolled back on a guess"
 fi
 
+# A release is only healthy if the product works, not if the process answers.
+#
+# The probes defaulted to `/api/health`, which is liveness: it reports from the
+# process and never touches PostgreSQL. A backend that starts and then loses the
+# database passes it, so a release that could serve nobody was recorded as
+# deployed. Readiness asks the database.
+DEPLOY_SCRIPT="$ROOT_DIR/scripts/auto_deploy.sh"
+for variable in LOCAL_BACKEND_URL PUBLIC_HEALTH_URL; do
+  if grep -qE "^$variable=.*/api/health\"" "$DEPLOY_SCRIPT"; then
+    fail "$variable still defaults to liveness; a backend that cannot reach the database would pass"
+  elif grep -qE "^$variable=.*/api/health/ready" "$DEPLOY_SCRIPT"; then
+    pass "$variable probes readiness, not just the process"
+  else
+    fail "$variable does not probe readiness"
+  fi
+done
+
+# A release verdict must exist and must be a real pass.
+#
+# M13. The gate accepted any non-empty set of good verdicts, so a window where
+# only a scanner had registered read as approval. These two fixtures are the
+# shapes that used to pass and must not.
+ONLY_SCANNER="$WORK_DIR/only-scanner.json"
+checks_fixture "$ONLY_SCANNER" "Secret Scan:completed:success"
+out="$(run_deploy "$CODE_ONLY" "$BASE" "$ONLY_SCANNER" "$NO_STATUS" 1)"
+if is_state "$out" waiting_ci; then
+  pass "a green set without the release verdict does not ship"
+else
+  fail "a green set without the release verdict was accepted"
+fi
+
+SKIPPED_GATE="$WORK_DIR/skipped-gate.json"
+checks_fixture "$SKIPPED_GATE" "CI Gate:completed:skipped" "Backend:completed:success"
+out="$(run_deploy "$CODE_ONLY" "$BASE" "$SKIPPED_GATE" "$NO_STATUS" 1)"
+if is_state "$out" blocked_ci; then
+  pass "a skipped release verdict does not ship"
+else
+  fail "a skipped release verdict was accepted"
+fi
+
 if (( FAILURES > 0 )); then
   printf '\n%d contract(s) failed\n' "$FAILURES"
   exit 1

@@ -220,9 +220,17 @@ describe('deciding whether a message is really from the sender', () => {
     expect(read).toEqual({ kind: 'untrusted', reason: 'forged' });
   });
 
-  it('shows, but does not vouch for, one signed by a key the sender has replaced', () => {
-    // A rotation looks like a failed signature and is not an accusation. Hiding
-    // this would erase legitimate history the moment somebody changes keys.
+  it('withholds one signed by a key it cannot place, rather than showing it with a note', () => {
+    // This used to be shown, annotated "not authenticated". M09 of the
+    // September audit is why it no longer is: whether a bad signature reads as
+    // `forged` or `unrecognised` turns on `sender_signing_key`, which the
+    // server fills in. Declaring a key nobody has on record was enough to move
+    // a message from refused to displayed, and the reader was left deciding
+    // whether text attributed to a contact was real, from small print.
+    //
+    // The cost is deliberate and is the reason it was written the other way
+    // first: history signed with a key that has since been rotated away is
+    // legitimate, and is now withheld too.
     clearDecryptionCache();
     const alice = generateIdentity();
     const alicesOldKeys = generateIdentity();
@@ -236,9 +244,11 @@ describe('deciding whether a message is really from the sender', () => {
       bob,
       alice.signingPublicKey,
     );
-    if (read.kind !== 'encrypted') throw new Error('unreachable');
-    expect(read.content.authenticity).toBe('unrecognised');
-    expect(read.content.text).toBe('sent long ago');
+    expect(read.kind).toBe('untrusted');
+    if (read.kind !== 'untrusted') throw new Error('unreachable');
+    expect(read.reason).toBe('unrecognised');
+    // And the text is not reachable from the result at all.
+    expect(JSON.stringify(read)).not.toContain('sent long ago');
   });
 
   it('claims nothing when there is no key to check against', () => {
@@ -334,7 +344,12 @@ describe('the shared crypto modules', () => {
       bob,
       fromHex(toHex(alice.signingPublicKey)),
     );
-    if (read.kind !== 'encrypted') throw new Error('unreachable');
-    expect(read.content.authenticity).not.toBe('verified');
+    // Not merely "not verified": withheld. Everything the server controls says
+    // the message is fine, and the only disagreement is the directory, so the
+    // text must not be drawn on the strength of the server's own claim.
+    expect(read.kind).toBe('untrusted');
+    if (read.kind !== 'untrusted') throw new Error('unreachable');
+    expect(read.reason).toBe('unrecognised');
+    expect(JSON.stringify(read)).not.toContain('trust me');
   });
 });

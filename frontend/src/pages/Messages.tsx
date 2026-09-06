@@ -80,7 +80,11 @@ function previewText(
       return t('messages.lockedPreview');
     case 'untrusted':
       return t(
-        content.reason === 'forged' ? 'messages.notFromSender' : 'messages.malformedMessage',
+        {
+          forged: 'messages.notFromSender',
+          malformed: 'messages.malformedMessage',
+          unrecognised: 'messages.unplaceableKey',
+        }[content.reason],
       );
     default:
       return t('messages.encryptedPreview');
@@ -206,14 +210,7 @@ function MessageBubble({
               previewText(content, t)
             )}
           </p>
-          {/* Only for a message that was drawn. The refusals say why in place of
-              the text, and repeating it underneath would read as a footnote on
-              something the reader can see. */}
-          {content.kind === 'encrypted' && content.content.authenticity === 'unrecognised' ? (
-            <p className="mt-1 text-[10px] leading-4 opacity-80">
-              {t('messages.notAuthenticated')}
-            </p>
-          ) : null}
+
           <div
             className={`mt-1 flex items-center justify-end gap-1.5 text-[10px] ${
               own ? 'opacity-75' : 'text-[hsl(var(--muted-foreground))]'

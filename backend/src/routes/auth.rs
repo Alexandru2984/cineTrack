@@ -275,16 +275,8 @@ async fn change_password(
         client: &client,
     };
     let data = body.into_inner();
-    services::auth::change_password(
-        pool.get_ref(),
-        config.get_ref(),
-        &security,
-        user_id,
-        &data.current_password,
-        &data.new_password,
-        data.totp_code.as_deref(),
-    )
-    .await?;
+    services::auth::change_password(pool.get_ref(), config.get_ref(), &security, user_id, &data)
+        .await?;
 
     // All refresh tokens were revoked; drop the current session's cookie too.
     Ok(HttpResponse::Ok()
@@ -498,12 +490,20 @@ async fn list_security_activity(
 
 async fn revoke_session(
     pool: web::Data<PgPool>,
+    config: web::Data<Config>,
     req: HttpRequest,
     path: web::Path<uuid::Uuid>,
 ) -> Result<HttpResponse, AppError> {
     let user_id = require_auth(&req).await?;
     let client = client_info(&req);
-    services::auth::revoke_session(pool.get_ref(), &client, user_id, path.into_inner()).await?;
+    services::auth::revoke_session(
+        pool.get_ref(),
+        config.get_ref(),
+        &client,
+        user_id,
+        path.into_inner(),
+    )
+    .await?;
     Ok(HttpResponse::Ok().json(serde_json::json!({"message": "Session revoked"})))
 }
 

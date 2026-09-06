@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import api from '@/lib/api';
-import { rewrapBackup } from '@/lib/crypto/session';
+import api, { endSession } from '@/lib/api';
+import { sealBackupForPassword } from '@/lib/crypto/session';
 import { useAuthStore } from '@/store/auth';
 import { useEncryptionStore } from '@/store/encryption';
 import type { AuthResponse, SecurityActivity, Session, User } from '@/types';
@@ -50,9 +50,17 @@ export function useLogin() {
 
 export function useLogout() {
   const logout = useAuthStore((s) => s.logout);
+  const clearKeys = useEncryptionStore((s) => s.clear);
+  const userId = useAuthStore((s) => s.user?.id ?? null);
   return useMutation({
-    mutationFn: async () => {
-      await api.post('/auth/logout').catch(() => {});
+    // `forgetKeys` is the shared-device answer. Keeping them is the default
+    // because forgetting costs a password or a recovery code on the next
+    // sign-in, which is the wrong tax on a device somebody owns — but leaving
+    // them behind on a borrowed browser hands the next person every past
+    // message, so it has to be offered rather than decided here.
+    mutationFn: async ({ forgetKeys = false }: { forgetKeys?: boolean } = {}) => {
+      await endSession();
+      if (forgetKeys) await clearKeys(userId);
     },
     onSuccess: () => logout(),
   });
@@ -210,22 +218,15 @@ export function useChangePassword() {
       new_password: string;
       totp_code?: string;
     }) => {
-      const res = await api.patch('/auth/password', data);
+      // Sealed before the request and carried by it. Sending it afterwards
+      // could not work: the change revokes the token that would authorise it,
+      // so the follow-up failed silently and the backup stayed sealed under the
+      // old password — found only by somebody restoring on a new device.
+      const key_backup = identity
+        ? await sealBackupForPassword(identity, data.new_password)
+        : undefined;
 
-      // Re-seal the encryption key here, in the one moment both halves exist:
-      // the key is in memory and the new password is in hand. It cannot wait
-      // for a later screen, because success signs the user out.
-      //
-      // Failure is not allowed to undo a password change that already
-      // succeeded. The recovery code still opens the backup, so the cost of
-      // giving up here is one confusing restore, against reporting a password
-      // change as failed when it was not.
-      try {
-        await rewrapBackup(identity, data.new_password);
-      } catch {
-        // Deliberately swallowed; see above.
-      }
-
+      const res = await api.patch('/auth/password', { ...data, key_backup });
       return res.data as { message: string };
     },
     // The backend revokes every refresh token and clears the current cookie.

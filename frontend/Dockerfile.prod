@@ -20,15 +20,40 @@ FROM nginx:1.31-alpine@sha256:7068961d45b07b2af510ac002e9daa63a1d3eba2111202d676
 # The scan is what found this, and it found it on branches that changed nothing
 # related: a Trivy run is dated, so a base image that passed yesterday fails
 # today. That is the check working.
-RUN apk add --no-cache --upgrade 'libexpat>=2.8.4-r0'
+#
+# `libuuid` joined it on 2026-09-05, and the daily sweep is what noticed: seven
+# HIGH advisories against util-linux 2.42.1-r0 — CVE-2026-53612 through
+# CVE-2026-78410, the first of them a TOCTOU in `mount`. Same reasoning, same
+# remedy: take the fix from Alpine main rather than wait for the base tag.
+#
+# The floor is `-r1` and was `-r0` for a few hours. Trivy reported the fix in
+# 2.42.3-r0 that morning; the advisory for CVE-2026-78408 was revised the same
+# day and Alpine published -r1, so an image built against the first answer
+# scanned clean locally and dirty in CI. A version somebody wrote down is a
+# snapshot of an advisory database, not a fact about the package.
+RUN apk add --no-cache --upgrade 'libexpat>=2.8.4-r0' 'libuuid>=2.42.3-r1'
 # Asserted after the upgrade, not before. These pins exist so a base image whose
 # contents drift breaks the build loudly instead of shipping different software
 # under the same digest; an assertion that ran first would describe the image we
 # started from rather than the one being shipped.
 RUN apk info --exists 'c-ares=1.34.8-r0' && \
-    apk info --exists 'libexpat=2.8.4-r0' && \
     apk info --exists 'curl=8.21.0-r0' && \
     apk info --exists 'libcurl=8.21.0-r0'
+# The three above are pinned exactly because they come from the base image: a
+# digest that starts shipping a different version is drift, and the build should
+# say so.
+#
+# The upgraded ones need no assertion of their own. `apk add 'pkg>=version'`
+# already refuses to build when nothing satisfies the constraint, which is the
+# floor — checked, not assumed.
+#
+# They were pinned exactly here too, and that was wrong twice over. `libuuid`
+# was 2.42.3-r0 when the fix was taken and 2.42.3-r1 in CI hours later, so the
+# build failed on a package that fixes strictly more. The replacement read the
+# installed version with `apk info -v`, which prints a description rather than a
+# version, so the comparison got nonsense, returned empty, and passed
+# everything — a check that checked nothing, found only by raising the floor
+# past what exists and watching the build succeed anyway.
 # Stamped the same way as the backend image. Without it the deploy-drift check
 # has one revision to speak for two independently deployed artifacts, and gets
 # it wrong in both directions: a frontend-only release leaves the backend label

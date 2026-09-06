@@ -87,6 +87,8 @@ export const ro: Dictionary = {
     lockedPreview: 'Blocat',
     undecryptable: 'Acest mesaj nu poate fi deschis pe acest dispozitiv',
     encryptedLabel: 'Criptat cap-coadă',
+    unplaceableKey:
+      'Mesajul este semnat cu o cheie pe care nu o putem asocia acestui cont. Este ascuns până alegi să îl arăți; asta se întâmplă și legitim, după ce cineva își rotește cheile.',
     notFromSender:
       'Acest mesaj nu a fost semnat de acest cont. Este ascuns pentru că s-ar putea să nu fie de la el.',
     malformedMessage:
@@ -94,7 +96,7 @@ export const ro: Dictionary = {
     notAuthenticated:
       'Nu a putut fi verificat cu cheia actuală a acestui cont — poate a fost trimis înainte ca ea să fie schimbată.',
     privacyNoticeEncrypted:
-      'Mesajele din această conversație sunt criptate cap-coadă. Văzute le stochează, dar nu le poate citi. Un mesaj pe care îl raportezi este dezvăluit moderatorilor de către tine, și doar acel mesaj.',
+      'Mesajele din această conversație sunt criptate cap-coadă. Văzute stochează textul cifrat și nu îl citește. Un mesaj pe care îl raportezi este dezvăluit moderatorilor de către tine, și doar acel mesaj.',
     encryptionRequired:
       'Conversația este criptată, iar acest dispozitiv nu are cheia ta. Restaureaz-o pentru a trimite mesaje.',
   },
@@ -129,7 +131,7 @@ export const ro: Dictionary = {
     settingsAbsent:
       'Activeaz-o aici și e gata înainte de prima conversație. Fără ea, mesajele sunt stocate într-o formă pe care Văzute o poate citi.',
     settingsReady:
-      'Activă, iar acest dispozitiv îți deține cheia. Mesajele cu cei care au activat-o și ei sunt stocate criptat, iar Văzute nu le poate citi.',
+      'Activă, iar acest dispozitiv îți deține cheia. Mesajele cu cei care au activat-o și ei sunt stocate criptat, iar Văzute nu le citește.',
     settingsLocked:
       'Contul tău are chei, dar acest dispozitiv nu le deține încă.',
     setupTitle: 'Activează criptarea cap-coadă',

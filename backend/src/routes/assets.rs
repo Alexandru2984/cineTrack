@@ -97,12 +97,28 @@ fn valid_poster_spec(spec: &str) -> bool {
 
 fn valid_public_asset_key(key: &str) -> bool {
     if let Some(name) = key.strip_prefix("avatars/") {
-        let Some((id, extension)) = name.rsplit_once('.') else {
+        let Some((stem, extension)) = name.rsplit_once('.') else {
             return false;
         };
-        return !id.contains('/')
-            && Uuid::parse_str(id).is_ok()
-            && AVATAR_EXTENSIONS.contains(&extension);
+        if !AVATAR_EXTENSIONS.contains(&extension) {
+            return false;
+        }
+        // Two shapes. `{user}/{nonce}` is what uploads write now: the nonce
+        // makes the object unguessable, which is what keeps a private profile's
+        // avatar from being fetched by anyone who has seen the account's id.
+        // `{user}` alone is what earlier uploads wrote and is still referenced
+        // by rows nobody has replaced since.
+        //
+        // Both are parsed as UUIDs, so neither can carry a path segment out of
+        // the prefix.
+        return match stem.split_once('/') {
+            Some((user, nonce)) => {
+                Uuid::parse_str(user).is_ok()
+                    && !nonce.contains('/')
+                    && Uuid::parse_str(nonce).is_ok()
+            }
+            None => Uuid::parse_str(stem).is_ok(),
+        };
     }
     key.strip_prefix("posters/").is_some_and(valid_poster_spec)
 }
@@ -400,7 +416,22 @@ async fn upload_avatar(
     let info = validate_avatar_image(&bytes, declared_type)?;
     let bytes = strip_avatar_metadata(&bytes, info)?;
 
-    let key = format!("avatars/{user_id}.{}", info.extension);
+    // A nonce per upload, for two reasons the audit found separately.
+    //
+    // Two uploads of different formats used to write `avatars/{id}.png` and
+    // `avatars/{id}.jpg`, each then deleting "every other variant" — so the
+    // first request's cleanup could delete the image the second had just made
+    // current, leaving the row pointing at nothing.
+    //
+    // And the key was derivable from the account id, which is not hidden. A
+    // profile that withholds `avatar_url` from a viewer it has not approved
+    // still answered `/api/assets/avatars/{id}.jpg` to anyone who asked.
+    // Guessing a v4 nonce is not a thing that happens.
+    let key = format!(
+        "avatars/{user_id}/{}.{}",
+        Uuid::new_v4().simple(),
+        info.extension
+    );
 
     // Write the new image before anything else, and before any transaction is
     // open. Two things were wrong with doing this the other way round.
@@ -426,6 +457,14 @@ async fn upload_avatar(
     // write rather than for two round trips to a third party.
     let mut tx = pool.begin().await?;
     lock_user(&mut tx, user_id).await?;
+    // Read what this upload replaces while the row is locked, so the key that
+    // gets cleaned up below is the one this request actually superseded — not
+    // whatever a concurrent upload happens to have written by then.
+    let superseded =
+        sqlx::query_scalar::<_, Option<String>>("SELECT avatar_url FROM users WHERE id = $1")
+            .bind(user_id)
+            .fetch_one(&mut *tx)
+            .await?;
     sqlx::query("UPDATE users SET avatar_url = $2, updated_at = NOW() WHERE id = $1")
         .bind(user_id)
         .bind(&avatar_url)
@@ -433,25 +472,24 @@ async fn upload_avatar(
         .await?;
     tx.commit().await?;
 
-    // Only once the row points at the new image. Failing here leaves an image
-    // in a *different* format that nothing references — invisible to anyone,
-    // and removed by the next upload, which deletes every variant but the one
-    // it just wrote. Refusing the request over it would be worse: the avatar
-    // the member uploaded is already live and already theirs.
+    // Only once the row points at the new image, and only the exact object this
+    // upload replaced. Deleting "every other variant" was what let two
+    // concurrent uploads remove each other's work.
     //
-    // This is why the key is not versioned, which is the other way to make the
-    // write safe. `avatars/{id}.{ext}` is derived from what it holds, so an
-    // interrupted upload leaves a key the next one overwrites. A versioned key
-    // would leave genuinely unreferenced objects behind and need a sweeper to
-    // find them — trading a problem that cannot happen for one that needs
-    // machinery to clean up.
-    if let Err(error) = store
-        .delete_other_avatar_variants(user_id, info.extension)
-        .await
+    // Failing here leaves one unreferenced object. That is the cost of a key
+    // nothing else can collide with, and it is bounded: deleting the avatar or
+    // the account removes everything under the member's prefix.
+    if let Some(previous) = superseded
+        .as_deref()
+        .and_then(|url| store.key_from_public_url(url))
+        .filter(|previous| previous != &key)
     {
-        log::warn!(
-            "avatar replacement cleanup failed user_id={user_id}: {error:#};              the superseded variant will be removed by the next upload"
-        );
+        if let Err(error) = store.delete(&previous).await {
+            log::warn!(
+                "avatar replacement cleanup failed user_id={user_id} key={previous}: {error:#}; \
+                 it is unreferenced and removed with the avatar or the account"
+            );
+        }
     }
 
     crate::metrics::record_product_action(crate::metrics::ProductAction::AvatarUploaded);
@@ -665,7 +703,7 @@ mod tests {
         for (function, calls) in [
             (
                 "upload_avatar",
-                ["store .put(", "delete_other_avatar_variants"].as_slice(),
+                ["store .put(", "store.delete(&previous)"].as_slice(),
             ),
             ("delete_avatar", ["delete_avatar_variants"].as_slice()),
         ] {
@@ -682,7 +720,7 @@ mod tests {
         }
     }
 
-    /// The new image is written before the old ones are removed.
+    /// The new image is written before the old one is removed.
     ///
     /// Reversed, a `put` that fails after the delete leaves the member with no
     /// image at all while their row still points at a key that no longer
@@ -691,7 +729,7 @@ mod tests {
     fn an_upload_writes_before_it_deletes() {
         let body = flattened("upload_avatar");
         let put = position_of(&body, "store .put(", "upload_avatar");
-        let cleanup = position_of(&body, "delete_other_avatar_variants", "upload_avatar");
+        let cleanup = position_of(&body, "store.delete(&previous)", "upload_avatar");
         let commit = position_of(&body, "tx.commit()", "upload_avatar");
         assert!(
             put < cleanup,
@@ -700,6 +738,47 @@ mod tests {
         assert!(
             commit < cleanup,
             "cleanup must follow the commit, so a failure cannot orphan the live avatar"
+        );
+    }
+
+    /// The key an upload writes cannot be derived from the account id.
+    ///
+    /// M03. A profile withholds `avatar_url` from a viewer it has not approved,
+    /// but the account id is not secret, and the object was keyed
+    /// `avatars/{id}.{ext}` — so the bytes answered to anyone who asked for one
+    /// of four extensions. Hiding a field in JSON is not access control over
+    /// the object it names.
+    #[test]
+    fn avatar_keys_are_not_derivable_from_the_account_id() {
+        let body = flattened("upload_avatar");
+        assert!(
+            body.contains("avatars/{user_id}/{}.{}") && body.contains("Uuid::new_v4()"),
+            "upload_avatar no longer writes a per-upload nonce, so the object is \
+             guessable from the account id again"
+        );
+    }
+
+    /// An upload removes the object it replaced, and only that one.
+    ///
+    /// M02. Cleanup used to delete "every variant except the one I wrote", so
+    /// two uploads of different formats raced: the first request's cleanup
+    /// could remove the image the second had just made current, leaving the row
+    /// pointing at nothing.
+    #[test]
+    fn cleanup_targets_the_superseded_object_only() {
+        let body = flattened("upload_avatar");
+        assert!(
+            !body.contains("delete_other_avatar_variants"),
+            "upload_avatar still deletes by extension, which lets two uploads \
+             delete each other's object"
+        );
+        let read = position_of(&body, "SELECT avatar_url FROM users", "upload_avatar");
+        let lock = position_of(&body, "lock_user(", "upload_avatar");
+        let commit = position_of(&body, "tx.commit()", "upload_avatar");
+        assert!(
+            lock < read && read < commit,
+            "the superseded key must be read under the row lock, or a concurrent \
+             upload decides which object this request deletes"
         );
     }
 

@@ -250,6 +250,22 @@ impl From<crate::models::User> for UserSummary {
     }
 }
 
+/// The identity backup, re-sealed under the password being set.
+///
+/// Carried by the password change rather than sent after it. The change revokes
+/// every token including the one making the request, so a follow-up call could
+/// not authenticate — it failed silently, and the backup stayed sealed under the
+/// old password until somebody tried to restore on a new device and could not.
+#[derive(Debug, Deserialize, Validate)]
+#[serde(deny_unknown_fields)]
+pub struct KeyBackupPayload {
+    #[validate(custom(function = "crate::dto::encryption::validate_wrapped_key"))]
+    pub password_wrapped_key: String,
+    #[validate(custom(function = "crate::dto::encryption::validate_salt"))]
+    pub password_kdf_salt: String,
+    pub password_kdf: crate::dto::encryption::KdfParameters,
+}
+
 #[derive(Debug, Deserialize, Validate)]
 #[serde(deny_unknown_fields)]
 pub struct ChangePasswordRequest {
@@ -266,6 +282,9 @@ pub struct ChangePasswordRequest {
     pub new_password: String,
     #[validate(length(max = 64, message = "Two-factor code is too long"))]
     pub totp_code: Option<String>,
+    /// Optional: accounts without encryption set up send nothing.
+    #[validate(nested)]
+    pub key_backup: Option<KeyBackupPayload>,
 }
 
 /// The current password is required even though the caller is already
@@ -666,6 +685,7 @@ mod tests {
             current_password: "x".repeat(129),
             new_password: "SecurePass1".to_string(),
             totp_code: None,
+            key_backup: None,
         };
         assert!(req.validate().is_err());
     }

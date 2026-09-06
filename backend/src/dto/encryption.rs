@@ -42,7 +42,7 @@ fn validate_public_key(value: &str) -> Result<(), ValidationError> {
     Ok(())
 }
 
-fn validate_wrapped_key(value: &str) -> Result<(), ValidationError> {
+pub(crate) fn validate_wrapped_key(value: &str) -> Result<(), ValidationError> {
     let decoded = decode_hex(value)?;
     if !(32..=4096).contains(&decoded.len()) {
         return Err(ValidationError::new("invalid_wrapped_key_length"));
@@ -62,7 +62,7 @@ fn validate_fingerprint(value: &str) -> Result<(), ValidationError> {
     Ok(())
 }
 
-fn validate_salt(value: &str) -> Result<(), ValidationError> {
+pub(crate) fn validate_salt(value: &str) -> Result<(), ValidationError> {
     let decoded = decode_hex(value)?;
     if decoded.len() != 16 {
         return Err(ValidationError::new("invalid_salt_length"));
@@ -171,6 +171,18 @@ pub struct RewrapBackupRequest {
     #[validate(custom(function = "validate_salt"))]
     pub password_kdf_salt: String,
     pub password_kdf: KdfParameters,
+    /// Required. Replacing the backup destroys the only copy that a password
+    /// can open, and the shape of a blob is not evidence that it still holds
+    /// the key. A live access token was the whole authorisation, so a stolen
+    /// one could sabotage restoration without ever holding the identity.
+    #[validate(length(
+        min = 1,
+        max = 128,
+        message = "Current password must be 1-128 characters"
+    ))]
+    pub current_password: String,
+    #[validate(length(max = 64, message = "Two-factor code is too long"))]
+    pub totp_code: Option<String>,
 }
 
 /// A peer's public keys, as served to somebody about to message them.

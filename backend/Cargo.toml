@@ -41,6 +41,7 @@ actix-web-prom = "0.10"
 prometheus = { version = "0.14", default-features = false }
 aws-sdk-s3 = { version = "=1.143.0", default-features = false, features = ["behavior-version-latest", "default-https-client", "http-1x", "rt-tokio"] }
 aws-smithy-types = "=1.6.2"
+csv = "1.4"
 
 [dev-dependencies]
 actix-http = "3"

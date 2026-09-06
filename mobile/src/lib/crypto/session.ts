@@ -77,12 +77,15 @@ export async function setupIdentity(userId: string, password: string): Promise<S
         wrapIdentity(identity, deriveWrappingKey(recoveryCode, recoverySalt, DEFAULT_KDF_COST)),
       ),
       recovery_kdf_salt: toHex(recoverySalt),
-      // Ignored on a first publication and required on a replacement, which is
-      // the only case where this route destroys anything. Sent unconditionally
-      // because the password is already in hand here — it is what wraps the key
-      // two lines above — so the request stays valid if replacing keys ever
-      // becomes something the interface offers.
-      current_password: password,
+      // Not sent. This is a first publication, where the server ignores it — and
+    // it used to travel in the same request as the wrapped key, its salt and its
+    // KDF cost, which is everything needed to unwrap the identity. An audit
+    // recovered both private keys from this one captured body.
+    //
+    // Removing it is not the fix. The same password reaches the server at sign
+    // in, so a hostile server can still pair it with the stored envelope; that
+    // is a protocol change, tracked separately. This only stops handing over
+    // the whole set in a single request that never needed it.
     },
   });
 
@@ -105,6 +108,35 @@ export async function setupIdentity(userId: string, password: string): Promise<S
  *  Returns whether it happened. A device that does not hold the key cannot
  *  re-seal it, and that is a real outcome the caller has to be able to report
  *  rather than an error to swallow. */
+/// Seal the identity under a new password, without sending it anywhere.
+///
+/// The caller hands the result to whichever request is authorised to store it.
+/// Re-sealing used to be its own call made straight after a password change —
+/// which revokes the token that would have carried it, so it could not
+/// authenticate and failed silently, leaving the backup sealed under a password
+/// nobody would use again.
+export async function sealBackupForPassword(
+  identity: IdentityKeyPair,
+  password: string,
+): Promise<{
+  password_wrapped_key: string;
+  password_kdf_salt: string;
+  password_kdf: { memory_kib: number; iterations: number; parallelism: number };
+}> {
+  const salt = randomSalt(SALT_BYTES);
+  return {
+    password_wrapped_key: toHex(
+      wrapIdentity(identity, deriveWrappingKey(password, salt, DEFAULT_KDF_COST)),
+    ),
+    password_kdf_salt: toHex(salt),
+    password_kdf: {
+      memory_kib: DEFAULT_KDF_COST.memoryKib,
+      iterations: DEFAULT_KDF_COST.iterations,
+      parallelism: DEFAULT_KDF_COST.parallelism,
+    },
+  };
+}
+
 export async function rewrapBackup(
   identity: IdentityKeyPair | null,
   newPassword: string,

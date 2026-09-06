@@ -7,6 +7,7 @@ const PRUNE_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct RetentionSummary {
     pub refresh_tokens: u64,
+    pub revoked_refresh_families: u64,
     pub password_reset_tokens: u64,
     pub email_verification_tokens: u64,
     pub email_change_tokens: u64,
@@ -18,6 +19,7 @@ pub struct RetentionSummary {
 impl RetentionSummary {
     pub fn total(&self) -> u64 {
         self.refresh_tokens
+            + self.revoked_refresh_families
             + self.password_reset_tokens
             + self.email_verification_tokens
             + self.email_change_tokens
@@ -51,6 +53,23 @@ pub async fn prune_security_artifacts(pool: &PgPool) -> Result<RetentionSummary,
               AND active.revoked_at IS NULL
               AND active.expires_at >= NOW()
         )"#,
+    )
+    .execute(&mut *tx)
+    .await?
+    .rows_affected();
+
+    // A family verdict is kept until every refresh token it could refuse has
+    // expired on its own. Dropping it earlier would let a revoked session come
+    // back, which is the whole fault it exists to close.
+    let revoked_refresh_families = sqlx::query(
+        r#"DELETE FROM revoked_refresh_families
+        WHERE expires_at < NOW()
+          AND NOT EXISTS (
+              SELECT 1 FROM refresh_tokens live
+              WHERE live.user_id = revoked_refresh_families.user_id
+                AND live.family_id = revoked_refresh_families.family_id
+                AND live.expires_at >= NOW()
+          )"#,
     )
     .execute(&mut *tx)
     .await?
@@ -103,6 +122,7 @@ pub async fn prune_security_artifacts(pool: &PgPool) -> Result<RetentionSummary,
 
     Ok(RetentionSummary {
         refresh_tokens,
+        revoked_refresh_families,
         password_reset_tokens,
         email_verification_tokens,
         email_change_tokens,
