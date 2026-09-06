@@ -367,6 +367,11 @@ jobs:
       - name: Export Android bundle
         run: npm run export:android
 
+      # Asking for OTA is not enough on its own any more: preview points at the
+      # production API, so an internal APK with unsigned updates was a second
+      # way to deliver code that then ran with a tester's real session. The gate
+      # is the signing certificate, and this proves the flag alone cannot open
+      # that path.
       - name: Validate OTA profile configuration
         run: |
           EAS_BUILD_PROFILE=production EXPO_UPDATES_ENABLED=true \
@@ -374,7 +379,15 @@ jobs:
           node -e 'const c=require("/tmp/vazute-production-config.json"); if(c.updates?.enabled !== false) process.exit(1)'
           EAS_BUILD_PROFILE=preview EXPO_UPDATES_ENABLED=true \
             npx expo config --type public --json > /tmp/vazute-preview-config.json
-          node -e 'const c=require("/tmp/vazute-preview-config.json"); if(c.updates?.enabled !== true) process.exit(1)'
+          node -e 'const c=require("/tmp/vazute-preview-config.json"); if(c.updates?.enabled !== false) process.exit(1)'
+          EAS_BUILD_PROFILE=preview EXPO_UPDATES_ENABLED=true \
+            EXPO_UPDATES_CODE_SIGNING_CERTIFICATE=certificates/updates.pem \
+            npx expo config --type public --json > /tmp/vazute-signed-config.json
+          node -e 'const c=require("/tmp/vazute-signed-config.json"); if(c.updates?.enabled !== true) process.exit(1)'
+          EAS_BUILD_PROFILE=production EXPO_UPDATES_ENABLED=true \
+            EXPO_UPDATES_CODE_SIGNING_CERTIFICATE=certificates/updates.pem \
+            npx expo config --type public --json > /tmp/vazute-signed-store-config.json
+          node -e 'const c=require("/tmp/vazute-signed-store-config.json"); if(c.updates?.enabled !== false) process.exit(1)'
 
       - name: Prebuild production native projects
         if: steps.native.outputs.needed == 'true'
