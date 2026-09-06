@@ -121,26 +121,29 @@ pub struct PublishKeysRequest {
     #[validate(custom(function = "validate_fingerprint"))]
     pub key_fingerprint: String,
 
-    #[validate(custom(function = "validate_wrapped_key"))]
-    pub password_wrapped_key: String,
-    #[validate(custom(function = "validate_salt"))]
-    pub password_kdf_salt: String,
-    pub password_kdf: KdfParameters,
-
+    /// Wrapped under a key derived from the recovery code — which is generated
+    /// on the client, shown once, and never sent here. This is the only copy a
+    /// new setup writes.
+    ///
+    /// There used to be a second copy wrapped under the account password. The
+    /// password reaches this server on every sign-in, so that copy was one the
+    /// server could open, and the product's claim that it cannot read messages
+    /// was not true of the protocol. Removing it is what makes the claim true
+    /// rather than merely expensive to break.
     #[validate(custom(function = "validate_wrapped_key"))]
     pub recovery_wrapped_key: String,
     #[validate(custom(function = "validate_salt"))]
     pub recovery_kdf_salt: String,
+    pub recovery_kdf: KdfParameters,
 
     /// Required only when the account already has keys, because only then does
     /// this route destroy something.
     ///
     /// A first publication has nothing to overwrite, and asking for a password
     /// during onboarding would buy nothing. A second one replaces the identity
-    /// *and* both wrapped copies of the private key — the password copy and the
-    /// recovery copy — so after it there is no way back to the old key and
-    /// every message ever sent to it is unreadable for good. A fifteen-minute
-    /// access token should not be enough to do that.
+    /// *and* the wrapped copy of the private key, so after it there is no way
+    /// back to the old key and every message ever sent to it is unreadable for
+    /// good. A fifteen-minute access token should not be enough to do that.
     ///
     /// The interface never asks for this: `EncryptionGate` shows the setup form
     /// only when no keys exist and the restore form otherwise, so a replacement
@@ -152,25 +155,25 @@ pub struct PublishKeysRequest {
     pub totp_code: Option<String>,
 }
 
-/// Replace only the password-sealed copy of the private key.
+/// Re-seal the private key under a new recovery code.
 ///
-/// Separate from `PublishKeysRequest` because the two mean different things. A
-/// password change re-seals the same key under a new secret; publishing
-/// replaces the key itself, and its upsert bumps the generation counter to say
-/// so. Reusing that route here would announce a rotation that never happened,
-/// and every peer would be told to re-check a safety number that had not moved.
-///
-/// The recovery copy is deliberately absent. It is sealed under a code the
-/// server never sees and the password change has no bearing on it — rewriting
-/// it here could only lose it.
+/// Separate from `PublishKeysRequest` because the two mean different things.
+/// This re-seals the same key under a new secret; publishing replaces the key
+/// itself, and its upsert bumps the generation counter to say so. Reusing that
+/// route here would announce a rotation that never happened, and every peer
+/// would be told to re-check a safety number that had not moved.
 #[derive(Debug, Deserialize, Validate)]
 #[serde(deny_unknown_fields)]
 pub struct RewrapBackupRequest {
+    /// A fresh recovery-code wrap. Replacing it is also what completes the
+    /// upgrade for an account that still carries a password copy: once the
+    /// owner holds a code they have saved, the copy this server could open is
+    /// dropped in the same transaction.
     #[validate(custom(function = "validate_wrapped_key"))]
-    pub password_wrapped_key: String,
+    pub recovery_wrapped_key: String,
     #[validate(custom(function = "validate_salt"))]
-    pub password_kdf_salt: String,
-    pub password_kdf: KdfParameters,
+    pub recovery_kdf_salt: String,
+    pub recovery_kdf: KdfParameters,
     /// Required. Replacing the backup destroys the only copy that a password
     /// can open, and the shape of a blob is not evidence that it still holds
     /// the key. A live access token was the whole authorisation, so a stolen
@@ -202,11 +205,15 @@ pub struct PublicKeysResponse {
 /// the wrapping key, never the key itself.
 #[derive(Debug, Serialize)]
 pub struct KeyBackupResponse {
-    pub password_wrapped_key: String,
-    pub password_kdf_salt: String,
-    pub password_kdf: KdfParameters,
+    /// Present only for accounts set up before the password copy was removed,
+    /// and only until their owner saves a fresh recovery code. A client offers
+    /// the password option exactly when this is here.
+    pub password_wrapped_key: Option<String>,
+    pub password_kdf_salt: Option<String>,
+    pub password_kdf: Option<KdfParameters>,
     pub recovery_wrapped_key: String,
     pub recovery_kdf_salt: String,
+    pub recovery_kdf: KdfParameters,
     pub updated_at: DateTime<Utc>,
 }
 

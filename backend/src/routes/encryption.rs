@@ -81,11 +81,10 @@ async fn publish_keys(
     // Replacing keys costs a password; creating them for the first time does
     // not. The difference is what the route destroys. A first publication
     // overwrites nothing, and a password prompt during onboarding would buy
-    // nothing. A second one replaces the identity and *both* wrapped copies of
-    // the private key below — the password copy and the recovery copy — after
-    // which no one, the owner included, can read a single message that was
-    // encrypted to the old key. That is not something a fifteen-minute access
-    // token should be able to do on its own.
+    // nothing. A second one replaces the identity and the wrapped copy of the
+    // private key below, after which no one, the owner included, can read a
+    // single message that was encrypted to the old key. That is not something a
+    // fifteen-minute access token should be able to do on its own.
     //
     // Checked before any work, so a request that cannot succeed does not first
     // spend an Argon2 verification or open a transaction.
@@ -115,7 +114,7 @@ async fn publish_keys(
         )
         .await?;
     }
-    data.password_kdf
+    data.recovery_kdf
         .validate_cost()
         .map_err(|error| AppError::BadRequest(describe(&error)))?;
 
@@ -126,10 +125,6 @@ async fn publish_keys(
         .map_err(|_| AppError::BadRequest("Invalid exchange key encoding".to_string()))?;
     let signing = hex::decode(&data.signing_public_key)
         .map_err(|_| AppError::BadRequest("Invalid signing key encoding".to_string()))?;
-    let password_wrapped = hex::decode(&data.password_wrapped_key)
-        .map_err(|_| AppError::BadRequest("Invalid wrapped key encoding".to_string()))?;
-    let password_salt = hex::decode(&data.password_kdf_salt)
-        .map_err(|_| AppError::BadRequest("Invalid salt encoding".to_string()))?;
     let recovery_wrapped = hex::decode(&data.recovery_wrapped_key)
         .map_err(|_| AppError::BadRequest("Invalid wrapped key encoding".to_string()))?;
     let recovery_salt = hex::decode(&data.recovery_kdf_salt)
@@ -159,31 +154,35 @@ async fn publish_keys(
     .fetch_one(&mut *tx)
     .await?;
 
+    // One copy, wrapped under the recovery code. A publication also clears any
+    // password copy the account still carried: it is replacing the identity, so
+    // the old wrap opens nothing anyway, and leaving it would keep a blob this
+    // server can open against keys nobody uses.
     sqlx::query(
         r#"INSERT INTO user_key_backups (
-            user_id, password_wrapped_key, password_kdf_salt,
-            password_kdf_memory_kib, password_kdf_iterations, password_kdf_parallelism,
-            recovery_wrapped_key, recovery_kdf_salt
+            user_id, recovery_wrapped_key, recovery_kdf_salt,
+            recovery_kdf_memory_kib, recovery_kdf_iterations, recovery_kdf_parallelism
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        VALUES ($1, $2, $3, $4, $5, $6)
         ON CONFLICT (user_id) DO UPDATE SET
-            password_wrapped_key = EXCLUDED.password_wrapped_key,
-            password_kdf_salt = EXCLUDED.password_kdf_salt,
-            password_kdf_memory_kib = EXCLUDED.password_kdf_memory_kib,
-            password_kdf_iterations = EXCLUDED.password_kdf_iterations,
-            password_kdf_parallelism = EXCLUDED.password_kdf_parallelism,
             recovery_wrapped_key = EXCLUDED.recovery_wrapped_key,
             recovery_kdf_salt = EXCLUDED.recovery_kdf_salt,
+            recovery_kdf_memory_kib = EXCLUDED.recovery_kdf_memory_kib,
+            recovery_kdf_iterations = EXCLUDED.recovery_kdf_iterations,
+            recovery_kdf_parallelism = EXCLUDED.recovery_kdf_parallelism,
+            password_wrapped_key = NULL,
+            password_kdf_salt = NULL,
+            password_kdf_memory_kib = NULL,
+            password_kdf_iterations = NULL,
+            password_kdf_parallelism = NULL,
             updated_at = NOW()"#,
     )
     .bind(user_id)
-    .bind(&password_wrapped)
-    .bind(&password_salt)
-    .bind(data.password_kdf.memory_kib)
-    .bind(data.password_kdf.iterations)
-    .bind(data.password_kdf.parallelism)
     .bind(&recovery_wrapped)
     .bind(&recovery_salt)
+    .bind(data.recovery_kdf.memory_kib)
+    .bind(data.recovery_kdf.iterations)
+    .bind(data.recovery_kdf.parallelism)
     .execute(&mut *tx)
     .await?;
 
@@ -206,17 +205,16 @@ async fn publish_keys(
     }))
 }
 
-/// The caller's own encrypted backup, for restoring on a new device.
-/// Re-seal the private key under a new password.
+/// Re-seal the private key under a new recovery code.
 ///
-/// Called when the account password changes. Without it the stored copy still
-/// opens under the *old* password, so the next device to restore would be
-/// refused with the password its owner believes is correct, and only the
-/// recovery code would work — a state that is recoverable but bewildering.
+/// Two things at once, because they are one operation. It rotates a code whose
+/// owner thinks somebody has seen it, and it completes the upgrade for an
+/// account set up while the key was also sealed under the account password —
+/// dropping that copy in the same statement, once its owner holds a code they
+/// have saved.
 ///
-/// Only the password copy moves. The identity row is untouched, so the
-/// generation counter does not advance and no peer is told to re-verify a
-/// safety number that has not changed.
+/// The identity row is untouched, so the generation counter does not advance
+/// and no peer is told to re-verify a safety number that has not changed.
 ///
 /// Refused when the account has no backup: there is nothing to re-seal, and
 /// silently creating one from a request the server cannot inspect would store a
@@ -230,18 +228,20 @@ async fn rewrap_key_backup(
     let user_id = require_auth(&req).await?;
     body.validate()?;
     let data = body.into_inner();
-    data.password_kdf
+    data.recovery_kdf
         .validate_cost()
         .map_err(|error| AppError::BadRequest(describe(&error)))?;
 
     // Step up before destroying anything. This route replaces the only copy of
-    // the identity a password can open, and validating the shape of a blob is
-    // not evidence that it still holds the key — a stolen access token was the
-    // entire authorisation, so it could sabotage restoration for an account it
-    // had never held the identity for.
+    // the identity there is, and validating the shape of a blob is not evidence
+    // that it still holds the key — a stolen access token was the entire
+    // authorisation, so it could sabotage restoration for an account whose
+    // identity it had never held.
     //
-    // The ordinary path no longer comes through here at all: re-sealing after a
-    // password change now travels with the change itself, in one transaction.
+    // It is also the upgrade path: an account set up before the password copy
+    // was removed keeps that copy until its owner has a recovery code they have
+    // saved. Writing a new one here is that moment, so the password copy goes
+    // in the same statement.
     let user = sqlx::query_as::<_, crate::models::User>("SELECT * FROM users WHERE id = $1")
         .bind(user_id)
         .fetch_optional(pool.get_ref())
@@ -256,28 +256,33 @@ async fn rewrap_key_backup(
     )
     .await?;
 
-    let wrapped = hex::decode(&data.password_wrapped_key)
+    let wrapped = hex::decode(&data.recovery_wrapped_key)
         .map_err(|_| AppError::BadRequest("Invalid wrapped key encoding".to_string()))?;
-    let salt = hex::decode(&data.password_kdf_salt)
+    let salt = hex::decode(&data.recovery_kdf_salt)
         .map_err(|_| AppError::BadRequest("Invalid salt encoding".to_string()))?;
 
     let mut tx = pool.begin().await?;
     let updated = sqlx::query(
         r#"UPDATE user_key_backups SET
-            password_wrapped_key = $2,
-            password_kdf_salt = $3,
-            password_kdf_memory_kib = $4,
-            password_kdf_iterations = $5,
-            password_kdf_parallelism = $6,
+            recovery_wrapped_key = $2,
+            recovery_kdf_salt = $3,
+            recovery_kdf_memory_kib = $4,
+            recovery_kdf_iterations = $5,
+            recovery_kdf_parallelism = $6,
+            password_wrapped_key = NULL,
+            password_kdf_salt = NULL,
+            password_kdf_memory_kib = NULL,
+            password_kdf_iterations = NULL,
+            password_kdf_parallelism = NULL,
             updated_at = NOW()
         WHERE user_id = $1"#,
     )
     .bind(user_id)
     .bind(&wrapped)
     .bind(&salt)
-    .bind(data.password_kdf.memory_kib)
-    .bind(data.password_kdf.iterations)
-    .bind(data.password_kdf.parallelism)
+    .bind(data.recovery_kdf.memory_kib)
+    .bind(data.recovery_kdf.iterations)
+    .bind(data.recovery_kdf.parallelism)
     .execute(&mut *tx)
     .await?;
 
@@ -301,6 +306,7 @@ async fn rewrap_key_backup(
     Ok(no_store(HttpResponse::NoContent()).finish())
 }
 
+/// The caller's own encrypted backup, for restoring on a new device.
 async fn get_key_backup(
     pool: web::Data<PgPool>,
     req: HttpRequest,
@@ -309,19 +315,26 @@ async fn get_key_backup(
     let row = sqlx::query_as::<
         _,
         (
+            // The password copy is nullable now: present only for accounts that
+            // predate its removal and have not yet completed the upgrade.
+            Option<Vec<u8>>,
+            Option<Vec<u8>>,
+            Option<i32>,
+            Option<i32>,
+            Option<i32>,
             Vec<u8>,
             Vec<u8>,
             i32,
             i32,
             i32,
-            Vec<u8>,
-            Vec<u8>,
             chrono::DateTime<chrono::Utc>,
         ),
     >(
         r#"SELECT password_wrapped_key, password_kdf_salt,
                   password_kdf_memory_kib, password_kdf_iterations, password_kdf_parallelism,
-                  recovery_wrapped_key, recovery_kdf_salt, updated_at
+                  recovery_wrapped_key, recovery_kdf_salt,
+                  recovery_kdf_memory_kib, recovery_kdf_iterations, recovery_kdf_parallelism,
+                  updated_at
         FROM user_key_backups WHERE user_id = $1"#,
     )
     .bind(user_id)
@@ -329,17 +342,36 @@ async fn get_key_backup(
     .await?
     .ok_or_else(|| AppError::NotFound("No key backup for this account".to_string()))?;
 
+    // The password copy is served only while it exists. An account set up since
+    // it was removed has none, and one that has completed the upgrade has had
+    // its cleared — in both cases the client offers the recovery code only.
+    let password_copy = match (row.0, row.1, row.2, row.3, row.4) {
+        (Some(wrapped), Some(salt), Some(memory_kib), Some(iterations), Some(parallelism)) => {
+            Some((
+                hex::encode(wrapped),
+                hex::encode(salt),
+                KdfParameters {
+                    memory_kib,
+                    iterations,
+                    parallelism,
+                },
+            ))
+        }
+        _ => None,
+    };
+
     Ok(no_store(HttpResponse::Ok()).json(KeyBackupResponse {
-        password_wrapped_key: hex::encode(row.0),
-        password_kdf_salt: hex::encode(row.1),
-        password_kdf: KdfParameters {
-            memory_kib: row.2,
-            iterations: row.3,
-            parallelism: row.4,
-        },
+        password_wrapped_key: password_copy.as_ref().map(|copy| copy.0.clone()),
+        password_kdf_salt: password_copy.as_ref().map(|copy| copy.1.clone()),
+        password_kdf: password_copy.map(|copy| copy.2),
         recovery_wrapped_key: hex::encode(row.5),
         recovery_kdf_salt: hex::encode(row.6),
-        updated_at: row.7,
+        recovery_kdf: KdfParameters {
+            memory_kib: row.7,
+            iterations: row.8,
+            parallelism: row.9,
+        },
+        updated_at: row.10,
     }))
 }
 
