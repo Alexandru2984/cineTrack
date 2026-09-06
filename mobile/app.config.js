@@ -33,6 +33,33 @@ function isInstallableBuild() {
   );
 }
 
+/**
+ * Whether over-the-air updates may be enabled for this build.
+ *
+ * They may not, and the condition is written so that turning them on requires
+ * wiring code signing rather than flipping an environment variable.
+ *
+ * The preview profile used to enable them, and preview points at the production
+ * API: an internal APK given to a tester was a second, unsigned way to deliver
+ * code that then ran with that tester's real session. Expo verifies the update
+ * came from the configured server, not that the publisher intended it, so a
+ * compromised EAS account or channel would have been enough. Store builds never
+ * had this — they force OTA off — which left the least-protected distribution
+ * path attached to real accounts.
+ *
+ * Re-enabling means configuring `updates.codeSigningCertificate` and the key
+ * that goes with it, and restricting who can publish to the channel. Until that
+ * exists, `EXPO_UPDATES_ENABLED=true` is not enough on its own, which is the
+ * point: an env var in a build profile should not be able to open a code
+ * delivery path.
+ */
+function otaIsAllowed() {
+  if (process.env.EXPO_UPDATES_ENABLED !== 'true') return false;
+  // Store builds are never eligible, whatever else is configured.
+  if (process.env.EAS_BUILD_PROFILE === 'production') return false;
+  return Boolean(process.env.EXPO_UPDATES_CODE_SIGNING_CERTIFICATE);
+}
+
 module.exports = ({ config }) => {
   const services = googleServicesFile();
 
@@ -58,9 +85,7 @@ module.exports = ({ config }) => {
     },
     updates: {
       ...config.updates,
-      enabled:
-        process.env.EAS_BUILD_PROFILE !== 'production' &&
-        process.env.EXPO_UPDATES_ENABLED !== 'false',
+      enabled: otaIsAllowed(),
     },
   };
 };

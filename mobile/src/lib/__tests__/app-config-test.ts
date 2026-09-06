@@ -27,23 +27,45 @@ beforeEach(() => {
 
 afterEach(() => {
   delete process.env.EXPO_UPDATES_ENABLED;
+  delete process.env.EXPO_UPDATES_CODE_SIGNING_CERTIFICATE;
   delete process.env.EAS_BUILD_PROFILE;
   delete process.env.EAS_BUILD;
   delete process.env.GOOGLE_SERVICES_JSON;
 });
 
 describe('mobile update policy', () => {
-  it('keeps OTA available for internal preview builds', () => {
+  // Preview used to enable OTA, and preview points at the production API: an
+  // internal APK handed to a tester was a second, unsigned way to deliver code
+  // that then ran with that tester's real session. Asking for it is no longer
+  // enough on its own.
+  it('refuses unsigned OTA on internal preview builds', () => {
+    process.env.EAS_BUILD_PROFILE = 'preview';
     process.env.EXPO_UPDATES_ENABLED = 'true';
     expect(resolveAppConfig({ config }).updates).toEqual({
       url: 'https://u.expo.dev/project',
-      enabled: true,
+      enabled: false,
     });
   });
 
   it('disables unsigned OTA updates in store builds', () => {
     process.env.EAS_BUILD_PROFILE = 'production';
     process.env.EXPO_UPDATES_ENABLED = 'true';
+    expect(resolveAppConfig({ config }).updates.enabled).toBe(false);
+  });
+
+  // The gate is the signing certificate, not the flag, so that a build profile
+  // cannot open a code-delivery path by setting one environment variable.
+  it('allows OTA once updates are code signed, store builds excepted', () => {
+    process.env.EXPO_UPDATES_ENABLED = 'true';
+    process.env.EXPO_UPDATES_CODE_SIGNING_CERTIFICATE = 'certificates/updates.pem';
+    process.env.EAS_BUILD_PROFILE = 'preview';
+    expect(resolveAppConfig({ config }).updates.enabled).toBe(true);
+
+    process.env.EAS_BUILD_PROFILE = 'production';
+    expect(resolveAppConfig({ config }).updates.enabled).toBe(false);
+  });
+
+  it('stays off when nothing asked for it', () => {
     expect(resolveAppConfig({ config }).updates.enabled).toBe(false);
   });
 });
