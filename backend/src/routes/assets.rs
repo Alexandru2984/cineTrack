@@ -50,7 +50,7 @@ pub fn configure_public_images_unlimited(cfg: &mut web::ServiceConfig) {
     cfg.service(web::scope("/api/img").route("/{size}/{file}", web::get().to(serve_poster)))
         .service(
             web::scope("/api/assets")
-                .route("/avatars/{file}", web::get().to(serve_avatar_asset))
+                .route("/avatars/{file:.*}", web::get().to(serve_avatar_asset))
                 .route("/posters/{size}/{file}", web::get().to(serve_cached_poster)),
         );
 }
@@ -69,7 +69,7 @@ pub fn configure_public_images(cfg: &mut web::ServiceConfig, limiter: &ImageGove
     .service(
         web::scope("/api/assets")
             .wrap(RateLimit::new(limiter))
-            .route("/avatars/{file}", web::get().to(serve_avatar_asset))
+            .route("/avatars/{file:.*}", web::get().to(serve_avatar_asset))
             .route("/posters/{size}/{file}", web::get().to(serve_cached_poster)),
     );
 }
@@ -95,6 +95,14 @@ fn valid_poster_spec(spec: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
 }
 
+/// Whether a public asset key is one this service is willing to serve.
+///
+/// The avatar route matches a tail rather than one segment, because uploads
+/// write `avatars/{user}/{nonce}.ext` and a single-segment pattern silently
+/// stopped matching them — the object existed, the row pointed at it, and the
+/// proxy answered an empty 404. What keeps the tail safe is here rather than in
+/// the route: every segment is parsed as a UUID, so nothing can walk out of the
+/// prefix.
 fn valid_public_asset_key(key: &str) -> bool {
     if let Some(name) = key.strip_prefix("avatars/") {
         let Some((stem, extension)) = name.rsplit_once('.') else {
