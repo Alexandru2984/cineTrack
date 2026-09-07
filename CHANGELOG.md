@@ -64,6 +64,16 @@ and release versions follow semantic versioning.
 
 ### Security
 
+- The URL decoder behind deep-link routing no longer degrades on malformed
+  input. `expo-router` parses links through `query-string`, which requires
+  `decode-uri-component`; every published version it can load decodes malformed
+  percent-encoding by recursing over splits of the token list, so cost climbs
+  far faster than the length of the input — 1 200 characters took 7.5 seconds
+  here, and kept climbing. A link crafted to exploit it would spin the app on
+  whatever device opened it. The fixed upstream release is ESM-only and
+  `query-string` is CommonJS, so it cannot simply be required; the fixed
+  algorithm is vendored as CommonJS instead and wired in, with tests that check
+  both the timing and that it agrees with upstream output.
 - The encrypted key backup is no longer sealed under the account password. It
   used to be sealed twice — once under a recovery code the server never sees,
   and once under a key derived from the account password, which the server

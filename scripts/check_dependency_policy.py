@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import json
 import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 ROOT = Path(__file__).resolve().parent.parent
 LOCKFILES = (ROOT / "frontend/package-lock.json", ROOT / "mobile/package-lock.json")
@@ -53,6 +53,17 @@ def license_is_approved(expression: str) -> bool:
     return normalized in ALLOWED_LICENSE_EXPRESSIONS
 
 
+def target_is_in_tree(target: str) -> bool:
+    """Whether a lockfile link target stays inside the workspace it belongs to.
+
+    Relative, and not climbing out with `..` or an absolute path. Vendored code
+    is reviewable in a diff; a link reaching outside the tree is not."""
+    if target.startswith(("/", "~")) or ":" in target:
+        return False
+    parts = PurePosixPath(target).parts
+    return bool(parts) and ".." not in parts
+
+
 def validate_lockfile(path: Path) -> list[str]:
     relative = path.relative_to(ROOT).as_posix()
     data = json.loads(path.read_text(encoding="utf-8"))
@@ -71,6 +82,24 @@ def validate_lockfile(path: Path) -> list[str]:
             continue
         if not isinstance(package, dict):
             errors.append(f"{relative}:{package_path}: package metadata must be an object")
+            continue
+
+        # A `link: true` entry is a symlink npm creates for a dependency that
+        # lives inside this repository, not something fetched from anywhere. It
+        # carries no version, license or integrity because there is nothing to
+        # carry them for — the real record is the target path, which is checked
+        # like any other entry a few iterations later.
+        #
+        # The target still has to be inside the tree. A link pointing outside it
+        # would be code that arrives from somewhere this policy cannot see,
+        # which is the whole thing these checks exist to prevent.
+        if package.get("link") is True:
+            target = package.get("resolved")
+            if not isinstance(target, str) or not target_is_in_tree(target):
+                errors.append(
+                    f"{relative}:{package_path}: link target {target!r} is outside the repository"
+                )
+            checked += 1
             continue
 
         version = str(package.get("version", ""))
