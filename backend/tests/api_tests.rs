@@ -14560,6 +14560,97 @@ async fn a_nul_byte_in_text_is_refused_rather_than_crashing() {
     assert_eq!(actix_test::call_service(&app, req).await.status(), 201);
 }
 
+/// A day is the member's day, not Greenwich's.
+///
+/// Found auditing this codebase after the September round, checking whether the
+/// numbers people see every day are right. Every date in the statistics came
+/// from `AT TIME ZONE 'UTC'`, so a watch belonged to the day it was in
+/// Greenwich. In Bucharest — where this application is used — that is wrong in
+/// a way anyone can see: watching at 23:30 and again at 00:30 the next night is
+/// two evenings, and both were filed as one. One square on the year heatmap
+/// instead of two, and a streak broken while its owner believed it was intact.
+///
+/// The offset arrives per request, the way the calendar already takes `today`,
+/// because it changes twice a year and only the client knows it.
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn statistics_are_bucketed_by_the_members_own_day() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (token, _, user_id) =
+        register_user(&app, "localday", "localday@mailbox.dev", "Pass1234").await;
+    let user_id = Uuid::parse_str(&user_id).unwrap();
+    let media_id = seed_show_with_episodes(&pool, "Local Day Show", &[]).await;
+
+    // 23:30 on 10 August and 00:30 on 11 August, Europe/Bucharest (UTC+3).
+    for stamp in ["2026-08-10 20:30:00+00", "2026-08-10 21:30:00+00"] {
+        sqlx::query(
+            "INSERT INTO watch_history (user_id, media_id, watched_at)
+             VALUES ($1, $2, $3::timestamptz)",
+        )
+        .bind(user_id)
+        .bind(media_id)
+        .bind(stamp)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+
+    let heatmap = |offset: Option<i32>| {
+        let app = &app;
+        let token = token.clone();
+        async move {
+            let uri = match offset {
+                Some(minutes) => {
+                    format!("/api/stats/me/heatmap?year=2026&utc_offset_minutes={minutes}")
+                }
+                None => "/api/stats/me/heatmap?year=2026".to_string(),
+            };
+            let req = actix_test::TestRequest::get()
+                .uri(&uri)
+                .insert_header(("Authorization", format!("Bearer {token}")))
+                .peer_addr(peer_addr())
+                .to_request();
+            let days: Value = actix_test::call_and_read_body_json(app, req).await;
+            days.as_array()
+                .map(|all| {
+                    all.iter()
+                        .filter(|day| day["count"].as_i64().unwrap_or(0) > 0)
+                        .map(|day| {
+                            (
+                                day["date"].as_str().unwrap_or_default().to_string(),
+                                day["count"].as_i64().unwrap_or(0),
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default()
+        }
+    };
+
+    // Without an offset, the old behaviour: one day, both watches.
+    assert_eq!(
+        heatmap(None).await,
+        vec![("2026-08-10".to_string(), 2)],
+        "UTC bucketing changed; this test no longer contrasts anything"
+    );
+
+    // With the member's own offset, the two evenings they actually had.
+    assert_eq!(
+        heatmap(Some(180)).await,
+        vec![("2026-08-10".to_string(), 1), ("2026-08-11".to_string(), 1),],
+        "two local evenings were still filed as one day"
+    );
+
+    // A hostile offset cannot move history into another year.
+    assert_eq!(
+        heatmap(Some(999_999)).await,
+        vec![("2026-08-10".to_string(), 2)],
+        "an out-of-range offset was accepted"
+    );
+}
+
 /// The same rule about unaired episodes, whichever route is used.
 ///
 /// L02 from the September audit. The calendar and season routes refuse an

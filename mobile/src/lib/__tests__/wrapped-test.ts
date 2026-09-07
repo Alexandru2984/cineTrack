@@ -49,7 +49,11 @@ describe('mobile annual recap', () => {
       total_watches: 66,
       top_shows: [{ media_type: 'movie', tmdb_id: 603 }],
     });
-    expect(mockApiRequest).toHaveBeenCalledWith('/stats/me/wrapped?year=2026');
+    // The offset travels with it: the recap is about the member's year, and
+    // the server has no other way to know where their days start.
+    expect(mockApiRequest).toHaveBeenCalledWith(
+      `/stats/me/wrapped?year=2026&utc_offset_minutes=${-new Date().getTimezoneOffset()}`,
+    );
   });
 
   it('rejects mismatched years, invalid dates, and duplicate months', async () => {
