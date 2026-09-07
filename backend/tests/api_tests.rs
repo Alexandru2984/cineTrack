@@ -14272,6 +14272,243 @@ async fn a_legacy_password_copy_survives_until_a_new_recovery_code_is_saved() {
     assert_eq!(body["recovery_wrapped_key"], "9a".repeat(64));
 }
 
+/// Recovery has to cut the capabilities that do not need a session.
+///
+/// Found auditing this codebase after the September round, and it is the same
+/// shape as H03: an action authorised before the compromise ended surviving the
+/// event meant to end it. Changing the password revokes every session and
+/// cancels every pending credential token — and left two things untouched.
+///
+/// The calendar feed URL is a bearer token in a link, answered by a route that
+/// never sees a session: whoever held the account kept reading the owner's
+/// watchlist and upcoming episodes afterwards. A push registration is the same
+/// shape, and kept delivering what the owner was watching to a device the
+/// attacker had registered.
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn recovery_cuts_the_capabilities_that_outlive_a_session() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (token, _, user_id) =
+        register_user(&app, "capsurvive", "capsurvive@mailbox.dev", "Pass1234").await;
+    let user_uuid = Uuid::parse_str(&user_id).unwrap();
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/calendar/feed")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let feed: Value = actix_test::call_and_read_body_json(&app, req).await;
+    let feed_url = feed["feed_url"]
+        .as_str()
+        .expect("enabling the feed returns its URL");
+    let feed_token = feed_url
+        .rsplit('/')
+        .next()
+        .expect("the URL ends in the token")
+        .to_string();
+
+    let req = actix_test::TestRequest::put()
+        .uri("/api/push/devices")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .set_json(json!({
+            "expo_push_token": "ExponentPushToken[capsurvive0000000000]",
+            "unregister_secret": "b".repeat(64),
+            "platform": "android",
+            "app_version": "1.2.0",
+            "utc_offset_minutes": 0
+        }))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 200);
+
+    // Both work while the account is held. Without this the test could pass by
+    // never having armed anything.
+    let req = actix_test::TestRequest::get()
+        .uri(&format!("/api/calendar/feed/{feed_token}"))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 200);
+    let devices =
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM push_devices WHERE user_id = $1")
+            .bind(user_uuid)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(devices, 1);
+
+    let req = actix_test::TestRequest::patch()
+        .uri("/api/auth/password")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .set_json(json!({ "current_password": "Pass1234", "new_password": "NewPass5678" }))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 200);
+
+    let req = actix_test::TestRequest::get()
+        .uri(&format!("/api/calendar/feed/{feed_token}"))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(
+        actix_test::call_service(&app, req).await.status(),
+        404,
+        "the feed URL still serves the owner's calendar after recovery"
+    );
+
+    let devices =
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM push_devices WHERE user_id = $1")
+            .bind(user_uuid)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        devices, 0,
+        "a device registered before recovery still receives notifications"
+    );
+}
+
+/// The link-preview routes have to carry a budget like everything else.
+///
+/// Found auditing this codebase after the September round. They are public,
+/// unauthenticated, and each runs a query — and they sit outside `/api`, which
+/// is the scope the shared limiter wraps, so they had none. The vhost locations
+/// that rewrite here carry no `limit_req` either, and the crawler test they
+/// gate on is a `User-Agent` header anyone can send.
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn the_unfurl_routes_are_rate_limited() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+
+    // A budget small enough to exhaust in a test, applied the way production
+    // applies the shared one.
+    let limiter =
+        cinetrack::middleware::rate_limit::RateLimitConfig::new(1, 2).expect("a valid tiny budget");
+    let app = actix_test::init_service(
+        actix_web::App::new()
+            .app_data(actix_web::web::Data::new(pool.clone()))
+            .configure(|cfg| cinetrack::routes::unfurl::configure_rate_limited(cfg, &limiter)),
+    )
+    .await;
+
+    let mut statuses = vec![];
+    for _ in 0..8 {
+        let req = actix_test::TestRequest::get()
+            .uri("/unfurl/media/550")
+            .peer_addr(peer_addr())
+            .to_request();
+        statuses.push(actix_test::call_service(&app, req).await.status().as_u16());
+    }
+
+    assert!(
+        statuses.contains(&429),
+        "eight unauthenticated preview requests from one address were all served: {statuses:?}"
+    );
+}
+
+/// An import that never finished must not cost somebody the feature.
+///
+/// Found auditing this codebase after the September round. An import runs in a
+/// spawned task and the row that says so is all the next request consults. A
+/// restart takes the task and leaves the row `running`; so does a completion
+/// write that fails, which the code discarded without logging. The partial
+/// unique index permits one non-failed job per account, so either way that
+/// member could never start another import — no sweep, no timeout, no operator
+/// command, and the only way out was editing the table by hand.
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn an_interrupted_import_does_not_block_the_account_for_ever() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (_token, _, user_id) =
+        register_user(&app, "stuckjob", "stuckjob@mailbox.dev", "Pass1234").await;
+    let uuid = Uuid::parse_str(&user_id).unwrap();
+
+    let admit = |pool: PgPool, uuid: Uuid| async move {
+        sqlx::query_scalar::<_, Uuid>(
+            "INSERT INTO import_jobs (user_id, status) VALUES ($1, 'pending')
+             ON CONFLICT DO NOTHING RETURNING id",
+        )
+        .bind(uuid)
+        .fetch_optional(&pool)
+        .await
+        .unwrap()
+    };
+
+    // What a restart leaves behind.
+    sqlx::query(
+        "INSERT INTO import_jobs (user_id, status, created_at, updated_at)
+         VALUES ($1, 'running', NOW(), NOW())",
+    )
+    .bind(uuid)
+    .execute(&pool)
+    .await
+    .unwrap();
+    assert!(
+        admit(pool.clone(), uuid).await.is_none(),
+        "the reservation should be held while a job looks live"
+    );
+
+    // Startup knows better: nothing is running in a process that just began.
+    let released = cinetrack::services::importer::release_interrupted_jobs(&pool)
+        .await
+        .unwrap();
+    assert_eq!(released, 1);
+    let recovered = admit(pool.clone(), uuid).await;
+    assert!(
+        recovered.is_some(),
+        "the account is still locked out after a restart"
+    );
+    sqlx::query("DELETE FROM import_jobs WHERE user_id = $1")
+        .bind(uuid)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    // The other way in: a completion write lost inside a process that keeps
+    // running. Age is the only thing that distinguishes it from healthy work.
+    sqlx::query(
+        "INSERT INTO import_jobs (user_id, status, created_at, updated_at)
+         VALUES ($1, 'running', NOW() - INTERVAL '2 days', NOW() - INTERVAL '2 days')",
+    )
+    .bind(uuid)
+    .execute(&pool)
+    .await
+    .unwrap();
+    assert!(admit(pool.clone(), uuid).await.is_none());
+
+    let released = cinetrack::services::importer::release_stale_jobs(&pool, uuid)
+        .await
+        .unwrap();
+    assert_eq!(released, 1);
+    assert!(
+        admit(pool.clone(), uuid).await.is_some(),
+        "a job abandoned two days ago still holds the reservation"
+    );
+
+    // And a job that is merely young is left alone, or this would cancel work
+    // that is still running.
+    sqlx::query("DELETE FROM import_jobs WHERE user_id = $1")
+        .bind(uuid)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO import_jobs (user_id, status) VALUES ($1, 'running')")
+        .bind(uuid)
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        cinetrack::services::importer::release_stale_jobs(&pool, uuid)
+            .await
+            .unwrap(),
+        0,
+        "a running import was cancelled while it was still working"
+    );
+}
+
 /// The same rule about unaired episodes, whichever route is used.
 ///
 /// L02 from the September audit. The calendar and season routes refuse an
