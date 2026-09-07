@@ -217,7 +217,20 @@ services:
     deploy:
       resources:
         limits:
-          memory: 512M
+          # Measured rather than guessed. The paths that hold memory are each
+          # bounded — two imports at 24 MiB, eight object reads at 15 MiB, two
+          # exports which peaked at 202 MiB on an account with sixty thousand
+          # history rows — and all of them at once comes to roughly 370 MiB
+          # before anything else the process is doing. 512 MiB left no room for
+          # that; before the exports were bounded, eight of them reached
+          # 693 MiB and the container would have been killed.
+          #
+          # The host has 62 GiB with 42 free, so the old number was not
+          # protecting anything it could not afford to give. This one is still
+          # a cap — a runaway is stopped — with headroom above the worst case
+          # anyone has measured. `bench/memory_under_load.sh` is how to check
+          # it again.
+          memory: 1024M
           cpus: "1.0"
           pids: 256
 
