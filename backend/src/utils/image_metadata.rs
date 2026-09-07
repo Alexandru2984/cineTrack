@@ -272,6 +272,102 @@ fn keep_gif_extension(label: u8, block: &[u8]) -> bool {
 }
 
 #[cfg(test)]
+mod fuzz {
+    use super::*;
+
+    /// A deterministic xorshift, so a failure is reproducible from the seed
+    /// printed with it rather than "it failed once on some machine".
+    struct Rng(u64);
+    impl Rng {
+        fn next(&mut self) -> u64 {
+            let mut x = self.0;
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            self.0 = x;
+            x
+        }
+        fn byte(&mut self) -> u8 {
+            (self.next() >> 24) as u8
+        }
+        fn below(&mut self, bound: usize) -> usize {
+            if bound == 0 {
+                0
+            } else {
+                (self.next() % bound as u64) as usize
+            }
+        }
+    }
+
+    /// Plausible headers, so the fuzzer spends its time inside the parsers
+    /// rather than bouncing off the first signature check.
+    fn seeds() -> Vec<(&'static str, Vec<u8>)> {
+        vec![
+            ("jpg", vec![0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]),
+            ("png", b"\x89PNG\r\n\x1a\n\x00\x00\x00\x0dIHDR".to_vec()),
+            ("webp", b"RIFF\x20\x00\x00\x00WEBPVP8 ".to_vec()),
+            ("gif", b"GIF89a\x01\x00\x01\x00\x00\x00\x00".to_vec()),
+        ]
+    }
+
+    /// The parsers read attacker-supplied bytes.
+    ///
+    /// They are written with checked slicing throughout — `bytes.get(..)?`
+    /// rather than indexing — so a truncated or lying length header should end
+    /// as `None` and a refused upload. This asserts that by running it, because
+    /// reading the code is how the whole class of bug survives review: one
+    /// arithmetic overflow or one direct index is a panic, and a panic inside a
+    /// request handler on somebody else's bytes is a denial of service.
+    #[test]
+    fn no_input_makes_a_parser_panic() {
+        let mut rng = Rng(0x5eed_1234_abcd_ef01);
+        for (extension, seed) in seeds() {
+            for _ in 0..2_000 {
+                let mut bytes = seed.clone();
+                let extra = rng.below(96);
+                for _ in 0..extra {
+                    bytes.push(rng.byte());
+                }
+                // Corrupt some of the header too, including the length fields
+                // the walk trusts to advance.
+                let flips = rng.below(6);
+                for _ in 0..flips {
+                    if bytes.is_empty() {
+                        break;
+                    }
+                    let at = rng.below(bytes.len());
+                    bytes[at] = rng.byte();
+                }
+                // Truncation is the case that breaks a hand-written walk.
+                if rng.below(3) == 0 && !bytes.is_empty() {
+                    let keep = rng.below(bytes.len());
+                    bytes.truncate(keep);
+                }
+
+                // The assertion is that this returns at all.
+                let _ = strip_metadata(&bytes, extension);
+            }
+        }
+    }
+
+    /// Sizes that tend to break length arithmetic, at every supported format.
+    #[test]
+    fn boundary_lengths_are_handled() {
+        for (extension, seed) in seeds() {
+            for length in [0usize, 1, 2, 3, 12, 13, 14, seed.len(), seed.len() + 1] {
+                let mut bytes = seed.clone();
+                bytes.resize(length, 0xff);
+                let _ = strip_metadata(&bytes, extension);
+            }
+            // A length header claiming far more than the buffer holds.
+            let mut lying = seed.clone();
+            lying.extend_from_slice(&[0xff, 0xff, 0xff, 0xff]);
+            let _ = strip_metadata(&lying, extension);
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 

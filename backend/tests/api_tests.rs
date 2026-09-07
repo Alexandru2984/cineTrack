@@ -14509,6 +14509,57 @@ async fn an_interrupted_import_does_not_block_the_account_for_ever() {
     );
 }
 
+/// A NUL byte in a text field is a bad request, not a server error.
+///
+/// Found auditing this codebase after the September round, by pushing hostile
+/// text through every field that stores it. Postgres refuses a NUL byte in
+/// text, so the value reached the database and failed there — and the route
+/// answered 500 for input the caller had sent.
+///
+/// Nothing is exposed by it. What it costs is the server-error rate the alerts
+/// watch: somebody pasting text with a stray byte moves a signal that is
+/// supposed to mean the service is broken.
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn a_nul_byte_in_text_is_refused_rather_than_crashing() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (token, _, _) = register_user(&app, "nulbyte", "nulbyte@mailbox.dev", "Pass1234").await;
+
+    let hostile = "before\u{0000}after";
+
+    let req = actix_test::TestRequest::patch()
+        .uri("/api/users/me")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .set_json(json!({ "bio": hostile }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let status = actix_test::call_service(&app, req).await.status();
+    assert_eq!(
+        status, 400,
+        "a NUL byte in a bio answered {status}; it reached the database and failed there"
+    );
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/lists")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .set_json(json!({ "name": hostile }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let status = actix_test::call_service(&app, req).await.status();
+    assert_eq!(status, 400, "a NUL byte in a list name answered {status}");
+
+    // And ordinary text still works, so this is not refusing everything.
+    let req = actix_test::TestRequest::post()
+        .uri("/api/lists")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .set_json(json!({ "name": "an ordinary list" }))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 201);
+}
+
 /// The same rule about unaired episodes, whichever route is used.
 ///
 /// L02 from the September audit. The calendar and season routes refuse an
