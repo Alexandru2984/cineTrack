@@ -16,7 +16,7 @@ tokio = { version = "1", features = ["full"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 jsonwebtoken = { version = "10.4", default-features = false, features = ["aws_lc_rs"] }
-argon2 = "0.5"
+argon2 = "0.6"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
 dotenvy = "0.15"
 thiserror = "2"
@@ -39,7 +39,7 @@ anyhow = "1"
 lettre = { version = "0.11", default-features = false, features = ["builder", "smtp-transport", "tokio1-rustls-tls", "hostname"] }
 actix-web-prom = "0.10"
 prometheus = { version = "0.14", default-features = false }
-aws-sdk-s3 = { version = "=1.143.0", default-features = false, features = ["behavior-version-latest", "default-https-client", "http-1x", "rt-tokio"] }
+aws-sdk-s3 = { version = "=1.144.0", default-features = false, features = ["behavior-version-latest", "default-https-client", "http-1x", "rt-tokio"] }
 aws-smithy-types = "=1.6.2"
 csv = "1.4"
 
