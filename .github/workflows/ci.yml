@@ -513,6 +513,9 @@ jobs:
           python3 scripts/check_dependency_policy.py
           python3 scripts/tests/dependency_policy_test.py
 
+      - name: Validate database role time budgets
+        run: python3 scripts/tests/db_role_budgets_test.py
+
       - name: Validate CI security and smoke-test contracts
         run: scripts/tests/ci_contract_test.sh
 

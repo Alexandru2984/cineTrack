@@ -120,6 +120,43 @@ SELECT format(
 )
 \gexec
 
+-- Time budgets for the application role, and only for it.
+--
+-- There were none: `statement_timeout`, `lock_timeout` and
+-- `idle_in_transaction_session_timeout` were all 0 on the server and unset on
+-- every role. The pool allows twenty connections and gives up acquiring one
+-- after five seconds, so twenty statements that never finish are the whole API
+-- refusing requests — and an HTTP timeout does not cancel work already running
+-- in Postgres, so nothing else was going to end them.
+--
+-- 30s per statement is far above anything measured here; it exists to stop a
+-- pathological plan, not to discipline slow queries. 5s on locks turns a row
+-- somebody else is holding into a failed request rather than a stuck one. 60s
+-- on an idle transaction bounds the case that actually hurts: a task killed
+-- between statements keeps its locks until the connection dies, and writers to
+-- those rows wait behind it.
+--
+-- The migration role is deliberately left alone. A migration that rewrites a
+-- table legitimately takes longer than any request, and killing one halfway is
+-- worse than waiting for it.
+SELECT format(
+    'ALTER ROLE %I SET statement_timeout = ''30s''',
+    :'app_role'
+)
+\gexec
+
+SELECT format(
+    'ALTER ROLE %I SET lock_timeout = ''5s''',
+    :'app_role'
+)
+\gexec
+
+SELECT format(
+    'ALTER ROLE %I SET idle_in_transaction_session_timeout = ''60s''',
+    :'app_role'
+)
+\gexec
+
 SELECT format(
     'CREATE ROLE %I LOGIN PASSWORD %L NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS CONNECTION LIMIT 5',
     :'migration_role', :'migration_password'
