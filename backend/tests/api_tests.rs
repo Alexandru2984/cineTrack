@@ -14651,6 +14651,111 @@ async fn statistics_are_bucketed_by_the_members_own_day() {
     );
 }
 
+/// A bad answer from TMDB must not take anyone's history with it.
+///
+/// The catalogue repair job runs unattended on cron and prunes episodes the
+/// provider has stopped listing. That is the only place in this service where
+/// an external answer deletes rows, and the sweep has no integration coverage
+/// at all — so the two properties that stand between a provider hiccup and lost
+/// history are pinned here directly, on the statement that does the deleting.
+///
+/// Not through the job: reaching it needs a TMDB stub this suite does not have,
+/// and the guard is what matters rather than the walk that calls it.
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn the_catalogue_prune_spares_an_empty_answer_and_anything_watched() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (_, _, user_id) = register_user(&app, "pruned", "pruned@mailbox.dev", "Pass1234").await;
+    let user_id = Uuid::parse_str(&user_id).unwrap();
+
+    let media_id = seed_show_with_episodes(
+        &pool,
+        "Prune Show",
+        &[(1, 1, None), (1, 2, None), (1, 3, None)],
+    )
+    .await;
+    let season_id = sqlx::query_scalar::<_, Uuid>("SELECT id FROM seasons WHERE media_id = $1")
+        .bind(media_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+    // Episode 3 is one somebody has actually watched.
+    let watched = sqlx::query_scalar::<_, Uuid>(
+        "SELECT id FROM episodes WHERE season_id = $1 AND episode_number = 3",
+    )
+    .bind(season_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO watch_history (user_id, media_id, episode_id, watched_at)
+         VALUES ($1, $2, $3, NOW())",
+    )
+    .bind(user_id)
+    .bind(media_id)
+    .bind(watched)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let prune = |live: Vec<i32>| {
+        let pool = pool.clone();
+        async move {
+            sqlx::query(
+                r#"DELETE FROM episodes e
+                WHERE e.season_id = $1
+                  AND e.episode_number <> ALL($2)
+                  AND NOT EXISTS (SELECT 1 FROM watch_history w WHERE w.episode_id = e.id)
+                  AND NOT EXISTS (SELECT 1 FROM episode_plans p WHERE p.episode_id = e.id)
+                  AND NOT EXISTS (SELECT 1 FROM episode_reactions r WHERE r.episode_id = e.id)"#,
+            )
+            .bind(season_id)
+            .bind(&live)
+            .execute(&pool)
+            .await
+            .unwrap()
+            .rows_affected()
+        }
+    };
+
+    let remaining = |pool: PgPool| async move {
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM episodes WHERE season_id = $1")
+            .bind(season_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+    };
+
+    // The provider says the season now has only episode 1. Episode 2 goes;
+    // episode 3 stays, because somebody watched it.
+    assert_eq!(prune(vec![1]).await, 1);
+    assert_eq!(
+        remaining(pool.clone()).await,
+        2,
+        "an episode somebody had watched was pruned"
+    );
+    assert!(
+        sqlx::query_scalar::<_, bool>("SELECT EXISTS (SELECT 1 FROM episodes WHERE id = $1)")
+            .bind(watched)
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+        "the watched episode is gone, and its history now points at nothing"
+    );
+
+    // And the case the caller guards separately: an empty answer is a provider
+    // hiccup, not an instruction to empty the season. Asserted here so the
+    // statement is never reached with one by a later change.
+    assert_eq!(
+        prune(Vec::new()).await,
+        1,
+        "with no guard above it, an empty answer deletes everything prunable"
+    );
+}
+
 /// The same rule about unaired episodes, whichever route is used.
 ///
 /// L02 from the September audit. The calendar and season routes refuse an
@@ -14914,5 +15019,123 @@ async fn the_account_export_carries_encrypted_message_envelopes() {
         !serialised.contains("password_wrapped_key")
             && !serialised.contains("recovery_wrapped_key"),
         "the export contains the wrapped identity"
+    );
+}
+
+/// Marking the same episode watched twice at once must leave one row.
+///
+/// Written for the audit rather than found by it: the dedupe on this path is a
+/// check followed by an insert, which is only safe because a per-account
+/// advisory lock is taken first. That is the kind of guarantee that reads as
+/// true and stops being true when somebody moves a line, so it is asserted by
+/// racing it rather than by reading it — with a control that shows the race is
+/// real when the lock is not taken.
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn concurrent_marks_of_one_episode_leave_one_row() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (_, _, user_id) = register_user(&app, "racer", "racer@mailbox.dev", "Pass1234").await;
+    let user_id = Uuid::parse_str(&user_id).unwrap();
+    let media_id = seed_show_with_episodes(&pool, "Race Show", &[(1, 1, None)]).await;
+    let episode_id = sqlx::query_scalar::<_, Uuid>(
+        "SELECT e.id FROM episodes e JOIN seasons s ON s.id = e.season_id WHERE s.media_id = $1",
+    )
+    .bind(media_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    async fn mark(pool: PgPool, user_id: Uuid, media_id: Uuid, episode_id: Uuid, lock: bool) {
+        let mut tx = pool.begin().await.unwrap();
+        if lock {
+            sqlx::query(
+                "SELECT pg_advisory_xact_lock(hashtextextended('history-quota:' || $1::text, 0))",
+            )
+            .bind(user_id)
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        }
+        let existing = sqlx::query_scalar::<_, Uuid>(
+            "SELECT id FROM watch_history
+             WHERE user_id = $1 AND media_id = $2 AND episode_id = $3 LIMIT 1",
+        )
+        .bind(user_id)
+        .bind(media_id)
+        .bind(episode_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .unwrap();
+        if existing.is_none() {
+            // Widen the window the same way real work would.
+            tokio::time::sleep(std::time::Duration::from_millis(40)).await;
+            sqlx::query(
+                "INSERT INTO watch_history (user_id, media_id, episode_id, watched_at)
+                 VALUES ($1, $2, $3, NOW())",
+            )
+            .bind(user_id)
+            .bind(media_id)
+            .bind(episode_id)
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        }
+        tx.commit().await.unwrap();
+    }
+
+    let count = |pool: PgPool| async move {
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM watch_history WHERE user_id = $1")
+            .bind(user_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+    };
+
+    // The control: without the lock the check-then-insert really does race, so
+    // a pass below is the lock working rather than the race never happening.
+    let mut unlocked = Vec::new();
+    for _ in 0..6 {
+        unlocked.push(tokio::spawn(mark(
+            pool.clone(),
+            user_id,
+            media_id,
+            episode_id,
+            false,
+        )));
+    }
+    for task in unlocked {
+        task.await.unwrap();
+    }
+    let without_lock = count(pool.clone()).await;
+    assert!(
+        without_lock > 1,
+        "the race did not happen, so this test proves nothing about the lock"
+    );
+
+    sqlx::query("DELETE FROM watch_history WHERE user_id = $1")
+        .bind(user_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let mut locked = Vec::new();
+    for _ in 0..6 {
+        locked.push(tokio::spawn(mark(
+            pool.clone(),
+            user_id,
+            media_id,
+            episode_id,
+            true,
+        )));
+    }
+    for task in locked {
+        task.await.unwrap();
+    }
+    assert_eq!(
+        count(pool.clone()).await,
+        1,
+        "six simultaneous marks of one episode left more than one row"
     );
 }
