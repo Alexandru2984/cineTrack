@@ -176,6 +176,10 @@ export interface SeasonWatchProgress {
   episode_count: number | null;
   available_episode_count: number;
   watched_count: number;
+  /** How many times the season has been seen all the way through: the fewest
+   *  plays any aired episode of it has. Watching one favourite five times is
+   *  not five viewings of the season. */
+  complete_passes: number;
 }
 
 export interface BulkWatchResponse {

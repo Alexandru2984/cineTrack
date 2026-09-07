@@ -202,6 +202,44 @@ export function useMarkSeasonWatched() {
   });
 }
 
+/** Record another viewing.
+ *
+ *  Separate from the "watched" mutations rather than a flag on them: "watched"
+ *  is idempotent so a double tap costs nothing, and this is additive by
+ *  definition. One per level, matching the backend verbs.
+ */
+export function useRewatchSeason() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ tmdbId, seasonNumber }: { tmdbId: number; seasonNumber: number }) =>
+      apiRequest<BulkWatchResponse>(
+        `/history/tv/${tmdbId}/seasons/${seasonNumber}/rewatch`,
+        { method: 'POST' },
+      ),
+    onSuccess: (_data, variables) => invalidateWatchState(queryClient, variables.tmdbId),
+  });
+}
+
+export function useRewatchShow() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ tmdbId }: { tmdbId: number }) =>
+      apiRequest<BulkWatchResponse>(`/history/tv/${tmdbId}/rewatch`, { method: 'POST' }),
+    onSuccess: (_data, variables) => invalidateWatchState(queryClient, variables.tmdbId),
+  });
+}
+
+export function useRewatchMovie() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ tmdbId }: { tmdbId: number }) =>
+      apiRequest<{ times_watched: number }>(`/history/movies/${tmdbId}/rewatch`, {
+        method: 'POST',
+      }),
+    onSuccess: (_data, variables) => invalidateWatchState(queryClient, variables.tmdbId),
+  });
+}
+
 export function useMarkEpisodesWatchedThrough() {
   const queryClient = useQueryClient();
   return useMutation({

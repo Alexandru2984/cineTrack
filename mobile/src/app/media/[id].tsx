@@ -6,6 +6,7 @@ import {
   CheckCheck,
   Clock3,
   ListPlus,
+  RotateCcw,
   Share2,
   Star,
 } from 'lucide-react-native';
@@ -35,6 +36,9 @@ import {
   useMarkEpisodeWatched,
   useMarkEpisodesWatchedThrough,
   useMarkSeasonWatched,
+  useRewatchMovie,
+  useRewatchSeason,
+  useRewatchShow,
   useShowProgress,
   useTrackingLookup,
   useUpdateTracking,
@@ -136,6 +140,9 @@ export default function MediaDetailScreen() {
   const progress = useShowProgress(media.data?.tmdb_id);
   const markEpisode = useMarkEpisodeWatched();
   const markSeason = useMarkSeasonWatched();
+  const rewatchSeason = useRewatchSeason();
+  const rewatchShow = useRewatchShow();
+  const rewatchMovie = useRewatchMovie();
   const markThrough = useMarkEpisodesWatchedThrough();
   const watchedSet = useMemo(
     () => new Set(watchedEpisodes.data ?? []),
@@ -393,6 +400,24 @@ export default function MediaDetailScreen() {
                 setListPickerOpen(true);
               }}
             />
+            {/* Offered once the title is finished, which is the only point at
+                which seeing it again is a thing somebody can mean. */}
+            {selectedStatus === 'completed' ? (
+              <AppButton
+                label={
+                  item.media_type === 'tv' ? t('media.rewatchShow') : t('media.rewatchMovie')
+                }
+                variant="secondary"
+                compact
+                icon={<RotateCcw color={theme.mutedText} size={18} />}
+                loading={rewatchShow.isPending || rewatchMovie.isPending}
+                onPress={() =>
+                  item.media_type === 'tv'
+                    ? rewatchShow.mutate({ tmdbId: item.tmdb_id })
+                    : rewatchMovie.mutate({ tmdbId: item.tmdb_id })
+                }
+              />
+            ) : null}
             {listFeedback ? (
               <AppText variant="caption" style={{ color: theme.success }}>
                 {listFeedback}
@@ -529,20 +554,35 @@ export default function MediaDetailScreen() {
                       total: episodes.data?.length ?? 0,
                     })}
                   </AppText>
+                  {/* A finished season used to end in a disabled button saying
+                      so. That is the moment somebody is most likely to want the
+                      other thing, so it becomes the offer to see it again
+                      rather than a dead control. */}
                   <AppButton
-                    label={seasonUnwatched === 0 ? t('media.seasonWatched') : t('media.markSeasonWatched')}
+                    label={
+                      seasonUnwatched === 0
+                        ? t('media.rewatchSeason')
+                        : t('media.markSeasonWatched')
+                    }
                     icon={
                       seasonUnwatched === 0 ? (
-                        <Check color="#FFFFFF" size={17} />
+                        <RotateCcw color="#FFFFFF" size={17} />
                       ) : (
                         <CheckCheck color="#FFFFFF" size={17} />
                       )
                     }
                     variant="success"
                     compact
-                    disabled={seasonUnwatched === 0}
-                    loading={bulkPending}
-                    onPress={confirmSeason}
+                    loading={bulkPending || rewatchSeason.isPending}
+                    onPress={
+                      seasonUnwatched === 0
+                        ? () =>
+                            rewatchSeason.mutate({
+                              tmdbId: item.tmdb_id,
+                              seasonNumber: selectedSeason,
+                            })
+                        : confirmSeason
+                    }
                   />
                 </View>
 
