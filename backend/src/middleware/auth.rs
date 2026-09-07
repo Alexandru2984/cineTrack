@@ -16,7 +16,7 @@ use crate::utils::jwt;
 /// The lookup is in-process (see `services::revocation`), so this costs no
 /// query and nothing on the hot path.
 fn reject_revoked(claims: jwt::Claims) -> Result<Uuid, AppError> {
-    if revocation::is_revoked(claims.sid, claims.sub, claims.iat) {
+    if revocation::is_revoked(claims.sid, claims.sub, claims.iat, claims.iat_ms) {
         // Deliberately indistinguishable from any other rejected token: a
         // caller holding a revoked credential learns that it no longer works,
         // not why, and not that the account still exists.

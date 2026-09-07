@@ -58,6 +58,7 @@ struct ConnectionGuard {
     /// can be re-checked while it is open.
     session_id: Uuid,
     issued_at: i64,
+    issued_at_ms: Option<i64>,
 }
 
 impl Drop for ConnectionGuard {
@@ -117,6 +118,7 @@ async fn stream_events(req: HttpRequest) -> Result<HttpResponse, AppError> {
         user_id,
         session_id: claims.sid,
         issued_at: claims.iat,
+        issued_at_ms: claims.iat_ms,
     };
 
     let body = stream::unfold((receiver, guard), |(mut receiver, guard)| async move {
@@ -125,7 +127,12 @@ async fn stream_events(req: HttpRequest) -> Result<HttpResponse, AppError> {
         // Checked on every wake-up, including keepalives, so a revoked session
         // is dropped within one keepalive interval at the latest rather than
         // whenever the client happens to reconnect.
-        if revocation::is_revoked(guard.session_id, guard.user_id, guard.issued_at) {
+        if revocation::is_revoked(
+            guard.session_id,
+            guard.user_id,
+            guard.issued_at,
+            guard.issued_at_ms,
+        ) {
             return None;
         }
 
@@ -179,10 +186,12 @@ mod tests {
         let session_id = Uuid::new_v4();
         let issued_at = chrono::Utc::now().timestamp();
 
-        assert!(!revocation::is_revoked(session_id, user_id, issued_at));
+        assert!(!revocation::is_revoked(
+            session_id, user_id, issued_at, None
+        ));
         revocation::revoke_session_in_memory(session_id);
         assert!(
-            revocation::is_revoked(session_id, user_id, issued_at),
+            revocation::is_revoked(session_id, user_id, issued_at, None),
             "the stream's own liveness check must see the revocation"
         );
     }

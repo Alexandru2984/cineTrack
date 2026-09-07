@@ -157,6 +157,7 @@ fn bench_jwt(c: &mut Criterion) {
                 black_box(session_id),
                 black_box(user_id),
                 black_box(issued_at),
+                black_box(Some(issued_at * 1000)),
             )
         });
     });
