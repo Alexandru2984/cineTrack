@@ -60,6 +60,57 @@ class DependencyPolicyTests(unittest.TestCase):
         self.assertTrue(any("unapproved package source" in error for error in errors))
         self.assertTrue(any("missing SHA-512 integrity" in error for error in errors))
 
+    def test_links_into_the_repository_are_allowed_but_links_out_are_not(self) -> None:
+        """Vendored code is reviewable in a diff; a link out of the tree is not.
+
+        npm writes a `link: true` entry with no version, license or integrity
+        for a dependency that lives inside the repository — the real record is
+        the target path, checked like any other. Failing those three on the
+        symlink would mean no in-repo package could ever be used, which is how
+        a vendored security fix ends up being an argument for shipping the
+        vulnerable version instead."""
+        original_root = policy.ROOT
+        try:
+            with tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                lock = root / "package-lock.json"
+                lock.write_text(
+                    json.dumps(
+                        {
+                            "lockfileVersion": 3,
+                            "packages": {
+                                "": {"name": "private-app"},
+                                "node_modules/vendored": {
+                                    "resolved": "vendor/vendored",
+                                    "link": True,
+                                },
+                                "vendor/vendored": {
+                                    "version": "1.0.0",
+                                    "license": "MIT",
+                                },
+                                "node_modules/escapes": {
+                                    "resolved": "../../elsewhere/pkg",
+                                    "link": True,
+                                },
+                                "node_modules/absolute": {
+                                    "resolved": "/opt/pkg",
+                                    "link": True,
+                                },
+                            },
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+                policy.ROOT = root
+                errors = policy.validate_lockfile(lock)
+        finally:
+            policy.ROOT = original_root
+
+        self.assertEqual(len(errors), 2, errors)
+        self.assertTrue(all("outside the repository" in error for error in errors))
+        self.assertTrue(any("elsewhere/pkg" in error for error in errors))
+        self.assertTrue(any("/opt/pkg" in error for error in errors))
+
 
 class DependabotGroupingTests(unittest.TestCase):
     """Postgres must never arrive as an automated image bump.
