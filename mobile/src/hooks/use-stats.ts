@@ -12,10 +12,30 @@ import type {
 
 const STATS_STALE_TIME = 60_000;
 
+/** Minutes to add to UTC to reach this device's civil time.
+ *
+ *  Sent with every statistic that buckets by day. The server has no other way
+ *  to know it: a watch at 00:30 in Bucharest is 21:30 the day before in
+ *  Greenwich, and filing it there put two evenings on one square of the heatmap
+ *  and broke streaks that were not broken.
+ *
+ *  Read per call rather than once, so a device that travels — or sits through a
+ *  daylight-saving change — sends the offset that is true now, and it is part
+ *  of the query key so a cached answer belongs to the offset it was fetched
+ *  for. `release-notifications` computes the same value for push scheduling;
+ *  this is deliberately not shared with it, because that one is stored on the
+ *  server and this one must not be. */
+function utcOffsetMinutes(): number {
+  return -new Date().getTimezoneOffset();
+}
+
 export function useMyStats(enabled = true) {
   return useQuery({
-    queryKey: ['stats', 'me'],
-    queryFn: () => apiRequest<UserStats>('/stats/me'),
+    queryKey: ['stats', 'me', utcOffsetMinutes()],
+    queryFn: () =>
+      apiRequest<UserStats>(
+        withQuery('/stats/me', { utc_offset_minutes: utcOffsetMinutes() }),
+      ),
     staleTime: STATS_STALE_TIME,
     enabled,
   });
@@ -23,9 +43,14 @@ export function useMyStats(enabled = true) {
 
 export function useHeatmap(year: number, enabled = true) {
   return useQuery({
-    queryKey: ['stats', 'heatmap', year],
+    queryKey: ['stats', 'heatmap', year, utcOffsetMinutes()],
     queryFn: () =>
-      apiRequest<HeatmapDay[]>(withQuery('/stats/me/heatmap', { year })),
+      apiRequest<HeatmapDay[]>(
+        withQuery('/stats/me/heatmap', {
+          year,
+          utc_offset_minutes: utcOffsetMinutes(),
+        }),
+      ),
     staleTime: STATS_STALE_TIME,
     enabled,
   });
@@ -42,8 +67,11 @@ export function useGenreDistribution(enabled = true) {
 
 export function useMonthlyActivity(enabled = true) {
   return useQuery({
-    queryKey: ['stats', 'monthly'],
-    queryFn: () => apiRequest<MonthlyActivity[]>('/stats/me/monthly'),
+    queryKey: ['stats', 'monthly', utcOffsetMinutes()],
+    queryFn: () =>
+      apiRequest<MonthlyActivity[]>(
+        withQuery('/stats/me/monthly', { utc_offset_minutes: utcOffsetMinutes() }),
+      ),
     staleTime: STATS_STALE_TIME,
     enabled,
   });

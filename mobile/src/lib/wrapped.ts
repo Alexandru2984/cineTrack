@@ -117,7 +117,10 @@ export async function fetchWrapped(year: number): Promise<WrappedStats> {
     throw new ApiError('Year must be between 1900 and 2100', 400);
   }
   const payload = await apiRequest<unknown>(
-    withQuery('/stats/me/wrapped', { year }),
+    withQuery('/stats/me/wrapped', {
+      year,
+      utc_offset_minutes: -new Date().getTimezoneOffset(),
+    }),
   );
   const result = wrappedStatsSchema.parse(payload);
   if (result.year !== year) {

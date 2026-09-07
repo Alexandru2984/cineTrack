@@ -1,3 +1,4 @@
+import type { User } from '@/types';
 import axios from 'axios';
 import { useAuthStore } from '@/store/auth';
 
@@ -20,6 +21,39 @@ api.interceptors.request.use((config) => {
 
 let refreshPromise: Promise<string> | null = null;
 /// Thrown when a rotation completes into a session that has since been replaced.
+/** The shape an authentication response has to have before it is believed.
+ *
+ *  These fields used to be destructured straight out of `response.data` and
+ *  handed to the store. A body that was not what it claimed — an edge error
+ *  page served as 200, a truncated response, anything between here and the API
+ *  rewriting it — produced `setAuth(undefined, undefined)`: a store whose
+ *  status said `authenticated` while `isAuthenticated()` said false, and a
+ *  rotation that returned `undefined` as the new access token to everything
+ *  waiting on it. Reloading did the same thing again, so it did not clear.
+ *
+ *  The mobile client has validated this since it was written; this is the same
+ *  check, without adding a schema library for one shape. */
+export function isAuthPayload(value: unknown): value is { access_token: string; user: User } {
+  if (typeof value !== 'object' || value === null) return false;
+  const payload = value as { access_token?: unknown; user?: unknown };
+  if (typeof payload.access_token !== 'string' || payload.access_token.length === 0) return false;
+  if (typeof payload.user !== 'object' || payload.user === null) return false;
+  const user = payload.user as { id?: unknown; username?: unknown };
+  return typeof user.id === 'string' && typeof user.username === 'string';
+}
+
+/** A response that arrived but cannot be an authentication result.
+ *
+ *  Deliberately not a credential rejection: nothing here says the session is
+ *  over, only that this answer was unusable, so the circuit stays open and the
+ *  next attempt can succeed. */
+export class MalformedAuthResponseError extends Error {
+  constructor() {
+    super('malformed-auth-response');
+    this.name = 'MalformedAuthResponseError';
+  }
+}
+
 export class SessionSupersededError extends Error {
   constructor() {
     super('Session superseded');
@@ -119,6 +153,9 @@ export function refreshAccessToken(): Promise<string> {
         withCredentials: true,
         timeout: 15_000,
       });
+      if (!isAuthPayload(response.data)) {
+        throw new MalformedAuthResponseError();
+      }
       const { access_token, user } = response.data;
       // The result belongs to the session that asked for it. Signing out while
       // this was in flight means it must be discarded, not applied.
@@ -126,7 +163,7 @@ export function refreshAccessToken(): Promise<string> {
         throw new SessionSupersededError();
       }
       useAuthStore.getState().setAuth(access_token, user);
-      return access_token as string;
+      return access_token;
     })
       .catch((error) => {
         // Only a refusal closes the circuit. Anything else leaves it open so

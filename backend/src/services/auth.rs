@@ -1650,6 +1650,38 @@ async fn cancel_pending_credential_actions(
     .execute(&mut **tx)
     .await?;
 
+    // Two capabilities that outlive a session on purpose, and so outlived
+    // recovery too. Both were reachable without one, which is exactly what made
+    // them worth taking: revoking every session and changing the password left
+    // whoever had held the account still reading it.
+    //
+    // The calendar feed URL is a bearer token in a link. Anyone holding it gets
+    // the owner's watchlist and upcoming episodes, indefinitely, from a route
+    // that never sees a session. Disabled rather than rotated — a new URL the
+    // owner does not know about is not better than none, and the settings
+    // screen shows the feature as off, which is the prompt to re-enable it and
+    // re-subscribe.
+    sqlx::query(
+        "UPDATE users SET calendar_feed_token_hash = NULL, updated_at = NOW()
+         WHERE id = $1 AND calendar_feed_token_hash IS NOT NULL",
+    )
+    .bind(user_id)
+    .execute(&mut **tx)
+    .await?;
+
+    // Push registrations are the same shape: a device token plus a secret, held
+    // by the device, honoured without a session. A device registered while the
+    // account was held keeps receiving what the owner is watching.
+    //
+    // This takes the owner's own device with it. That is the only way to take
+    // the other one, and it costs a re-registration the client already performs
+    // on its own: `syncReleaseNotifications` runs whenever the app has an
+    // authenticated user, so the owner's notifications come back by themselves.
+    sqlx::query("DELETE FROM push_devices WHERE user_id = $1")
+        .bind(user_id)
+        .execute(&mut **tx)
+        .await?;
+
     Ok(())
 }
 

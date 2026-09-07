@@ -82,7 +82,7 @@ pub fn configure_with_rate_limits(
     // straight here. Registered in this function specifically — `configure`
     // above is not the one the server builds itself from, which is how the
     // first version of this shipped as a 404 nobody's tests could see.
-    unfurl::configure(cfg);
+    unfurl::configure_rate_limited(cfg, shared_rate_limiter);
 
     cfg.service(
         web::scope("/api")

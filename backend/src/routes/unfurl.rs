@@ -23,6 +23,34 @@ use uuid::Uuid;
 
 use crate::errors::AppError;
 
+/// The same routes, carrying the shared budget.
+///
+/// These are public, unauthenticated, and each one runs a query. They sit
+/// outside `/api`, so the scope that wraps the shared limiter never covered
+/// them, and the vhost locations that rewrite here carry no `limit_req` of
+/// their own — the crawler match is a `User-Agent`, which anyone can send. That
+/// left three routes doing database work for anybody who asked, as fast as they
+/// could ask.
+///
+/// The budget is the ordinary shared one. A preview crawler fetches a link
+/// once, and the services that fetch a few times come from different addresses,
+/// so this is not a limit real unfurling can reach.
+pub fn configure_rate_limited(
+    cfg: &mut web::ServiceConfig,
+    limiter: &crate::routes::SharedGovernorConfig,
+) {
+    cfg.service(
+        web::scope("/unfurl")
+            .wrap(crate::middleware::rate_limit::RateLimit::new(limiter))
+            .route("/list/{id}", web::get().to(list_card))
+            .route("/list/{id}", web::head().to(list_card))
+            .route("/media/{tmdb_id}", web::get().to(media_card))
+            .route("/media/{tmdb_id}", web::head().to(media_card))
+            .route("/profile/{username}", web::get().to(profile_card))
+            .route("/profile/{username}", web::head().to(profile_card)),
+    );
+}
+
 pub fn configure(cfg: &mut web::ServiceConfig) {
     // HEAD as well as GET. Some preview services ask for the headers first, to
     // see the content type and size before spending a body fetch. Registering

@@ -135,6 +135,16 @@ async fn publish_keys(
     // Replacing keys makes every message encrypted to the old ones unreadable
     // by anyone who has not kept the old private key. The generation counter is
     // what lets a peer notice, and the fingerprint is what lets a human notice.
+    // `replacing` was read before the step-up, outside this transaction, because
+    // an Argon2 verification does not belong inside one. That leaves a window:
+    // two first publications can both see no keys, both skip the password, and
+    // the second silently replace the first — the identity a device had already
+    // started using, and every message encrypted to it.
+    //
+    // So the decision is carried into the write. The upsert only replaces when
+    // this request was authorised to replace; otherwise a conflict updates
+    // nothing and returns no row, and the loser is told to start again rather
+    // than being handed a generation it did not create.
     let generation = sqlx::query_scalar::<_, i32>(
         r#"INSERT INTO user_identity_keys
             (user_id, exchange_public_key, signing_public_key, key_fingerprint)
@@ -145,14 +155,23 @@ async fn publish_keys(
             key_fingerprint = EXCLUDED.key_fingerprint,
             generation = user_identity_keys.generation + 1,
             updated_at = NOW()
+        WHERE $5
         RETURNING generation"#,
     )
     .bind(user_id)
     .bind(&exchange)
     .bind(&signing)
     .bind(&data.key_fingerprint)
-    .fetch_one(&mut *tx)
-    .await?;
+    .bind(replacing)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(|| {
+        AppError::Conflict(
+            "Encryption keys were published for this account while this request was in \
+             flight. Reload and try again."
+                .to_string(),
+        )
+    })?;
 
     // One copy, wrapped under the recovery code. A publication also clears any
     // password copy the account still carried: it is replacing the identity, so

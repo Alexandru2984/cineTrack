@@ -381,6 +381,14 @@ async fn start_import(
     quota::ensure_tracking_capacity(tracking_count, incoming_titles)?;
     quota::ensure_history_capacity(history_count, incoming_history_events)?;
 
+    // A job left unfinished by a lost completion write would otherwise hold the
+    // reservation below for ever, and the member has no way to clear it. Doing
+    // this here means the recovery is the thing they would try anyway.
+    if let Err(error) = crate::services::importer::release_stale_jobs(pool.get_ref(), user_id).await
+    {
+        log::error!("could not release stale import jobs for user_id={user_id}: {error}");
+    }
+
     // One non-failed import per user keeps history idempotent. The partial
     // unique index makes this reservation atomic across concurrent requests.
     let job_id = sqlx::query_scalar::<_, Uuid>(

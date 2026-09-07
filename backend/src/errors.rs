@@ -94,6 +94,17 @@ impl ResponseError for AppError {
                         actix_web::http::StatusCode::BAD_REQUEST,
                         "Invalid data".to_string(),
                     ),
+                    // 22021 character_not_in_repertoire, and the two encoding
+                    // classes beside it. Postgres refuses a NUL byte in text,
+                    // so any field carrying one arrived at the database and
+                    // failed there — which surfaced as a 500 for input the
+                    // caller sent. It is a bad request, and saying so also
+                    // keeps somebody typing a stray byte from moving the
+                    // server-error rate the alerts watch.
+                    Some("22021") | Some("22P05") | Some("22023") => (
+                        actix_web::http::StatusCode::BAD_REQUEST,
+                        "Invalid text encoding".to_string(),
+                    ),
                     _ => {
                         eprintln!("Internal error: {:?}", self);
                         log::error!("Internal error: {:?}", self);

@@ -14272,6 +14272,490 @@ async fn a_legacy_password_copy_survives_until_a_new_recovery_code_is_saved() {
     assert_eq!(body["recovery_wrapped_key"], "9a".repeat(64));
 }
 
+/// Recovery has to cut the capabilities that do not need a session.
+///
+/// Found auditing this codebase after the September round, and it is the same
+/// shape as H03: an action authorised before the compromise ended surviving the
+/// event meant to end it. Changing the password revokes every session and
+/// cancels every pending credential token — and left two things untouched.
+///
+/// The calendar feed URL is a bearer token in a link, answered by a route that
+/// never sees a session: whoever held the account kept reading the owner's
+/// watchlist and upcoming episodes afterwards. A push registration is the same
+/// shape, and kept delivering what the owner was watching to a device the
+/// attacker had registered.
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn recovery_cuts_the_capabilities_that_outlive_a_session() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (token, _, user_id) =
+        register_user(&app, "capsurvive", "capsurvive@mailbox.dev", "Pass1234").await;
+    let user_uuid = Uuid::parse_str(&user_id).unwrap();
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/calendar/feed")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let feed: Value = actix_test::call_and_read_body_json(&app, req).await;
+    let feed_url = feed["feed_url"]
+        .as_str()
+        .expect("enabling the feed returns its URL");
+    let feed_token = feed_url
+        .rsplit('/')
+        .next()
+        .expect("the URL ends in the token")
+        .to_string();
+
+    let req = actix_test::TestRequest::put()
+        .uri("/api/push/devices")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .set_json(json!({
+            "expo_push_token": "ExponentPushToken[capsurvive0000000000]",
+            "unregister_secret": "b".repeat(64),
+            "platform": "android",
+            "app_version": "1.2.0",
+            "utc_offset_minutes": 0
+        }))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 200);
+
+    // Both work while the account is held. Without this the test could pass by
+    // never having armed anything.
+    let req = actix_test::TestRequest::get()
+        .uri(&format!("/api/calendar/feed/{feed_token}"))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 200);
+    let devices =
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM push_devices WHERE user_id = $1")
+            .bind(user_uuid)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(devices, 1);
+
+    let req = actix_test::TestRequest::patch()
+        .uri("/api/auth/password")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .set_json(json!({ "current_password": "Pass1234", "new_password": "NewPass5678" }))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 200);
+
+    let req = actix_test::TestRequest::get()
+        .uri(&format!("/api/calendar/feed/{feed_token}"))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(
+        actix_test::call_service(&app, req).await.status(),
+        404,
+        "the feed URL still serves the owner's calendar after recovery"
+    );
+
+    let devices =
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM push_devices WHERE user_id = $1")
+            .bind(user_uuid)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        devices, 0,
+        "a device registered before recovery still receives notifications"
+    );
+}
+
+/// The link-preview routes have to carry a budget like everything else.
+///
+/// Found auditing this codebase after the September round. They are public,
+/// unauthenticated, and each runs a query — and they sit outside `/api`, which
+/// is the scope the shared limiter wraps, so they had none. The vhost locations
+/// that rewrite here carry no `limit_req` either, and the crawler test they
+/// gate on is a `User-Agent` header anyone can send.
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn the_unfurl_routes_are_rate_limited() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+
+    // A budget small enough to exhaust in a test, applied the way production
+    // applies the shared one.
+    let limiter =
+        cinetrack::middleware::rate_limit::RateLimitConfig::new(1, 2).expect("a valid tiny budget");
+    let app = actix_test::init_service(
+        actix_web::App::new()
+            .app_data(actix_web::web::Data::new(pool.clone()))
+            .configure(|cfg| cinetrack::routes::unfurl::configure_rate_limited(cfg, &limiter)),
+    )
+    .await;
+
+    let mut statuses = vec![];
+    for _ in 0..8 {
+        let req = actix_test::TestRequest::get()
+            .uri("/unfurl/media/550")
+            .peer_addr(peer_addr())
+            .to_request();
+        statuses.push(actix_test::call_service(&app, req).await.status().as_u16());
+    }
+
+    assert!(
+        statuses.contains(&429),
+        "eight unauthenticated preview requests from one address were all served: {statuses:?}"
+    );
+}
+
+/// An import that never finished must not cost somebody the feature.
+///
+/// Found auditing this codebase after the September round. An import runs in a
+/// spawned task and the row that says so is all the next request consults. A
+/// restart takes the task and leaves the row `running`; so does a completion
+/// write that fails, which the code discarded without logging. The partial
+/// unique index permits one non-failed job per account, so either way that
+/// member could never start another import — no sweep, no timeout, no operator
+/// command, and the only way out was editing the table by hand.
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn an_interrupted_import_does_not_block_the_account_for_ever() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (_token, _, user_id) =
+        register_user(&app, "stuckjob", "stuckjob@mailbox.dev", "Pass1234").await;
+    let uuid = Uuid::parse_str(&user_id).unwrap();
+
+    let admit = |pool: PgPool, uuid: Uuid| async move {
+        sqlx::query_scalar::<_, Uuid>(
+            "INSERT INTO import_jobs (user_id, status) VALUES ($1, 'pending')
+             ON CONFLICT DO NOTHING RETURNING id",
+        )
+        .bind(uuid)
+        .fetch_optional(&pool)
+        .await
+        .unwrap()
+    };
+
+    // What a restart leaves behind.
+    sqlx::query(
+        "INSERT INTO import_jobs (user_id, status, created_at, updated_at)
+         VALUES ($1, 'running', NOW(), NOW())",
+    )
+    .bind(uuid)
+    .execute(&pool)
+    .await
+    .unwrap();
+    assert!(
+        admit(pool.clone(), uuid).await.is_none(),
+        "the reservation should be held while a job looks live"
+    );
+
+    // Startup knows better: nothing is running in a process that just began.
+    let released = cinetrack::services::importer::release_interrupted_jobs(&pool)
+        .await
+        .unwrap();
+    assert_eq!(released, 1);
+    let recovered = admit(pool.clone(), uuid).await;
+    assert!(
+        recovered.is_some(),
+        "the account is still locked out after a restart"
+    );
+    sqlx::query("DELETE FROM import_jobs WHERE user_id = $1")
+        .bind(uuid)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    // The other way in: a completion write lost inside a process that keeps
+    // running. Age is the only thing that distinguishes it from healthy work.
+    sqlx::query(
+        "INSERT INTO import_jobs (user_id, status, created_at, updated_at)
+         VALUES ($1, 'running', NOW() - INTERVAL '2 days', NOW() - INTERVAL '2 days')",
+    )
+    .bind(uuid)
+    .execute(&pool)
+    .await
+    .unwrap();
+    assert!(admit(pool.clone(), uuid).await.is_none());
+
+    let released = cinetrack::services::importer::release_stale_jobs(&pool, uuid)
+        .await
+        .unwrap();
+    assert_eq!(released, 1);
+    assert!(
+        admit(pool.clone(), uuid).await.is_some(),
+        "a job abandoned two days ago still holds the reservation"
+    );
+
+    // And a job that is merely young is left alone, or this would cancel work
+    // that is still running.
+    sqlx::query("DELETE FROM import_jobs WHERE user_id = $1")
+        .bind(uuid)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO import_jobs (user_id, status) VALUES ($1, 'running')")
+        .bind(uuid)
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        cinetrack::services::importer::release_stale_jobs(&pool, uuid)
+            .await
+            .unwrap(),
+        0,
+        "a running import was cancelled while it was still working"
+    );
+}
+
+/// A NUL byte in a text field is a bad request, not a server error.
+///
+/// Found auditing this codebase after the September round, by pushing hostile
+/// text through every field that stores it. Postgres refuses a NUL byte in
+/// text, so the value reached the database and failed there — and the route
+/// answered 500 for input the caller had sent.
+///
+/// Nothing is exposed by it. What it costs is the server-error rate the alerts
+/// watch: somebody pasting text with a stray byte moves a signal that is
+/// supposed to mean the service is broken.
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn a_nul_byte_in_text_is_refused_rather_than_crashing() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (token, _, _) = register_user(&app, "nulbyte", "nulbyte@mailbox.dev", "Pass1234").await;
+
+    let hostile = "before\u{0000}after";
+
+    let req = actix_test::TestRequest::patch()
+        .uri("/api/users/me")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .set_json(json!({ "bio": hostile }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let status = actix_test::call_service(&app, req).await.status();
+    assert_eq!(
+        status, 400,
+        "a NUL byte in a bio answered {status}; it reached the database and failed there"
+    );
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/lists")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .set_json(json!({ "name": hostile }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let status = actix_test::call_service(&app, req).await.status();
+    assert_eq!(status, 400, "a NUL byte in a list name answered {status}");
+
+    // And ordinary text still works, so this is not refusing everything.
+    let req = actix_test::TestRequest::post()
+        .uri("/api/lists")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .set_json(json!({ "name": "an ordinary list" }))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 201);
+}
+
+/// A day is the member's day, not Greenwich's.
+///
+/// Found auditing this codebase after the September round, checking whether the
+/// numbers people see every day are right. Every date in the statistics came
+/// from `AT TIME ZONE 'UTC'`, so a watch belonged to the day it was in
+/// Greenwich. In Bucharest — where this application is used — that is wrong in
+/// a way anyone can see: watching at 23:30 and again at 00:30 the next night is
+/// two evenings, and both were filed as one. One square on the year heatmap
+/// instead of two, and a streak broken while its owner believed it was intact.
+///
+/// The offset arrives per request, the way the calendar already takes `today`,
+/// because it changes twice a year and only the client knows it.
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn statistics_are_bucketed_by_the_members_own_day() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (token, _, user_id) =
+        register_user(&app, "localday", "localday@mailbox.dev", "Pass1234").await;
+    let user_id = Uuid::parse_str(&user_id).unwrap();
+    let media_id = seed_show_with_episodes(&pool, "Local Day Show", &[]).await;
+
+    // 23:30 on 10 August and 00:30 on 11 August, Europe/Bucharest (UTC+3).
+    for stamp in ["2026-08-10 20:30:00+00", "2026-08-10 21:30:00+00"] {
+        sqlx::query(
+            "INSERT INTO watch_history (user_id, media_id, watched_at)
+             VALUES ($1, $2, $3::timestamptz)",
+        )
+        .bind(user_id)
+        .bind(media_id)
+        .bind(stamp)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+
+    let heatmap = |offset: Option<i32>| {
+        let app = &app;
+        let token = token.clone();
+        async move {
+            let uri = match offset {
+                Some(minutes) => {
+                    format!("/api/stats/me/heatmap?year=2026&utc_offset_minutes={minutes}")
+                }
+                None => "/api/stats/me/heatmap?year=2026".to_string(),
+            };
+            let req = actix_test::TestRequest::get()
+                .uri(&uri)
+                .insert_header(("Authorization", format!("Bearer {token}")))
+                .peer_addr(peer_addr())
+                .to_request();
+            let days: Value = actix_test::call_and_read_body_json(app, req).await;
+            days.as_array()
+                .map(|all| {
+                    all.iter()
+                        .filter(|day| day["count"].as_i64().unwrap_or(0) > 0)
+                        .map(|day| {
+                            (
+                                day["date"].as_str().unwrap_or_default().to_string(),
+                                day["count"].as_i64().unwrap_or(0),
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default()
+        }
+    };
+
+    // Without an offset, the old behaviour: one day, both watches.
+    assert_eq!(
+        heatmap(None).await,
+        vec![("2026-08-10".to_string(), 2)],
+        "UTC bucketing changed; this test no longer contrasts anything"
+    );
+
+    // With the member's own offset, the two evenings they actually had.
+    assert_eq!(
+        heatmap(Some(180)).await,
+        vec![("2026-08-10".to_string(), 1), ("2026-08-11".to_string(), 1),],
+        "two local evenings were still filed as one day"
+    );
+
+    // A hostile offset cannot move history into another year.
+    assert_eq!(
+        heatmap(Some(999_999)).await,
+        vec![("2026-08-10".to_string(), 2)],
+        "an out-of-range offset was accepted"
+    );
+}
+
+/// A bad answer from TMDB must not take anyone's history with it.
+///
+/// The catalogue repair job runs unattended on cron and prunes episodes the
+/// provider has stopped listing. That is the only place in this service where
+/// an external answer deletes rows, and the sweep has no integration coverage
+/// at all — so the two properties that stand between a provider hiccup and lost
+/// history are pinned here directly, on the statement that does the deleting.
+///
+/// Not through the job: reaching it needs a TMDB stub this suite does not have,
+/// and the guard is what matters rather than the walk that calls it.
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn the_catalogue_prune_spares_an_empty_answer_and_anything_watched() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (_, _, user_id) = register_user(&app, "pruned", "pruned@mailbox.dev", "Pass1234").await;
+    let user_id = Uuid::parse_str(&user_id).unwrap();
+
+    let media_id = seed_show_with_episodes(
+        &pool,
+        "Prune Show",
+        &[(1, 1, None), (1, 2, None), (1, 3, None)],
+    )
+    .await;
+    let season_id = sqlx::query_scalar::<_, Uuid>("SELECT id FROM seasons WHERE media_id = $1")
+        .bind(media_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+    // Episode 3 is one somebody has actually watched.
+    let watched = sqlx::query_scalar::<_, Uuid>(
+        "SELECT id FROM episodes WHERE season_id = $1 AND episode_number = 3",
+    )
+    .bind(season_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO watch_history (user_id, media_id, episode_id, watched_at)
+         VALUES ($1, $2, $3, NOW())",
+    )
+    .bind(user_id)
+    .bind(media_id)
+    .bind(watched)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let prune = |live: Vec<i32>| {
+        let pool = pool.clone();
+        async move {
+            sqlx::query(
+                r#"DELETE FROM episodes e
+                WHERE e.season_id = $1
+                  AND e.episode_number <> ALL($2)
+                  AND NOT EXISTS (SELECT 1 FROM watch_history w WHERE w.episode_id = e.id)
+                  AND NOT EXISTS (SELECT 1 FROM episode_plans p WHERE p.episode_id = e.id)
+                  AND NOT EXISTS (SELECT 1 FROM episode_reactions r WHERE r.episode_id = e.id)"#,
+            )
+            .bind(season_id)
+            .bind(&live)
+            .execute(&pool)
+            .await
+            .unwrap()
+            .rows_affected()
+        }
+    };
+
+    let remaining = |pool: PgPool| async move {
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM episodes WHERE season_id = $1")
+            .bind(season_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+    };
+
+    // The provider says the season now has only episode 1. Episode 2 goes;
+    // episode 3 stays, because somebody watched it.
+    assert_eq!(prune(vec![1]).await, 1);
+    assert_eq!(
+        remaining(pool.clone()).await,
+        2,
+        "an episode somebody had watched was pruned"
+    );
+    assert!(
+        sqlx::query_scalar::<_, bool>("SELECT EXISTS (SELECT 1 FROM episodes WHERE id = $1)")
+            .bind(watched)
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+        "the watched episode is gone, and its history now points at nothing"
+    );
+
+    // And the case the caller guards separately: an empty answer is a provider
+    // hiccup, not an instruction to empty the season. Asserted here so the
+    // statement is never reached with one by a later change.
+    assert_eq!(
+        prune(Vec::new()).await,
+        1,
+        "with no guard above it, an empty answer deletes everything prunable"
+    );
+}
+
 /// The same rule about unaired episodes, whichever route is used.
 ///
 /// L02 from the September audit. The calendar and season routes refuse an
@@ -14535,5 +15019,123 @@ async fn the_account_export_carries_encrypted_message_envelopes() {
         !serialised.contains("password_wrapped_key")
             && !serialised.contains("recovery_wrapped_key"),
         "the export contains the wrapped identity"
+    );
+}
+
+/// Marking the same episode watched twice at once must leave one row.
+///
+/// Written for the audit rather than found by it: the dedupe on this path is a
+/// check followed by an insert, which is only safe because a per-account
+/// advisory lock is taken first. That is the kind of guarantee that reads as
+/// true and stops being true when somebody moves a line, so it is asserted by
+/// racing it rather than by reading it — with a control that shows the race is
+/// real when the lock is not taken.
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn concurrent_marks_of_one_episode_leave_one_row() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (_, _, user_id) = register_user(&app, "racer", "racer@mailbox.dev", "Pass1234").await;
+    let user_id = Uuid::parse_str(&user_id).unwrap();
+    let media_id = seed_show_with_episodes(&pool, "Race Show", &[(1, 1, None)]).await;
+    let episode_id = sqlx::query_scalar::<_, Uuid>(
+        "SELECT e.id FROM episodes e JOIN seasons s ON s.id = e.season_id WHERE s.media_id = $1",
+    )
+    .bind(media_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    async fn mark(pool: PgPool, user_id: Uuid, media_id: Uuid, episode_id: Uuid, lock: bool) {
+        let mut tx = pool.begin().await.unwrap();
+        if lock {
+            sqlx::query(
+                "SELECT pg_advisory_xact_lock(hashtextextended('history-quota:' || $1::text, 0))",
+            )
+            .bind(user_id)
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        }
+        let existing = sqlx::query_scalar::<_, Uuid>(
+            "SELECT id FROM watch_history
+             WHERE user_id = $1 AND media_id = $2 AND episode_id = $3 LIMIT 1",
+        )
+        .bind(user_id)
+        .bind(media_id)
+        .bind(episode_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .unwrap();
+        if existing.is_none() {
+            // Widen the window the same way real work would.
+            tokio::time::sleep(std::time::Duration::from_millis(40)).await;
+            sqlx::query(
+                "INSERT INTO watch_history (user_id, media_id, episode_id, watched_at)
+                 VALUES ($1, $2, $3, NOW())",
+            )
+            .bind(user_id)
+            .bind(media_id)
+            .bind(episode_id)
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        }
+        tx.commit().await.unwrap();
+    }
+
+    let count = |pool: PgPool| async move {
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM watch_history WHERE user_id = $1")
+            .bind(user_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+    };
+
+    // The control: without the lock the check-then-insert really does race, so
+    // a pass below is the lock working rather than the race never happening.
+    let mut unlocked = Vec::new();
+    for _ in 0..6 {
+        unlocked.push(tokio::spawn(mark(
+            pool.clone(),
+            user_id,
+            media_id,
+            episode_id,
+            false,
+        )));
+    }
+    for task in unlocked {
+        task.await.unwrap();
+    }
+    let without_lock = count(pool.clone()).await;
+    assert!(
+        without_lock > 1,
+        "the race did not happen, so this test proves nothing about the lock"
+    );
+
+    sqlx::query("DELETE FROM watch_history WHERE user_id = $1")
+        .bind(user_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let mut locked = Vec::new();
+    for _ in 0..6 {
+        locked.push(tokio::spawn(mark(
+            pool.clone(),
+            user_id,
+            media_id,
+            episode_id,
+            true,
+        )));
+    }
+    for task in locked {
+        task.await.unwrap();
+    }
+    assert_eq!(
+        count(pool.clone()).await,
+        1,
+        "six simultaneous marks of one episode left more than one row"
     );
 }

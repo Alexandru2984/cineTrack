@@ -37,6 +37,8 @@ async fn my_wrapped(
 ) -> Result<HttpResponse, AppError> {
     let user_id = require_auth(&req).await?;
     let year = parse_year(&query)?;
+    // The recap is about the member's year, not Greenwich's.
+    let offset = offset_minutes(&query);
     // Bind the year as a half-open timestamp range instead of EXTRACT(YEAR ...),
     // so the (user_id, watched_at) index can satisfy the predicate directly
     // rather than scanning the account's whole history and filtering.
@@ -76,18 +78,19 @@ async fn my_wrapped(
                         THEN COALESCE(e.runtime_minutes, m.runtime_minutes, 0)
                     ELSE COALESCE(m.runtime_minutes, 0)
                 END), 0)::bigint,
-                MIN((wh.watched_at AT TIME ZONE 'UTC')::date),
-                MAX((wh.watched_at AT TIME ZONE 'UTC')::date)
+                MIN(((wh.watched_at AT TIME ZONE 'UTC') + make_interval(mins => $4))::date),
+                MAX(((wh.watched_at AT TIME ZONE 'UTC') + make_interval(mins => $4))::date)
             FROM watch_history wh
             JOIN media m ON wh.media_id = m.id
             LEFT JOIN episodes e ON wh.episode_id = e.id
             WHERE wh.user_id = $1
-              AND wh.watched_at >= ($2::date::timestamp AT TIME ZONE 'UTC')
-              AND wh.watched_at < (($3::date + 1)::timestamp AT TIME ZONE 'UTC')"#,
+              AND wh.watched_at >= (($2::date::timestamp - make_interval(mins => $4)) AT TIME ZONE 'UTC')
+              AND wh.watched_at < ((($3::date + 1)::timestamp - make_interval(mins => $4)) AT TIME ZONE 'UTC')"#,
     )
     .bind(user_id)
     .bind(start_date)
     .bind(end_date)
+    .bind(offset)
     .fetch_one(pool.get_ref())
     .await?;
 
@@ -98,8 +101,8 @@ async fn my_wrapped(
             SELECT DISTINCT wh.media_id
             FROM watch_history wh
             WHERE wh.user_id = $1
-              AND wh.watched_at >= ($2::date::timestamp AT TIME ZONE 'UTC')
-              AND wh.watched_at < (($3::date + 1)::timestamp AT TIME ZONE 'UTC')
+              AND wh.watched_at >= (($2::date::timestamp - make_interval(mins => $4)) AT TIME ZONE 'UTC')
+              AND wh.watched_at < ((($3::date + 1)::timestamp - make_interval(mins => $4)) AT TIME ZONE 'UTC')
         ) watched
         JOIN media m ON m.id = watched.media_id,
         jsonb_array_elements(
@@ -113,6 +116,7 @@ async fn my_wrapped(
     .bind(user_id)
     .bind(start_date)
     .bind(end_date)
+    .bind(offset)
     .fetch_all(pool.get_ref())
     .await?
     .into_iter()
@@ -125,8 +129,8 @@ async fn my_wrapped(
         FROM watch_history wh
         JOIN media m ON wh.media_id = m.id
         WHERE wh.user_id = $1
-          AND wh.watched_at >= ($2::date::timestamp AT TIME ZONE 'UTC')
-          AND wh.watched_at < (($3::date + 1)::timestamp AT TIME ZONE 'UTC')
+          AND wh.watched_at >= (($2::date::timestamp - make_interval(mins => $4)) AT TIME ZONE 'UTC')
+          AND wh.watched_at < ((($3::date + 1)::timestamp - make_interval(mins => $4)) AT TIME ZONE 'UTC')
         GROUP BY m.tmdb_id, m.media_type, m.title, m.poster_path
         ORDER BY COUNT(*) DESC, m.title
         LIMIT 5"#,
@@ -134,6 +138,7 @@ async fn my_wrapped(
     .bind(user_id)
     .bind(start_date)
     .bind(end_date)
+    .bind(offset)
     .fetch_all(pool.get_ref())
     .await?
     .into_iter()
@@ -150,16 +155,17 @@ async fn my_wrapped(
 
     // Per-month counts, back-filled to a full 12-month series.
     let month_rows = sqlx::query_as::<_, (i32, i64)>(
-        r#"SELECT EXTRACT(MONTH FROM wh.watched_at AT TIME ZONE 'UTC')::int AS month, COUNT(*)::bigint
+        r#"SELECT EXTRACT(MONTH FROM (wh.watched_at AT TIME ZONE 'UTC') + make_interval(mins => $4))::int AS month, COUNT(*)::bigint
         FROM watch_history wh
         WHERE wh.user_id = $1
-          AND wh.watched_at >= ($2::date::timestamp AT TIME ZONE 'UTC')
-          AND wh.watched_at < (($3::date + 1)::timestamp AT TIME ZONE 'UTC')
+          AND wh.watched_at >= (($2::date::timestamp - make_interval(mins => $4)) AT TIME ZONE 'UTC')
+          AND wh.watched_at < ((($3::date + 1)::timestamp - make_interval(mins => $4)) AT TIME ZONE 'UTC')
         GROUP BY month"#,
     )
     .bind(user_id)
     .bind(start_date)
     .bind(end_date)
+    .bind(offset)
     .fetch_all(pool.get_ref())
     .await?;
     let monthly: Vec<WrappedMonth> = (1..=12)
@@ -174,18 +180,20 @@ async fn my_wrapped(
 
     // Longest daily streak within the year.
     let year_dates = sqlx::query_as::<_, (NaiveDate,)>(
-        r#"SELECT DISTINCT (watched_at AT TIME ZONE 'UTC')::date AS watch_date
+        r#"SELECT DISTINCT ((watched_at AT TIME ZONE 'UTC') + make_interval(mins => $4))::date
+               AS watch_date
         FROM watch_history
         WHERE user_id = $1
-          AND watched_at >= ($2::date::timestamp AT TIME ZONE 'UTC')
-          AND watched_at < (($3::date + 1)::timestamp AT TIME ZONE 'UTC')"#,
+          AND watched_at >= (($2::date::timestamp - make_interval(mins => $4)) AT TIME ZONE 'UTC')
+          AND watched_at < ((($3::date + 1)::timestamp - make_interval(mins => $4)) AT TIME ZONE 'UTC')"#,
     )
     .bind(user_id)
     .bind(start_date)
     .bind(end_date)
+    .bind(offset)
     .fetch_all(pool.get_ref())
     .await?;
-    let (_, longest_streak) = calculate_streaks(&year_dates);
+    let (_, longest_streak) = calculate_streaks_at(&year_dates, local_today(offset));
 
     crate::metrics::record_product_action(crate::metrics::ProductAction::AnnualRecapViewed);
     Ok(HttpResponse::Ok().json(WrappedStats {
@@ -204,7 +212,12 @@ async fn my_wrapped(
     }))
 }
 
-async fn my_stats(pool: web::Data<PgPool>, req: HttpRequest) -> Result<HttpResponse, AppError> {
+async fn my_stats(
+    pool: web::Data<PgPool>,
+    req: HttpRequest,
+    query: web::Query<std::collections::HashMap<String, String>>,
+) -> Result<HttpResponse, AppError> {
+    let offset = offset_minutes(&query);
     let user_id = require_auth(&req).await?;
 
     let total_movies = sqlx::query_scalar::<_, i64>(
@@ -305,15 +318,17 @@ async fn my_stats(pool: web::Data<PgPool>, req: HttpRequest) -> Result<HttpRespo
 
     // Calculate streak
     let streak_data = sqlx::query_as::<_, (NaiveDate,)>(
-        r#"SELECT DISTINCT (watched_at AT TIME ZONE 'UTC')::date AS watch_date
+        r#"SELECT DISTINCT ((watched_at AT TIME ZONE 'UTC') + make_interval(mins => $2))::date
+               AS watch_date
         FROM watch_history WHERE user_id = $1
         ORDER BY watch_date DESC"#,
     )
     .bind(user_id)
+    .bind(offset)
     .fetch_all(pool.get_ref())
     .await?;
 
-    let (current_streak, longest_streak) = calculate_streaks(&streak_data);
+    let (current_streak, longest_streak) = calculate_streaks_at(&streak_data, local_today(offset));
 
     Ok(HttpResponse::Ok().json(UserStats {
         total_movies,
@@ -325,8 +340,34 @@ async fn my_stats(pool: web::Data<PgPool>, req: HttpRequest) -> Result<HttpRespo
     }))
 }
 
-fn calculate_streaks(dates: &[(NaiveDate,)]) -> (i32, i32) {
-    calculate_streaks_at(dates, Utc::now().date_naive())
+/// The member's own day, rather than the server's.
+///
+/// Every date in this module came from `AT TIME ZONE 'UTC'`, so the day a watch
+/// belonged to was the day it was in Greenwich. For anyone east of it that is
+/// wrong in a way they can see: in Bucharest, watching at 23:30 and again at
+/// 00:30 the next night is two evenings and was filed as one — one heatmap
+/// square instead of two, and a streak broken while the member believed it was
+/// intact. Anything watched after local midnight was filed under the day
+/// before.
+///
+/// The offset is supplied per request, the way the calendar already takes
+/// `today`, rather than stored: it changes twice a year and the client is the
+/// only party that knows it. Absent, this is UTC, which is what every caller
+/// got before.
+///
+/// Bounded to the range of real civil offsets — ±14 hours — so a hostile value
+/// cannot shift somebody's history into a different year.
+fn offset_minutes(query: &std::collections::HashMap<String, String>) -> i32 {
+    query
+        .get("utc_offset_minutes")
+        .and_then(|value| value.parse::<i32>().ok())
+        .filter(|minutes| (-840..=840).contains(minutes))
+        .unwrap_or(0)
+}
+
+/// The member's current date, for deciding whether a streak is still running.
+fn local_today(offset: i32) -> NaiveDate {
+    (Utc::now() + chrono::Duration::minutes(i64::from(offset))).date_naive()
 }
 
 fn calculate_streaks_at(dates: &[(NaiveDate,)], today: NaiveDate) -> (i32, i32) {
@@ -388,20 +429,24 @@ async fn my_heatmap(
     let end_date = NaiveDate::from_ymd_opt(year, 12, 31)
         .ok_or_else(|| AppError::BadRequest("Invalid year".to_string()))?;
 
+    // The year's boundaries move with the member too, or the first and last
+    // days of it would be cut in the wrong place.
+    let offset = offset_minutes(&query);
     let data = sqlx::query_as::<_, (NaiveDate, i64)>(
         r#"SELECT
-            (watched_at AT TIME ZONE 'UTC')::date AS watch_date,
+            ((watched_at AT TIME ZONE 'UTC') + make_interval(mins => $4))::date AS watch_date,
             COUNT(*)::bigint AS count
         FROM watch_history
         WHERE user_id = $1
-          AND watched_at >= ($2::date::timestamp AT TIME ZONE 'UTC')
-          AND watched_at < (($3::date + 1)::timestamp AT TIME ZONE 'UTC')
+          AND watched_at >= (($2::date::timestamp - make_interval(mins => $4)) AT TIME ZONE 'UTC')
+          AND watched_at < ((($3::date + 1)::timestamp - make_interval(mins => $4)) AT TIME ZONE 'UTC')
         GROUP BY watch_date
         ORDER BY watch_date"#,
     )
     .bind(user_id)
     .bind(start_date)
     .bind(end_date)
+    .bind(offset)
     .fetch_all(pool.get_ref())
     .await?;
 
@@ -445,12 +490,20 @@ async fn my_genres(pool: web::Data<PgPool>, req: HttpRequest) -> Result<HttpResp
     Ok(HttpResponse::Ok().json(response))
 }
 
-async fn my_monthly(pool: web::Data<PgPool>, req: HttpRequest) -> Result<HttpResponse, AppError> {
+async fn my_monthly(
+    pool: web::Data<PgPool>,
+    req: HttpRequest,
+    query: web::Query<std::collections::HashMap<String, String>>,
+) -> Result<HttpResponse, AppError> {
     let user_id = require_auth(&req).await?;
+    let offset = offset_minutes(&query);
 
     let data = sqlx::query_as::<_, (String, Option<i64>, i64)>(
         r#"SELECT
-            TO_CHAR(wh.watched_at AT TIME ZONE 'UTC', 'YYYY-MM') as month,
+            TO_CHAR(
+                (wh.watched_at AT TIME ZONE 'UTC') + make_interval(mins => $2),
+                'YYYY-MM'
+            ) as month,
             SUM(CASE
                 WHEN wh.episode_id IS NOT NULL
                     THEN COALESCE(e.runtime_minutes, m.runtime_minutes, 0)
@@ -466,6 +519,7 @@ async fn my_monthly(pool: web::Data<PgPool>, req: HttpRequest) -> Result<HttpRes
         LIMIT 12"#,
     )
     .bind(user_id)
+    .bind(offset)
     .fetch_all(pool.get_ref())
     .await?;
 
