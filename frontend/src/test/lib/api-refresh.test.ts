@@ -69,7 +69,7 @@ describe('access token refresh interceptor', () => {
         // Hold the refresh open so all three requests queue behind this one.
         await new Promise((resolve) => setTimeout(resolve, 10));
         refreshed = true;
-        return { data: { access_token: 'fresh', user: { id: 'u1' } } };
+        return { data: { access_token: 'fresh', user: { id: 'u1', username: 'someone' } } };
       },
       onRequest: (config) =>
         refreshed ? respond(config, 200, { ok: true }) : respond(config, 401),
@@ -87,7 +87,7 @@ describe('access token refresh interceptor', () => {
 
   it('does not refresh when the 401 came from signing in', async () => {
     const { api, refreshSpy } = await loadApi({
-      refresh: async () => ({ data: { access_token: 'fresh', user: {} } }),
+      refresh: async () => ({ data: { access_token: 'fresh', user: { id: 'u1', username: 'someone' } } }),
       onRequest: (config) =>
         respond(config, 401, { message: 'Invalid email or password' }),
     });
@@ -103,7 +103,7 @@ describe('access token refresh interceptor', () => {
   it('retries a request only once, even if the retry also gets a 401', async () => {
     let calls = 0;
     const { api, refreshSpy } = await loadApi({
-      refresh: async () => ({ data: { access_token: 'fresh', user: { id: 'u1' } } }),
+      refresh: async () => ({ data: { access_token: 'fresh', user: { id: 'u1', username: 'someone' } } }),
       onRequest: (config) => {
         calls += 1;
         return respond(config, 401);

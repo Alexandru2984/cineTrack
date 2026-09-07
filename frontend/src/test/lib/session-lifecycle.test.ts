@@ -3,6 +3,7 @@ import axios from 'axios';
 
 import api, {
   bootstrapSession,
+  MalformedAuthResponseError,
   clearLogoutPending,
   endSession,
   isLogoutPending,
@@ -192,5 +193,47 @@ describe('web session lifecycle', () => {
     expect(a).toBe('rotated');
     expect(b).toBe('rotated');
     expect(mockedPost).toHaveBeenCalledTimes(1);
+  });
+});
+
+/** A response that arrives but is not an authentication result.
+ *
+ *  Found auditing this codebase after the September round. The fields were
+ *  destructured straight out of the body, so an edge error page served as 200 —
+ *  or any rewritten response — produced `setAuth(undefined, undefined)`: a
+ *  store whose status said `authenticated` while `isAuthenticated()` said
+ *  false, and a rotation that handed `undefined` back as the new access token.
+ *  Reloading repeated it, so the state did not clear on its own.
+ *
+ *  The mobile client has validated this since it was written. */
+describe('a refresh response that is not an authentication result', () => {
+  it.each([
+    ['an edge error page', '<html>502 Bad Gateway</html>'],
+    ['a body missing the fields', { message: 'ok' }],
+    ['a token that is not a string', { access_token: 12345, user: { id: 'a', username: 'b' } }],
+    ['a user that is not an object', { access_token: 'tok', user: 'nobody' }],
+    ['an empty token', { access_token: '', user: { id: 'a', username: 'b' } }],
+  ])('is refused: %s', async (_label, data) => {
+    useAuthStore.setState({ status: 'anonymous', token: null, user: null });
+    mockedPost.mockResolvedValue({ data });
+
+    await expect(refreshAccessToken()).rejects.toBeInstanceOf(MalformedAuthResponseError);
+
+    const state = useAuthStore.getState();
+    expect(state.token).toBeNull();
+    expect(state.user).toBeNull();
+    // Not a credential rejection: nothing here says the session ended, so the
+    // circuit stays open and the next attempt can still succeed.
+    expect(state.refreshRejected).toBe(false);
+  });
+
+  it('still accepts a well-formed one', async () => {
+    useAuthStore.setState({ status: 'anonymous', token: null, user: null });
+    mockedPost.mockResolvedValue({
+      data: { access_token: 'fresh', user: { id: 'u1', username: 'someone' } },
+    });
+
+    await expect(refreshAccessToken()).resolves.toBe('fresh');
+    expect(useAuthStore.getState().isAuthenticated()).toBe(true);
   });
 });

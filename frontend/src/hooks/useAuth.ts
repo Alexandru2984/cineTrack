@@ -1,3 +1,4 @@
+import { isAuthPayload, MalformedAuthResponseError } from '@/lib/api';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import api, { endSession } from '@/lib/api';
 import { useAuthStore } from '@/store/auth';
@@ -17,7 +18,12 @@ export function useRegister() {
       const res = await api.post<AuthResponse>('/auth/register', data);
       return res.data;
     },
-    onSuccess: (data) => setAuth(data.access_token, data.user),
+    onSuccess: (data) => {
+      // The same guard the rotation uses. A body that is not an authentication
+      // result must not become a half-signed-in store.
+      if (!isAuthPayload(data)) throw new MalformedAuthResponseError();
+      setAuth(data.access_token, data.user);
+    },
   });
 }
 
@@ -43,7 +49,12 @@ export function useLogin() {
       const res = await api.post<AuthResponse>('/auth/login', data);
       return res.data;
     },
-    onSuccess: (data) => setAuth(data.access_token, data.user),
+    onSuccess: (data) => {
+      // The same guard the rotation uses. A body that is not an authentication
+      // result must not become a half-signed-in store.
+      if (!isAuthPayload(data)) throw new MalformedAuthResponseError();
+      setAuth(data.access_token, data.user);
+    },
   });
 }
 
