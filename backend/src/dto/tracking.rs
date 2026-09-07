@@ -17,6 +17,13 @@ pub struct SeasonWatchProgress {
     pub episode_count: Option<i32>,
     pub available_episode_count: i64,
     pub watched_count: i64,
+    /// How many times the season has been seen all the way through.
+    ///
+    /// The fewest plays any aired episode of it has: watching one favourite
+    /// five times is not five viewings of the season. Zero until every aired
+    /// episode has been seen at least once, which is the same moment
+    /// `watched_count` reaches `available_episode_count`.
+    pub complete_passes: i64,
 }
 
 #[derive(Debug, Serialize)]

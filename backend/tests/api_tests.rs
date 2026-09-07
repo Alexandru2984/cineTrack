@@ -14807,6 +14807,115 @@ async fn concurrent_exports_are_refused_rather_than_run_together() {
     assert_eq!(actix_test::call_service(&app, req).await.status(), 200);
 }
 
+/// Watching something a second time has to be sayable.
+///
+/// The model always allowed it — no unique constraint, and the TV Time import
+/// brings rewatches in — but nothing in the API could add one. "Watched" is
+/// idempotent by design: it answers `already_watched` and writes nothing, which
+/// is right for a double tap and useless for somebody who has genuinely seen it
+/// again. So there was no way to say it for an episode, a season or a series.
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn a_second_viewing_can_be_recorded_at_every_level() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (token, _, user_id) =
+        register_user(&app, "rewatcher", "rewatch@mailbox.dev", "Pass1234").await;
+    let user_id = Uuid::parse_str(&user_id).unwrap();
+
+    let yesterday = chrono::Utc::now().date_naive() - chrono::Duration::days(1);
+    let media_id = seed_show_with_episodes(
+        &pool,
+        "Rewatch Show",
+        &[(1, 1, Some(yesterday)), (1, 2, Some(yesterday))],
+    )
+    .await;
+    let tmdb_id = sqlx::query_scalar::<_, i32>("SELECT tmdb_id FROM media WHERE id = $1")
+        .bind(media_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+    let plays = |pool: PgPool, episode_number: i32| async move {
+        sqlx::query_scalar::<_, i64>(
+            "SELECT count(*) FROM watch_history wh
+             JOIN episodes e ON e.id = wh.episode_id
+             WHERE wh.user_id = $1 AND e.episode_number = $2",
+        )
+        .bind(user_id)
+        .bind(episode_number)
+        .fetch_one(&pool)
+        .await
+        .unwrap()
+    };
+
+    let post = |uri: String| {
+        let app = &app;
+        let token = token.clone();
+        async move {
+            let req = actix_test::TestRequest::post()
+                .uri(&uri)
+                .insert_header(("Authorization", format!("Bearer {token}")))
+                .peer_addr(peer_addr())
+                .to_request();
+            actix_test::call_service(app, req).await.status()
+        }
+    };
+
+    // A first viewing of the season, the ordinary way.
+    assert!(post(format!("/api/history/tv/{tmdb_id}/seasons/1/watched"))
+        .await
+        .is_success());
+    assert_eq!(plays(pool.clone(), 1).await, 1);
+
+    // Pressing it again changes nothing — that is what makes it safe for a
+    // double tap, and why it cannot serve as the rewatch button.
+    assert!(post(format!("/api/history/tv/{tmdb_id}/seasons/1/watched"))
+        .await
+        .is_success());
+    assert_eq!(plays(pool.clone(), 1).await, 1);
+
+    // One episode again.
+    assert!(post(format!(
+        "/api/history/tv/{tmdb_id}/seasons/1/episodes/1/rewatch"
+    ))
+    .await
+    .is_success());
+    assert_eq!(plays(pool.clone(), 1).await, 2);
+    assert_eq!(
+        plays(pool.clone(), 2).await,
+        1,
+        "the rest of the season moved"
+    );
+
+    // The whole season again.
+    assert!(post(format!("/api/history/tv/{tmdb_id}/seasons/1/rewatch"))
+        .await
+        .is_success());
+    assert_eq!(plays(pool.clone(), 1).await, 3);
+    assert_eq!(plays(pool.clone(), 2).await, 2);
+
+    // The whole series again.
+    assert!(post(format!("/api/history/tv/{tmdb_id}/rewatch"))
+        .await
+        .is_success());
+    assert_eq!(plays(pool.clone(), 1).await, 4);
+    assert_eq!(plays(pool.clone(), 2).await, 3);
+
+    // And the count the interface shows: how many times the season has been
+    // seen all the way through, which is the fewest plays any episode of it
+    // has — not the most, or one favourite would speak for the season.
+    let req = actix_test::TestRequest::get()
+        .uri(&format!("/api/history/tv/{tmdb_id}/progress"))
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let progress: Value = actix_test::call_and_read_body_json(&app, req).await;
+    assert_eq!(progress[0]["complete_passes"], 3);
+    assert_eq!(progress[0]["watched_count"], 2);
+}
+
 /// The same rule about unaired episodes, whichever route is used.
 ///
 /// L02 from the September audit. The calendar and season routes refuse an

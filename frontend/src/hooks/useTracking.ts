@@ -250,6 +250,83 @@ export function useMarkSeasonWatched() {
   });
 }
 
+/** Record another viewing.
+ *
+ *  Separate from the "watched" mutations rather than a flag on them, because
+ *  the two mean different things: "watched" is idempotent so a double tap costs
+ *  nothing, and this one is additive by definition. One hook per level, the
+ *  same three levels the interface offers.
+ */
+export function useRewatchEpisode() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      tmdbId,
+      seasonNumber,
+      episodeNumber,
+    }: {
+      tmdbId: number;
+      seasonNumber: number;
+      episodeNumber: number;
+    }) => {
+      const res = await api.post(
+        `/history/tv/${tmdbId}/seasons/${seasonNumber}/episodes/${episodeNumber}/rewatch`,
+      );
+      return res.data as { times_watched: number };
+    },
+    onSuccess: (_data, variables) => {
+      invalidateEpisodeWatchState(qc, variables.tmdbId);
+    },
+  });
+}
+
+export function useRewatchSeason() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      tmdbId,
+      seasonNumber,
+    }: {
+      tmdbId: number;
+      seasonNumber: number;
+    }) => {
+      const res = await api.post<BulkWatchResponse>(
+        `/history/tv/${tmdbId}/seasons/${seasonNumber}/rewatch`,
+      );
+      return res.data;
+    },
+    onSuccess: (_data, variables) => {
+      invalidateEpisodeWatchState(qc, variables.tmdbId);
+    },
+  });
+}
+
+export function useRewatchShow() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ tmdbId }: { tmdbId: number }) => {
+      const res = await api.post<BulkWatchResponse>(`/history/tv/${tmdbId}/rewatch`);
+      return res.data;
+    },
+    onSuccess: (_data, variables) => {
+      invalidateEpisodeWatchState(qc, variables.tmdbId);
+    },
+  });
+}
+
+export function useRewatchMovie() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ tmdbId }: { tmdbId: number }) => {
+      const res = await api.post(`/history/movies/${tmdbId}/rewatch`);
+      return res.data as { times_watched: number };
+    },
+    onSuccess: (_data, variables) => {
+      invalidateEpisodeWatchState(qc, variables.tmdbId);
+    },
+  });
+}
+
 export function useMarkEpisodesWatchedThrough() {
   const qc = useQueryClient();
   return useMutation({

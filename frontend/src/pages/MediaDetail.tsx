@@ -6,6 +6,9 @@ import {
   useUnmarkEpisodeWatched,
   useMarkEpisodesWatchedThrough,
   useMarkSeasonWatched,
+  useRewatchMovie,
+  useRewatchSeason,
+  useRewatchShow,
   useShowWatchProgress,
   useTrackingLookup,
   useWatchedEpisodes,
@@ -27,6 +30,7 @@ import {
   Loader2,
   ListPlus,
   Plus,
+  RotateCcw,
   Star,
   X,
 } from 'lucide-react';
@@ -108,6 +112,16 @@ export default function MediaDetail() {
   const unmarkEpisodeWatched = useUnmarkEpisodeWatched();
   const markSeasonWatched = useMarkSeasonWatched();
   const markEpisodesWatchedThrough = useMarkEpisodesWatchedThrough();
+  const rewatchSeason = useRewatchSeason();
+  const rewatchShow = useRewatchShow();
+  const rewatchMovie = useRewatchMovie();
+
+  // How many times this season has been seen all the way through. The server
+  // computes it from the fewest plays any aired episode has, so one favourite
+  // watched repeatedly does not speak for the season.
+  const selectedSeasonPasses =
+    showWatchProgress.find((entry) => entry.season_number === selectedSeason)
+      ?.complete_passes ?? 0;
   const [statusSelection, setStatusSelection] = useState<{
     mediaKey: string;
     status: TrackingStatus;
@@ -309,6 +323,29 @@ export default function MediaDetail() {
                 <ListPlus className="h-4 w-4" aria-hidden="true" />
                 {t('media.customList')}
               </button>
+              {/* Offered once the title is finished, which is the only point at
+                  which seeing it again is a thing somebody can mean. For a
+                  series it records another viewing of every aired episode; for
+                  a film, one more viewing of the film. */}
+              {trackingStatus === 'completed' ? (
+                <button
+                  type="button"
+                  disabled={rewatchShow.isPending || rewatchMovie.isPending}
+                  onClick={() =>
+                    mediaType === 'tv'
+                      ? rewatchShow.mutate({ tmdbId: media.tmdb_id })
+                      : rewatchMovie.mutate({ tmdbId: media.tmdb_id })
+                  }
+                  className="flex items-center gap-2 rounded-md border border-[hsl(var(--border))] px-4 py-2 text-sm font-medium transition-colors hover:bg-[hsl(var(--secondary))] disabled:opacity-60"
+                >
+                  {rewatchShow.isPending || rewatchMovie.isPending ? (
+                    <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                  ) : (
+                    <RotateCcw className="h-4 w-4" aria-hidden="true" />
+                  )}
+                  {mediaType === 'tv' ? t('media.rewatchShow') : t('media.rewatchMovie')}
+                </button>
+              ) : null}
             </div>
             {listFeedback ? (
               <p className="text-sm text-emerald-600 dark:text-emerald-400" role="status">
@@ -387,28 +424,58 @@ export default function MediaDetail() {
                         watched: watchedEpisodeSet.size,
                         total: episodes.length,
                       })}
+                      {selectedSeasonPasses > 1 ? (
+                        <span className="ml-2">
+                          · {t('media.seasonPasses', { count: selectedSeasonPasses })}
+                        </span>
+                      ) : null}
                     </p>
-                    <button
-                      type="button"
-                      disabled={selectedSeasonUnwatchedCount === 0 || bulkWatchPending}
-                      onClick={() => {
-                        if (selectedSeasonData) {
-                          setWatchConfirmation({
-                            kind: 'season',
-                            season: selectedSeasonData,
-                            unwatchedCount: selectedSeasonUnwatchedCount,
-                          });
+                    {/* A finished season used to end in a disabled button
+                        saying so. That is the moment somebody is most likely to
+                        want the other thing, so it becomes the offer to see it
+                        again rather than a dead control. */}
+                    {selectedSeasonUnwatchedCount === 0 ? (
+                      <button
+                        type="button"
+                        disabled={bulkWatchPending || rewatchSeason.isPending}
+                        onClick={() =>
+                          rewatchSeason.mutate({
+                            tmdbId: media.tmdb_id,
+                            seasonNumber: selectedSeason,
+                          })
                         }
-                      }}
-                      className="flex h-9 items-center gap-2 rounded-md border border-[hsl(var(--border))] px-3 text-sm font-medium hover:border-emerald-600 hover:text-emerald-600 disabled:cursor-default disabled:opacity-60"
-                    >
-                      {bulkWatchPending
-                        ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-                        : selectedSeasonUnwatchedCount === 0
-                          ? <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
-                          : <CheckCheck className="h-4 w-4" aria-hidden="true" />}
-                      {selectedSeasonUnwatchedCount === 0 ? t('media.seasonWatched') : t('media.markSeasonWatched')}
-                    </button>
+                        className="flex h-9 items-center gap-2 rounded-md border border-[hsl(var(--border))] px-3 text-sm font-medium hover:border-emerald-600 hover:text-emerald-600 disabled:cursor-default disabled:opacity-60"
+                      >
+                        {rewatchSeason.isPending ? (
+                          <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                        ) : (
+                          <RotateCcw className="h-4 w-4" aria-hidden="true" />
+                        )}
+                        {t('media.rewatchSeason')}
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        disabled={bulkWatchPending}
+                        onClick={() => {
+                          if (selectedSeasonData) {
+                            setWatchConfirmation({
+                              kind: 'season',
+                              season: selectedSeasonData,
+                              unwatchedCount: selectedSeasonUnwatchedCount,
+                            });
+                          }
+                        }}
+                        className="flex h-9 items-center gap-2 rounded-md border border-[hsl(var(--border))] px-3 text-sm font-medium hover:border-emerald-600 hover:text-emerald-600 disabled:cursor-default disabled:opacity-60"
+                      >
+                        {bulkWatchPending ? (
+                          <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                        ) : (
+                          <CheckCheck className="h-4 w-4" aria-hidden="true" />
+                        )}
+                        {t('media.markSeasonWatched')}
+                      </button>
+                    )}
                   </div>
                   <div className="divide-y divide-[hsl(var(--border))]">
                     {episodes.map((episode) => {
