@@ -60,24 +60,40 @@ pub async fn run_import(
 
     match result {
         Ok(totals) => {
-            let _ = sqlx::query(
+            // Logged rather than discarded. This is the write that moves a job
+            // out of `running`, and the partial unique index only lets one
+            // non-failed job exist per account — so losing it does not just
+            // mislead the progress screen, it stops that member importing ever
+            // again. `release_interrupted_jobs` is what recovers from it; this
+            // line is how anyone finds out it happened.
+            if let Err(error) = sqlx::query(
                 "UPDATE import_jobs SET status = 'completed', totals = $2, updated_at = NOW() WHERE id = $1",
             )
             .bind(job_id)
             .bind(serde_json::to_value(&totals).unwrap_or(serde_json::Value::Null))
             .execute(&pool)
-            .await;
+            .await
+            {
+                log::error!(
+                    "import job {job_id} finished but its completion could not be recorded: {error}"
+                );
+            }
         }
         Err(e) => {
             log::error!("Import job {job_id} failed: {e:#}");
-            let _ = sqlx::query(
+            if let Err(error) = sqlx::query(
                 "UPDATE import_jobs
                  SET status = 'failed', error = 'Import could not be completed', updated_at = NOW()
                  WHERE id = $1",
             )
             .bind(job_id)
             .execute(&pool)
-            .await;
+            .await
+            {
+                log::error!(
+                    "import job {job_id} failed and its failure could not be recorded: {error}"
+                );
+            }
         }
     }
 }
@@ -512,6 +528,72 @@ async fn write_watch_history(
         qb.build().execute(&mut **tx).await?;
     }
     Ok(())
+}
+
+/// How long a job may sit unfinished before it is treated as abandoned.
+///
+/// The largest import this service accepts is bounded by the per-account quota
+/// and finishes in minutes. Six hours is not a deadline for slow work; it is
+/// long enough that nothing healthy reaches it.
+pub const STALE_IMPORT_AFTER: &str = "6 hours";
+
+/// Free the accounts whose import can never finish.
+///
+/// An import runs in a spawned task, and the row that says so is the only thing
+/// the next request looks at. A restart takes the task and leaves the row: the
+/// job stays `running` for ever, and because the partial unique index permits
+/// one non-failed job per account, that member can never start another. There
+/// was no sweep, no timeout and no operator command — the only way out was
+/// editing the table by hand.
+///
+/// Called at startup, where the claim is exact: no import is running in a
+/// process that has just begun. The age cut-off then covers the other way in,
+/// a completion write that failed inside a process still running.
+pub async fn release_interrupted_jobs(pool: &sqlx::PgPool) -> Result<u64, sqlx::Error> {
+    let released = sqlx::query(
+        "UPDATE import_jobs
+         SET status = 'failed',
+             error = 'Import was interrupted and did not finish. Start it again.',
+             updated_at = NOW()
+         WHERE status IN ('pending', 'running')",
+    )
+    .execute(pool)
+    .await?
+    .rows_affected();
+
+    if released > 0 {
+        log::warn!("released {released} import job(s) left unfinished by a restart");
+    }
+    Ok(released)
+}
+
+/// The same release, for jobs that have simply been sitting too long.
+///
+/// Run before admitting a new import so a member who hit the lost-write case
+/// recovers by retrying, which is what they will do anyway.
+pub async fn release_stale_jobs(
+    pool: &sqlx::PgPool,
+    user_id: uuid::Uuid,
+) -> Result<u64, sqlx::Error> {
+    let released = sqlx::query(
+        "UPDATE import_jobs
+         SET status = 'failed',
+             error = 'Import was interrupted and did not finish. Start it again.',
+             updated_at = NOW()
+         WHERE user_id = $1
+           AND status IN ('pending', 'running')
+           AND updated_at < NOW() - $2::interval",
+    )
+    .bind(user_id)
+    .bind(STALE_IMPORT_AFTER)
+    .execute(pool)
+    .await?
+    .rows_affected();
+
+    if released > 0 {
+        log::warn!("released {released} stale import job(s) for user_id={user_id}");
+    }
+    Ok(released)
 }
 
 #[cfg(test)]

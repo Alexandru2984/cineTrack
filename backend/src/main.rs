@@ -457,6 +457,14 @@ async fn main() -> std::io::Result<()> {
         log::info!("Breached-password check enabled (HIBP k-anonymity)");
     }
 
+    // No import is running in a process that has just started, whatever the
+    // table says. A job left `running` by a restart holds the one-non-failed-job
+    // reservation for its owner permanently, so this is what keeps a deploy from
+    // quietly costing somebody the feature.
+    if let Err(error) = cinetrack::services::importer::release_interrupted_jobs(&pool).await {
+        log::error!("could not release interrupted import jobs: {error}");
+    }
+
     // Object storage (Cloudflare R2). Optional — features degrade if unset.
     let storage_service = match &config.r2 {
         Some(r2) => {
