@@ -17,6 +17,20 @@ pub struct Claims {
     pub sid: Uuid,
     pub exp: i64,
     pub iat: i64,
+    /// The same instant as `iat`, in milliseconds.
+    ///
+    /// `iat` is whole seconds, as JWT defines it, and a revocation cutoff had
+    /// to be rounded up to the next second because of it: a token minted at
+    /// 10:00:00.9 and a revocation at 10:00:00.1 are indistinguishable
+    /// otherwise. Rounding up refuses everything issued during the
+    /// revocation's own second — including the token a member gets by signing
+    /// in immediately afterwards, which is what the sign-out they just
+    /// triggered tells them to do.
+    ///
+    /// Optional so tokens minted before this existed still validate; those
+    /// fall back to the second-precision comparison they were issued under.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub iat_ms: Option<i64>,
 }
 
 pub fn generate_access_token(
@@ -30,6 +44,7 @@ pub fn generate_access_token(
         sub: user_id,
         sid: session_id,
         iat: now.timestamp(),
+        iat_ms: Some(now.timestamp_millis()),
         exp: (now + Duration::minutes(expiry_minutes)).timestamp(),
     };
 

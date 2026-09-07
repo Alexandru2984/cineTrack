@@ -1,3 +1,6 @@
+use std::sync::{Arc, LazyLock};
+use tokio::sync::Semaphore;
+
 use actix_web::{web, HttpRequest, HttpResponse};
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -364,6 +367,22 @@ async fn update_profile(
     Ok(HttpResponse::Ok().json(crate::dto::auth::UserResponse::from(user)))
 }
 
+/// How many account exports may be building at once.
+///
+/// An export materialises the account's collections as JSON before any of it
+/// is written to the response, so the cost is paid in memory and paid per
+/// concurrent request. See the note in `export_account_data` for the
+/// measurement this number comes from.
+const MAX_CONCURRENT_EXPORTS: usize = 2;
+
+static EXPORT_SLOTS: LazyLock<Arc<Semaphore>> =
+    LazyLock::new(|| Arc::new(Semaphore::new(MAX_CONCURRENT_EXPORTS)));
+
+/// The slot pool, so a test can hold it and observe the refusal.
+pub fn export_slots() -> Arc<Semaphore> {
+    Arc::clone(&EXPORT_SLOTS)
+}
+
 /// Return a repeatable-read snapshot of the account's portable data. Secrets
 /// that grant access (password/token hashes, TOTP material, recovery codes,
 /// push tokens, and unregister secrets) are deliberately never selected.
@@ -375,6 +394,26 @@ async fn export_account_data(
 ) -> Result<HttpResponse, AppError> {
     let user_id = require_auth(&req).await?;
     body.validate()?;
+
+    // Measured, not assumed: eight of these at once, on an account with sixty
+    // thousand history rows, peaked at 693 MiB. The container has 512, so that
+    // is the whole API dying — for everyone, from one member pressing a button
+    // twice, and well under the hundred-thousand-event quota an account is
+    // allowed to reach.
+    //
+    // Imports and object reads were bounded for this reason; this route
+    // materialises whole collections as JSON and was not. Two at a time, the
+    // same shape as imports: refusing early costs a caller a retry, refusing
+    // late costs everybody the process.
+    //
+    // The password check below is deliberately after this. It is the expensive
+    // part, and a request that cannot proceed should not spend an Argon2
+    // verification first.
+    let _permit = Arc::clone(&EXPORT_SLOTS).try_acquire_owned().map_err(|_| {
+        AppError::TooManyRequests(
+            "Another export is already running; try again in a moment".to_string(),
+        )
+    })?;
 
     let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = $1")
         .bind(user_id)

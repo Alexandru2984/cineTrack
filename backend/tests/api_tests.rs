@@ -14756,6 +14756,57 @@ async fn the_catalogue_prune_spares_an_empty_answer_and_anything_watched() {
     );
 }
 
+/// Exports have to be refused before they exhaust the process.
+///
+/// The remaining half of M11, found by measuring rather than reading. Imports
+/// and object reads were bounded in the September round; an export materialises
+/// whole collections as JSON and was not. Eight at once, on an account with
+/// sixty thousand history rows, peaked at 693 MiB against a 512 MiB container
+/// — the whole API dying, for everyone, because one member pressed a button
+/// twice. Sixty thousand is well under the hundred thousand an account may
+/// hold.
+///
+/// With the bound: 202 MiB, and the requests beyond it answered rather than
+/// dropped. `bench/memory_under_load.sh` reproduces both numbers.
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn concurrent_exports_are_refused_rather_than_run_together() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (token, _, _) = register_user(&app, "exporter", "exporter@mailbox.dev", "Pass1234").await;
+
+    // The slots are process-wide, so they have to be held to observe the
+    // refusal — the same shape the import suite uses.
+    let held = cinetrack::routes::users::export_slots()
+        .try_acquire_many_owned(2)
+        .expect("both export slots are free at the start of this test");
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/users/me/export")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .set_json(json!({ "password": "Pass1234" }))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(
+        actix_test::call_service(&app, req).await.status(),
+        429,
+        "an export ran while both slots were taken"
+    );
+
+    drop(held);
+
+    // And with a slot free it works, so the guard is not simply refusing
+    // everything.
+    let req = actix_test::TestRequest::post()
+        .uri("/api/users/me/export")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .set_json(json!({ "password": "Pass1234" }))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 200);
+}
+
 /// The same rule about unaired episodes, whichever route is used.
 ///
 /// L02 from the September audit. The calendar and season routes refuse an

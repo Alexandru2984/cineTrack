@@ -55,8 +55,31 @@ struct RevocationCache {
     /// `family_id` → when the entry may be forgotten.
     sessions: HashMap<Uuid, DateTime<Utc>>,
     /// `user_id` → (cutoff, when the entry may be forgotten). Every access
-    /// token this user issued strictly before `cutoff` is refused.
-    users: HashMap<Uuid, (DateTime<Utc>, DateTime<Utc>)>,
+    /// token this user issued strictly before the cutoff is refused.
+    users: HashMap<Uuid, (UserCutoff, DateTime<Utc>)>,
+}
+
+/// When an account's tokens were cut off, at both precisions.
+///
+/// `exact` is the instant the revocation happened. `rounded_up` is that taken
+/// to the next whole second, which is the only comparison a token carrying
+/// second-precision `iat` allows — and the reason a member who signed in during
+/// that second was refused the token they had just been told to go and get.
+#[derive(Clone, Copy, Debug)]
+struct UserCutoff {
+    exact: DateTime<Utc>,
+    rounded_up: DateTime<Utc>,
+}
+
+impl UserCutoff {
+    fn at(exact: DateTime<Utc>) -> Self {
+        let rounded_up = exact
+            .checked_add_signed(chrono::Duration::seconds(1))
+            .unwrap_or(exact)
+            .with_nanosecond(0)
+            .unwrap_or(exact);
+        Self { exact, rounded_up }
+    }
 }
 
 static CACHE: LazyLock<RwLock<RevocationCache>> =
@@ -86,9 +109,18 @@ macro_rules! write_cache {
 
 /// Is this session revoked?
 ///
-/// `issued_at` is the token's `iat`, in whole seconds since the epoch, as JWT
-/// defines it.
-pub fn is_revoked(session_id: Uuid, user_id: Uuid, issued_at: i64) -> bool {
+/// `issued_at` is the token's `iat` in whole seconds, and `issued_at_ms` the
+/// same instant in milliseconds when the token carries it. The millisecond
+/// value is what makes the comparison exact: with seconds alone the cutoff has
+/// to be rounded up to the next whole second, which refuses tokens minted later
+/// in that same second — including the one a member receives by signing in
+/// immediately after the change that revoked them.
+pub fn is_revoked(
+    session_id: Uuid,
+    user_id: Uuid,
+    issued_at: i64,
+    issued_at_ms: Option<i64>,
+) -> bool {
     let cache = read_cache!();
     let now = Utc::now();
 
@@ -102,8 +134,16 @@ pub fn is_revoked(session_id: Uuid, user_id: Uuid, issued_at: i64) -> bool {
     }
 
     if let Some((cutoff, expires_at)) = cache.users.get(&user_id) {
-        if *expires_at > now && issued_at < cutoff.timestamp() {
-            return true;
+        if *expires_at > now {
+            // Precisely when the token allows it; by the rounded-up second for
+            // tokens minted before the millisecond claim existed.
+            let refused = match issued_at_ms {
+                Some(minted) => minted < cutoff.exact.timestamp_millis(),
+                None => issued_at < cutoff.rounded_up.timestamp(),
+            };
+            if refused {
+                return true;
+            }
         }
     }
 
@@ -162,11 +202,7 @@ pub async fn revoke_user(
     user_id: Uuid,
 ) -> Result<(), AppError> {
     let now = Utc::now();
-    let cutoff = now
-        .checked_add_signed(chrono::Duration::seconds(1))
-        .unwrap_or(now)
-        .with_nanosecond(0)
-        .unwrap_or(now);
+    let cutoff = UserCutoff::at(now);
     let expires_at = now + REVOCATION_TTL;
 
     sqlx::query(
@@ -177,7 +213,9 @@ pub async fn revoke_user(
                 expires_at = GREATEST(access_token_revocations.expires_at, EXCLUDED.expires_at)"#,
     )
     .bind(user_id)
-    .bind(cutoff)
+    // The exact instant. This column used to hold the rounded-up second, which
+    // made the stored value later than the event it records.
+    .bind(cutoff.exact)
     .bind(expires_at)
     .execute(&mut **tx)
     .await?;
@@ -189,7 +227,9 @@ pub async fn revoke_user(
         // A later revocation must never move the cutoff backwards, or a token
         // the earlier one refused would start being accepted again.
         .and_modify(|entry| {
-            entry.0 = entry.0.max(cutoff);
+            if cutoff.exact > entry.0.exact {
+                entry.0 = cutoff;
+            }
             entry.1 = entry.1.max(expires_at);
         })
         .or_insert((cutoff, expires_at));
@@ -222,7 +262,9 @@ pub async fn load(pool: &PgPool) -> Result<usize, AppError> {
     cache.sessions = sessions.into_iter().collect();
     cache.users = users
         .into_iter()
-        .map(|(user_id, cutoff, expires_at)| (user_id, (cutoff, expires_at)))
+        .map(|(user_id, revoked_at, expires_at)| {
+            (user_id, (UserCutoff::at(revoked_at), expires_at))
+        })
         .collect();
 
     Ok(total)
@@ -299,7 +341,63 @@ mod tests {
     }
 
     fn insert_user(user_id: Uuid, cutoff: DateTime<Utc>, expires_at: DateTime<Utc>) {
-        write_cache!().users.insert(user_id, (cutoff, expires_at));
+        write_cache!()
+            .users
+            .insert(user_id, (UserCutoff::at(cutoff), expires_at));
+    }
+
+    /// The token a member gets by signing in straight after a revocation must
+    /// work.
+    ///
+    /// CI caught this on `main` after eight other findings had been merged: a
+    /// password change revokes the account, the member signs in again — which
+    /// is what the application tells them to do — and the fresh token was
+    /// refused, because `iat` is whole seconds and the cutoff had to be rounded
+    /// up to cover the whole second it happened in.
+    ///
+    /// Intermittent by nature: it only bites when the sign-in lands in the same
+    /// second as the change, which is exactly what an automatic client does.
+    #[test]
+    fn a_token_minted_after_the_cutoff_is_accepted_within_the_same_second() {
+        let user_id = Uuid::new_v4();
+        let session_id = Uuid::new_v4();
+
+        // A revocation part-way through a second.
+        let revoked_at = Utc::now().with_nanosecond(200_000_000).unwrap();
+        insert_user(user_id, revoked_at, revoked_at + chrono::Duration::hours(1));
+
+        // A token minted later in that same second: its whole-second `iat` is
+        // indistinguishable from one minted before the revocation.
+        let minted = revoked_at + chrono::Duration::milliseconds(500);
+        assert!(
+            !is_revoked(
+                session_id,
+                user_id,
+                minted.timestamp(),
+                Some(minted.timestamp_millis())
+            ),
+            "a token minted after the cutoff was refused"
+        );
+
+        // And one minted just before it is still refused, or the fix would have
+        // opened the hole the rounding existed to close.
+        let earlier = revoked_at - chrono::Duration::milliseconds(50);
+        assert!(
+            is_revoked(
+                session_id,
+                user_id,
+                earlier.timestamp(),
+                Some(earlier.timestamp_millis())
+            ),
+            "a token minted before the cutoff survived it"
+        );
+
+        // A token without the precise claim keeps the old, safer comparison:
+        // refused for the whole second.
+        assert!(
+            is_revoked(session_id, user_id, minted.timestamp(), None),
+            "an older token stopped being covered by the rounded cutoff"
+        );
     }
 
     #[test]
@@ -307,7 +405,8 @@ mod tests {
         assert!(!is_revoked(
             Uuid::new_v4(),
             Uuid::new_v4(),
-            Utc::now().timestamp()
+            Utc::now().timestamp(),
+            None
         ));
     }
 
@@ -319,7 +418,8 @@ mod tests {
         assert!(is_revoked(
             family_id,
             Uuid::new_v4(),
-            Utc::now().timestamp()
+            Utc::now().timestamp(),
+            None
         ));
     }
 
@@ -330,8 +430,13 @@ mod tests {
         let user_id = Uuid::new_v4();
         insert_session(revoked, Utc::now() + chrono::Duration::minutes(30));
 
-        assert!(is_revoked(revoked, user_id, Utc::now().timestamp()));
-        assert!(!is_revoked(untouched, user_id, Utc::now().timestamp()));
+        assert!(is_revoked(revoked, user_id, Utc::now().timestamp(), None));
+        assert!(!is_revoked(
+            untouched,
+            user_id,
+            Utc::now().timestamp(),
+            None
+        ));
     }
 
     #[test]
@@ -343,7 +448,8 @@ mod tests {
         assert!(!is_revoked(
             family_id,
             Uuid::new_v4(),
-            Utc::now().timestamp()
+            Utc::now().timestamp(),
+            None
         ));
     }
 
@@ -357,13 +463,15 @@ mod tests {
         assert!(is_revoked(
             Uuid::new_v4(),
             user_id,
-            (cutoff - chrono::Duration::minutes(1)).timestamp()
+            (cutoff - chrono::Duration::minutes(1)).timestamp(),
+            None
         ));
         // Issued a minute after: this is a fresh sign-in, and it must work.
         assert!(!is_revoked(
             Uuid::new_v4(),
             user_id,
-            (cutoff + chrono::Duration::minutes(1)).timestamp()
+            (cutoff + chrono::Duration::minutes(1)).timestamp(),
+            None
         ));
     }
 
@@ -379,8 +487,8 @@ mod tests {
         );
 
         let issued_at = (cutoff - chrono::Duration::minutes(1)).timestamp();
-        assert!(is_revoked(Uuid::new_v4(), revoked_user, issued_at));
-        assert!(!is_revoked(Uuid::new_v4(), other_user, issued_at));
+        assert!(is_revoked(Uuid::new_v4(), revoked_user, issued_at, None));
+        assert!(!is_revoked(Uuid::new_v4(), other_user, issued_at, None));
     }
 
     #[test]
@@ -392,7 +500,8 @@ mod tests {
         assert!(!is_revoked(
             Uuid::new_v4(),
             user_id,
-            (cutoff - chrono::Duration::minutes(1)).timestamp()
+            (cutoff - chrono::Duration::minutes(1)).timestamp(),
+            None
         ));
     }
 
