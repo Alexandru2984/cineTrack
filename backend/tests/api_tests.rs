@@ -14916,6 +14916,99 @@ async fn a_second_viewing_can_be_recorded_at_every_level() {
     assert_eq!(progress[0]["watched_count"], 2);
 }
 
+/// Watch time has to count a second viewing, and count it once.
+///
+/// Checked by hand rather than by trusting the query: the total is assembled
+/// from history plus a fill for shows marked complete without ticking every
+/// episode, and a rewatch touches both halves. Coverage counts distinct
+/// episodes, so a repeat must not shrink the fill; the history sum counts
+/// events, so a repeat must appear there.
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn watch_time_counts_a_second_viewing_exactly_once() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (token, _, _) = register_user(&app, "hours", "hours@mailbox.dev", "Pass1234").await;
+
+    let yesterday = chrono::Utc::now().date_naive() - chrono::Duration::days(1);
+    let media_id = seed_show_with_episodes(
+        &pool,
+        "Runtime Show",
+        &[
+            (1, 1, Some(yesterday)),
+            (1, 2, Some(yesterday)),
+            (1, 3, Some(yesterday)),
+        ],
+    )
+    .await;
+    // Thirty minutes each, so the arithmetic is checkable in the head.
+    sqlx::query("UPDATE episodes SET runtime_minutes = 30 WHERE season_id IN (SELECT id FROM seasons WHERE media_id = $1)")
+        .bind(media_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let tmdb_id = sqlx::query_scalar::<_, i32>("SELECT tmdb_id FROM media WHERE id = $1")
+        .bind(media_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+    let hours = |pool: PgPool| {
+        let app = &app;
+        let token = token.clone();
+        async move {
+            let _ = pool;
+            let req = actix_test::TestRequest::get()
+                .uri("/api/stats/me")
+                .insert_header(("Authorization", format!("Bearer {token}")))
+                .peer_addr(peer_addr())
+                .to_request();
+            let stats: Value = actix_test::call_and_read_body_json(app, req).await;
+            (
+                stats["total_hours"].as_f64().unwrap_or(-1.0),
+                stats["total_episodes"].as_i64().unwrap_or(-1),
+            )
+        }
+    };
+
+    let post = |uri: String| {
+        let app = &app;
+        let token = token.clone();
+        async move {
+            let req = actix_test::TestRequest::post()
+                .uri(&uri)
+                .insert_header(("Authorization", format!("Bearer {token}")))
+                .peer_addr(peer_addr())
+                .to_request();
+            actix_test::call_service(app, req).await.status()
+        }
+    };
+
+    // Three episodes, thirty minutes each.
+    assert!(post(format!("/api/history/tv/{tmdb_id}/seasons/1/watched"))
+        .await
+        .is_success());
+    assert_eq!(hours(pool.clone()).await, (1.5, 3));
+
+    // Seen again: six viewings, three hours. Not nine — the fill for a
+    // completed show must not be added on top of history that already covers
+    // it — and not still three, which is what counting distinct episodes here
+    // would give.
+    assert!(post(format!("/api/history/tv/{tmdb_id}/seasons/1/rewatch"))
+        .await
+        .is_success());
+    assert_eq!(hours(pool.clone()).await, (3.0, 6));
+
+    // And one more episode on its own.
+    assert!(post(format!(
+        "/api/history/tv/{tmdb_id}/seasons/1/episodes/1/rewatch"
+    ))
+    .await
+    .is_success());
+    assert_eq!(hours(pool.clone()).await, (3.5, 7));
+}
+
 /// The same rule about unaired episodes, whichever route is used.
 ///
 /// L02 from the September audit. The calendar and season routes refuse an
