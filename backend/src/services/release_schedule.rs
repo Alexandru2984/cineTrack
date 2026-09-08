@@ -7,6 +7,7 @@ use uuid::Uuid;
 use crate::errors::AppError;
 use crate::models::Media;
 use crate::services::tmdb::TmdbService;
+use crate::services::catalog_backoff::{self, RefreshOutcome};
 
 const RELEASE_SCHEDULE_ADVISORY_LOCK: i64 = 0x5641_5a55_5445_5343;
 
@@ -240,16 +241,6 @@ struct ReleaseScheduleCandidate {
     consecutive_failures: i16,
 }
 
-fn retry_delay(outcome: &str, previous_failures: i16) -> chrono::Duration {
-    let exponent = u32::from(previous_failures.clamp(0, 5) as u16);
-    let multiplier = i64::from(1_u32 << exponent);
-    match outcome {
-        "transient" => chrono::Duration::hours(multiplier.min(24)),
-        "not_found" | "invalid" => chrono::Duration::days(multiplier.min(30)),
-        _ => chrono::Duration::days(1),
-    }
-}
-
 fn success_delay(candidate: &ReleaseScheduleCandidate) -> chrono::Duration {
     if candidate.media_type == "movie" {
         if candidate
@@ -325,10 +316,11 @@ async fn mark_success(
 async fn mark_failure(
     pool: &PgPool,
     candidate: &ReleaseScheduleCandidate,
-    outcome: &'static str,
+    outcome: RefreshOutcome,
 ) -> Result<(), sqlx::Error> {
+    let outcome = outcome.label();
     let next_attempt_at: DateTime<Utc> =
-        Utc::now() + retry_delay(outcome, candidate.consecutive_failures);
+        Utc::now() + catalog_backoff::retry_delay(outcome, candidate.consecutive_failures);
     sqlx::query(
         r#"INSERT INTO release_schedule_sync_state
             (media_id, outcome, consecutive_failures, last_attempt_at, next_attempt_at)
@@ -456,26 +448,21 @@ pub async fn sync_tracked_release_schedules(
                     summary.movie_titles += 1;
                 }
             }
-            Err(error @ (AppError::DatabaseError(_) | AppError::InternalError(_))) => {
-                return Err(error);
-            }
-            Err(AppError::NotFound(_)) => {
-                mark_failure(pool, candidate, "not_found").await?;
-                summary.not_found += 1;
-            }
-            Err(
-                AppError::ServiceUnavailable(_)
-                | AppError::TooManyRequests(_)
-                | AppError::TmdbError(_),
-            ) => {
-                mark_failure(pool, candidate, "transient").await?;
-                summary.transient_failures += 1;
-                summary.stopped_early = true;
-                break;
-            }
-            Err(_) => {
-                mark_failure(pool, candidate, "invalid").await?;
-                summary.invalid += 1;
+            // Fatal cases come back out of `classify` untouched; the rest are
+            // recorded against the candidate and counted the same way in both
+            // jobs, which is the whole reason the policy is shared.
+            Err(error) => {
+                let outcome = catalog_backoff::classify(error)?;
+                mark_failure(pool, candidate, outcome).await?;
+                match outcome {
+                    RefreshOutcome::NotFound => summary.not_found += 1,
+                    RefreshOutcome::Transient => summary.transient_failures += 1,
+                    RefreshOutcome::Invalid => summary.invalid += 1,
+                }
+                if outcome.stops_the_run() {
+                    summary.stopped_early = true;
+                    break;
+                }
             }
         }
     }
@@ -501,13 +488,6 @@ mod tests {
             release_date,
             consecutive_failures: 0,
         }
-    }
-
-    #[test]
-    fn retry_backoff_is_bounded() {
-        assert_eq!(retry_delay("transient", 0), chrono::Duration::hours(1));
-        assert_eq!(retry_delay("transient", 8), chrono::Duration::hours(24));
-        assert_eq!(retry_delay("invalid", 8), chrono::Duration::days(30));
     }
 
     #[test]

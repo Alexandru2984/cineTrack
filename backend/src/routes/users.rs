@@ -798,6 +798,52 @@ async fn export_account_data(
     .fetch_all(&mut *tx)
     .await?;
 
+    // Badges are earned by a member's own watching and shown on their profile,
+    // and this is the only record of when each was awarded.
+    //
+    // It was missing, along with the dismissals below, and neither absence was
+    // a decision anybody had written down. An audit found them by listing every
+    // table with a `user_id` and subtracting the tables this function reads —
+    // which is the only way a gap like this shows up, because the export looks
+    // complete from the inside and no test asserts what it should contain.
+    //
+    // `media_id` is nullable here: some badges are for the account rather than
+    // for one title, so the join has to be a left one or those rows vanish.
+    let badges = sqlx::query_scalar::<_, serde_json::Value>(
+        r#"SELECT jsonb_build_object(
+            'badge_key', ub.badge_key,
+            'tmdb_id', m.tmdb_id,
+            'media_type', m.media_type,
+            'title', m.title,
+            'earned_at', ub.earned_at
+        )
+        FROM user_badges ub
+        LEFT JOIN media m ON m.id = ub.media_id
+        WHERE ub.user_id = $1
+        ORDER BY ub.earned_at, ub.badge_key"#,
+    )
+    .bind(user_id)
+    .fetch_all(&mut *tx)
+    .await?;
+
+    // "Stop recommending this to me". Stated by the member, acted on by
+    // discovery every time it builds a row, and held nowhere else.
+    let discovery_dismissals = sqlx::query_scalar::<_, serde_json::Value>(
+        r#"SELECT jsonb_build_object(
+            'tmdb_id', m.tmdb_id,
+            'media_type', m.media_type,
+            'title', m.title,
+            'created_at', dd.created_at
+        )
+        FROM discovery_dismissals dd
+        JOIN media m ON m.id = dd.media_id
+        WHERE dd.user_id = $1
+        ORDER BY dd.created_at, dd.media_id"#,
+    )
+    .bind(user_id)
+    .fetch_all(&mut *tx)
+    .await?;
+
     tx.commit().await?;
 
     let client = crate::routes::auth::client_info(&req);
@@ -825,7 +871,7 @@ async fn export_account_data(
             "attachment; filename=\"vazute-account-export.json\"",
         ))
         .json(AccountDataExport {
-            format_version: 4,
+            format_version: 5,
             exported_at: chrono::Utc::now(),
             account,
             library,
@@ -845,6 +891,8 @@ async fn export_account_data(
             terms_acceptances,
             blocks,
             reports_submitted,
+            badges,
+            discovery_dismissals,
         }))
 }
 

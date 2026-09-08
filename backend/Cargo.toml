@@ -5,7 +5,7 @@ edition = "2021"
 publish = false
 
 [dependencies]
-actix-web = "4"
+actix-web = { version = "4", default-features = false, features = ["macros", "compress-brotli", "compress-gzip", "compress-zstd", "cookies", "unicode"] }
 actix-cors = "0.7"
 actix-multipart = "0.8"
 futures-util = "0.3"

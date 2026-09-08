@@ -31,15 +31,6 @@ pub struct User {
     pub updated_at: DateTime<Utc>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
-pub struct OAuthAccount {
-    pub id: Uuid,
-    pub user_id: Uuid,
-    pub provider: String,
-    pub provider_user_id: String,
-    pub created_at: DateTime<Utc>,
-}
-
 #[derive(Debug, Clone, FromRow)]
 pub struct RefreshToken {
     pub id: Uuid,

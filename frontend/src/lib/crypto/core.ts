@@ -350,6 +350,27 @@ export function encryptMessage(
   senderSigningPrivateKey: Uint8Array,
   clientNonce: string,
 ): EncryptedMessage {
+  // Refused here, not only where the API refuses it.
+  //
+  // The nonce below is reused across two GCM seals, and the note at the top of
+  // this file says that is safe because the two keys differ. They differ
+  // because one comes from the agreement with the recipient and the other from
+  // the agreement with the sender. Address a message to yourself and those are
+  // the same agreement, so both seals run under one key with one nonce on two
+  // different plaintexts — which loses confidentiality to keystream reuse and
+  // authenticity to authentication-key recovery.
+  //
+  // `send_message` rejects a message to yourself today, so this is not
+  // reachable. But that is an authorization rule protecting a cryptographic
+  // invariant from another layer, and the first "note to self" feature anybody
+  // writes would quietly break the cipher. The invariant belongs where it is
+  // relied on.
+  if (equalBytes(recipientExchangePublicKey, senderExchangePublicKey)) {
+    throw new Error(
+      'A message cannot be addressed to its own sender: the nonce reuse below is only safe while the two agreements differ',
+    );
+  }
+
   const ephemeralPrivateKey = x25519.utils.randomSecretKey();
   const senderEphemeralKey = x25519.getPublicKey(ephemeralPrivateKey);
   const shared = x25519.getSharedSecret(ephemeralPrivateKey, recipientExchangePublicKey);

@@ -131,6 +131,29 @@ describe('message encryption', () => {
     expect(decryptMessage(envelope, bob.exchangePrivateKey).plaintext).toBe(plaintext);
   });
 
+  it('refuses a message addressed to its own sender', () => {
+    // The envelope seals twice under one nonce, and that is only safe while the
+    // two keys differ: one is the agreement with the recipient, the other the
+    // agreement with the sender. Address it to yourself and they are the same
+    // agreement, so both seals share a key and a nonce over different
+    // plaintexts — GCM's one prohibition, costing confidentiality and
+    // authenticity at once.
+    //
+    // The API refuses this today. That refusal is an authorization rule in
+    // another process, and it is not what makes the cipher safe.
+    const alice = generateIdentity();
+
+    expect(() =>
+      encryptMessage(
+        'note to self',
+        alice.exchangePublicKey,
+        alice.exchangePublicKey,
+        alice.signingPrivateKey,
+        CLIENT_NONCE,
+      ),
+    ).toThrow(/own sender/);
+  });
+
   it('keeps the message shut to everybody else, sender copy included', () => {
     const alice = generateIdentity();
     const bob = generateIdentity();

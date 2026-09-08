@@ -38,7 +38,7 @@ const mockShare = jest.mocked(Sharing.shareAsync);
 
 function exportPayload() {
   return {
-    format_version: 3,
+    format_version: 5,
     exported_at: '2026-07-25T20:00:00Z',
     account: {
       id: '7d7acbc0-a064-4cb0-a3ea-6c41caa62bc3',
@@ -75,6 +75,9 @@ function exportPayload() {
     ],
     blocks: [],
     reports_submitted: [],
+    direct_messages: [],
+    badges: [],
+    discovery_dismissals: [],
   };
 }
 
@@ -82,6 +85,37 @@ describe('mobile account data export', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockFile.exists = false;
+  });
+
+  it('accepts an export newer than this build knows about', async () => {
+    // The bug this replaces: the schema pinned `format_version` to an exact
+    // literal, the server moved to 4 when direct messages were added, and every
+    // export from an installed app failed from then on. A shipped app cannot be
+    // updated in step with the server, so a newer version has to be readable.
+    mockApiRequest.mockResolvedValueOnce({
+      ...exportPayload(),
+      format_version: 99,
+    });
+    await expect(requestAccountDataExport('Pass1234')).resolves.toMatchObject({
+      format_version: 99,
+    });
+  });
+
+  it('keeps sections this build does not know about', async () => {
+    // The second half of the same bug. `z.object` drops what it does not name,
+    // and the result is what gets written to the member's file — so a section
+    // added on the server would have been quietly missing from their own copy.
+    mockApiRequest.mockResolvedValueOnce({
+      ...exportPayload(),
+      something_added_later: [{ id: 'kept' }],
+    });
+    const parsed = await requestAccountDataExport('Pass1234');
+    expect(parsed).toMatchObject({ something_added_later: [{ id: 'kept' }] });
+  });
+
+  it('still refuses a response that is not an export', async () => {
+    mockApiRequest.mockResolvedValueOnce({ format_version: 2 });
+    await expect(requestAccountDataExport('Pass1234')).rejects.toThrow();
   });
 
   it('requires a bounded password and validates the private export envelope', async () => {
@@ -93,7 +127,7 @@ describe('mobile account data export', () => {
 
     mockApiRequest.mockResolvedValueOnce(exportPayload());
     await expect(requestAccountDataExport('Pass1234')).resolves.toMatchObject({
-      format_version: 3,
+      format_version: 5,
       account: { email: 'viewer@example.com' },
     });
     expect(mockApiRequest).toHaveBeenCalledWith('/users/me/export', {
@@ -132,7 +166,7 @@ describe('mobile account data export', () => {
       'vazute-account-export.json',
     );
     expect(mockCreate).toHaveBeenCalledWith({ overwrite: true });
-    expect(mockWrite).toHaveBeenCalledWith(expect.stringContaining('"format_version": 3'));
+    expect(mockWrite).toHaveBeenCalledWith(expect.stringContaining('"format_version": 5'));
     expect(mockShare).toHaveBeenCalledWith(mockFile.uri, {
       dialogTitle: 'Save your Văzute account export',
       mimeType: 'application/json',
