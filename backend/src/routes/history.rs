@@ -25,6 +25,14 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
                 web::get().to(list_watched_episodes),
             )
             .route("/tv/{tmdb_id}/progress", web::get().to(show_watch_progress))
+            // How many times each episode of a season has been seen. Separate
+            // from the endpoint above rather than added to it: that one returns
+            // a list of episode numbers and is called by app versions already
+            // installed, which would break on a changed shape.
+            .route(
+                "/tv/{tmdb_id}/seasons/{season_number}/episodes/counts",
+                web::get().to(list_episode_watch_counts),
+            )
             .route(
                 "/tv/{tmdb_id}/seasons/{season_number}/watched",
                 web::post().to(mark_season_watched),
@@ -45,6 +53,19 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
                 "/tv/{tmdb_id}/seasons/{season_number}/episodes/{episode_number}/watched",
                 web::delete().to(unmark_episode_watched),
             )
+            // Another viewing, rather than a first one. Separate verbs because
+            // "watched" has to stay idempotent — a double tap is not a rewatch
+            // — while these are additive by definition.
+            .route("/tv/{tmdb_id}/rewatch", web::post().to(rewatch_show))
+            .route(
+                "/tv/{tmdb_id}/seasons/{season_number}/rewatch",
+                web::post().to(rewatch_season),
+            )
+            .route(
+                "/tv/{tmdb_id}/seasons/{season_number}/episodes/{episode_number}/rewatch",
+                web::post().to(rewatch_episode),
+            )
+            .route("/movies/{tmdb_id}/rewatch", web::post().to(rewatch_movie))
             .route("/{id}", web::delete().to(delete_history)),
     );
 }
@@ -237,6 +258,50 @@ async fn create_history(
     Ok(HttpResponse::Created().json(history))
 }
 
+/// How many times each episode of a season has been watched.
+///
+/// Only episodes with at least one viewing appear; the interface treats a
+/// missing entry as zero, which is what it already does with the watched set.
+async fn list_episode_watch_counts(
+    pool: web::Data<PgPool>,
+    req: HttpRequest,
+    path: web::Path<(i32, i32)>,
+) -> Result<HttpResponse, AppError> {
+    let user_id = require_auth(&req).await?;
+    let (tmdb_id, season_number) = path.into_inner();
+    validate_episode_path(tmdb_id, season_number, None)?;
+
+    let counts = sqlx::query_as::<_, (i32, i64)>(
+        r#"SELECT e.episode_number, COUNT(*)::bigint
+        FROM watch_history wh
+        JOIN episodes e ON e.id = wh.episode_id
+        JOIN seasons s ON s.id = e.season_id
+        JOIN media m ON m.id = s.media_id
+        WHERE wh.user_id = $1
+          AND m.tmdb_id = $2
+          AND m.media_type = 'tv'
+          AND s.season_number = $3
+        GROUP BY e.episode_number
+        ORDER BY e.episode_number"#,
+    )
+    .bind(user_id)
+    .bind(tmdb_id)
+    .bind(season_number)
+    .fetch_all(pool.get_ref())
+    .await?;
+
+    let response: Vec<_> = counts
+        .into_iter()
+        .map(|(episode_number, times_watched)| {
+            serde_json::json!({
+                "episode_number": episode_number,
+                "times_watched": times_watched,
+            })
+        })
+        .collect();
+    Ok(HttpResponse::Ok().json(response))
+}
+
 async fn list_watched_episodes(
     pool: web::Data<PgPool>,
     req: HttpRequest,
@@ -286,14 +351,36 @@ async fn show_watch_progress(
 
     // Counts what the bulk actions below will actually touch, so it uses the
     // same rule they do.
-    let progress = sqlx::query_as::<_, (i32, Option<i32>, i64, i64)>(
-        r#"SELECT
+    let progress = sqlx::query_as::<_, (i32, Option<i32>, i64, i64, i64)>(
+        r#"WITH plays AS (
+            -- One row per aired episode, with how many times it was watched.
+            -- The left join is what keeps an unwatched episode present with a
+            -- count of zero, which is what makes the minimum below zero rather
+            -- than the minimum over the episodes that happen to have been seen.
+            SELECT
+                seasons.id AS season_id,
+                episodes.id AS episode_id,
+                COUNT(history.id) AS times
+            FROM seasons
+            JOIN media ON media.id = seasons.media_id
+            JOIN episodes ON episodes.season_id = seasons.id
+            LEFT JOIN watch_history history
+              ON history.episode_id = episodes.id AND history.user_id = $2
+            WHERE seasons.media_id = $1
+              AND episode_has_aired(episodes.air_date, media.origin_country)
+            GROUP BY seasons.id, episodes.id
+        )
+        SELECT
             seasons.season_number,
             seasons.episode_count,
             COUNT(DISTINCT episodes.id) FILTER (
                 WHERE episode_has_aired(episodes.air_date, media.origin_country)
             )::bigint AS available_episode_count,
-            COUNT(DISTINCT history.episode_id)::bigint AS watched_count
+            COUNT(DISTINCT history.episode_id)::bigint AS watched_count,
+            COALESCE(
+                (SELECT MIN(plays.times) FROM plays WHERE plays.season_id = seasons.id),
+                0
+            )::bigint AS complete_passes
         FROM seasons
         JOIN media ON media.id = seasons.media_id
         LEFT JOIN episodes ON episodes.season_id = seasons.id
@@ -309,13 +396,18 @@ async fn show_watch_progress(
     .await?
     .into_iter()
     .map(
-        |(season_number, episode_count, available_episode_count, watched_count)| {
-            SeasonWatchProgress {
-                season_number,
-                episode_count,
-                available_episode_count,
-                watched_count,
-            }
+        |(
+            season_number,
+            episode_count,
+            available_episode_count,
+            watched_count,
+            complete_passes,
+        )| SeasonWatchProgress {
+            season_number,
+            episode_count,
+            available_episode_count,
+            watched_count,
+            complete_passes,
         },
     )
     .collect::<Vec<_>>();
@@ -443,11 +535,26 @@ async fn cache_bulk_seasons(
     Ok(())
 }
 
+/// Whether a bulk write is a first viewing or another one.
+///
+/// A first viewing skips what is already watched — pressing "watched" twice on
+/// a season should not double it. A repeat records a row for every aired
+/// episode regardless, because that is precisely what the member is saying
+/// happened.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum WatchMode {
+    /// Idempotent: episodes already in the history are left alone.
+    FirstTime,
+    /// Additive: every aired episode gets another row.
+    Again,
+}
+
 async fn write_bulk_episode_history(
     pool: &PgPool,
     user_id: Uuid,
     media_id: Uuid,
     episode_ids: Vec<Uuid>,
+    mode: WatchMode,
 ) -> Result<BulkWatchResponse, AppError> {
     if episode_ids.is_empty() {
         return Err(AppError::NotFound(
@@ -477,15 +584,23 @@ async fn write_bulk_episode_history(
     .bind(&episode_ids)
     .fetch_one(&mut *tx)
     .await?;
-    let additional = candidate_count - already_watched_count;
+    let additional = match mode {
+        WatchMode::FirstTime => candidate_count - already_watched_count,
+        // A repeat writes one row per aired episode, whatever is already there.
+        WatchMode::Again => candidate_count,
+    };
     quota::ensure_history_capacity(history_count, additional)?;
 
+    // The two differ only in whether an episode already in the history is
+    // skipped. Written as one statement with the condition parameterised so the
+    // quota reservation above and the insert cannot drift apart, which is how
+    // the two would eventually disagree about how many rows are coming.
     let marked_count = i64::try_from(
         sqlx::query(
             r#"INSERT INTO watch_history (user_id, media_id, episode_id, watched_at)
             SELECT $1, $2, selected.episode_id, NOW()
             FROM UNNEST($3::uuid[]) AS selected(episode_id)
-            WHERE NOT EXISTS (
+            WHERE $4 OR NOT EXISTS (
                 SELECT 1 FROM watch_history existing
                 WHERE existing.user_id = $1
                   AND existing.media_id = $2
@@ -495,6 +610,7 @@ async fn write_bulk_episode_history(
         .bind(user_id)
         .bind(media_id)
         .bind(&episode_ids)
+        .bind(mode == WatchMode::Again)
         .execute(&mut *tx)
         .await?
         .rows_affected(),
@@ -545,9 +661,229 @@ async fn mark_season_watched(
     .bind(season_number)
     .fetch_all(pool.get_ref())
     .await?;
-    let response =
-        write_bulk_episode_history(pool.get_ref(), user_id, media.id, episode_ids).await?;
+    let response = write_bulk_episode_history(
+        pool.get_ref(),
+        user_id,
+        media.id,
+        episode_ids,
+        WatchMode::FirstTime,
+    )
+    .await?;
     Ok(HttpResponse::Ok().json(response))
+}
+
+/// Record another viewing of a season, every aired episode of it.
+///
+/// Separate from `mark_season_watched` rather than a flag on it, because the
+/// two mean different things and one of them has to stay idempotent: pressing
+/// "watched" twice is a double tap, pressing "watch again" twice is two
+/// rewatches. A verb that changes meaning with a query parameter makes that
+/// distinction impossible to see at the call site.
+/// Record another viewing of a film.
+///
+/// Films carry no episodes, so their history is one row per viewing against
+/// the title itself — which is what the tracking status writes on completion,
+/// and what this adds to.
+async fn rewatch_movie(
+    pool: web::Data<PgPool>,
+    tmdb: web::Data<TmdbService>,
+    req: HttpRequest,
+    path: web::Path<i32>,
+) -> Result<HttpResponse, AppError> {
+    let user_id = require_auth(&req).await?;
+    let tmdb_id = path.into_inner();
+    if tmdb_id <= 0 {
+        return Err(AppError::BadRequest("Invalid TMDB id".to_string()));
+    }
+    let media = tmdb
+        .get_or_cache_media(pool.get_ref(), tmdb_id, "movie")
+        .await?;
+
+    let mut tx = pool.begin().await?;
+    ensure_tracking_for_watch(&mut tx, user_id, media.id).await?;
+    let history_count = quota::lock_and_count_history(&mut tx, user_id).await?;
+    quota::ensure_history_capacity(history_count, 1)?;
+    let history_id = sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO watch_history (user_id, media_id, episode_id, watched_at)
+        VALUES ($1, $2, NULL, NOW())
+        RETURNING id"#,
+    )
+    .bind(user_id)
+    .bind(media.id)
+    .fetch_one(&mut *tx)
+    .await?;
+    let times_watched = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM watch_history
+         WHERE user_id = $1 AND media_id = $2 AND episode_id IS NULL",
+    )
+    .bind(user_id)
+    .bind(media.id)
+    .fetch_one(&mut *tx)
+    .await?;
+    tx.commit().await?;
+
+    crate::services::badges::recompute_quietly(pool.get_ref(), user_id, Some(media.id)).await;
+
+    Ok(HttpResponse::Ok().json(serde_json::json!({
+        "history_id": history_id,
+        "media_id": media.id,
+        "times_watched": times_watched,
+    })))
+}
+
+/// Record another viewing of one episode.
+///
+/// The counterpart of `mark_episode_watched`, which answers `already_watched`
+/// and writes nothing when the episode is in the history — correct for a
+/// button that means "I have seen this", and useless for a member who has seen
+/// it again.
+async fn rewatch_episode(
+    pool: web::Data<PgPool>,
+    tmdb: web::Data<TmdbService>,
+    req: HttpRequest,
+    path: web::Path<(i32, i32, i32)>,
+) -> Result<HttpResponse, AppError> {
+    let user_id = require_auth(&req).await?;
+    let (tmdb_id, season_number, episode_number) = path.into_inner();
+    validate_episode_path(tmdb_id, season_number, Some(episode_number))?;
+    let media = load_tv_media_for_watch(pool.get_ref(), tmdb.get_ref(), user_id, tmdb_id).await?;
+    let episode = tmdb
+        .cache_season_episodes(pool.get_ref(), &media, season_number)
+        .await?
+        .into_iter()
+        .find(|episode| episode.episode_number == episode_number)
+        .ok_or_else(|| AppError::NotFound("Episode not found".to_string()))?;
+
+    // The same rule as a first viewing: an episode that has not aired cannot
+    // have been seen, whichever button was pressed.
+    if episode
+        .air_date
+        .is_some_and(|date| date > chrono::Utc::now().date_naive())
+    {
+        return Err(AppError::BadRequest(
+            "Future episodes cannot be marked watched".to_string(),
+        ));
+    }
+
+    let mut tx = pool.begin().await?;
+    ensure_tracking_for_watch(&mut tx, user_id, media.id).await?;
+    let history_count = quota::lock_and_count_history(&mut tx, user_id).await?;
+    quota::ensure_history_capacity(history_count, 1)?;
+    let history_id = sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO watch_history (user_id, media_id, episode_id, watched_at)
+        VALUES ($1, $2, $3, NOW())
+        RETURNING id"#,
+    )
+    .bind(user_id)
+    .bind(media.id)
+    .bind(episode.id)
+    .fetch_one(&mut *tx)
+    .await?;
+    let times_watched = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM watch_history WHERE user_id = $1 AND episode_id = $2",
+    )
+    .bind(user_id)
+    .bind(episode.id)
+    .fetch_one(&mut *tx)
+    .await?;
+    tx.commit().await?;
+
+    // A rewatch can cross a marathon threshold like any other viewing, and
+    // failing to award it must not fail the request.
+    crate::services::badges::recompute_quietly(pool.get_ref(), user_id, Some(media.id)).await;
+
+    Ok(HttpResponse::Ok().json(serde_json::json!({
+        "history_id": history_id,
+        "media_id": media.id,
+        "episode_id": episode.id,
+        "times_watched": times_watched,
+    })))
+}
+
+async fn rewatch_season(
+    pool: web::Data<PgPool>,
+    tmdb: web::Data<TmdbService>,
+    req: HttpRequest,
+    path: web::Path<(i32, i32)>,
+) -> Result<HttpResponse, AppError> {
+    let user_id = require_auth(&req).await?;
+    let (tmdb_id, season_number) = path.into_inner();
+    validate_episode_path(tmdb_id, season_number, None)?;
+    let media = load_tv_media_for_watch(pool.get_ref(), tmdb.get_ref(), user_id, tmdb_id).await?;
+    cache_bulk_seasons(pool.get_ref(), tmdb.get_ref(), &media, season_number, false).await?;
+    let episode_ids = aired_episode_ids(pool.get_ref(), media.id, Some(season_number)).await?;
+    let response = write_bulk_episode_history(
+        pool.get_ref(),
+        user_id,
+        media.id,
+        episode_ids,
+        WatchMode::Again,
+    )
+    .await?;
+    Ok(HttpResponse::Ok().json(response))
+}
+
+/// Record another viewing of a whole series.
+async fn rewatch_show(
+    pool: web::Data<PgPool>,
+    tmdb: web::Data<TmdbService>,
+    req: HttpRequest,
+    path: web::Path<i32>,
+) -> Result<HttpResponse, AppError> {
+    let user_id = require_auth(&req).await?;
+    let tmdb_id = path.into_inner();
+    if tmdb_id <= 0 {
+        return Err(AppError::BadRequest("Invalid TMDB id".to_string()));
+    }
+    let media = load_tv_media_for_watch(pool.get_ref(), tmdb.get_ref(), user_id, tmdb_id).await?;
+
+    // "The whole series" is every season the catalogue knows, refreshed through
+    // the same bounded helper the season marks use — so the limits on how many
+    // seasons and episodes one request may touch apply here too.
+    let last_season = sqlx::query_scalar::<_, Option<i32>>(
+        "SELECT MAX(season_number) FROM seasons WHERE media_id = $1 AND season_number > 0",
+    )
+    .bind(media.id)
+    .fetch_one(pool.get_ref())
+    .await?
+    .ok_or_else(|| AppError::NotFound("This series has no seasons yet".to_string()))?;
+    cache_bulk_seasons(pool.get_ref(), tmdb.get_ref(), &media, last_season, true).await?;
+    let episode_ids = aired_episode_ids(pool.get_ref(), media.id, None).await?;
+    let response = write_bulk_episode_history(
+        pool.get_ref(),
+        user_id,
+        media.id,
+        episode_ids,
+        WatchMode::Again,
+    )
+    .await?;
+    Ok(HttpResponse::Ok().json(response))
+}
+
+/// Every aired episode of a series, or of one season of it.
+///
+/// The same rule the bulk marks already use: "the whole thing" never reaches
+/// past what has been broadcast, so a rewatch of a running series does not
+/// silently claim episodes nobody could have seen.
+async fn aired_episode_ids(
+    pool: &PgPool,
+    media_id: Uuid,
+    season_number: Option<i32>,
+) -> Result<Vec<Uuid>, AppError> {
+    Ok(sqlx::query_scalar::<_, Uuid>(
+        r#"SELECT episodes.id
+        FROM episodes
+        JOIN seasons ON seasons.id = episodes.season_id
+        JOIN media ON media.id = seasons.media_id
+        WHERE seasons.media_id = $1
+          AND ($2::int IS NULL OR seasons.season_number = $2)
+          AND episode_has_aired(episodes.air_date, media.origin_country)
+        ORDER BY seasons.season_number, episodes.episode_number"#,
+    )
+    .bind(media_id)
+    .bind(season_number)
+    .fetch_all(pool)
+    .await?)
 }
 
 async fn mark_episodes_watched_through(
@@ -613,8 +949,14 @@ async fn mark_episodes_watched_through(
     .bind(episode_number)
     .fetch_all(pool.get_ref())
     .await?;
-    let response =
-        write_bulk_episode_history(pool.get_ref(), user_id, media.id, episode_ids).await?;
+    let response = write_bulk_episode_history(
+        pool.get_ref(),
+        user_id,
+        media.id,
+        episode_ids,
+        WatchMode::FirstTime,
+    )
+    .await?;
     Ok(HttpResponse::Ok().json(response))
 }
 

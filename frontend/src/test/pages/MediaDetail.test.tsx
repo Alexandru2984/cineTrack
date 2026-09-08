@@ -13,6 +13,10 @@ const mocks = vi.hoisted(() => ({
   unmarkEpisodeWatched: vi.fn(),
   markSeasonWatched: vi.fn(),
   markEpisodesWatchedThrough: vi.fn(),
+  rewatchEpisode: vi.fn(),
+  rewatchSeason: vi.fn(),
+  rewatchShow: vi.fn(),
+  rewatchMovie: vi.fn(),
   useTrackingLookup: vi.fn(),
 }));
 
@@ -75,6 +79,12 @@ vi.mock('@/hooks/useTracking', () => ({
     isPending: false,
     error: null,
   }),
+  // Rewatching is offered at three levels; the page reads all of them even
+  // when the fixture is not finished, so the mock has to carry them.
+  useRewatchEpisode: () => ({ mutate: mocks.rewatchEpisode, isPending: false, error: null }),
+  useRewatchSeason: () => ({ mutate: mocks.rewatchSeason, isPending: false, error: null }),
+  useRewatchShow: () => ({ mutate: mocks.rewatchShow, isPending: false, error: null }),
+  useRewatchMovie: () => ({ mutate: mocks.rewatchMovie, isPending: false, error: null }),
   useMarkSeasonWatched: () => ({
     mutate: mocks.markSeasonWatched,
     isPending: false,
@@ -220,6 +230,28 @@ describe('MediaDetail episode tracking', () => {
       expect.objectContaining({ onSuccess: expect.any(Function) }),
     );
     expect(mocks.markEpisodeWatched).not.toHaveBeenCalled();
+  });
+
+  /** A finished season used to end in a disabled button saying so.
+   *
+   *  The model always allowed a second viewing — no unique constraint, and the
+   *  TV Time import brings rewatches in — but nothing in the interface could
+   *  add one, at any level. The moment somebody is most likely to want it is
+   *  exactly the moment the old button went dead. */
+  it('offers to watch a finished season again', async () => {
+    const user = userEvent.setup();
+    // Every episode of the season already seen.
+    mocks.useWatchedEpisodes.mockReturnValue({ data: [1, 2], isLoading: false });
+    renderPage();
+
+    const again = await screen.findByRole('button', { name: /watch season again/i });
+    await user.click(again);
+
+    expect(mocks.rewatchSeason).toHaveBeenCalledWith(
+      expect.objectContaining({ seasonNumber: 1 }),
+    );
+    // And it is not the idempotent one, which would have recorded nothing.
+    expect(mocks.markSeasonWatched).not.toHaveBeenCalled();
   });
 
   it('confirms marking every available episode in a season', async () => {
