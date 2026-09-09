@@ -33,16 +33,50 @@ use crate::utils::jwt;
 /// How many simultaneous streams one account may hold.
 ///
 /// A stream costs a task and a socket for as long as it is open, so without a
-/// bound a single account could pin them by opening tabs. Five matches the
-/// active-session cap, which is the same question asked about refresh tokens.
-const MAX_CONNECTIONS_PER_USER: usize = 5;
+/// bound a single account could pin them by opening tabs.
+///
+/// This used to be five, to match the active-session cap. That was the wrong
+/// comparison — a session is a signed-in browser, and one browser holds as many
+/// streams as it has tabs — and it interacted badly with how a dead stream is
+/// noticed. The count comes from live `broadcast::Receiver`s, and the receiver
+/// for an abandoned stream survives until this process next tries to write to
+/// it, which is at most `KEEPALIVE_INTERVAL` away. So a reload leaves its old
+/// stream counted for a while, and refreshing a few times in quick succession
+/// refused the *live* connection because of ones the browser had already
+/// dropped: 429, and no live updates until the ghosts timed out.
+///
+/// The cap therefore has to clear the number of reconnects a person can make
+/// inside one detection window, with room to spare. Ten against a ten-second
+/// window is not a threshold ordinary use reaches; it is still a hard bound on
+/// sockets and tasks, which is the only thing this was ever for.
+const MAX_CONNECTIONS_PER_USER: usize = 10;
 
 /// Idle gap after which a comment frame is emitted.
 ///
 /// Proxies close connections that go quiet, and a client cannot tell a healthy
 /// idle stream from a dead one. Comment frames are ignored by the SSE parser,
 /// so this is invisible to the application and only keeps the pipe warm.
-const KEEPALIVE_INTERVAL: Duration = Duration::from_secs(25);
+///
+/// It is also, unavoidably, how long it takes to notice a client that left.
+/// Server-sent events have no liveness probe of their own: this process learns
+/// the far end is gone when a write fails, and this is when it writes. That
+/// makes the interval the detection window the cap above has to accommodate,
+/// which is why it is ten seconds rather than twenty-five. The extra traffic is
+/// a twelve-byte comment frame every ten seconds per open stream.
+const KEEPALIVE_INTERVAL: Duration = Duration::from_secs(10);
+
+/// The cap, for the tests that assert what it has to clear.
+///
+/// Exposed rather than duplicated: a test carrying its own copy of the number
+/// passes while the code it guards says something else.
+pub fn max_connections_per_user() -> usize {
+    MAX_CONNECTIONS_PER_USER
+}
+
+/// The detection window, for the same reason.
+pub fn keepalive_interval() -> Duration {
+    KEEPALIVE_INTERVAL
+}
 
 pub fn configure(cfg: &mut web::ServiceConfig) {
     cfg.route("/events", web::get().to(stream_events));
@@ -64,6 +98,10 @@ struct ConnectionGuard {
 impl Drop for ConnectionGuard {
     fn drop(&mut self) {
         events::release(self.user_id);
+        // Paired with the increment where the guard is built, so every way a
+        // stream can end — client gone, session revoked, shutdown — decrements
+        // exactly once.
+        crate::metrics::record_event_stream_closed();
     }
 }
 
@@ -120,6 +158,9 @@ async fn stream_events(req: HttpRequest) -> Result<HttpResponse, AppError> {
         issued_at: claims.iat,
         issued_at_ms: claims.iat_ms,
     };
+    // After the guard exists, never before: anything that could fail between
+    // the two would leave the gauge counting a stream nobody holds.
+    crate::metrics::record_event_stream_opened();
 
     let body = stream::unfold((receiver, guard), |(mut receiver, guard)| async move {
         let next = tokio::time::timeout(KEEPALIVE_INTERVAL, receiver.recv()).await;

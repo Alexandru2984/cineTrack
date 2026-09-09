@@ -15510,3 +15510,103 @@ async fn the_account_export_covers_every_table_holding_member_data() {
 
     pool.close().await;
 }
+
+// ── The event-stream cap and the ghosts it used to count ───────────────
+//
+// `/api/events` bounds how many streams one account may hold. The count comes
+// from live broadcast receivers, and the receiver behind a stream the browser
+// has already abandoned is not released until this process next tries to write
+// to it — one keepalive interval away at most.
+//
+// So the cap was being compared against a number that includes connections
+// nobody holds. With the cap at five and the window at twenty-five seconds, a
+// few quick reloads refused the live connection because of the dead ones, and
+// the tab sat without live updates until they timed out. Production showed
+// sixteen of those refusals in an hour, every one of them on this route and no
+// other.
+//
+// These hold real receivers to stand in for the ghosts, which is exactly what
+// the handler counts.
+#[actix_web::test]
+#[ignore = "requires test DB: docker compose -f docker-compose.test.yml up -d"]
+async fn an_event_stream_is_refused_only_once_the_account_is_really_at_the_cap() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (access_token, _, user_id) =
+        register_user(&app, "streamer", "streamer@mailbox.dev", "Pass1234").await;
+    let user_id = Uuid::parse_str(&user_id).expect("registered user id");
+
+    let cap = cinetrack::routes::events::max_connections_per_user();
+
+    // One short of the cap: the next stream is still the member's to open.
+    let mut held: Vec<_> = (0..cap - 1)
+        .map(|_| cinetrack::services::events::subscribe(user_id))
+        .collect();
+    let req = actix_test::TestRequest::get()
+        .uri("/api/events")
+        .insert_header(("Authorization", format!("Bearer {access_token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let status = actix_test::call_service(&app, req).await.status();
+    assert_eq!(
+        status, 200,
+        "a stream below the cap must be accepted; got {status}"
+    );
+
+    // At the cap, it is refused — the bound still exists, which is the point of
+    // raising it rather than removing it.
+    held.push(cinetrack::services::events::subscribe(user_id));
+    while held.len() < cap {
+        held.push(cinetrack::services::events::subscribe(user_id));
+    }
+    let req = actix_test::TestRequest::get()
+        .uri("/api/events")
+        .insert_header(("Authorization", format!("Bearer {access_token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(
+        actix_test::call_service(&app, req).await.status(),
+        429,
+        "an account genuinely holding {cap} streams must be refused the next one"
+    );
+
+    // Dropping them is what a timed-out ghost does, and it must free the slot.
+    held.clear();
+    cinetrack::services::events::release(user_id);
+    let req = actix_test::TestRequest::get()
+        .uri("/api/events")
+        .insert_header(("Authorization", format!("Bearer {access_token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(
+        actix_test::call_service(&app, req).await.status(),
+        200,
+        "releasing the held streams must let the account open one again"
+    );
+
+    pool.close().await;
+}
+
+// The cap is only safe while it clears the reconnects a person can make inside
+// one detection window. Both numbers are in one file and either can be edited
+// alone, so the relationship between them is asserted rather than left in a
+// comment — raising the keepalive back to twenty-five seconds without touching
+// the cap is exactly the regression that produced the refusals.
+#[test]
+fn the_stream_cap_leaves_room_for_reconnects_within_one_detection_window() {
+    let cap = cinetrack::routes::events::max_connections_per_user();
+    let window = cinetrack::routes::events::keepalive_interval();
+
+    assert!(
+        window.as_secs() <= 15,
+        "a detection window of {}s leaves abandoned streams counted for too long",
+        window.as_secs()
+    );
+    // A person reloading hard manages a few attempts in ten seconds; the cap
+    // has to sit well clear of that, not next to it.
+    assert!(
+        cap >= 8,
+        "a cap of {cap} is too close to the reconnects one detection window allows"
+    );
+}

@@ -27,6 +27,30 @@ struct CspReportMetrics {
     reports: IntCounterVec,
 }
 
+/// Open server-sent event streams.
+///
+/// A gauge rather than a counter, because the question this answers is "how
+/// many are held right now" — the number the per-account cap in
+/// `routes::events` is compared against. Without it that cap refused
+/// connections with nothing to show how close anybody was to it, which is how
+/// a live-updates outage stayed invisible until somebody read a console.
+#[derive(Clone)]
+struct EventStreamMetrics {
+    open: IntGauge,
+}
+
+impl EventStreamMetrics {
+    fn new() -> Self {
+        Self {
+            open: IntGauge::new(
+                "cinetrack_event_streams_open",
+                "Server-sent event streams currently held open",
+            )
+            .expect("Event stream metric must be valid"),
+        }
+    }
+}
+
 #[derive(Clone)]
 struct CommunitySafetyMetrics {
     reports: IntCounterVec,
@@ -400,6 +424,18 @@ static PRODUCT_METRICS: LazyLock<ProductMetrics> = LazyLock::new(ProductMetrics:
 static SECURITY_METRICS: LazyLock<SecurityMetrics> = LazyLock::new(SecurityMetrics::new);
 static COMMUNITY_SAFETY_METRICS: LazyLock<CommunitySafetyMetrics> =
     LazyLock::new(CommunitySafetyMetrics::new);
+static EVENT_STREAM_METRICS: LazyLock<EventStreamMetrics> = LazyLock::new(EventStreamMetrics::new);
+
+/// A stream was accepted and is now held open.
+pub(crate) fn record_event_stream_opened() {
+    EVENT_STREAM_METRICS.open.inc();
+}
+
+/// A stream ended, however it ended — the client went away, the session was
+/// revoked, or the process is shutting down.
+pub(crate) fn record_event_stream_closed() {
+    EVENT_STREAM_METRICS.open.dec();
+}
 
 pub fn record_tmdb_request(endpoint: &'static str, outcome: &'static str, duration: Duration) {
     TMDB_METRICS
@@ -609,6 +645,10 @@ pub fn build() -> PrometheusMetrics {
         .register(Box::new(COMMUNITY_SAFETY_METRICS.oldest_active_age.clone()))
         .expect("Failed to register moderation queue age metric");
     prometheus
+        .registry
+        .register(Box::new(EVENT_STREAM_METRICS.open.clone()))
+        .expect("Failed to register event stream metric");
+    prometheus
 }
 
 #[cfg(test)]
@@ -627,6 +667,7 @@ mod tests {
         record_security_event(SecurityEvent::LoginRejected);
         record_safety_report("child_safety");
         record_moderation_action("reviewing");
+        record_event_stream_opened();
         let prometheus = build();
         let names = prometheus
             .registry
@@ -634,6 +675,26 @@ mod tests {
             .into_iter()
             .map(|family| family.name().to_string())
             .collect::<Vec<_>>();
+
+        assert!(names
+            .iter()
+            .any(|name| name == "cinetrack_event_streams_open"));
+        // Registered is not the same as wired: assert the value the recorder
+        // just moved is the value the registry reports.
+        let open_streams = prometheus
+            .registry
+            .gather()
+            .into_iter()
+            .find(|family| family.name() == "cinetrack_event_streams_open")
+            .and_then(|family| {
+                family
+                    .get_metric()
+                    .first()
+                    .map(|m| m.get_gauge().get_value())
+            })
+            .expect("the open-streams gauge must be in the registry");
+        assert_eq!(open_streams, 1.0, "opening a stream must move the gauge");
+        record_event_stream_closed();
 
         assert!(names
             .iter()
