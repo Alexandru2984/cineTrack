@@ -15610,3 +15610,171 @@ fn the_stream_cap_leaves_room_for_reconnects_within_one_detection_window() {
         "a cap of {cap} is too close to the reconnects one detection window allows"
     );
 }
+
+// ── media.popularity against the inventory it copies ───────────────────
+//
+// Discovery stopped joining `catalog_external_ids` to read one number and
+// reads `media.popularity` instead, filtering on `IS NOT NULL` where it used to
+// filter on an inner join plus `adult`/`video`. That substitution is only valid
+// while the column agrees with the inventory, so the agreement is asserted
+// rather than assumed.
+//
+// It is also written both ways round on purpose. The first version of this
+// change filled the column from a trigger on `media` alone, which was correct
+// in production — the inventory is a complete export and always lands first —
+// and wrong for anybody writing a fixture, who has no reason to care. Three
+// existing tests failed on it. The reconciliation is now two-sided, and this
+// pins that: whichever row is written first, the answer is the same.
+#[actix_web::test]
+#[ignore = "requires test DB: docker compose -f docker-compose.test.yml up -d"]
+async fn media_popularity_agrees_with_the_inventory_whichever_lands_first() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+
+    // Inventory first, then the title — production's order.
+    sqlx::query(
+        "INSERT INTO catalog_external_ids (media_type, tmdb_id, adult, video, popularity)
+         VALUES ('movie', 771001, false, false, 12.5)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO media (tmdb_id, media_type, title, poster_path, metadata_level)
+         VALUES (771001, 'movie', 'Inventory First', '/a.jpg', 'detail')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // Asserted here, before any other inventory write, because that is the only
+    // moment the insert-side trigger is the thing doing the work. Later in this
+    // test the statement-side reconciliation fires and would repair this row
+    // anyway — which is exactly how a first version of this assertion passed
+    // with the insert trigger dropped, and said nothing.
+    //
+    // What it stands for: a title hydrated between two nightly syncs. Nothing
+    // touches the inventory afterwards, so without this trigger it would sit
+    // out of discovery until the next morning.
+    let value: Option<f32> =
+        sqlx::query_scalar("SELECT popularity FROM media WHERE tmdb_id = 771001")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        value,
+        Some(12.5),
+        "a title written after its inventory row must get the number at once, \
+         without waiting for the next thing to touch the inventory"
+    );
+
+    // Title first, then the inventory — a fixture's order, and the one the
+    // insert-only trigger got wrong.
+    sqlx::query(
+        "INSERT INTO media (tmdb_id, media_type, title, poster_path, metadata_level)
+         VALUES (771002, 'movie', 'Title First', '/b.jpg', 'detail')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO catalog_external_ids (media_type, tmdb_id, adult, video, popularity)
+         VALUES ('movie', 771002, false, false, 34.5)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // Adult and video entries: listed, and still excluded.
+    sqlx::query(
+        "INSERT INTO media (tmdb_id, media_type, title, poster_path, metadata_level)
+         VALUES (771003, 'movie', 'Adult', '/c.jpg', 'detail'),
+                (771004, 'movie', 'Video', '/d.jpg', 'detail'),
+                (771005, 'movie', 'Unlisted', '/e.jpg', 'detail')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO catalog_external_ids (media_type, tmdb_id, adult, video, popularity)
+         VALUES ('movie', 771003, true, false, 99.0),
+                ('movie', 771004, false, true, 99.0)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // The whole point, stated once: the column is non-NULL for exactly the rows
+    // the old inner join would have kept.
+    let disagreeing: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*)
+         FROM media m
+         WHERE (m.popularity IS NOT NULL) <> EXISTS (
+             SELECT 1 FROM catalog_external_ids i
+             WHERE i.media_type = m.media_type
+               AND i.tmdb_id = m.tmdb_id
+               AND NOT i.adult
+               AND NOT i.video
+         )",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        disagreeing, 0,
+        "media.popularity must be set for exactly the titles the old join kept"
+    );
+
+    let value: Option<f32> =
+        sqlx::query_scalar("SELECT popularity FROM media WHERE tmdb_id = 771002")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        value,
+        Some(34.5),
+        "a title written before its inventory row must still get the number"
+    );
+
+    // A number that moves, moves here too.
+    sqlx::query("UPDATE catalog_external_ids SET popularity = 77.0 WHERE tmdb_id = 771001")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let value: Option<f32> =
+        sqlx::query_scalar("SELECT popularity FROM media WHERE tmdb_id = 771001")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(value, Some(77.0), "a changed popularity must reach media");
+
+    // Turning adult withdraws the title, rather than leaving it in discovery on
+    // a number nothing backs.
+    sqlx::query("UPDATE catalog_external_ids SET adult = TRUE WHERE tmdb_id = 771001")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let value: Option<f32> =
+        sqlx::query_scalar("SELECT popularity FROM media WHERE tmdb_id = 771001")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(value, None, "a title turned adult must lose its copy");
+
+    // And so does one the export drops.
+    sqlx::query("DELETE FROM catalog_external_ids WHERE tmdb_id = 771002")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let value: Option<f32> =
+        sqlx::query_scalar("SELECT popularity FROM media WHERE tmdb_id = 771002")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        value, None,
+        "a title dropped from the export must lose its copy"
+    );
+
+    pool.close().await;
+}

@@ -70,10 +70,17 @@ ON CONFLICT (provider) DO UPDATE SET
     tv_object_key = EXCLUDED.tv_object_key,
     completed_at = EXCLUDED.completed_at;
 
+-- `media` carries its own copy of popularity so discovery does not have to
+-- join 1.46 million rows to read one number. Nothing is needed here to keep it
+-- true: a statement-level trigger on catalog_external_ids reconciles it after
+-- the writes above, inside this same transaction. See
+-- 20240307000000_media_popularity.sql.
+
 TRUNCATE catalog_external_ids_staging;
 COMMIT;
 ANALYZE catalog_external_ids;
 ANALYZE catalog_external_titles;
+ANALYZE media;
 """
 
 
