@@ -60,6 +60,10 @@ pub struct AccountDataExport {
     pub terms_acceptances: Vec<Value>,
     pub blocks: Vec<Value>,
     pub reports_submitted: Vec<Value>,
+    /// Earned badges and the titles they were awarded for.
+    pub badges: Vec<Value>,
+    /// Titles the member asked discovery to stop suggesting.
+    pub discovery_dismissals: Vec<Value>,
 }
 
 #[cfg(test)]

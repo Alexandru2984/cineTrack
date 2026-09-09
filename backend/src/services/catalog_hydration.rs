@@ -4,6 +4,7 @@ use chrono::{DateTime, Utc};
 use sqlx::{FromRow, PgPool};
 
 use crate::errors::AppError;
+use crate::services::catalog_backoff::{self, RefreshOutcome};
 use crate::services::tmdb::TmdbService;
 
 const HYDRATION_ADVISORY_LOCK: i64 = 0x4349_4e45_5452_4143;
@@ -33,16 +34,6 @@ struct HydrationCandidate {
     consecutive_failures: i16,
 }
 
-fn retry_delay(outcome: &str, previous_failures: i16) -> chrono::Duration {
-    let exponent = u32::from(previous_failures.clamp(0, 5) as u16);
-    let multiplier = i64::from(1_u32 << exponent);
-    match outcome {
-        "transient" => chrono::Duration::hours(multiplier.min(24)),
-        "not_found" | "invalid" => chrono::Duration::days(multiplier.min(30)),
-        _ => chrono::Duration::days(1),
-    }
-}
-
 async fn mark_success(pool: &PgPool, candidate: &HydrationCandidate) -> Result<(), sqlx::Error> {
     let next_attempt_at = Utc::now() + chrono::Duration::days(DETAIL_REFRESH_DAYS);
     sqlx::query(
@@ -68,10 +59,11 @@ async fn mark_success(pool: &PgPool, candidate: &HydrationCandidate) -> Result<(
 async fn mark_failure(
     pool: &PgPool,
     candidate: &HydrationCandidate,
-    outcome: &'static str,
+    outcome: RefreshOutcome,
 ) -> Result<(), sqlx::Error> {
+    let outcome = outcome.label();
     let next_attempt_at: DateTime<Utc> =
-        Utc::now() + retry_delay(outcome, candidate.consecutive_failures);
+        Utc::now() + catalog_backoff::retry_delay(outcome, candidate.consecutive_failures);
     sqlx::query(
         r#"INSERT INTO catalog_hydration_state
             (media_type, tmdb_id, outcome, consecutive_failures,
@@ -191,43 +183,25 @@ pub async fn hydrate_popular_catalog(
                 mark_success(pool, candidate).await?;
                 summary.succeeded += 1;
             }
-            Err(error @ (AppError::DatabaseError(_) | AppError::InternalError(_))) => {
-                return Err(error);
-            }
-            Err(AppError::NotFound(_)) => {
-                mark_failure(pool, candidate, "not_found").await?;
-                summary.not_found += 1;
-            }
-            Err(
-                AppError::ServiceUnavailable(_)
-                | AppError::TooManyRequests(_)
-                | AppError::TmdbError(_),
-            ) => {
-                mark_failure(pool, candidate, "transient").await?;
-                summary.transient_failures += 1;
-                summary.stopped_early = true;
-                break;
-            }
-            Err(_) => {
-                mark_failure(pool, candidate, "invalid").await?;
-                summary.invalid += 1;
+            // Fatal cases come back out of `classify` untouched; the rest are
+            // recorded against the candidate and counted the same way in both
+            // jobs, which is the whole reason the policy is shared.
+            Err(error) => {
+                let outcome = catalog_backoff::classify(error)?;
+                mark_failure(pool, candidate, outcome).await?;
+                match outcome {
+                    RefreshOutcome::NotFound => summary.not_found += 1,
+                    RefreshOutcome::Transient => summary.transient_failures += 1,
+                    RefreshOutcome::Invalid => summary.invalid += 1,
+                }
+                if outcome.stops_the_run() {
+                    summary.stopped_early = true;
+                    break;
+                }
             }
         }
     }
 
     lock_transaction.rollback().await?;
     Ok(summary)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn retry_backoff_is_bounded() {
-        assert_eq!(retry_delay("transient", 0), chrono::Duration::hours(1));
-        assert_eq!(retry_delay("transient", 8), chrono::Duration::hours(24));
-        assert_eq!(retry_delay("not_found", 2), chrono::Duration::days(4));
-        assert_eq!(retry_delay("invalid", 12), chrono::Duration::days(30));
-    }
 }

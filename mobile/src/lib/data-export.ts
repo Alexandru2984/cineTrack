@@ -8,40 +8,59 @@ import { ApiError } from '@/lib/http';
 const EXPORT_FILE_NAME = 'vazute-account-export.json';
 const MAX_EXPORT_CHARACTERS = 96 * 1024 * 1024;
 
-const accountExportSchema = z.object({
-  format_version: z.literal(3),
-  exported_at: z.string().datetime({ offset: true }),
-  account: z.object({
-    id: z.string().uuid(),
-    username: z.string().min(1).max(50),
-    email: z.string().email().max(255),
-    avatar_url: z.string().nullable(),
-    bio: z.string().nullable(),
-    is_public: z.boolean(),
-    email_verified: z.boolean(),
-    two_factor_enabled: z.boolean(),
-    terms_accepted_version: z.string().nullable(),
-    terms_accepted_at: z.string().nullable(),
-    created_at: z.string(),
-    updated_at: z.string(),
-  }),
-  library: z.array(z.unknown()).max(10_000),
-  watch_history: z.array(z.unknown()).max(100_000),
-  lists: z.array(z.unknown()).max(50),
-  relationships: z.array(z.unknown()).max(10_000),
-  episode_plans: z.array(z.unknown()).max(10_000),
-  episode_reactions: z.array(z.unknown()).max(100_000),
-  notifications: z.array(z.unknown()).max(5_000),
-  sessions: z.array(z.unknown()).max(10_000),
-  notification_devices: z.array(z.unknown()).max(10),
-  import_jobs: z.array(z.unknown()).max(10_000),
-  calendar_preferences: z.unknown().nullable(),
-  oauth_accounts: z.array(z.unknown()).max(20),
-  security_activity: z.array(z.unknown()).max(200),
-  terms_acceptances: z.array(z.unknown()).max(100),
-  blocks: z.array(z.unknown()).max(5000),
-  reports_submitted: z.array(z.unknown()).max(5000),
-});
+// Deliberately tolerant about the version, and deliberately not strict about
+// unknown keys — both because of what this function does with the result.
+//
+// It does not interpret the export. It re-serialises it to a file the member
+// keeps. So a pinned `z.literal` bought nothing and cost everything: the server
+// went to 4 when direct messages were added, this stayed at 3, and every export
+// from the phone has failed since — a shipped app cannot be updated in lockstep
+// with the server, so pinning an exact version guarantees this breakage on
+// every future bump. And `z.object` strips what it does not name, so the one
+// field nobody added here, `direct_messages`, would have been silently dropped
+// from the member's own copy of their own messages.
+//
+// The floor still rejects a genuinely older shape, and the per-field bounds
+// below still reject a response that is not an export at all.
+const accountExportSchema = z
+  .object({
+    format_version: z.number().int().min(3),
+    exported_at: z.string().datetime({ offset: true }),
+    account: z.object({
+      id: z.string().uuid(),
+      username: z.string().min(1).max(50),
+      email: z.string().email().max(255),
+      avatar_url: z.string().nullable(),
+      bio: z.string().nullable(),
+      is_public: z.boolean(),
+      email_verified: z.boolean(),
+      two_factor_enabled: z.boolean(),
+      terms_accepted_version: z.string().nullable(),
+      terms_accepted_at: z.string().nullable(),
+      created_at: z.string(),
+      updated_at: z.string(),
+    }),
+    library: z.array(z.unknown()).max(10_000),
+    watch_history: z.array(z.unknown()).max(100_000),
+    lists: z.array(z.unknown()).max(50),
+    relationships: z.array(z.unknown()).max(10_000),
+    direct_messages: z.array(z.unknown()).max(100_000),
+    episode_plans: z.array(z.unknown()).max(10_000),
+    episode_reactions: z.array(z.unknown()).max(100_000),
+    notifications: z.array(z.unknown()).max(5_000),
+    sessions: z.array(z.unknown()).max(10_000),
+    notification_devices: z.array(z.unknown()).max(10),
+    import_jobs: z.array(z.unknown()).max(10_000),
+    calendar_preferences: z.unknown().nullable(),
+    oauth_accounts: z.array(z.unknown()).max(20),
+    security_activity: z.array(z.unknown()).max(200),
+    terms_acceptances: z.array(z.unknown()).max(100),
+    blocks: z.array(z.unknown()).max(5000),
+    reports_submitted: z.array(z.unknown()).max(5000),
+    badges: z.array(z.unknown()).max(5000),
+    discovery_dismissals: z.array(z.unknown()).max(10_000),
+  })
+  .passthrough();
 
 export type AccountDataExport = z.infer<typeof accountExportSchema>;
 

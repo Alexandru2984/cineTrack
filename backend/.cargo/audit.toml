@@ -7,25 +7,19 @@
 # the facts it rests on.
 
 [advisories]
-ignore = [
-    # RUSTSEC-2026-0258 — h2: unbounded empty DATA frames (denial of service).
-    #
-    # Two versions are in the tree. h2 0.4 was updated to the patched 0.4.16.
-    # h2 0.3.27 comes from actix-http, and the advisory offers no fix on the 0.3
-    # line, so there is nothing to upgrade to short of actix-web 4 changing its
-    # own dependency.
-    #
-    # It is unreachable here. actix-web serves HTTP/2 only over a TLS bind with
-    # ALPN, or through an explicit h2c bind; `main.rs` uses a plain `.bind()`,
-    # which serves HTTP/1.x and nothing else. In front of it, nginx sets
-    # `proxy_http_version 1.1`, so the only client the backend ever has speaks
-    # HTTP/1.1 too. No connection reaches the h2 codec.
-    #
-    # Revisit if the server ever binds TLS or h2c, if nginx starts proxying with
-    # HTTP/2, or as soon as actix-http ships a release on patched h2 — whichever
-    # happens first. The guard test fails on the first two.
-    "RUSTSEC-2026-0258",
-]
+ignore = []
+
+# RUSTSEC-2026-0258 (h2: unbounded empty DATA frames) used to be ignored here.
+# The reasoning was sound — nothing could reach the h2 codec — but an accepted
+# advisory is a standing claim someone has to keep re-verifying. The dependency
+# is gone instead: `actix-web` is now taken with `default-features = false` and
+# every default feature except `http2`, which drops h2 0.3 and `local-channel`
+# from the tree entirely. The server was never able to speak HTTP/2 anyway; the
+# feature only ever compiled a codec no bind could reach.
+#
+# `scripts/tests/rust_audit_exceptions_test.sh` asserts the feature stays off,
+# so re-enabling it brings the advisory back into view rather than silently
+# restoring vulnerable code.
 
 # Warnings, recorded rather than left to be rediscovered.
 #
@@ -48,9 +42,9 @@ ignore = [
 #
 # chacha20 0.10.0 — yanked.
 #
-#   Reached through rand, through actix-http. Yanked is a publication status,
-#   not a vulnerability: the release was withdrawn from the registry and the
-#   lockfile still pins it. There is no advisory against it and nothing to fix
-#   here until actix-http moves.
+#   Reached through `rand`, which this crate depends on directly and which
+#   actix-multipart and sqlx-postgres also pull in. Yanked is a publication
+#   status, not a vulnerability: the release was withdrawn from the registry and
+#   the lockfile still pins it. There is no advisory against it.
 #
-#   Revisit on the next actix-web release.
+#   Revisit when `rand` ships a release that moves off it.

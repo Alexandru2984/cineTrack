@@ -9660,7 +9660,11 @@ async fn test_account_export_requires_password_and_excludes_credentials() {
     );
 
     let body: Value = actix_test::read_body_json(response).await;
-    assert_eq!(body["format_version"], 4);
+    // 5, because the export gained the two sections below. The phone reads a
+    // floor rather than an exact value, so a bump is not a breaking change any
+    // more — see `scripts/tests/account_export_contract_test.py` for why it was
+    // one before.
+    assert_eq!(body["format_version"], 5);
     assert_eq!(body["account"]["email"], "export@mailbox.dev");
     assert_eq!(body["account"]["two_factor_enabled"], false);
     assert_eq!(
@@ -9675,6 +9679,10 @@ async fn test_account_export_requires_password_and_excludes_credentials() {
     assert!(body["blocks"].is_array());
     assert!(body["reports_submitted"].is_array());
     assert!(body["direct_messages"].is_array());
+    // Both held member data and neither was exported until an audit compared
+    // the tables holding it against the tables this handler reads.
+    assert!(body["badges"].is_array());
+    assert!(body["discovery_dismissals"].is_array());
     assert_eq!(
         body["security_activity"][0]["event_type"],
         "account_registered"
@@ -15391,4 +15399,114 @@ async fn concurrent_marks_of_one_episode_leave_one_row() {
         1,
         "six simultaneous marks of one episode left more than one row"
     );
+}
+
+// ── The account export against the schema ──────────────────────────────
+//
+// "Download my data" has to mean all of it, and nothing keeps it honest: the
+// handler reads twenty-odd tables by hand, a new table arrives with its own
+// migration, and the export stays exactly as complete as it looks from the
+// inside. An audit in September 2026 found two tables that had been missing
+// since they were added — `user_badges` and `discovery_dismissals`, both of
+// them a member's own data, neither of them a decision anybody had recorded.
+//
+// So the two sides are compared rather than asserted. The schema names every
+// table that holds something belonging to a person; the handler's source names
+// every table the export reads. Anything in the first and not the second has to
+// be listed below with a reason, and a reason that stops being true is a
+// failing test rather than a silent gap.
+#[actix_web::test]
+#[ignore = "requires test DB: docker compose -f docker-compose.test.yml up -d"]
+async fn the_account_export_covers_every_table_holding_member_data() {
+    let pool = setup_pool().await;
+
+    // Columns that make a row belong to somebody.
+    let owned: Vec<String> = sqlx::query_scalar(
+        "SELECT table_name::text
+         FROM information_schema.columns
+         WHERE table_schema = 'public'
+           AND column_name IN ('user_id', 'owner_id', 'follower_id',
+                               'sender_id', 'recipient_id', 'reporter_id')
+         GROUP BY table_name
+         ORDER BY table_name",
+    )
+    .fetch_all(&pool)
+    .await
+    .expect("read the schema");
+    assert!(
+        owned.len() > 10,
+        "the schema query found {} tables, which means it stopped working",
+        owned.len()
+    );
+
+    // The export's own source, so this cannot drift from what it really reads.
+    let handler = include_str!("../src/routes/users.rs");
+    let export = handler
+        .split_once("async fn export_account_data")
+        .expect("the export handler")
+        .1;
+    let export = export.split_once("\n}\n").expect("the end of it").0;
+
+    // Held back on purpose. Each is a credential, a token, or internal security
+    // state — handing these to whoever holds the download is a risk, not a
+    // right, and the account page shows what it can without them.
+    let withheld = [
+        (
+            "email_change_tokens",
+            "a live credential for changing the address",
+        ),
+        ("email_verification_tokens", "a live credential"),
+        ("password_reset_tokens", "a live credential"),
+        (
+            "two_factor_recovery_codes",
+            "hashed second factors; exporting them weakens the factor",
+        ),
+        (
+            "revoked_refresh_families",
+            "internal revocation state, not member data",
+        ),
+        (
+            "user_key_backups",
+            "the wrapped private key; the member already holds the only thing that opens it",
+        ),
+        (
+            "user_identity_keys",
+            "public keys the client republishes; nothing here is recoverable from the file",
+        ),
+        (
+            "moderators",
+            "a role held over the site, exported through the moderation tools instead",
+        ),
+    ];
+
+    let mut missing = Vec::new();
+    for table in &owned {
+        let read = export.contains(&format!("FROM {table}\n"))
+            || export.contains(&format!("FROM {table} "))
+            || export.contains(&format!("JOIN {table} "));
+        if read {
+            continue;
+        }
+        if withheld.iter().any(|(name, _)| name == table) {
+            continue;
+        }
+        missing.push(table.clone());
+    }
+
+    assert!(
+        missing.is_empty(),
+        "these tables hold member data and the account export never reads them: {missing:?}. \
+         Add them to the export, or list them in `withheld` with the reason they are held back."
+    );
+
+    // A reason nobody has to keep true is worse than no reason, so an entry
+    // that no longer names a real table fails too.
+    for (name, _) in &withheld {
+        assert!(
+            owned.iter().any(|table| table == name),
+            "`{name}` is listed as deliberately withheld, but no such table holds member data any more"
+        );
+    }
+
+    pool.close().await;
 }

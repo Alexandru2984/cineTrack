@@ -1,0 +1,20 @@
+-- `idx_media_tmdb` duplicates the unique constraint's index exactly.
+--
+-- The initial schema created both:
+--
+--   CREATE UNIQUE INDEX media_tmdb_id_media_type_key ON media (tmdb_id, media_type)
+--   CREATE INDEX        idx_media_tmdb               ON media (tmdb_id, media_type)
+--
+-- Same table, same columns, same order, same operator classes. The unique one
+-- backs a constraint and cannot be dropped; the plain one adds nothing a query
+-- can use that the other does not already offer. Production bears this out —
+-- both are "used", 469k scans against 40k, because the planner picks whichever
+-- it likes for a lookup either can serve. Losing one moves those scans to the
+-- other and changes no plan.
+--
+-- What it does change is write cost. `media` is written on every catalogue
+-- refresh, and each of those maintained two identical B-trees. Found by an
+-- audit comparing pg_index entries by their column signature, which is the only
+-- way a pair like this surfaces: neither index looks wrong on its own, and both
+-- report traffic.
+DROP INDEX IF EXISTS idx_media_tmdb;

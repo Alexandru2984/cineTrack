@@ -23,25 +23,39 @@ mapfile -t ignored < <(
   grep -oE '"RUSTSEC-[0-9]{4}-[0-9]{4}"' "$AUDIT_CONFIG" | tr -d '"' | sort -u
 )
 
-for advisory in "${ignored[@]}"; do
+for advisory in ${ignored[@]+"${ignored[@]}"}; do
   case "$advisory" in
-    RUSTSEC-2026-0258)
-      # Accepted because the h2 codec is unreachable: actix-web serves HTTP/2
-      # only over a TLS bind or an explicit h2c bind, and nginx proxies to the
-      # backend over HTTP/1.1. Both halves are asserted.
-      if grep -qE '\.bind_(rustls|openssl|auto_h2c)' "$ROOT_DIR/backend/src/main.rs"; then
-        fail "$advisory assumes no TLS or h2c bind, but main.rs now has one"
-      fi
-      grep -qE '^\s*\.bind\(' "$ROOT_DIR/backend/src/main.rs" \
-        || fail "$advisory assumes a plain .bind(); main.rs no longer has one"
-      # shellcheck disable=SC2016 # literal nginx directive, not a shell variable
-      grep -Fq 'proxy_http_version 1.1;' "$ROOT_DIR/nginx/vazute.micutu.com.conf" \
-        || fail "$advisory assumes nginx proxies over HTTP/1.1; the vhost changed"
-      ;;
     *)
       fail "$advisory has no justification check here; add one or remove the ignore"
       ;;
   esac
 done
 
-echo "Rust audit exceptions checked: ${#ignored[@]} advisory/advisories still justified"
+# RUSTSEC-2026-0258 (h2) was retired from the ignore list by dropping the
+# dependency: `actix-web` is taken without default features and without
+# `http2`, so no h2 codec is compiled in. Turning the feature back on would
+# reintroduce a vulnerable crate that no ignore entry covers any more, and
+# `cargo audit` would start failing — but it would fail in CI, after the fact.
+# Catch it at the declaration instead.
+MANIFEST="$ROOT_DIR/backend/Cargo.toml"
+actix_web_line="$(grep -E '^actix-web = ' "$MANIFEST" || true)"
+[[ -n "$actix_web_line" ]] || fail "no actix-web dependency line in backend/Cargo.toml"
+
+case "$actix_web_line" in
+  *'default-features = false'*) ;;
+  *) fail "actix-web must be declared with default-features = false, or the http2 feature (and vulnerable h2 0.3) comes back" ;;
+esac
+
+case "$actix_web_line" in
+  *'"http2"'*) fail "actix-web enables the http2 feature, which pulls in h2 0.3 (RUSTSEC-2026-0258); the server only ever serves HTTP/1.x" ;;
+esac
+
+# The feature list is what keeps h2 out, so prove it against the built tree
+# rather than trusting the manifest text alone.
+if command -v cargo >/dev/null 2>&1; then
+  if (cd "$ROOT_DIR/backend" && cargo tree --offline --prefix none 2>/dev/null | grep -qE '^h2 v0\.3'); then
+    fail "h2 0.3 is back in the dependency tree (RUSTSEC-2026-0258)"
+  fi
+fi
+
+echo "Rust audit exceptions checked: ${#ignored[@]} advisory/advisories still justified; h2 stays out of the tree"

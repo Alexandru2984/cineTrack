@@ -19,10 +19,3 @@ pub struct List {
     pub is_public: bool,
     pub created_at: DateTime<Utc>,
 }
-
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
-pub struct ListItem {
-    pub list_id: Uuid,
-    pub media_id: Uuid,
-    pub added_at: DateTime<Utc>,
-}

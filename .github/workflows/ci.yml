@@ -552,6 +552,17 @@ jobs:
       - name: Validate client type parity
         run: scripts/tests/client_type_parity_test.py
 
+      # The same failure one layer down: the API is registered twice, once for
+      # the harness and once for the server, and a module added to only one of
+      # them has already shipped as a production 404.
+      - name: Validate route wiring parity
+        run: scripts/tests/route_wiring_parity_test.py
+
+      # The phone parses the account export with a schema strict enough to
+      # reject it. That pairing already broke in the field for two releases.
+      - name: Validate account export contract
+        run: scripts/tests/account_export_contract_test.py
+
       # The phone's counterpart to the web client's axe sweep over every route.
       - name: Validate mobile accessibility
         run: scripts/tests/mobile_accessibility_test.py
