@@ -6,8 +6,8 @@ use uuid::Uuid;
 
 use crate::errors::AppError;
 use crate::models::Media;
-use crate::services::tmdb::TmdbService;
 use crate::services::catalog_backoff::{self, RefreshOutcome};
+use crate::services::tmdb::TmdbService;
 
 const RELEASE_SCHEDULE_ADVISORY_LOCK: i64 = 0x5641_5a55_5445_5343;
 

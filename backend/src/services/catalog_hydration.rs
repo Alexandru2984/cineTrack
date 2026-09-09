@@ -4,8 +4,8 @@ use chrono::{DateTime, Utc};
 use sqlx::{FromRow, PgPool};
 
 use crate::errors::AppError;
-use crate::services::tmdb::TmdbService;
 use crate::services::catalog_backoff::{self, RefreshOutcome};
+use crate::services::tmdb::TmdbService;
 
 const HYDRATION_ADVISORY_LOCK: i64 = 0x4349_4e45_5452_4143;
 const DETAIL_REFRESH_DAYS: i64 = 30;

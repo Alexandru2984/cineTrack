@@ -15451,14 +15451,32 @@ async fn the_account_export_covers_every_table_holding_member_data() {
     // state — handing these to whoever holds the download is a risk, not a
     // right, and the account page shows what it can without them.
     let withheld = [
-        ("email_change_tokens", "a live credential for changing the address"),
+        (
+            "email_change_tokens",
+            "a live credential for changing the address",
+        ),
         ("email_verification_tokens", "a live credential"),
         ("password_reset_tokens", "a live credential"),
-        ("two_factor_recovery_codes", "hashed second factors; exporting them weakens the factor"),
-        ("revoked_refresh_families", "internal revocation state, not member data"),
-        ("user_key_backups", "the wrapped private key; the member already holds the only thing that opens it"),
-        ("user_identity_keys", "public keys the client republishes; nothing here is recoverable from the file"),
-        ("moderators", "a role held over the site, exported through the moderation tools instead"),
+        (
+            "two_factor_recovery_codes",
+            "hashed second factors; exporting them weakens the factor",
+        ),
+        (
+            "revoked_refresh_families",
+            "internal revocation state, not member data",
+        ),
+        (
+            "user_key_backups",
+            "the wrapped private key; the member already holds the only thing that opens it",
+        ),
+        (
+            "user_identity_keys",
+            "public keys the client republishes; nothing here is recoverable from the file",
+        ),
+        (
+            "moderators",
+            "a role held over the site, exported through the moderation tools instead",
+        ),
     ];
 
     let mut missing = Vec::new();
