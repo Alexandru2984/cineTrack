@@ -164,16 +164,33 @@ jobs:
           # `--head` is not optional here. The checkout runs with
           # `persist-credentials: false` and the push above carries its own
           # token, so the branch has no upstream and `gh` cannot infer what to
-          # open the pull request from. Without it the command aborts with
-          # "you must first push the current branch to a remote" *after* the
-          # push has already succeeded — which is exactly what happened on
-          # 2026-09-04: the branch landed, no pull request was opened, and the
-          # only sign was a red run nobody had a reason to open.
-          gh pr create \
+          # open the pull request from.
+          #
+          # It is also not what broke this on 2026-09-04, which the note here
+          # used to claim. The flag was added, the branch kept landing without a
+          # pull request, and on 2026-09-09 the run failed the same way with the
+          # real reason in the log:
+          #
+          #   GraphQL: GitHub Actions is not permitted to create or approve
+          #   pull requests (createPullRequest)
+          #
+          # That is a repository setting — Settings → Actions → General →
+          # "Allow GitHub Actions to create and approve pull requests" — and
+          # `pull-requests: write` on this job does not override it. A missing
+          # flag and a withheld permission fail at the same place and look alike
+          # in a run summary, so the difference is spelled out below rather than
+          # left for the next person to re-derive.
+          if ! gh pr create \
             --base main \
             --head "$BRANCH" \
             --title "fix(deps): apply fixable advisories" \
-            --body-file /tmp/sweep-body.md
+            --body-file /tmp/sweep-body.md 2>/tmp/sweep-pr-error; then
+            cat /tmp/sweep-pr-error >&2
+            if grep -q "not permitted to create or approve pull requests" /tmp/sweep-pr-error; then
+              echo "::error::The lockfile fix is pushed to ${BRANCH}, but Actions may not open the pull request. Turn on Settings → Actions → General → \"Allow GitHub Actions to create and approve pull requests\", or open it by hand. This is a repository setting; the job already has pull-requests: write, which does not override it."
+            fi
+            exit 1
+          fi
 
   frontend-image:
     name: Frontend image advisories
