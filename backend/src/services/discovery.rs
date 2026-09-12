@@ -204,18 +204,17 @@ async fn load_recommendations(
                 media.release_date,
                 media.tmdb_vote_average AS vote_average,
                 media.genres,
-                inventory.popularity
+                media.popularity
             FROM media
-            JOIN catalog_external_ids inventory
-              ON inventory.tmdb_id = media.tmdb_id
-             AND inventory.media_type = media.media_type
             LEFT JOIN localized_media localized
               ON localized.media_id = media.id
             WHERE media.media_type = 'movie'
               AND media.metadata_level = 'detail'
               AND media.poster_path IS NOT NULL
-              AND inventory.adult = FALSE
-              AND inventory.video = FALSE
+              -- Non-NULL is exactly the old inner join plus its adult/video
+              -- filter: the column is only ever filled for rows the inventory
+              -- lists as neither. See 20240307000000_media_popularity.sql.
+              AND media.popularity IS NOT NULL
               AND NOT EXISTS (
                   SELECT 1
                   FROM user_media tracked
@@ -231,7 +230,7 @@ async fn load_recommendations(
                   WHERE dismissal.user_id = $3
                     AND dismissal.media_id = media.id
               )
-            ORDER BY inventory.popularity DESC, media.tmdb_id
+            ORDER BY media.popularity DESC, media.tmdb_id
             LIMIT $6
         ), tv_candidates AS MATERIALIZED (
             SELECT
@@ -246,18 +245,17 @@ async fn load_recommendations(
                 media.release_date,
                 media.tmdb_vote_average AS vote_average,
                 media.genres,
-                inventory.popularity
+                media.popularity
             FROM media
-            JOIN catalog_external_ids inventory
-              ON inventory.tmdb_id = media.tmdb_id
-             AND inventory.media_type = media.media_type
             LEFT JOIN localized_media localized
               ON localized.media_id = media.id
             WHERE media.media_type = 'tv'
               AND media.metadata_level = 'detail'
               AND media.poster_path IS NOT NULL
-              AND inventory.adult = FALSE
-              AND inventory.video = FALSE
+              -- Non-NULL is exactly the old inner join plus its adult/video
+              -- filter: the column is only ever filled for rows the inventory
+              -- lists as neither. See 20240307000000_media_popularity.sql.
+              AND media.popularity IS NOT NULL
               AND NOT EXISTS (
                   SELECT 1
                   FROM user_media tracked
@@ -273,7 +271,7 @@ async fn load_recommendations(
                   WHERE dismissal.user_id = $3
                     AND dismissal.media_id = media.id
               )
-            ORDER BY inventory.popularity DESC, media.tmdb_id
+            ORDER BY media.popularity DESC, media.tmdb_id
             LIMIT $6
         ), candidate_pool AS (
             SELECT * FROM movie_candidates
@@ -408,16 +406,13 @@ async fn load_popular(
                     media.backdrop_path,
                     media.release_date,
                     media.tmdb_vote_average AS vote_average,
-                    inventory.popularity
-                FROM catalog_external_ids inventory
-                JOIN media
-                  ON media.tmdb_id = inventory.tmdb_id
-                 AND media.media_type = inventory.media_type
+                    media.popularity
+                FROM media
                 LEFT JOIN localized_media localized
                   ON localized.media_id = media.id
-                WHERE inventory.media_type = 'movie'
-                  AND inventory.adult = FALSE
-                  AND inventory.video = FALSE
+                WHERE media.media_type = 'movie'
+                  -- See the note in load_recommendations above.
+                  AND media.popularity IS NOT NULL
                   AND media.metadata_level = 'detail'
                   AND media.poster_path IS NOT NULL
                   AND NOT EXISTS (
@@ -426,7 +421,7 @@ async fn load_popular(
                         AND tracked.media_id = media.id
                   )
                 ORDER BY
-                    inventory.popularity DESC,
+                    media.popularity DESC,
                     media.tmdb_vote_average DESC NULLS LAST,
                     media.tmdb_id
                 LIMIT $3
@@ -443,16 +438,13 @@ async fn load_popular(
                     media.backdrop_path,
                     media.release_date,
                     media.tmdb_vote_average AS vote_average,
-                    inventory.popularity
-                FROM catalog_external_ids inventory
-                JOIN media
-                  ON media.tmdb_id = inventory.tmdb_id
-                 AND media.media_type = inventory.media_type
+                    media.popularity
+                FROM media
                 LEFT JOIN localized_media localized
                   ON localized.media_id = media.id
-                WHERE inventory.media_type = 'tv'
-                  AND inventory.adult = FALSE
-                  AND inventory.video = FALSE
+                WHERE media.media_type = 'tv'
+                  -- See the note in load_recommendations above.
+                  AND media.popularity IS NOT NULL
                   AND media.metadata_level = 'detail'
                   AND media.poster_path IS NOT NULL
                   AND NOT EXISTS (
@@ -461,7 +453,7 @@ async fn load_popular(
                         AND tracked.media_id = media.id
                   )
                 ORDER BY
-                    inventory.popularity DESC,
+                    media.popularity DESC,
                     media.tmdb_vote_average DESC NULLS LAST,
                     media.tmdb_id
                 LIMIT $3
