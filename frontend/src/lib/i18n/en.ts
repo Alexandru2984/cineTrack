@@ -348,6 +348,11 @@ export const en = {
     safetyNumber: 'Safety number',
     safetyNumberHint:
       'Compare this with the other person through another channel. Matching numbers mean nobody is sitting between you.',
+    keyChangedTitle: '{username} has new security keys',
+    keyChangedBody:
+      'This happens when someone reinstalls the app or resets encryption — but it is also exactly what it would look like if someone were intercepting your messages. Compare the safety number with them through another channel before sending anything sensitive.',
+    keyChangedCompare: 'Compare safety number',
+    keyChangedAccept: 'I understand',
   },
   badges: {
     title: 'Badges',

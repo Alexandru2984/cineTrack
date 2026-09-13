@@ -27,6 +27,7 @@ import {
 } from '@/hooks/use-messages';
 import { usePeerKeys } from '@/hooks/use-encryption';
 import { useT } from '@/hooks/use-t';
+import { usePeerTrust } from '@/hooks/use-peer-trust';
 import { useTheme } from '@/hooks/use-theme';
 import { messagePath, safePostAuthRedirect } from '@/lib/deep-links';
 import { readMessage, type MessageContent } from '@/lib/crypto/messages';
@@ -99,6 +100,20 @@ export default function MessageThreadScreen() {
     ownFingerprint && peerFingerprintValue
       ? safetyNumber(ownFingerprint, peerFingerprintValue)
       : null;
+
+  // Whether this contact's key is the one this device saw before. The safety
+  // number above follows the key, but only somebody who wrote the old one down
+  // would notice it move; this remembers it for them. See `lib/crypto/trust.ts`.
+  const peerTrust = usePeerTrust(
+    currentUser?.id ?? null,
+    peerKeys.data?.user_id && peerFingerprintValue
+      ? {
+          userId: peerKeys.data.user_id,
+          username: peerKeys.data.username,
+          fingerprint: peerFingerprintValue,
+        }
+      : null,
+  );
 
   /** The key incoming messages are checked against.
    *
@@ -302,6 +317,40 @@ export default function MessageThreadScreen() {
             </>
           ) : null}
         </View>
+
+        {peerTrust.trust === 'changed' && safetyNumberValue ? (
+          <View
+            accessibilityRole="alert"
+            style={[styles.keyChanged, { backgroundColor: theme.warningSoft }]}
+          >
+            <AppText variant="label">
+              {t('encryption.keyChangedTitle', {
+                username: peerKeys.data?.username ?? username,
+              })}
+            </AppText>
+            <AppText variant="caption">{t('encryption.keyChangedBody')}</AppText>
+            <View style={styles.keyChangedActions}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={t('encryption.keyChangedCompare')}
+                onPress={() => setShowingSafetyNumber(true)}
+              >
+                <AppText variant="caption" style={{ color: theme.primary }}>
+                  {t('encryption.keyChangedCompare')}
+                </AppText>
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={t('encryption.keyChangedAccept')}
+                onPress={() => void peerTrust.accept()}
+              >
+                <AppText variant="caption" style={{ color: theme.mutedText }}>
+                  {t('encryption.keyChangedAccept')}
+                </AppText>
+              </Pressable>
+            </View>
+          </View>
+        ) : null}
 
         {!currentThread.can_message ? (
           <View style={[styles.unavailable, { backgroundColor: theme.warningSoft }]}>
@@ -515,6 +564,8 @@ const styles = StyleSheet.create({
   peerName: { flex: 1 },
   notice: { paddingHorizontal: spacing.lg, paddingVertical: spacing.sm },
   unavailable: { gap: spacing.xs, paddingHorizontal: spacing.lg, paddingVertical: spacing.md },
+  keyChanged: { gap: spacing.xs, paddingHorizontal: spacing.lg, paddingVertical: spacing.md },
+  keyChangedActions: { flexDirection: 'row', gap: spacing.lg, paddingTop: spacing.xs },
   messageList: {
     flexGrow: 1,
     gap: spacing.md,

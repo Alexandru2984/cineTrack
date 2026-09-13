@@ -351,6 +351,11 @@ export const ro: Dictionary = {
     safetyNumber: 'Număr de siguranță',
     safetyNumberHint:
       'Compară-l cu cealaltă persoană pe alt canal. Numere identice înseamnă că nimeni nu stă între voi.',
+    keyChangedTitle: '{username} are chei de securitate noi',
+    keyChangedBody:
+      'Se întâmplă când cineva își reinstalează aplicația sau își resetează criptarea — dar exact așa ar arăta și dacă cineva ți-ar intercepta mesajele. Compară numărul de siguranță cu persoana respectivă pe alt canal înainte să trimiți ceva sensibil.',
+    keyChangedCompare: 'Compară numărul de siguranță',
+    keyChangedAccept: 'Am înțeles',
   },
   badges: {
     title: 'Insigne',
