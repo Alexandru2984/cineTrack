@@ -77,6 +77,8 @@ vi.mock('@/store/locale', () => ({
 // so one case can serve a substituted key while leaving the *stated*
 // fingerprint alone — which is the attack the safety number has to survive.
 let peerKeysData: {
+  user_id?: string;
+  username?: string;
   exchange_public_key: string;
   signing_public_key: string;
   key_fingerprint: string;
@@ -208,5 +210,70 @@ describe('Messages page', () => {
     expect(mocks.send.mock.calls[1][0].clientNonce).toBe(
       mocks.send.mock.calls[0][0].clientNonce,
     );
+  });
+});
+
+// ── A contact's key that is not the one this device saw before ──────────
+//
+// The safety number follows the key in use, but it only warns somebody who
+// wrote the old one down. These pin a key for alice, then serve a different
+// one — which is exactly what a server swapping her key would look like.
+describe('Messages page — contact key changes', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+  });
+
+  it('warns when a contact’s key is not the one this device saw before, until accepted', async () => {
+    const me = generateIdentity();
+    const alice = generateIdentity();
+    const impostor = generateIdentity();
+    ownFingerprint = fingerprint(me.exchangePublicKey, me.signingPublicKey);
+    const aliceFingerprint = fingerprint(alice.exchangePublicKey, alice.signingPublicKey);
+    const impostorFingerprint = fingerprint(impostor.exchangePublicKey, impostor.signingPublicKey);
+    localStorage.setItem(
+      'vazute.e2ee.pins.me-id',
+      JSON.stringify({
+        'alice-id': { fingerprint: aliceFingerprint, username: 'alice', pinnedAt: '2026-09-01T00:00:00Z' },
+      }),
+    );
+    peerKeysData = {
+      user_id: 'alice-id',
+      username: 'alice',
+      exchange_public_key: toHex(impostor.exchangePublicKey),
+      signing_public_key: toHex(impostor.signingPublicKey),
+      key_fingerprint: impostorFingerprint,
+    };
+
+    renderMessages();
+
+    expect(await screen.findByText(/alice has new security keys/i)).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: /i understand/i }));
+    await waitFor(() => expect(screen.queryByText(/alice has new security keys/i)).toBeNull());
+    const stored = JSON.parse(localStorage.getItem('vazute.e2ee.pins.me-id') ?? '{}');
+    expect(stored['alice-id'].fingerprint).toBe(impostorFingerprint);
+  });
+
+  it('stays quiet on first contact, and remembers the key it was shown', async () => {
+    const me = generateIdentity();
+    const alice = generateIdentity();
+    ownFingerprint = fingerprint(me.exchangePublicKey, me.signingPublicKey);
+    const aliceFingerprint = fingerprint(alice.exchangePublicKey, alice.signingPublicKey);
+    peerKeysData = {
+      user_id: 'alice-id',
+      username: 'alice',
+      exchange_public_key: toHex(alice.exchangePublicKey),
+      signing_public_key: toHex(alice.signingPublicKey),
+      key_fingerprint: aliceFingerprint,
+    };
+
+    renderMessages();
+
+    await waitFor(() => {
+      const stored = JSON.parse(localStorage.getItem('vazute.e2ee.pins.me-id') ?? '{}');
+      expect(stored['alice-id']?.fingerprint).toBe(aliceFingerprint);
+    });
+    expect(screen.queryByText(/alice has new security keys/i)).toBeNull();
   });
 });

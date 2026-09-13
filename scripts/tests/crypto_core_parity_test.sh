@@ -24,6 +24,9 @@ SHARED_FILES=(
   "src/lib/crypto/core.ts"
   "src/lib/crypto/cache.ts"
   "src/lib/crypto/messages.ts"
+  # Whether a contact's key is the one seen before. One platform warning while
+  # the other stays quiet is the same silent failure as the rest of this list.
+  "src/lib/crypto/trust.ts"
 )
 
 for relative in "${SHARED_FILES[@]}"; do

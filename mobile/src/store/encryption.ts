@@ -9,6 +9,7 @@ import { create } from 'zustand';
 import type { IdentityKeyPair } from '@/lib/crypto/core';
 import { clearDecryptionCache } from '@/lib/crypto/cache';
 import { forgetIdentity } from '@/lib/crypto/storage';
+import { forgetPins } from '@/lib/crypto/pins';
 
 export type EncryptionStatus =
   /** Still reading local storage; nothing is known yet. */
@@ -50,6 +51,11 @@ export const useEncryptionStore = create<EncryptionState>((set) => ({
     set({ identity: null, fingerprint: null, status: 'loading' });
     // Plaintext decrypted this session must not outlive it in memory.
     clearDecryptionCache();
-    if (userId) await forgetIdentity(userId);
+    if (userId) {
+      await forgetIdentity(userId);
+      // The contacts this account had been writing to go with its keys: a
+      // shared device should not keep that list once asked to forget.
+      await forgetPins(userId);
+    }
   },
 }));

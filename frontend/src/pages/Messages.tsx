@@ -22,6 +22,7 @@ import {
   useSendMessage,
 } from '@/hooks/useMessages';
 import { usePeerKeys } from '@/hooks/useEncryption';
+import { usePeerTrust } from '@/hooks/usePeerTrust';
 import { usePageTitle } from '@/hooks/usePageTitle';
 import { useT } from '@/hooks/useT';
 import { getApiErrorMessage } from '@/lib/api';
@@ -331,6 +332,20 @@ function MessagesContent({ username }: { username: string }) {
       ? safetyNumber(ownFingerprint, peerFingerprintValue)
       : null;
 
+  // Whether this contact's key is the one this device saw before. The safety
+  // number above follows the key, but only somebody who wrote the old one down
+  // would notice it move; this remembers it for them. See `lib/crypto/trust.ts`.
+  const peerTrust = usePeerTrust(
+    currentUser?.id ?? null,
+    peerKeys.data?.user_id && peerFingerprintValue
+      ? {
+          userId: peerKeys.data.user_id,
+          username: peerKeys.data.username,
+          fingerprint: peerFingerprintValue,
+        }
+      : null,
+  );
+
   /** The key incoming messages are checked against.
    *
    *  Taken only from a directory entry that agrees with itself: a row whose
@@ -512,6 +527,42 @@ function MessagesContent({ username }: { username: string }) {
                 </button>
               ) : null}
             </header>
+
+            {peerTrust.trust === 'changed' && safetyNumberValue ? (
+              <div
+                role="alert"
+                className="shrink-0 border-b border-[hsl(var(--destructive))]/40 bg-[hsl(var(--destructive))]/10 px-4 py-3"
+              >
+                <p className="flex items-center gap-2 text-sm font-medium">
+                  <ShieldAlert
+                    className="h-4 w-4 shrink-0 text-[hsl(var(--destructive))]"
+                    aria-hidden="true"
+                  />
+                  {t('encryption.keyChangedTitle', {
+                    username: peerKeys.data?.username ?? username,
+                  })}
+                </p>
+                <p className="mt-1 text-xs leading-5 text-[hsl(var(--muted-foreground))]">
+                  {t('encryption.keyChangedBody')}
+                </p>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowingSafetyNumber(true)}
+                    className="rounded-md border border-[hsl(var(--border))] px-3 py-1.5 text-xs font-medium transition-colors hover:bg-[hsl(var(--accent))]"
+                  >
+                    {t('encryption.keyChangedCompare')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void peerTrust.accept()}
+                    className="rounded-md px-3 py-1.5 text-xs font-medium text-[hsl(var(--muted-foreground))] transition-colors hover:bg-[hsl(var(--accent))]"
+                  >
+                    {t('encryption.keyChangedAccept')}
+                  </button>
+                </div>
+              </div>
+            ) : null}
 
             {safetyNumberValue && showingSafetyNumber ? (
               <div className="shrink-0 border-b border-[hsl(var(--border))] bg-[hsl(var(--muted))]/40 px-4 py-3">
