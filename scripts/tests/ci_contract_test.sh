@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 python3 - "$ROOT_DIR" <<'PY'
+import json
 import pathlib
 import re
 import sys
@@ -256,6 +257,29 @@ require(
     "schedule:" in drift_text and "expo install --check" in drift_text.replace("doctor:versions", "expo install --check"),
     "dependency drift must still be reported on a schedule",
 )
+
+# EAS installs the mobile dependencies itself, with the npm that comes with its
+# Node. Left to its default it used Node 22 and npm 10 while CI tested on Node 24
+# and npm 11, and the two disagree about peer conflicts: Android build 25 died in
+# `npm ci` on a lockfile CI had just passed. The build has to run on the Node CI
+# tests with, or a green mobile job says nothing about whether the app builds.
+mobile_start = ci_steps.find("  mobile:\n")
+require(mobile_start != -1, "missing 'mobile' job")
+next_job = re.search(r"^  [A-Za-z0-9_-]+:\s*$", ci_steps[mobile_start + 1 :], re.M)
+mobile_job = ci_steps[mobile_start : mobile_start + 1 + next_job.start()] if next_job else ci_steps[mobile_start:]
+ci_node = re.search(r"node-version:\s*\"?(\d+)", mobile_job)
+require(ci_node is not None, "the mobile job must name the Node major it tests with")
+eas = json.loads((root / "mobile/eas.json").read_text(encoding="utf-8"))
+for profile, settings in eas["build"].items():
+    pinned = str(settings.get("node", ""))
+    require(
+        pinned != "",
+        f"EAS build profile {profile!r} must pin Node, or it installs with whatever npm the image ships",
+    )
+    require(
+        pinned.split(".")[0] == ci_node.group(1),
+        f"EAS build profile {profile!r} builds on Node {pinned}, but CI tests mobile on Node {ci_node.group(1)}",
+    )
 
 print("CI security and smoke-test contracts passed")
 PY

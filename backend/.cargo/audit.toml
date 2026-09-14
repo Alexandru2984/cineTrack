@@ -29,17 +29,6 @@ ignore = []
 # that: a green gate expresses an acceptance policy, not a zero-vulnerability
 # inventory.
 #
-# RUSTSEC-2026-0253 — lru 0.16.4, unsound.
-#
-#   Reached through aws-sdk-s3, which uses it to cache credential resolution.
-#   The unsoundness needs a `pop` whose value has a `Drop` that panics, with
-#   unwinding, caught. Nothing in this tree stores such a type in an `lru`: the
-#   cache holds AWS SDK credential structs, which are plain data. RustSec lists
-#   the fix in >= 0.18.2, which aws-sdk-s3 1.143 does not accept; forcing it
-#   would mean pinning a version its own bounds reject.
-#
-#   Revisit when aws-sdk-s3 widens the bound. Do not force it before then.
-#
 # chacha20 0.10.0 — yanked.
 #
 #   Reached through `rand`, which this crate depends on directly and which

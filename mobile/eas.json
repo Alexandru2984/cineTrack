@@ -6,6 +6,7 @@
   },
   "build": {
     "development": {
+      "node": "24.16.0",
       "developmentClient": true,
       "distribution": "internal",
       "channel": "development",
@@ -17,6 +18,7 @@
       }
     },
     "preview": {
+      "node": "24.16.0",
       "autoIncrement": true,
       "distribution": "internal",
       "channel": "preview",
@@ -31,6 +33,7 @@
       }
     },
     "production": {
+      "node": "24.16.0",
       "autoIncrement": true,
       "distribution": "store",
       "channel": "production",
