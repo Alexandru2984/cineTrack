@@ -57,6 +57,7 @@ updates:
     ignore:
       - dependency-name: expo
       - dependency-name: expo-*
+      - dependency-name: eslint-config-expo
       - dependency-name: react
       - dependency-name: react-dom
       - dependency-name: react-native
@@ -66,12 +67,14 @@ updates:
       - dependency-name: react-native-svg
       - dependency-name: "@react-native-async-storage/*"
       - dependency-name: "@react-native-community/*"
-      # Versioned in lockstep with React Native. On a 0.x line a "minor" bump
-      # is a new React Native release: @react-native/jest-preset went 0.86 -> 0.87
-      # while react-native stayed on 0.86.2, and jest-expo's peer (^0.86.3)
-      # refused the install. Patch releases still come through.
+      # Versioned in lockstep with React Native, which is ignored above, so they
+      # are ignored whole. Letting their patch releases through moved
+      # @react-native/jest-preset and jest-expo to 0.86.3 while react-native
+      # stayed on 0.86.2, whose peer wants exactly its own version. npm 11
+      # tolerated that; EAS's npm 10 did not, and Android build 25 died in
+      # `npm ci`. jest-expo is on Expo's managed list as well.
       - dependency-name: "@react-native/*"
-        update-types: ["version-update:semver-minor", "version-update:semver-major"]
+      - dependency-name: jest-expo
       # eslint-config-expo still bundles eslint-plugin-react, whose newest
       # release peers on eslint ^9.7 and calls the context.getFilename() API
       # that eslint 10 removed. Lift once Expo ships an eslint 10 config.
