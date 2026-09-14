@@ -1,4 +1,8 @@
-import '@testing-library/jest-dom';
+// The vitest-specific entry. The generic one reached vitest through a bridge in
+// the `expect` package that vitest 5 inlined away, so every jest-dom matcher
+// (`toBeInTheDocument`, `toBeVisible`, ...) vanished from the type of `expect`:
+// 243 errors in `tsc -b` while the tests themselves still passed.
+import '@testing-library/jest-dom/vitest';
 
 // Mock localStorage for tests
 const localStorageMock = (() => {
