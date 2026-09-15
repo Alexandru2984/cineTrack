@@ -123,18 +123,52 @@ a strict CSP with no `script-src 'unsafe-inline'`, `X-Frame-Options: DENY`,
 served. The backend and web containers bind only to loopback; the backend image
 is distroless (no shell).
 
+## Dynamic verification
+
+The static review was then confirmed against a running instance, not only the
+source. A build of this commit was started on an ephemeral throwaway Postgres
+(never production, never the integration DB), three users were registered
+through the real handlers — attacker, victim, bystander — and hostile requests
+were driven through the real routing, middleware and SQL. Confirmed live, each
+with the response and, where it mattered, a direct database check:
+
+- **IDOR held on every object.** The victim's PATCH, DELETE and add-item against
+  the attacker's list were refused, and the row was read straight from the
+  database afterwards to prove it was untouched. A private list was invisible to
+  a non-owner; a public one was not.
+- **Message isolation held.** With a mutual follow, A↔B messaging worked; a third
+  account querying its own thread with A never saw the A–B message, and a
+  mark-read with a fabricated id was refused.
+- **Franking was enforced at send.** An encrypted envelope with a bogus signature
+  and no published key was rejected 400 and never stored.
+- **Auth forgery was refused.** `alg:none` tokens, tampered payloads, wrong
+  scheme and garbage all returned 401; `/auth/me` only ever returned the caller.
+- **Login did not leak existence.** A real address and an absent one returned the
+  same status, the same message, and the same latency (~2.8s each — the dummy
+  Argon2 verification runs either way).
+- **Idempotency, self-action guards and moderation gating held.** A reused client
+  nonce produced exactly one stored row; self-follow and self-block returned 400;
+  a non-moderator hitting the moderation endpoints with a valid body returned 403.
+- **Mass assignment was structurally impossible.** Every request DTO carries
+  `#[serde(deny_unknown_fields)]`, so `is_moderator`/`role`/`id` overrides are
+  rejected at deserialization, and none reached a handler.
+
+Every apparent anomaly during the run traced back to the harness — an
+unverified-email gate, a rate-limit 429, or a body rejected by validation before
+authorization — not to the application. No probe reached production.
+
 ## Findings
 
 None this round required a code change. The classes that produced findings in
 July and August — message authorization, proxy trust, franking evidence, key
-guessability — are the ones re-checked most closely here, and each remained
-closed.
+guessability — are the ones re-checked most closely here, statically and against
+a live instance, and each remained closed.
 
 ## Not verified here
 
-- No authenticated dynamic fuzzing or live scanning was run against production;
-  the live checks were passive (headers, the Cloudflare-only lock) plus local
-  reasoning against a copy.
+- The dynamic pass ran against a local build, not production; the production
+  checks stayed passive (headers, the Cloudflare-only lock). No authenticated
+  scanning was pointed at the live origin.
 - The backend was not read line-by-line in full; the highest-risk handlers and
   the shared query/authorisation patterns were, and the patterns are consistent.
 - Cryptographic primitives (`aws-lc-rs` Ed25519, Argon2, X25519/HKDF/AES-GCM) are
