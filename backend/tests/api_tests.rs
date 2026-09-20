@@ -13608,15 +13608,22 @@ async fn the_recommendation_seed_fits_any_size_of_library() {
         .unwrap();
     }
 
-    let days = [
-        "2026-09-05",
-        "2026-09-06",
+    // Ten consecutive Mondays, not ten consecutive days. The rotation moves on a
+    // completion or on the week, so a run of days inside one week is a single
+    // draw — sampling by day would ask a six-title library to rotate across two
+    // distinct keys and call a one-in-six collision a failure. That is exactly
+    // how this test flaked after the rotation changed.
+    let weeks = [
         "2026-09-07",
-        "2026-09-08",
-        "2026-09-09",
-        "2026-09-10",
-        "2026-09-11",
-        "2026-09-12",
+        "2026-09-14",
+        "2026-09-21",
+        "2026-09-28",
+        "2026-10-05",
+        "2026-10-12",
+        "2026-10-19",
+        "2026-10-26",
+        "2026-11-02",
+        "2026-11-09",
     ];
     let pick = |user: Uuid, day: &'static str| {
         let pool = pool.clone();
@@ -13628,17 +13635,17 @@ async fn the_recommendation_seed_fits_any_size_of_library() {
     };
 
     // Nothing eligible: no seed, and no error. The row is simply absent.
-    for day in days {
+    for week in weeks {
         assert!(
-            pick(as_uuid(&empty_user), day).await.is_none(),
+            pick(as_uuid(&empty_user), week).await.is_none(),
             "a member with an empty library must not get a seed"
         );
     }
 
-    // Exactly one eligible: that one, every day. A pool of twenty over a set of
+    // Exactly one eligible: that one, every week. A pool of twenty over a set of
     // one is not an error and must not become an empty row.
-    for day in days {
-        let seed = pick(as_uuid(&single_user), day)
+    for week in weeks {
+        let seed = pick(as_uuid(&single_user), week)
             .await
             .expect("one eligible title is still a seed");
         assert_eq!(seed.tmdb_id, 683001);
@@ -13646,9 +13653,9 @@ async fn the_recommendation_seed_fits_any_size_of_library() {
 
     // Six eligible: still rotates. The pool size is a ceiling, not a floor.
     let mut small_seen = std::collections::HashSet::new();
-    for day in days {
+    for week in weeks {
         small_seen.insert(
-            pick(as_uuid(&small_user), day)
+            pick(as_uuid(&small_user), week)
                 .await
                 .expect("six eligible titles is a seed")
                 .tmdb_id,
@@ -13656,7 +13663,7 @@ async fn the_recommendation_seed_fits_any_size_of_library() {
     }
     assert!(
         small_seen.len() > 1,
-        "a six-title library never rotated: {small_seen:?}"
+        "a six-title library never rotated across ten weeks: {small_seen:?}"
     );
     assert!(
         small_seen.iter().all(|id| (683001..=683006).contains(id)),
@@ -13664,18 +13671,18 @@ async fn the_recommendation_seed_fits_any_size_of_library() {
     );
 
     // Two members, identical libraries. The rotation is keyed on the member as
-    // well as the day, so they must not march in step.
+    // well as the period, so they must not march in step.
     let mut differed = false;
-    for day in days {
-        let small = pick(as_uuid(&small_user), day).await.unwrap().tmdb_id;
-        let twin = pick(as_uuid(&twin_user), day).await.unwrap().tmdb_id;
+    for week in weeks {
+        let small = pick(as_uuid(&small_user), week).await.unwrap().tmdb_id;
+        let twin = pick(as_uuid(&twin_user), week).await.unwrap().tmdb_id;
         if small != twin {
             differed = true;
         }
     }
     assert!(
         differed,
-        "two members with the same library saw the same seed every day; \
+        "two members with the same library saw the same seed every week; \
          the rotation is not keyed on who is asking"
     );
 }
