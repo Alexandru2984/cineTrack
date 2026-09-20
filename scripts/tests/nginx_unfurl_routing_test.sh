@@ -41,22 +41,33 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Ports nothing else on the machine is holding. A developer box and a runner
-# both host plenty; picking blind makes this fail for reasons unrelated to nginx.
-free_port() {
-  python3 - <<'PY'
+# Three distinct ports nothing else on the machine is holding. A developer box
+# and a runner both host plenty; picking blind makes this fail for reasons
+# unrelated to nginx.
+#
+# Allocated in one process that holds all three sockets open at once. Asking
+# three separate times can hand back the same number twice — the kernel is free
+# to reuse a port the moment the previous socket closes — and then the second
+# stub dies with "Address already in use", nginx has no upstream, and all
+# fifteen checks below report nginx's own 502. That is exactly how this failed
+# on main on 2026-09-20, and it says nothing about the routing it exists to test.
+read -r EDGE_PORT BACKEND_PORT FRONTEND_PORT <<<"$(python3 - <<'PY'
 import socket
-with socket.socket() as s:
-    s.bind(("127.0.0.1", 0))
-    print(s.getsockname()[1])
+
+held = []
+for _ in range(3):
+    sock = socket.socket()
+    sock.bind(("127.0.0.1", 0))
+    held.append(sock)
+print(" ".join(str(sock.getsockname()[1]) for sock in held))
+for sock in held:
+    sock.close()
 PY
-}
-EDGE_PORT="$(free_port)"
-BACKEND_PORT="$(free_port)"
-FRONTEND_PORT="$(free_port)"
+)"
 
 cat > "$WORK_DIR/stubs.py" <<PY
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 
@@ -84,8 +95,20 @@ def handler(name):
     return Stub
 
 
+def listen(port, name):
+    # Retry briefly rather than dying outright: the port was free when it was
+    # picked, and something transient holding it for a moment should not fail a
+    # routing test.
+    for _ in range(50):
+        try:
+            return HTTPServer(("127.0.0.1", port), handler(name))
+        except OSError:
+            time.sleep(0.1)
+    raise SystemExit(f"stub {name} could not bind 127.0.0.1:{port}")
+
+
 for port, name in (($BACKEND_PORT, "backend"), ($FRONTEND_PORT, "frontend")):
-    server = HTTPServer(("127.0.0.1", port), handler(name))
+    server = listen(port, name)
     threading.Thread(target=server.serve_forever, daemon=True).start()
 
 threading.Event().wait()
@@ -125,10 +148,25 @@ docker run --detach --name "$CONTAINER" --network host \
   --volume "$WORK_DIR/nginx.conf:/etc/nginx/nginx.conf:ro" \
   nginx:alpine >/dev/null
 
+# Wait for a 200, not merely for an answer. nginx starts long before the stubs
+# it proxies to, and it answers its own 502 in the meantime — which this loop
+# used to accept as "ready". Every check then ran against a dead upstream and
+# reported a routing failure, which is the opposite of what had gone wrong.
+ready=0
 for _ in $(seq 1 40); do
-  curl --silent --max-time 2 "http://127.0.0.1:$EDGE_PORT/" >/dev/null 2>&1 && break
+  if [ "$(curl --silent --output /dev/null --write-out '%{http_code}' \
+      --max-time 2 "http://127.0.0.1:$EDGE_PORT/")" = "200" ]; then
+    ready=1
+    break
+  fi
   sleep 0.25
 done
+if [ "$ready" -ne 1 ]; then
+  echo "nginx unfurl routing: the edge never answered 200 on 127.0.0.1:$EDGE_PORT" >&2
+  echo "  the stub upstreams (backend $BACKEND_PORT, frontend $FRONTEND_PORT) did not come up;" >&2
+  echo "  this is a harness failure, not a routing one" >&2
+  exit 1
+fi
 
 BROWSER="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/128 Safari/537.36"
 LIST_ID="9d9a1f2e-0000-4000-8000-000000000000"
