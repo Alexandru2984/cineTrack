@@ -117,6 +117,17 @@ export interface IdentityKeyPair {
   signingPrivateKey: Uint8Array;
 }
 
+/** Best-effort scrub of an identity's private key bytes before it is dropped.
+ *
+ *  JavaScript cannot guarantee zeroization — the runtime may already have copied
+ *  a buffer during garbage collection — but overwriting the arrays still held
+ *  removes the obvious plaintext copy from the heap rather than waiting for the
+ *  collector. Only the private halves are sensitive; the public keys are not. */
+export function wipeIdentity(identity: IdentityKeyPair): void {
+  identity.exchangePrivateKey.fill(0);
+  identity.signingPrivateKey.fill(0);
+}
+
 export interface EncryptedMessage {
   ciphertext: Uint8Array;
   nonce: Uint8Array;

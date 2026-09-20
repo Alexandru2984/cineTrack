@@ -47,6 +47,7 @@ export const en = {
     email: 'Email',
     password: 'Password',
     forgotPassword: 'Forgot password?',
+    rememberMe: 'Keep me signed in',
     authCode: 'Authentication code',
     authCodeHint: 'Enter the 6-digit code from your authenticator app, or a recovery code.',
     loginFailed: 'Login failed',

@@ -38,6 +38,9 @@ pub struct RegisterRequest {
     /// profiles and free-text fields put this service above the GDPR Art. 8
     /// consent age, so the account cannot be created without it.
     pub confirmed_minimum_age: bool,
+    /// "Keep me logged in". Absent means yes, so a client that predates the
+    /// checkbox keeps the persistent session it used to get.
+    pub remember_me: Option<bool>,
 }
 
 /// Domains the standards permanently reserve for documentation and testing.
@@ -122,6 +125,9 @@ pub struct LoginRequest {
     /// 6-digit TOTP code or a recovery code.
     #[validate(length(max = 64, message = "Two-factor code is too long"))]
     pub totp_code: Option<String>,
+    /// "Keep me logged in". Absent means yes, so a client that predates the
+    /// checkbox keeps the persistent session it used to get.
+    pub remember_me: Option<bool>,
 }
 
 #[derive(Debug, Deserialize, Validate)]
@@ -425,6 +431,7 @@ mod tests {
             password: "SecurePass1".to_string(),
             accepted_terms: true,
             confirmed_minimum_age: true,
+            remember_me: None,
         };
         assert!(req.validate().is_ok());
     }
@@ -445,7 +452,7 @@ mod tests {
         assert!(serde_json::from_value::<LoginRequest>(serde_json::json!({
             "email": "test@mailbox.dev",
             "password": "SecurePass1",
-            "remember_me": true
+            "is_admin": true
         }))
         .is_err());
         assert!(
@@ -498,6 +505,7 @@ mod tests {
             password: "SecurePass1".to_string(),
             accepted_terms: true,
             confirmed_minimum_age: true,
+            remember_me: None,
         };
         assert!(req.validate().is_err());
     }
@@ -510,6 +518,7 @@ mod tests {
             password: "SecurePass1".to_string(),
             accepted_terms: true,
             confirmed_minimum_age: true,
+            remember_me: None,
         };
         assert!(req.validate().is_err());
     }
@@ -522,6 +531,7 @@ mod tests {
             password: "SecurePass1".to_string(),
             accepted_terms: true,
             confirmed_minimum_age: true,
+            remember_me: None,
         };
         assert!(req.validate().is_err());
     }
@@ -534,6 +544,7 @@ mod tests {
             password: "SecurePass1".to_string(),
             accepted_terms: true,
             confirmed_minimum_age: true,
+            remember_me: None,
         };
         assert!(req.validate().is_err());
     }
@@ -546,6 +557,7 @@ mod tests {
             password: "Short1".to_string(),
             accepted_terms: true,
             confirmed_minimum_age: true,
+            remember_me: None,
         };
         assert!(req.validate().is_err());
     }
@@ -558,6 +570,7 @@ mod tests {
             password: format!("{}1", "a".repeat(128)),
             accepted_terms: true,
             confirmed_minimum_age: true,
+            remember_me: None,
         };
         assert!(req.validate().is_err());
     }
@@ -570,6 +583,7 @@ mod tests {
             password: "OnlyLettersHere".to_string(),
             accepted_terms: true,
             confirmed_minimum_age: true,
+            remember_me: None,
         };
         assert!(req.validate().is_err());
     }
@@ -582,6 +596,7 @@ mod tests {
             password: "123456789".to_string(),
             accepted_terms: true,
             confirmed_minimum_age: true,
+            remember_me: None,
         };
         assert!(req.validate().is_err());
     }
@@ -594,6 +609,7 @@ mod tests {
             password: "SecurePass1".to_string(),
             accepted_terms: true,
             confirmed_minimum_age: true,
+            remember_me: None,
         };
         assert!(req.validate().is_ok());
     }
@@ -606,6 +622,7 @@ mod tests {
             password: "SecurePass1".to_string(),
             accepted_terms: true,
             confirmed_minimum_age: true,
+            remember_me: None,
         };
         assert!(req.validate().is_ok());
     }
@@ -618,6 +635,7 @@ mod tests {
             password: "Abcdef1x".to_string(), // exactly 8
             accepted_terms: true,
             confirmed_minimum_age: true,
+            remember_me: None,
         };
         assert!(req.validate().is_ok());
     }
@@ -632,6 +650,7 @@ mod tests {
             password: "SecurePass1".to_string(),
             accepted_terms: true,
             confirmed_minimum_age: true,
+            remember_me: None,
         };
         assert!(req.validate().is_ok());
     }
@@ -647,6 +666,7 @@ mod tests {
             password: "SecurePass1".to_string(),
             accepted_terms: true,
             confirmed_minimum_age: true,
+            remember_me: None,
         }
         .validate()
         .is_err());
@@ -654,6 +674,7 @@ mod tests {
             email: email.clone(),
             password: "SecurePass1".to_string(),
             totp_code: None,
+            remember_me: None,
         }
         .validate()
         .is_err());
@@ -791,6 +812,7 @@ mod tests {
             email: "testuser123@example.com".into(),
             password: "whatever123".into(),
             totp_code: None,
+            remember_me: None,
         };
         assert!(login.validate().is_ok());
 

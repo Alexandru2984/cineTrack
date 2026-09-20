@@ -10,18 +10,33 @@ const secureOptions: SecureStore.SecureStoreOptions = {
   keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
 };
 
+// Refresh token for a session the user chose NOT to keep signed in ("keep me
+// logged in" unchecked). It lives only for the life of the app process, so a
+// cold start finds nothing in the keychain and the next visit signs in fresh,
+// while refreshes during this run still work.
+let volatileRefreshToken: string | null = null;
+
 export async function readRefreshToken() {
   if (Platform.OS === 'web') return null;
+  if (volatileRefreshToken !== null) return volatileRefreshToken;
   return SecureStore.getItemAsync(REFRESH_TOKEN_KEY, secureOptions);
 }
 
-export async function writeRefreshToken(token: string) {
+export async function writeRefreshToken(token: string, persist = true) {
   if (Platform.OS === 'web') return;
-  await SecureStore.setItemAsync(REFRESH_TOKEN_KEY, token, secureOptions);
+  if (persist) {
+    volatileRefreshToken = null;
+    await SecureStore.setItemAsync(REFRESH_TOKEN_KEY, token, secureOptions);
+  } else {
+    // Session-only: hold it in memory and make sure no copy lingers on disk.
+    volatileRefreshToken = token;
+    await SecureStore.deleteItemAsync(REFRESH_TOKEN_KEY, secureOptions);
+  }
 }
 
 export async function removeRefreshToken() {
   if (Platform.OS === 'web') return;
+  volatileRefreshToken = null;
   await SecureStore.deleteItemAsync(REFRESH_TOKEN_KEY, secureOptions);
 }
 
@@ -37,8 +52,14 @@ export async function readCachedSession(): Promise<unknown | null> {
   }
 }
 
-export async function writeCachedSession(refreshToken: string, user: unknown) {
+export async function writeCachedSession(refreshToken: string, user: unknown, persist = true) {
   if (Platform.OS === 'web') return;
+  // The cached session is the offline fallback for a persistent login. A
+  // session-only login must leave nothing on disk, so it clears the cache instead.
+  if (!persist) {
+    await removeCachedSession().catch(() => undefined);
+    return;
+  }
   await SecureStore.setItemAsync(
     CACHED_SESSION_KEY,
     JSON.stringify({ refresh_token: refreshToken, user }),

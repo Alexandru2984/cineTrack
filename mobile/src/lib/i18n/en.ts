@@ -193,6 +193,7 @@ export const en = {
     password: 'Password',
     passwordPlaceholder: 'Password',
     forgotPassword: 'Forgot password?',
+    rememberMe: 'Keep me signed in',
     showPassword: 'Show password',
     hidePassword: 'Hide password',
     authenticatorOption: 'Authenticator',

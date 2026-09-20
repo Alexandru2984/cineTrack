@@ -1812,14 +1812,18 @@ async fn test_cookie_refresh_requires_allowed_origin() {
 
 #[actix_web::test]
 #[ignore = "requires test DB"]
-async fn test_refresh_old_token_invalid() {
+async fn test_refresh_reuse_within_grace_reissues_without_nuking() {
+    // The common cause of "signed out every time": a lost rotation response or two
+    // refreshes racing on launch, so the client presents the token it just
+    // rotated. Within the grace window on a healthy family that is a benign retry,
+    // not theft: it re-issues, and the account's sessions survive.
     let pool = setup_pool().await;
     clean_db(&pool).await;
     let app = actix_test::init_service(create_app(pool.clone())).await;
 
-    let (_, refresh, _) = register_user(&app, "oldref", "oldref@mailbox.dev", "Pass1234").await;
+    let (_, refresh, _) = register_user(&app, "graceref", "graceref@mailbox.dev", "Pass1234").await;
 
-    // Use refresh token once
+    // Rotate once.
     let req = actix_test::TestRequest::post()
         .uri("/api/auth/refresh")
         .set_json(json!({ "refresh_token": &refresh }))
@@ -1827,8 +1831,67 @@ async fn test_refresh_old_token_invalid() {
         .to_request();
     let resp = actix_test::call_service(&app, req).await;
     assert_eq!(resp.status(), 200);
+    let rotated = refresh_cookie_from_response(&resp);
 
-    // Try old refresh token again — should fail
+    // Immediately present the already-rotated token again — a retry inside grace.
+    let req = actix_test::TestRequest::post()
+        .uri("/api/auth/refresh")
+        .set_json(json!({ "refresh_token": &refresh }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(
+        resp.status(),
+        200,
+        "Reuse inside the grace window is a benign retry, not theft"
+    );
+
+    // The session is intact: the successor from the first rotation still works,
+    // proving the account was not nuked.
+    let req = actix_test::TestRequest::post()
+        .uri("/api/auth/refresh")
+        .set_json(json!({ "refresh_token": &rotated }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(
+        resp.status(),
+        200,
+        "The healthy family must survive the retry"
+    );
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn test_refresh_reuse_after_grace_is_theft() {
+    // A token rotated longer ago than the grace window and then replayed is the
+    // theft signal: reject it and revoke every session on the account.
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+
+    let (_, refresh, _) = register_user(&app, "theftref", "theftref@mailbox.dev", "Pass1234").await;
+
+    // Rotate once, keeping the successor to prove it dies with the family.
+    let req = actix_test::TestRequest::post()
+        .uri("/api/auth/refresh")
+        .set_json(json!({ "refresh_token": &refresh }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let rotated = refresh_cookie_from_response(&resp);
+
+    // Push the consumption past the grace window so the next reuse reads as theft.
+    sqlx::query(
+        "UPDATE refresh_tokens SET consumed_at = NOW() - INTERVAL '10 minutes'
+         WHERE consumed_at IS NOT NULL",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // Replaying the old token now is rejected...
     let req = actix_test::TestRequest::post()
         .uri("/api/auth/refresh")
         .set_json(json!({ "refresh_token": &refresh }))
@@ -1838,7 +1901,20 @@ async fn test_refresh_old_token_invalid() {
     assert_eq!(
         resp.status(),
         401,
-        "Old refresh token should be invalid after rotation"
+        "Reuse after the grace window must be rejected as theft"
+    );
+
+    // ...and it took the whole family with it: the live successor no longer works.
+    let req = actix_test::TestRequest::post()
+        .uri("/api/auth/refresh")
+        .set_json(json!({ "refresh_token": &rotated }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(
+        resp.status(),
+        401,
+        "Detected theft must revoke every session on the account"
     );
 }
 

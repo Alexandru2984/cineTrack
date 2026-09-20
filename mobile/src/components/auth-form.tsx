@@ -49,6 +49,9 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
   const [secondFactorCode, setSecondFactorCode] = useState('');
   const [acceptedTerms, setAcceptedTerms] = useState(false);
   const [confirmedAge, setConfirmedAge] = useState(false);
+  // Default on: staying signed in is what most people want, especially with 2FA.
+  // Unchecking it keeps the session only in memory, so closing the app signs out.
+  const [remember, setRemember] = useState(true);
   const isRegister = mode === 'register';
 
   const submit = async () => {
@@ -102,6 +105,7 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
           normalizedEmail,
           password,
           mfaRequired ? normalizeSecondFactorInput(secondFactorCode) : undefined,
+          remember,
         );
       }
       router.replace(redirect ?? '/(tabs)');
@@ -243,6 +247,31 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
                 </Pressable>
               </View>
             </View>
+
+            {!isRegister && !mfaRequired ? (
+              <View style={styles.termsRow}>
+                <Pressable
+                  testID="auth-remember-me"
+                  accessibilityRole="checkbox"
+                  accessibilityLabel={t('auth.rememberMe')}
+                  accessibilityState={{ checked: remember }}
+                  hitSlop={4}
+                  onPress={() => setRemember((value) => !value)}
+                  style={[
+                    styles.checkboxTouch,
+                    {
+                      borderColor: remember ? theme.primary : theme.border,
+                      backgroundColor: remember ? theme.primary : theme.elevated,
+                    },
+                  ]}
+                >
+                  {remember ? <Check color="#FFFFFF" size={18} strokeWidth={3} /> : null}
+                </Pressable>
+                <AppText variant="caption" muted style={styles.termsCopy}>
+                  {t('auth.rememberMe')}
+                </AppText>
+              </View>
+            ) : null}
 
             {!isRegister && mfaRequired ? (
               <View style={styles.field}>

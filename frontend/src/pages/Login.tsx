@@ -22,6 +22,10 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [mfaRequired, setMfaRequired] = useState(false);
   const [code, setCode] = useState('');
+  // Default on: staying signed in is what most people want, especially with 2FA,
+  // and it matches how the app behaved before the checkbox existed. Unchecking it
+  // makes this a session-only sign-in that ends when the browser closes.
+  const [remember, setRemember] = useState(true);
   const login = useLogin();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -30,7 +34,7 @@ export default function LoginPage() {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     login.mutate(
-      { email, password, totp_code: mfaRequired ? code.trim() : undefined },
+      { email, password, totp_code: mfaRequired ? code.trim() : undefined, remember_me: remember },
       {
         onSuccess: () => navigate(returnTo, { replace: true }),
         onError: (error) => {
@@ -81,6 +85,17 @@ export default function LoginPage() {
               placeholder="••••••••"
             />
           </div>
+
+          <label htmlFor="login-remember" className="flex items-center gap-2 text-sm select-none">
+            <input
+              id="login-remember"
+              type="checkbox"
+              checked={remember}
+              onChange={(e) => setRemember(e.target.checked)}
+              className="h-4 w-4 rounded border-[hsl(var(--input))] text-[hsl(var(--primary))] focus:ring-2 focus:ring-[hsl(var(--ring))]"
+            />
+            <span>{t('auth.rememberMe')}</span>
+          </label>
 
           {mfaRequired && (
             <div>

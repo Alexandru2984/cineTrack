@@ -75,7 +75,7 @@ async fn register(
     body.validate()?;
     breach.ensure_not_breached(&body.password).await?;
     let client = client_info(&req);
-    let (resp, refresh_token) = services::auth::register(
+    let (resp, refresh_token, persistent) = services::auth::register(
         pool.get_ref(),
         config.get_ref(),
         email_service.get_ref(),
@@ -84,7 +84,7 @@ async fn register(
     )
     .await?;
     Ok(HttpResponse::Created()
-        .cookie(refresh_cookie(&refresh_token, config.get_ref()))
+        .cookie(refresh_cookie(&refresh_token, config.get_ref(), persistent))
         .json(resp))
 }
 
@@ -97,7 +97,7 @@ async fn login(
 ) -> Result<HttpResponse, AppError> {
     body.validate()?;
     let client = client_info(&req);
-    let (resp, refresh_token) = services::auth::login(
+    let (resp, refresh_token, persistent) = services::auth::login(
         pool.get_ref(),
         config.get_ref(),
         email_service.get_ref(),
@@ -106,7 +106,7 @@ async fn login(
     )
     .await?;
     Ok(HttpResponse::Ok()
-        .cookie(refresh_cookie(&refresh_token, config.get_ref()))
+        .cookie(refresh_cookie(&refresh_token, config.get_ref(), persistent))
         .json(resp))
 }
 
@@ -121,7 +121,9 @@ async fn mobile_register(
     body.validate()?;
     breach.ensure_not_breached(&body.password).await?;
     let client = client_info(&req);
-    let (resp, refresh_token) = services::auth::register(
+    // Mobile stores the refresh token itself and decides persistence on the
+    // device, so the persistent flag the service returns is not needed here.
+    let (resp, refresh_token, _persistent) = services::auth::register(
         pool.get_ref(),
         config.get_ref(),
         email_service.get_ref(),
@@ -141,7 +143,7 @@ async fn mobile_login(
 ) -> Result<HttpResponse, AppError> {
     body.validate()?;
     let client = client_info(&req);
-    let (resp, refresh_token) = services::auth::login(
+    let (resp, refresh_token, _persistent) = services::auth::login(
         pool.get_ref(),
         config.get_ref(),
         email_service.get_ref(),
@@ -172,7 +174,7 @@ async fn mobile_refresh(
 ) -> Result<HttpResponse, AppError> {
     body.validate()?;
     let client = client_info(&req);
-    let (resp, refresh_token) = services::auth::refresh_token(
+    let (resp, refresh_token, _persistent) = services::auth::refresh_token(
         pool.get_ref(),
         config.get_ref(),
         &client,
@@ -228,11 +230,15 @@ async fn refresh(
     let refresh_token = refresh_token_from_request(&req, body.as_deref())
         .ok_or_else(|| AppError::Unauthorized("Missing refresh token".to_string()))?;
     let client = client_info(&req);
-    let (resp, new_refresh_token) =
+    let (resp, new_refresh_token, persistent) =
         services::auth::refresh_token(pool.get_ref(), config.get_ref(), &client, &refresh_token)
             .await?;
     Ok(HttpResponse::Ok()
-        .cookie(refresh_cookie(&new_refresh_token, config.get_ref()))
+        .cookie(refresh_cookie(
+            &new_refresh_token,
+            config.get_ref(),
+            persistent,
+        ))
         .json(resp))
 }
 
@@ -599,14 +605,21 @@ impl RefreshTokenPayload for LogoutRequest {
     }
 }
 
-fn refresh_cookie(token: &str, config: &Config) -> Cookie<'static> {
-    Cookie::build(REFRESH_COOKIE_NAME, token.to_string())
+fn refresh_cookie(token: &str, config: &Config, persistent: bool) -> Cookie<'static> {
+    let mut builder = Cookie::build(REFRESH_COOKIE_NAME, token.to_string())
         .http_only(true)
         .secure(config.is_production())
         .same_site(SameSite::Strict)
-        .path(REFRESH_COOKIE_PATH)
-        .max_age(CookieDuration::days(config.jwt_refresh_expiry_days))
-        .finish()
+        .path(REFRESH_COOKIE_PATH);
+    // "Keep me logged in": a persistent cookie carries a Max-Age and survives
+    // closing the browser; without it the cookie is session-scoped and the
+    // browser drops it when the last tab closes, so the next visit signs in
+    // fresh. The choice is recorded on the refresh-token row and travels through
+    // rotations, so a session-scoped session stays session-scoped as it refreshes.
+    if persistent {
+        builder = builder.max_age(CookieDuration::days(config.jwt_refresh_expiry_days));
+    }
+    builder.finish()
 }
 
 pub(crate) fn clear_refresh_cookie(config: &Config) -> Cookie<'static> {
@@ -634,7 +647,7 @@ mod tests {
     #[test]
     fn refresh_cookie_uses_http_only_strict_and_auth_path() {
         let config = test_config("development");
-        let cookie = refresh_cookie("refresh-token", &config);
+        let cookie = refresh_cookie("refresh-token", &config, true);
 
         assert_eq!(cookie.name(), REFRESH_COOKIE_NAME);
         assert_eq!(cookie.value(), "refresh-token");
@@ -647,9 +660,33 @@ mod tests {
     #[test]
     fn refresh_cookie_is_secure_in_production() {
         let config = test_config("production");
-        let cookie = refresh_cookie("refresh-token", &config);
+        let cookie = refresh_cookie("refresh-token", &config, true);
 
         assert_eq!(cookie.secure(), Some(true));
+    }
+
+    #[test]
+    fn persistent_refresh_cookie_carries_a_max_age() {
+        // "Keep me logged in": the cookie survives closing the browser.
+        let config = test_config("development");
+        let cookie = refresh_cookie("refresh-token", &config, true);
+        assert_eq!(
+            cookie.max_age(),
+            Some(CookieDuration::days(config.jwt_refresh_expiry_days))
+        );
+    }
+
+    #[test]
+    fn session_scoped_refresh_cookie_has_no_max_age() {
+        // Without "keep me logged in" the cookie is session-scoped: no Max-Age, so
+        // the browser drops it when the last tab closes and the next visit signs
+        // in fresh. Same security attributes otherwise.
+        let config = test_config("development");
+        let cookie = refresh_cookie("refresh-token", &config, false);
+        assert_eq!(cookie.max_age(), None);
+        assert_eq!(cookie.http_only(), Some(true));
+        assert_eq!(cookie.same_site(), Some(SameSite::Strict));
+        assert_eq!(cookie.path(), Some(REFRESH_COOKIE_PATH));
     }
 
     #[test]

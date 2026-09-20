@@ -44,6 +44,9 @@ pub struct RefreshToken {
     pub user_agent: Option<String>,
     pub ip_address: Option<String>,
     pub last_used_at: Option<DateTime<Utc>>,
+    /// Whether this session should survive closing the browser/app. Set from the
+    /// "keep me logged in" choice at sign-in and carried forward across rotations.
+    pub persistent: bool,
 }
 
 #[derive(Debug, Clone, FromRow)]
