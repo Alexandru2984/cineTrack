@@ -14,6 +14,7 @@ export function useRegister() {
       password: string;
       accepted_terms: boolean;
       confirmed_minimum_age: boolean;
+      remember_me?: boolean;
     }) => {
       const res = await api.post<AuthResponse>('/auth/register', data);
       return res.data;
@@ -45,7 +46,12 @@ export function useAcceptTerms() {
 export function useLogin() {
   const setAuth = useAuthStore((s) => s.setAuth);
   return useMutation({
-    mutationFn: async (data: { email: string; password: string; totp_code?: string }) => {
+    mutationFn: async (data: {
+      email: string;
+      password: string;
+      totp_code?: string;
+      remember_me?: boolean;
+    }) => {
       const res = await api.post<AuthResponse>('/auth/login', data);
       return res.data;
     },

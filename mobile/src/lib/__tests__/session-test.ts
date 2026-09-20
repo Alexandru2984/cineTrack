@@ -176,8 +176,8 @@ describe('mobile session recovery', () => {
 
     await hydrateSession();
 
-    expect(mockWriteRefreshToken).toHaveBeenCalledWith(response.refresh_token);
-    expect(mockWriteCachedSession).toHaveBeenCalledWith(response.refresh_token, user);
+    expect(mockWriteRefreshToken).toHaveBeenCalledWith(response.refresh_token, true);
+    expect(mockWriteCachedSession).toHaveBeenCalledWith(response.refresh_token, user, true);
     expect(useAuthStore.getState()).toMatchObject({
       status: 'authenticated',
       accessToken: response.access_token,
@@ -262,7 +262,24 @@ describe('mobile session recovery', () => {
       user: otherUser,
     });
     expect(mockWriteRefreshToken).toHaveBeenCalledTimes(1);
-    expect(mockWriteRefreshToken).toHaveBeenCalledWith(otherResponse.refresh_token);
+    expect(mockWriteRefreshToken).toHaveBeenCalledWith(otherResponse.refresh_token, true);
+  });
+
+  it('does not persist the session when "keep me logged in" is off', async () => {
+    // remember = false: the token is held only in memory for this run, so nothing
+    // is written to the keychain and a cold start signs in fresh.
+    mockRawRequest.mockResolvedValueOnce(response);
+
+    await loginSession('micu@example.com', 'Pass1234', undefined, false);
+
+    expect(mockRawRequest).toHaveBeenCalledWith(
+      '/auth/mobile/login',
+      expect.objectContaining({
+        body: expect.objectContaining({ remember_me: false }),
+      }),
+    );
+    expect(mockWriteRefreshToken).toHaveBeenCalledWith(response.refresh_token, false);
+    expect(mockWriteCachedSession).toHaveBeenCalledWith(response.refresh_token, user, false);
   });
 
   it('queues logout revocation when the device is offline', async () => {

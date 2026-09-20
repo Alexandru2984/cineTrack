@@ -48,6 +48,7 @@ export const ro: Dictionary = {
     email: 'Email',
     password: 'Parolă',
     forgotPassword: 'Ai uitat parola?',
+    rememberMe: 'Ține-mă autentificat',
     authCode: 'Cod de autentificare',
     authCodeHint:
       'Introdu codul de 6 cifre din aplicația de autentificare sau un cod de recuperare.',

@@ -40,6 +40,23 @@ const LOGIN_LOCK_MAX_SECONDS: i64 = 24 * 60 * 60;
 /// and leak the lock state through timing. Roughly the cost of one Argon2 run.
 const LOGIN_LOCKED_RESPONSE_FLOOR: StdDuration = StdDuration::from_millis(250);
 
+/// How long a just-rotated refresh token stays usable for a benign retry.
+///
+/// Strict rotation nukes every session on the account the instant an
+/// already-consumed token is presented again. That is the right answer to a
+/// stolen token replayed later, but it is the wrong answer to the common case
+/// that produced most "I have to sign in again every time" reports: the client
+/// rotated, the server committed, and the *response* was lost — a dropped mobile
+/// connection, or two refreshes racing on launch — so the client still holds the
+/// token it already sent and presents it once more. Within this window, on a
+/// family that has not been revoked, that reuse is treated as the retry it almost
+/// always is and a fresh pair is issued instead of destroying the account's
+/// sessions. Outside it, or on a revoked family, reuse still trips the theft path
+/// in full. The window is short on purpose: long enough to cover a lost response
+/// and a launch race, short enough that a token genuinely stolen and replayed
+/// later is still caught.
+const REFRESH_REUSE_GRACE_SECONDS: i64 = 60;
+
 /// Normalize an email for storage and lookup: trimmed and lowercased, so
 /// `Test@X.com ` and `test@x.com` resolve to the same account.
 pub fn normalize_email(email: &str) -> String {
@@ -65,7 +82,8 @@ pub async fn register(
     email_service: &EmailService,
     client: &ClientInfo,
     req: RegisterRequest,
-) -> Result<(AuthResponse, String), AppError> {
+) -> Result<(AuthResponse, String, bool), AppError> {
+    let remember = req.remember_me.unwrap_or(true);
     if !req.accepted_terms {
         return Err(AppError::BadRequest(
             "You must accept the Terms of Use and Community Guidelines".to_string(),
@@ -140,6 +158,7 @@ pub async fn register(
         client,
         &user,
         SecurityActivityKind::AccountRegistered,
+        remember,
     )
     .await?;
 
@@ -150,7 +169,7 @@ pub async fn register(
         user: UserResponse::from(user),
     };
 
-    Ok((resp, refresh_token))
+    Ok((resp, refresh_token, remember))
 }
 
 pub async fn login(
@@ -159,8 +178,11 @@ pub async fn login(
     email_service: &EmailService,
     client: &ClientInfo,
     req: LoginRequest,
-) -> Result<(AuthResponse, String), AppError> {
+) -> Result<(AuthResponse, String, bool), AppError> {
     let respond_at = Instant::now() + LOGIN_LOCKED_RESPONSE_FLOOR;
+    // "Keep me logged in", defaulting to yes so a client that never sends the
+    // field (and every existing one) keeps the persistent session it had before.
+    let remember = req.remember_me.unwrap_or(true);
     let email = normalize_email(&req.email);
     let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE email = $1")
         .bind(&email)
@@ -263,6 +285,7 @@ pub async fn login(
         client,
         &user,
         SecurityActivityKind::LoginSucceeded,
+        remember,
     )
     .await?;
 
@@ -295,7 +318,7 @@ pub async fn login(
         user: UserResponse::from(user),
     };
 
-    Ok((resp, refresh_token))
+    Ok((resp, refresh_token, remember))
 }
 
 pub async fn refresh_token(
@@ -303,7 +326,7 @@ pub async fn refresh_token(
     config: &Config,
     client: &ClientInfo,
     refresh_token: &str,
-) -> Result<(AuthResponse, String), AppError> {
+) -> Result<(AuthResponse, String, bool), AppError> {
     if !jwt::is_valid_refresh_token(refresh_token) {
         return Err(AppError::Unauthorized("Invalid refresh token".to_string()));
     }
@@ -318,40 +341,12 @@ pub async fn refresh_token(
     .await?
     .ok_or_else(|| AppError::Unauthorized("Invalid refresh token".to_string()))?;
 
-    if stored.consumed_at.is_some() {
-        // Reusing an already-rotated token means it was likely stolen; nuke every
-        // session for the account and flag it loudly for monitoring.
-        log::warn!(
-            "security: refresh token reuse detected, revoking all sessions user_id={}",
-            stored.user_id
-        );
-        sqlx::query("DELETE FROM refresh_tokens WHERE user_id = $1")
-            .bind(stored.user_id)
-            .execute(&mut *tx)
-            .await?;
-        // Deleting the refresh rows stops the thief renewing, but the access
-        // token they already hold is what they are using right now. Cut it off
-        // in the same transaction, or the theft we just detected keeps working
-        // for another fifteen minutes.
-        cancel_pending_credential_actions(&mut tx, stored.user_id).await?;
-        revocation::revoke_user(&mut tx, stored.user_id).await?;
-        tx.commit().await?;
-        crate::metrics::record_security_event(crate::metrics::SecurityEvent::RefreshTokenReuse);
-        return Err(AppError::Unauthorized(
-            "Refresh token reuse detected".to_string(),
-        ));
-    }
-
-    if stored.revoked_at.is_some() {
-        tx.commit().await?;
-        return Err(AppError::Unauthorized("Invalid refresh token".to_string()));
-    }
-
     // The row can look live and still belong to a session the owner ended.
     // Revocation updates every row of the family, but a rotation committing
     // alongside it inserts a successor that statement never saw, so the family
-    // verdict is recorded separately and checked here — before anything is
-    // issued, inside the transaction holding this row.
+    // verdict is recorded separately. Read up front because it decides both
+    // whether this token may be used at all and whether a reused token is a
+    // benign retry or a genuine theft.
     let family_revoked = sqlx::query_scalar::<_, bool>(
         "SELECT EXISTS (
              SELECT 1 FROM revoked_refresh_families
@@ -362,6 +357,52 @@ pub async fn refresh_token(
     .bind(stored.family_id)
     .fetch_one(&mut *tx)
     .await?;
+
+    if let Some(consumed_at) = stored.consumed_at {
+        let within_grace = Utc::now().signed_duration_since(consumed_at)
+            <= Duration::seconds(REFRESH_REUSE_GRACE_SECONDS);
+        if family_revoked || !within_grace {
+            // Reuse of a token rotated longer ago than the grace window, or on a
+            // family the owner has revoked, is the theft signal: nuke every
+            // session for the account and flag it loudly for monitoring.
+            log::warn!(
+                "security: refresh token reuse detected, revoking all sessions user_id={}",
+                stored.user_id
+            );
+            sqlx::query("DELETE FROM refresh_tokens WHERE user_id = $1")
+                .bind(stored.user_id)
+                .execute(&mut *tx)
+                .await?;
+            // Deleting the refresh rows stops the thief renewing, but the access
+            // token they already hold is what they are using right now. Cut it off
+            // in the same transaction, or the theft we just detected keeps working
+            // for another fifteen minutes.
+            cancel_pending_credential_actions(&mut tx, stored.user_id).await?;
+            revocation::revoke_user(&mut tx, stored.user_id).await?;
+            tx.commit().await?;
+            crate::metrics::record_security_event(crate::metrics::SecurityEvent::RefreshTokenReuse);
+            return Err(AppError::Unauthorized(
+                "Refresh token reuse detected".to_string(),
+            ));
+        }
+        // Reuse inside the grace window on a healthy family: almost always a lost
+        // rotation response or two refreshes racing on launch. Re-issue a fresh
+        // pair below rather than signing every device out. `consumed_at` is left
+        // at its first value (see the COALESCE on the mark-consumed update), so
+        // the window is measured from the original rotation and a token cannot be
+        // kept alive indefinitely by replaying it every few seconds.
+        log::info!(
+            "refresh token reused within grace window, re-issuing user_id={} family_id={}",
+            stored.user_id,
+            stored.family_id
+        );
+    }
+
+    if stored.revoked_at.is_some() {
+        tx.commit().await?;
+        return Err(AppError::Unauthorized("Invalid refresh token".to_string()));
+    }
+
     if family_revoked {
         sqlx::query("UPDATE refresh_tokens SET revoked_at = NOW() WHERE id = $1")
             .bind(stored.id)
@@ -380,10 +421,15 @@ pub async fn refresh_token(
         return Err(AppError::Unauthorized("Refresh token expired".to_string()));
     }
 
-    sqlx::query("UPDATE refresh_tokens SET consumed_at = NOW() WHERE id = $1")
-        .bind(stored.id)
-        .execute(&mut *tx)
-        .await?;
+    // COALESCE, not NOW(): a benign in-grace retry rotates again but must keep the
+    // original consumption time, or replaying the token every few seconds would
+    // slide the grace window forward forever and never expire.
+    sqlx::query(
+        "UPDATE refresh_tokens SET consumed_at = COALESCE(consumed_at, NOW()) WHERE id = $1",
+    )
+    .bind(stored.id)
+    .execute(&mut *tx)
+    .await?;
 
     let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = $1")
         .bind(stored.user_id)
@@ -406,8 +452,8 @@ pub async fn refresh_token(
 
     sqlx::query(
         "INSERT INTO refresh_tokens
-            (user_id, token_hash, expires_at, user_agent, ip_address, last_used_at, family_id)
-         VALUES ($1, $2, $3, $4, $5, NOW(), $6)",
+            (user_id, token_hash, expires_at, user_agent, ip_address, last_used_at, family_id, persistent)
+         VALUES ($1, $2, $3, $4, $5, NOW(), $6, $7)",
     )
     .bind(user.id)
     .bind(&new_token_hash)
@@ -415,6 +461,9 @@ pub async fn refresh_token(
     .bind(&client.user_agent)
     .bind(&client.ip_address)
     .bind(stored.family_id)
+    // Carry the "keep me logged in" choice forward, so a session created without
+    // it does not silently become persistent on its first rotation.
+    .bind(stored.persistent)
     .execute(&mut *tx)
     .await?;
 
@@ -428,7 +477,10 @@ pub async fn refresh_token(
         user: UserResponse::from(user),
     };
 
-    Ok((resp, new_refresh_token))
+    // The rotated session keeps the "keep me logged in" choice it was created
+    // with, so the web layer re-issues the same kind of cookie (persistent or
+    // session-scoped) it had rather than resetting to the default.
+    Ok((resp, new_refresh_token, stored.persistent))
 }
 
 pub async fn logout(pool: &PgPool, refresh_token: &str) -> Result<(), AppError> {
@@ -1509,6 +1561,7 @@ async fn issue_token_pair(
     client: &ClientInfo,
     user: &User,
     activity_kind: SecurityActivityKind,
+    remember: bool,
 ) -> Result<(String, String), AppError> {
     let refresh_token = jwt::generate_refresh_token();
     let token_hash = jwt::hash_refresh_token(&refresh_token);
@@ -1518,8 +1571,8 @@ async fn issue_token_pair(
     // The row is inserted before the access token is minted, because the access
     // token has to carry this session's identity and the database assigns it.
     let family_id = sqlx::query_scalar::<_, Uuid>(
-        "INSERT INTO refresh_tokens (user_id, token_hash, expires_at, user_agent, ip_address, last_used_at)
-         VALUES ($1, $2, $3, $4, $5, NOW())
+        "INSERT INTO refresh_tokens (user_id, token_hash, expires_at, user_agent, ip_address, last_used_at, persistent)
+         VALUES ($1, $2, $3, $4, $5, NOW(), $6)
          RETURNING family_id",
     )
     .bind(user.id)
@@ -1527,6 +1580,7 @@ async fn issue_token_pair(
     .bind(expires_at)
     .bind(&client.user_agent)
     .bind(&client.ip_address)
+    .bind(remember)
     .fetch_one(&mut *tx)
     .await?;
 

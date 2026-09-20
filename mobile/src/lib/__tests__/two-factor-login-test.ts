@@ -50,7 +50,7 @@ describe('two-factor login on mobile', () => {
     expect(mockRawRequest).toHaveBeenCalledWith(
       '/auth/mobile/login',
       expect.objectContaining({
-        body: { email: 'micu@example.com', password: 'secret' },
+        body: { email: 'micu@example.com', password: 'secret', remember_me: true },
       }),
     );
   });
@@ -61,7 +61,7 @@ describe('two-factor login on mobile', () => {
     expect(mockRawRequest).toHaveBeenCalledWith(
       '/auth/mobile/login',
       expect.objectContaining({
-        body: { email: 'micu@example.com', password: 'secret', totp_code: '123456' },
+        body: { email: 'micu@example.com', password: 'secret', totp_code: '123456', remember_me: true },
       }),
     );
   });

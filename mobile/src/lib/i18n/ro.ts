@@ -194,6 +194,7 @@ export const ro: Dictionary = {
     password: 'Parolă',
     passwordPlaceholder: 'Parolă',
     forgotPassword: 'Ai uitat parola?',
+    rememberMe: 'Ține-mă autentificat',
     showPassword: 'Arată parola',
     hidePassword: 'Ascunde parola',
     authenticatorOption: 'Authenticator',

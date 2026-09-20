@@ -6,7 +6,7 @@
  *  unencrypted storage and the one place they should not be. */
 import { create } from 'zustand';
 
-import type { IdentityKeyPair } from '@/lib/crypto/core';
+import { wipeIdentity, type IdentityKeyPair } from '@/lib/crypto/core';
 import { clearDecryptionCache } from '@/lib/crypto/cache';
 import { forgetIdentity } from '@/lib/crypto/storage';
 import { forgetPins } from '@/lib/crypto/pins';
@@ -41,13 +41,17 @@ interface EncryptionState {
   clear: (userId: string | null) => Promise<void>;
 }
 
-export const useEncryptionStore = create<EncryptionState>((set) => ({
+export const useEncryptionStore = create<EncryptionState>((set, get) => ({
   status: 'loading',
   identity: null,
   fingerprint: null,
   setIdentity: (identity, fingerprint) => set({ identity, fingerprint, status: 'ready' }),
   setStatus: (status) => set({ status }),
   clear: async (userId) => {
+    // Overwrite the private key bytes still in memory before dropping the
+    // reference, rather than leaving them for the garbage collector.
+    const current = get().identity;
+    if (current) wipeIdentity(current);
     set({ identity: null, fingerprint: null, status: 'loading' });
     // Plaintext decrypted this session must not outlive it in memory.
     clearDecryptionCache();

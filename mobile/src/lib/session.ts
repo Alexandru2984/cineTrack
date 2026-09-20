@@ -60,6 +60,12 @@ interface RefreshInFlight {
 }
 
 let sessionGeneration = 0;
+// Whether the current session should be kept signed in across app restarts. Set
+// from the "keep me logged in" choice at sign-in and from hydration (a session
+// restored from the keychain was, by definition, one the user chose to keep).
+// It decides whether rotations persist the refresh token to the keychain or hold
+// it only in memory for this run.
+let sessionPersistent = true;
 let refreshInFlight: RefreshInFlight | null = null;
 let credentialTail: Promise<void> = Promise.resolve();
 let revocationTail: Promise<void> = Promise.resolve();
@@ -188,7 +194,7 @@ async function acceptSession(payload: unknown, generation: number) {
       throw new SessionSupersededError();
     }
     try {
-      await writeRefreshToken(session.refresh_token);
+      await writeRefreshToken(session.refresh_token, sessionPersistent);
     } catch (error) {
       await revokeOrQueue(session.refresh_token);
       if (generation === sessionGeneration) {
@@ -205,7 +211,7 @@ async function acceptSession(payload: unknown, generation: number) {
       return rejectSupersededSession(session.refresh_token);
     }
     try {
-      await writeCachedSession(session.refresh_token, session.user);
+      await writeCachedSession(session.refresh_token, session.user, sessionPersistent);
     } catch {
       await removeCachedSession().catch(() => undefined);
     }
@@ -219,6 +225,10 @@ async function acceptSession(payload: unknown, generation: number) {
 
 export async function hydrateSession() {
   const generation = beginSessionTransition();
+  // A session restored from the keychain on a cold start is a persistent one by
+  // definition (a session-only login leaves nothing on disk), so rotations during
+  // this run should keep persisting.
+  sessionPersistent = true;
   useAuthStore.getState().beginSessionRestore();
 
   let refreshToken: string | null;
@@ -303,12 +313,25 @@ async function beginAuthentication() {
   return generation;
 }
 
-export async function loginSession(email: string, password: string, totpCode?: string) {
+export async function loginSession(
+  email: string,
+  password: string,
+  totpCode?: string,
+  remember = true,
+) {
   const generation = await beginAuthentication();
+  // Set before acceptSession runs, so the very first token this session stores is
+  // persisted (or held only in memory) according to the choice made here.
+  sessionPersistent = remember;
   const code = totpCode?.trim();
   const payload = await rawRequest('/auth/mobile/login', {
     method: 'POST',
-    body: { email: email.trim(), password, ...(code ? { totp_code: code } : {}) },
+    body: {
+      email: email.trim(),
+      password,
+      remember_me: remember,
+      ...(code ? { totp_code: code } : {}),
+    },
   });
   await acceptSession(payload, generation);
 }
@@ -321,6 +344,8 @@ export async function registerSession(
   confirmedMinimumAge: boolean,
 ) {
   const generation = await beginAuthentication();
+  // A brand-new account on this device stays signed in, like the web client.
+  sessionPersistent = true;
   const payload = await rawRequest('/auth/mobile/register', {
     method: 'POST',
     body: {
