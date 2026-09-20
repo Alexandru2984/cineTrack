@@ -499,11 +499,23 @@ pub struct SeedRow {
 /// on the watchlist could seed a row that says "because you watched" something
 /// nobody watched. No member has favourited a watchlist entry yet; nothing
 /// prevented it either.
-/// How many of the strongest candidates the daily seed is drawn from.
+/// How many of the strongest candidates the seed is drawn from.
 ///
 /// Twenty is wide enough that the row is not the same all season and narrow
 /// enough that it still draws on things you actually liked.
 const SEED_POOL_SIZE: i64 = 20;
+
+/// How far back watching still counts as recent enough to explain a
+/// recommendation.
+///
+/// Weighting alone could not carry this. The draw is random in proportion to
+/// weight, so a 2017 favourite with a low weight still came up every so often —
+/// and the owner's report was exactly that: "I don't see the point of shows
+/// watched a long time ago and other old ones". A window removes them from the
+/// pool rather than merely making them unlikely. Titles outside it come back
+/// only when there is nothing inside it at all, so someone returning after a
+/// long break still gets a row instead of an empty one.
+const SEED_RECENT_WINDOW_DAYS: i64 = 120;
 
 /// The title the "because you watched" row is built from.
 ///
@@ -518,11 +530,20 @@ const SEED_POOL_SIZE: i64 = 20;
 /// the other side: React Query refetches, and the heading would change under the
 /// reader mid-scroll.
 ///
-/// **It follows what you are actually watching.** A plain rotation fixed the
-/// first two and broke this one, giving a show last seen in 2017 the same
-/// chance as one finished last week — the eligible pool for that member spanned
-/// 2017 to 2026. So candidates are weighted by how recently they were watched
-/// and how hard, and the draw is weighted rather than uniform.
+/// **It moves with your watching, not with the clock.** The rotation key is the
+/// member's most recent completion plus the current week. Finishing a title
+/// changes the row at once; a week passing changes it at the latest; nothing
+/// else does. It used to be the calendar date, which changed the row every
+/// single day — the owner's report was that it "changes too fast", and that a
+/// new season or series finished is the moment it should move. The weekly floor
+/// is there so someone three months into one long series does not stare at the
+/// same heading until they finish it.
+///
+/// **It follows what you are actually watching.** Candidates are weighted by how
+/// recently they were watched and how hard, and the draw is weighted rather than
+/// uniform — and the pool itself is limited to the last
+/// `SEED_RECENT_WINDOW_DAYS`, because weighting alone still let years-old titles
+/// through.
 ///
 /// The weight is `base × recency × intensity`:
 ///
@@ -561,11 +582,12 @@ pub async fn recommendation_seed(
             WHERE wh.user_id = $1
             GROUP BY wh.media_id
         ),
-        eligible AS (
+        scored AS (
             SELECT
                 m.tmdb_id,
                 m.media_type,
                 m.title,
+                COALESCE(a.last_watched, um.updated_at) AS last_activity,
                 (
                     CASE WHEN um.is_favorite THEN 4 ELSE 0 END
                     + CASE WHEN um.rating >= 8 THEN 2 WHEN um.rating >= 7 THEN 1 ELSE 0 END
@@ -586,27 +608,55 @@ pub async fn recommendation_seed(
               AND m.tmdb_id > 0
               AND um.status IN ('completed', 'watching')
               AND (um.is_favorite OR um.rating >= 7 OR um.status = 'completed')
-            ORDER BY weight DESC, um.updated_at DESC, m.tmdb_id
+        ),
+        recent AS (
+            SELECT * FROM scored
+            WHERE last_activity > NOW() - make_interval(days => $4::int)
+        ),
+        eligible AS (
+            SELECT * FROM recent
+            UNION ALL
+            -- Nothing inside the window: fall back to the whole library rather
+            -- than leaving somebody who has been away with an empty row.
+            SELECT * FROM scored WHERE NOT EXISTS (SELECT 1 FROM recent)
+        ),
+        pool AS (
+            SELECT * FROM eligible
+            ORDER BY weight DESC, last_activity DESC, tmdb_id
             LIMIT $2
+        ),
+        rotation AS (
+            -- What makes the row move. Finishing something changes it at once;
+            -- otherwise the week does, at the latest. The calendar day is
+            -- deliberately absent: keyed on the day, the row changed daily.
+            SELECT COALESCE(
+                       (
+                           SELECT max(done.completed_at)::text
+                           FROM user_media done
+                           WHERE done.user_id = $1 AND done.completed_at IS NOT NULL
+                       ),
+                       'none'
+                   ) || ':' || date_trunc('week', $3::date::timestamp)::date::text AS epoch
         )
-        SELECT tmdb_id, media_type, title
-        FROM eligible
+        SELECT pool.tmdb_id, pool.media_type, pool.title
+        FROM pool CROSS JOIN rotation
         -- Efraimidis-Spirakis: the largest u^(1/weight) wins, which draws in
         -- proportion to weight. `+ 0.5` keeps u strictly positive, since
         -- `0^(1/w)` is zero for every weight and would silently exclude
         -- whichever title happened to hash to zero.
         ORDER BY power(
             (
-                ('x' || substr(md5($1::text || $3::date::text || tmdb_id::text), 1, 8))::bit(32)::bigint
+                ('x' || substr(md5($1::text || rotation.epoch || pool.tmdb_id::text), 1, 8))::bit(32)::bigint
                 + 0.5
             ) / 4294967296.0,
-            1.0 / weight
+            1.0 / pool.weight
         ) DESC
         LIMIT 1"#,
     )
     .bind(user_id)
     .bind(SEED_POOL_SIZE)
     .bind(on)
+    .bind(SEED_RECENT_WINDOW_DAYS)
     .fetch_optional(pool)
     .await
 }

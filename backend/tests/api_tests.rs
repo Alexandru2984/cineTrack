@@ -13436,16 +13436,23 @@ async fn popular_excludes_what_the_member_already_tracks() {
     );
 }
 
-/// The "because you watched" seed has to move, and has to hold still.
+/// The "because you watched" seed holds still until your watching moves it.
 ///
-/// Both halves are the requirement. The score it ranks by saturates — a
-/// favourite you have finished scores 5 and so does every other one — so the
-/// tiebreak decided, and one member with 522 eligible titles saw the same seed
-/// for months. Re-drawing it per request would be the opposite failure: React
-/// Query refetches, and the heading would change under the reader mid-scroll.
+/// Three properties, each of them a real report or a real bug.
+///
+/// **It holds within a day.** React Query refetches, and the heading must not
+/// change under the reader mid-scroll.
+///
+/// **It holds for the week.** Keyed on the calendar day it changed every single
+/// day, which the owner read as noise: "it seems to change too fast now".
+///
+/// **It moves when you finish something, and weekly at the latest.** Finishing a
+/// series is the moment the row should move; the weekly floor keeps somebody
+/// three months into one long show from staring at the same heading until they
+/// finish it.
 #[actix_web::test]
 #[ignore = "requires test DB"]
-async fn the_recommendation_seed_rotates_daily_and_holds_within_the_day() {
+async fn the_recommendation_seed_moves_with_progress_not_the_clock() {
     let pool = setup_pool().await;
     clean_db(&pool).await;
     let app = actix_test::init_service(create_app(pool.clone())).await;
@@ -13472,44 +13479,62 @@ async fn the_recommendation_seed_rotates_daily_and_holds_within_the_day() {
 
     // Calls the production selection rather than a copy of its query: a copy
     // would agree with whatever the code did, including doing nothing.
-    let seed_on = |day: &'static str| {
+    let user = Uuid::parse_str(&user_id).expect("registered user id");
+    let seed_on = |day: chrono::NaiveDate| {
         let pool = pool.clone();
-        let user = Uuid::parse_str(&user_id).expect("registered user id");
         async move {
-            cinetrack::services::discovery::recommendation_seed(
-                &pool,
-                user,
-                day.parse::<chrono::NaiveDate>().expect("a date"),
-            )
-            .await
-            .expect("seed lookup")
-            .expect("a member with twelve favourites has a seed")
-            .tmdb_id
+            cinetrack::services::discovery::recommendation_seed(&pool, user, day)
+                .await
+                .expect("seed lookup")
+                .expect("a member with twelve favourites has a seed")
+                .tmdb_id
         }
     };
+    let date = |value: &str| value.parse::<chrono::NaiveDate>().expect("a date");
 
-    let today = seed_on("2026-09-05").await;
+    // 2026-09-07 is a Monday; 09-13 is the Sunday that closes the same week.
+    let monday = date("2026-09-07");
+    let first = seed_on(monday).await;
     assert_eq!(
-        today,
-        seed_on("2026-09-05").await,
+        first,
+        seed_on(monday).await,
         "the seed must not move within a day"
     );
 
+    for day in ["2026-09-08", "2026-09-10", "2026-09-13"] {
+        assert_eq!(
+            seed_on(date(day)).await,
+            first,
+            "the seed moved inside one week with nothing finished ({day})"
+        );
+    }
+
+    // Ten weeks, ten draws over twelve equally weighted titles: "they all came
+    // out the same" is not a coincidence this has to tolerate.
     let mut seen = std::collections::HashSet::new();
-    for day in [
-        "2026-09-05",
-        "2026-09-06",
-        "2026-09-07",
-        "2026-09-08",
-        "2026-09-09",
-        "2026-09-10",
-        "2026-09-11",
-    ] {
-        seen.insert(seed_on(day).await);
+    for week in 0..10 {
+        seen.insert(seed_on(monday + chrono::Duration::weeks(week)).await);
     }
     assert!(
         seen.len() > 1,
-        "the seed never changed across a week: {seen:?}"
+        "the seed never changed across ten weeks: {seen:?}"
+    );
+
+    // Finishing something moves it inside the same week — ten different
+    // completion dates against the one Monday, for the same reason as above.
+    let mut after_finishing = std::collections::HashSet::new();
+    for offset in 0..10 {
+        sqlx::query("UPDATE user_media SET completed_at = $2 WHERE user_id = $1::uuid")
+            .bind(&user_id)
+            .bind(monday - chrono::Duration::days(offset))
+            .execute(&pool)
+            .await
+            .unwrap();
+        after_finishing.insert(seed_on(monday).await);
+    }
+    assert!(
+        after_finishing.len() > 1,
+        "finishing something never moved the seed: {after_finishing:?}"
     );
 
     // And the endpoint still answers with one of them.
@@ -13746,12 +13771,18 @@ async fn the_recommendation_seed_follows_recent_watching() {
         recent_days > old_days * 3,
         "the recently binged show should dominate: {recent_days} recent vs {old_days} old"
     );
-    // And the old favourite is not banished outright — surfacing one now and
-    // then is the point of a rotation.
-    assert!(
-        old_days > 0,
-        "the old favourite was banished entirely; surfacing one now and then is \
-         the point of a rotation ({recent_days} recent vs {old_days} old)"
+    // The old favourite is now excluded outright, and this assertion is the
+    // reverse of what it used to be. It used to require that a years-old
+    // favourite still surfaced now and then, on the reasoning that variety is
+    // the point of a rotation. The owner's report retired that reasoning: "I
+    // don't see the point of shows watched a long time ago and other old ones".
+    // Weighting alone could not deliver it — the draw is random in proportion to
+    // weight, so an eight-year-old title still came up — so the pool is now
+    // limited to `SEED_RECENT_WINDOW_DAYS` and this title falls outside it.
+    assert_eq!(
+        old_days, 0,
+        "a title last watched eight years ago must not explain a recommendation \
+         ({recent_days} recent vs {old_days} old)"
     );
 }
 
