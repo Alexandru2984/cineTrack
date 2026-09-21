@@ -62,6 +62,13 @@ updates:
       - dependency-name: react-dom
       - dependency-name: react-native
       - dependency-name: react-native-gesture-handler
+      # Pinned to the exact versions the SDK expects, and direct dependencies
+      # only so npm cannot drift them. Left to resolve on their own, npm answers
+      # expo-router's open `*` peer with the newest reanimated, which demands a
+      # worklets major that expo-modules-core refuses — and the whole SDK
+      # alignment then fails to resolve. They move with the SDK, not alone.
+      - dependency-name: react-native-reanimated
+      - dependency-name: react-native-worklets
       - dependency-name: react-native-safe-area-context
       - dependency-name: react-native-screens
       - dependency-name: react-native-svg
