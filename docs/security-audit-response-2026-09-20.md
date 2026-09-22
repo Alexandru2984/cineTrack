@@ -27,16 +27,35 @@ Plus a "keep me signed in" choice at sign-in on both clients (default on),
 persistent vs session-scoped. Covered by `test_refresh_reuse_within_grace_*` and
 `test_refresh_reuse_after_grace_is_theft`.
 
-## [SEC-CRIT-01] R2 backup immutability — GENUINELY OPEN (needs Cloudflare account)
+## [SEC-CRIT-01] R2 backup immutability — CONFIRMED OPEN (needs Cloudflare account)
 
-Correct in principle: the backup credential can delete, so a host compromise
-could erase the cloud backups. Lifecycle *expiry* is configured
-(`scripts/configure_r2_lifecycle.sh`) but that is not Object Lock (WORM). The fix
-is two Cloudflare-account actions the server cannot safely perform on its own:
-1. Enable Object Lock / a default retention (e.g. 30 days) on the backup bucket.
-2. Mint a backup-only R2 token with `PutObject` but no `DeleteObject`, and use it
-   in `scripts/backup_to_r2.sh`.
-This is the one open item; it is the owner's to apply in the Cloudflare dashboard.
+Re-tested against the live bucket on 2026-09-22 rather than reasoned about, and
+the finding holds — with one correction in the project's favour and one against.
+
+In its favour: backups do **not** use the application's credentials. All four
+`BACKUP_R2_*` variables are set, so `scripts/backup_to_r2.sh` writes to a
+dedicated bucket (`vazute-backups`) with a dedicated key, and the script requires
+that separation by default (`REQUIRE_DEDICATED_BACKUP_CREDENTIALS`). The audit
+described the shared-credential case, which is the fallback, not the configuration.
+
+Against it: the dedicated key **can delete**. Probed with a `DeleteObject` against
+a key that does not exist — which touches no backup and changes nothing — and it
+returned success rather than `AccessDenied`. So a host compromise still reaches
+every snapshot. `GetObjectLockConfiguration` and `GetBucketVersioning` both return
+`AccessDenied` for this key, so the server cannot read, let alone set, the bucket's
+lock state.
+
+That is why this stays open and cannot be closed from the machine: the fix needs
+account-level authority the host deliberately does not have.
+
+1. Enable Object Lock / a default retention (e.g. 30 days) on `vazute-backups`.
+2. Mint a backup-only R2 token with `PutObject` and no `DeleteObject`, and put it
+   in the `BACKUP_R2_*` variables.
+3. Re-probe afterwards: the same `DeleteObject` against a nonexistent key should
+   then answer `AccessDenied`.
+
+Lifecycle *expiry* is configured (`scripts/configure_r2_lifecycle.sh`), but expiry
+is not immutability and does not address this.
 
 ## [SEC-HIGH-01] SSE holds a PostgreSQL connection — NOT TRUE (already correct)
 
