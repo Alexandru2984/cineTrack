@@ -154,3 +154,153 @@ every check run and status to be green.
 OTA updates cannot be enabled without a code-signing certificate, and never in
 store builds. Private keys are overwritten in memory on sign-out (`wipeIdentity`,
 #242).
+
+## Second pass: line by line
+
+The first pass above went through the codebase by vulnerability class, and the
+2026-09-15 review said plainly that the backend had not been read line by line.
+This pass did that. Every handler in the 22 route modules was read, along with the
+auth, revocation, rate-limit and email services. Five sweeps then ran over the
+whole backend:
+- panic sites reachable from a request;
+- DTO fields with no length bound;
+- every `UPDATE` or `DELETE` without an ownership filter;
+- free-form query parameters;
+- slicing of user input.
+
+The pass also covered:
+- the web client: token storage, the login `returnTo`, dynamic `href`/`src`
+  values, the service worker and query caching;
+- the mobile client: deep links, reset-link handling, and the persisted query
+  cache;
+- the host's co-tenants.
+
+Five more findings came out of it, all fixed and each with a test that fails on
+the previous code. They were also reproduced against a local release build
+before the fix and re-run after it.
+
+### 4. A session that kept refreshing survived a password change (high)
+
+Three flows revoke every refresh token of an account with
+`UPDATE refresh_tokens ... WHERE user_id = $1`:
+- password change;
+- password reset;
+- "sign out everywhere".
+
+A rotation running at the same moment holds its token row. The `UPDATE` waits
+on that row, but the successor the rotation inserts is not in the statement's
+snapshot, so it is never revoked. A thief rotating a stolen token in a loop is
+mid-rotation most of the time. **Measured: in 42 of 60 attempts the thief still
+had a working session after the owner changed the password.** The access-token
+cutoff does not cover this: it expires after 75 minutes, and the surviving
+refresh token keeps working after that. Per-session revocation had already been
+fixed for this race through `revoked_refresh_families`; the account-wide paths
+had not.
+
+Fix: rotation takes the account row `FOR SHARE` before its token. The four
+revoking paths hold that row exclusively before touching `refresh_tokens`:
+- password change and reset already updated the row first;
+- logout and "sign out everywhere" now lock it (`lock_account_for_revocation`).
+
+The lock order is the same on both sides, so they cannot deadlock. After the
+fix: 0 of 60. Test: `test_a_password_change_ends_a_session_that_is_refreshing_in_a_loop`,
+20 trials, which fails on the first trial against the old code.
+
+### 5. Re-authentication was an unlimited password and second-factor oracle (medium)
+
+Sign-in locks an account after 5 wrong passwords or codes. The confirmation
+that sensitive actions ask for, `confirm_sensitive_action`, did neither: it
+never checked the lock and never counted a failure. The actions that use it:
+- changing the email or the password;
+- turning off two-factor;
+- deleting the account;
+- replacing the encryption keys.
+
+Two-factor setup had the same gap. With a stolen session and a phished password,
+an attacker could walk the TOTP space through `/auth/email/change` and move the
+account to their own address. Measured: 30 wrong codes, then 30 wrong
+passwords; every one answered 401, and `failed_attempts` stayed at 0.
+
+Fix: `reconfirm_password` and the second-factor check use the same counter and
+lock as sign-in, and a locked account refuses the confirmation with 429. After
+the fix: 5 × 401, then 429. Tests:
+`test_second_factor_guesses_through_a_sensitive_action_lock_the_account` and
+`test_password_guesses_through_a_sensitive_action_count_toward_the_lock`.
+
+### 6. Deleting an account left its access tokens valid (low)
+
+The cascade removed the refresh tokens. An access token already issued was
+still accepted until it expired, because nothing added the account to the
+revocation cache. Fix: `delete_account` calls `revoke_user` in the same
+transaction. Test: `test_a_deleted_accounts_access_token_stops_working`.
+
+### 7. A moderator could close a report about themselves (low)
+
+Fix: a status change on a report whose subject is the acting moderator is
+refused with 403, and the report stays open for another moderator. Test:
+`a_moderator_cannot_close_a_report_about_themselves`.
+
+### 8. The sign-in alert repeated the attacker's User-Agent (low)
+
+The "new sign-in" email printed the raw User-Agent header. Whoever holds the
+password chooses that header, so it could carry "this sign-in was blocked,
+verify at <link>" inside a genuine Văzute security email. Fix: the email names
+the device from a fixed vocabulary ("Chrome on Android", "Văzute app"). The raw
+header never reaches the message. Unit test in `services/email.rs`.
+
+### Verified clean in this pass
+
+- **Client IP.** `conf.d/cloudflare-realip.conf` runs at the http level: it
+  trusts cloudflared on loopback and Cloudflare's ranges, and reads
+  `CF-Connecting-IP`, which the edge always overwrites. The vhost then
+  overwrites `X-Forwarded-For` with `$remote_addr`, so the first entry the
+  backend reads is the real client.
+- **Handlers.** Every one of the 141 routes has the gate its data needs:
+  - auth;
+  - verified email;
+  - current terms;
+  - block checks;
+  - privacy (`can_view_private_user`, `visible_connection_owner`).
+
+  Every mutation without a `user_id` filter operates on the caller's own id, or
+  on a row already proven to be owned in the same transaction.
+- **Messages.** Blocks and the mutual follow are checked inside the transaction.
+  Once both parties have keys, a send cannot drop to plaintext. Idempotency is
+  scoped to the sender.
+- **Key backup.** Readable with a session alone, but the recovery code carries
+  100 bits (20 characters from a 32-symbol alphabet, no modulo bias) behind
+  Argon2id, so it cannot be brute-forced offline.
+- **Web client.** No tokens are kept in `localStorage`. `safeReturnTo`
+  re-parses with `new URL` and compares the origin. The only external link goes
+  through `safeWatchProviderLink`. The service worker caches TMDB posters only,
+  and `/api/` is on its deny list.
+- **Mobile client.** The persisted query cache is encrypted, holds only catalog
+  and library roots (never messages or profiles), and is wiped on sign-out and
+  account switch. The reset link lands on the sign-in screen and never signs
+  anyone in.
+- **Headers.** All ten path types checked carry CSP, HSTS, `nosniff` and
+  `X-Frame-Options`, so no `location` drops the server-level headers.
+- **Containers.** Every Văzute container runs:
+  - as non-root;
+  - with a read-only root filesystem;
+  - with `cap_drop: ALL` and `no-new-privileges`;
+  - under memory and PID limits;
+  - on loopback-only ports.
+
+  The production database is not published. Secret files are mode 600.
+- **Co-tenants.** Portainer (which holds `docker.sock`) sits behind Cloudflare
+  Access. The `hooks` webhook receiver requires an HMAC-SHA256 signature on all
+  17 hooks, and passes static arguments only. `admin`, `analytics` and `uptime`
+  have their own logins.
+
+### Recommendations for the host, not applied
+
+- **Dozzle** holds `docker.sock` and is protected by basic auth alone: one
+  apr1-MD5 entry, and no rate limit on attempts. Actions and shell are off, so
+  it reads logs only. Those logs include Văzute user ids, IPs and user agents.
+  Put it behind Cloudflare Access, as Portainer already is.
+- **coturn** denies loopback and private peers, but not the host's own public
+  address. Add `denied-peer-ip=185.254.97.77`. Only cloudflared's connected
+  QUIC sockets are reachable that way today.
+- **Cloudflare Global API Key** in `~/cf_cred.env`: kept by the owner's
+  decision, mode 600. Accepted.

@@ -143,7 +143,7 @@ impl EmailService {
         ip_address: Option<&str>,
     ) {
         let subject = "New sign-in to your Văzute account";
-        let device = user_agent.unwrap_or("Unknown device");
+        let device = describe_device(user_agent);
         let ip = ip_address.unwrap_or("Unknown IP address");
         let body = format!(
             "A new sign-in to your Văzute account succeeded.\n\n\
@@ -265,9 +265,80 @@ impl EmailService {
     }
 }
 
+/// A short, fixed-vocabulary name for the device behind a user agent.
+///
+/// The raw header used to go into the sign-in alert verbatim, and whoever signs
+/// in chooses it. Someone holding the password could sign in with a user agent
+/// reading "this sign-in was blocked, verify your account at <link>" and have
+/// Văzute deliver that sentence, from its own address, in the one email the
+/// owner is primed to act on. Only names from this list reach the message.
+fn describe_device(user_agent: Option<&str>) -> String {
+    let Some(agent) = user_agent else {
+        return "Unknown device".to_string();
+    };
+    let has = |needle: &str| agent.contains(needle);
+    let platform = if has("Android") {
+        Some("Android")
+    } else if has("iPhone") || has("iPad") || has("CFNetwork") {
+        Some("iOS")
+    } else if has("CrOS") {
+        Some("ChromeOS")
+    } else if has("Windows") {
+        Some("Windows")
+    } else if has("Mac OS X") || has("Macintosh") {
+        Some("macOS")
+    } else if has("Linux") {
+        Some("Linux")
+    } else {
+        None
+    };
+    let client = if has("okhttp") || has("Expo") {
+        Some("Văzute app")
+    } else if has("Edg/") {
+        Some("Edge")
+    } else if has("OPR/") {
+        Some("Opera")
+    } else if has("Firefox/") {
+        Some("Firefox")
+    } else if has("Chrome/") || has("CriOS/") {
+        Some("Chrome")
+    } else if has("Safari/") {
+        Some("Safari")
+    } else {
+        None
+    };
+    match (client, platform) {
+        (Some(client), Some(platform)) => format!("{client} on {platform}"),
+        (Some(client), None) => client.to_string(),
+        (None, Some(platform)) => format!("A browser or app on {platform}"),
+        (None, None) => "Unknown device".to_string(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn the_sign_in_alert_names_the_device_without_echoing_the_header() {
+        assert_eq!(
+            describe_device(Some(
+                "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/128.0 Mobile Safari/537.36"
+            )),
+            "Chrome on Android"
+        );
+        assert_eq!(describe_device(Some("okhttp/4.12.0")), "Văzute app");
+        assert_eq!(describe_device(None), "Unknown device");
+
+        let hostile =
+            "Chrome/1 Windows. This sign-in was blocked: verify at https://evil.example/v";
+        let described = describe_device(Some(hostile));
+        assert_eq!(described, "Chrome on Windows");
+        assert!(!described.contains("evil"));
+        assert_eq!(
+            describe_device(Some("Verify now at https://evil.example")),
+            "Unknown device"
+        );
+    }
 
     fn test_config(app_env: &str) -> Config {
         Config {

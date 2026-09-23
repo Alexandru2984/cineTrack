@@ -334,6 +334,28 @@ pub async fn refresh_token(
     let token_hash = jwt::hash_refresh_token(refresh_token);
     let mut tx = pool.begin().await?;
 
+    // Rotation holds the account row shared for its whole transaction, and every
+    // path that revokes an account's sessions takes that row exclusively first
+    // (`lock_account_for_revocation`). Without it, a revocation's
+    // `UPDATE refresh_tokens ... WHERE user_id = $1` could not see the successor a
+    // concurrent rotation was inserting, and the successor survived. A thief who
+    // kept refreshing in a loop was mid-rotation most of the time: measured
+    // locally, they kept a working session through a password change in 42 of
+    // 60 attempts. The row is locked before the token, the same order the
+    // revocations use, so the two cannot deadlock.
+    let Some(owner_id) =
+        sqlx::query_scalar::<_, Uuid>("SELECT user_id FROM refresh_tokens WHERE token_hash = $1")
+            .bind(&token_hash)
+            .fetch_optional(&mut *tx)
+            .await?
+    else {
+        return Err(AppError::Unauthorized("Invalid refresh token".to_string()));
+    };
+    sqlx::query("SELECT 1 FROM users WHERE id = $1 FOR SHARE")
+        .bind(owner_id)
+        .execute(&mut *tx)
+        .await?;
+
     let stored = sqlx::query_as::<_, RefreshToken>(
         "SELECT * FROM refresh_tokens WHERE token_hash = $1 FOR UPDATE",
     )
@@ -510,6 +532,16 @@ pub async fn logout(pool: &PgPool, refresh_token: &str) -> Result<(), AppError> 
     }
     let token_hash = jwt::hash_refresh_token(refresh_token);
     let mut tx = pool.begin().await?;
+    let Some(owner_id) =
+        sqlx::query_scalar::<_, Uuid>("SELECT user_id FROM refresh_tokens WHERE token_hash = $1")
+            .bind(&token_hash)
+            .fetch_optional(&mut *tx)
+            .await?
+    else {
+        tx.commit().await?;
+        return Ok(());
+    };
+    lock_account_for_revocation(&mut tx, owner_id).await?;
     let family_id = sqlx::query_scalar::<_, Uuid>(
         "SELECT family_id FROM refresh_tokens WHERE token_hash = $1 FOR UPDATE",
     )
@@ -1295,15 +1327,7 @@ pub async fn confirm_sensitive_action(
     password_input: &str,
     second_factor: Option<&str>,
 ) -> Result<(), AppError> {
-    let password_hash = user
-        .password_hash
-        .as_ref()
-        .ok_or_else(|| AppError::BadRequest("Password login is not enabled".to_string()))?;
-    if !password::verify_password(password_input, password_hash).await? {
-        return Err(AppError::Unauthorized(
-            "Current password is incorrect".to_string(),
-        ));
-    }
+    reconfirm_password(pool, user, password_input).await?;
 
     if user.totp_enabled {
         let code = second_factor
@@ -1311,12 +1335,46 @@ pub async fn confirm_sensitive_action(
             .filter(|code| !code.is_empty())
             .ok_or(AppError::TwoFactorRequired)?;
         if !verify_second_factor(pool, config, user, code).await? {
+            record_login_failure(pool, user.id).await?;
             return Err(AppError::Unauthorized(
                 "Invalid two-factor code".to_string(),
             ));
         }
     }
 
+    Ok(())
+}
+
+/// Check the account password for a signed-in user, under the sign-in lock.
+///
+/// These confirmations used to sit outside the lock entirely. Sign-in locks an
+/// account after a handful of wrong passwords or codes, but a session could be
+/// used to guess both without limit through the actions that ask for them again:
+/// changing the email or password, turning off two-factor, deleting the account.
+/// With a stolen session and a phished password, the second factor was the only
+/// thing left, and it could be walked through the email-change endpoint until a
+/// code matched. The confirmations now spend the same attempts as sign-in, and a
+/// locked account refuses them the same way.
+async fn reconfirm_password(
+    pool: &PgPool,
+    user: &User,
+    password_input: &str,
+) -> Result<(), AppError> {
+    if is_login_locked(user.login_locked_until) {
+        return Err(AppError::TooManyRequests(
+            "Too many incorrect attempts. Try again later.".to_string(),
+        ));
+    }
+    let password_hash = user
+        .password_hash
+        .as_ref()
+        .ok_or_else(|| AppError::BadRequest("Password login is not enabled".to_string()))?;
+    if !password::verify_password(password_input, password_hash).await? {
+        record_login_failure(pool, user.id).await?;
+        return Err(AppError::Unauthorized(
+            "Current password is incorrect".to_string(),
+        ));
+    }
     Ok(())
 }
 
@@ -1343,13 +1401,7 @@ pub async fn setup_two_factor(
 
     // Re-confirm the password so a stolen access token alone cannot enroll a
     // second factor and lock the real owner out.
-    let password_hash = user
-        .password_hash
-        .as_ref()
-        .ok_or_else(|| AppError::BadRequest("Password login is not enabled".to_string()))?;
-    if !password::verify_password(password_input, password_hash).await? {
-        return Err(AppError::Unauthorized("Password is incorrect".to_string()));
-    }
+    reconfirm_password(pool, &user, password_input).await?;
 
     if user.totp_enabled {
         return Err(AppError::Conflict(
@@ -1690,6 +1742,25 @@ pub async fn list_sessions_for_refresh_token(
     Ok(sessions)
 }
 
+/// Hold the account row exclusively before revoking its sessions.
+///
+/// Rotation holds this row shared (see `refresh_token`), so taking it here waits
+/// for any rotation already running and keeps new ones out until the revocation
+/// commits. The revocation's own statements then run after the in-flight
+/// rotation has inserted its successor, and revoke it with the rest. Paths that
+/// update the account row before touching `refresh_tokens` (a password change or
+/// reset) already hold this lock and do not need to call it.
+async fn lock_account_for_revocation(
+    tx: &mut Transaction<'_, Postgres>,
+    user_id: Uuid,
+) -> Result<(), AppError> {
+    sqlx::query("SELECT 1 FROM users WHERE id = $1 FOR UPDATE")
+        .bind(user_id)
+        .execute(&mut **tx)
+        .await?;
+    Ok(())
+}
+
 /// Revoke a single session by id. Scoped to the owner so one user cannot revoke
 /// another's session; a missing/foreign id yields NotFound (no enumeration).
 /// Cancel every pending action that an older credential authorised.
@@ -1854,6 +1925,7 @@ pub async fn logout_all_sessions(
     user_id: Uuid,
 ) -> Result<(), AppError> {
     let mut tx = pool.begin().await?;
+    lock_account_for_revocation(&mut tx, user_id).await?;
     sqlx::query(
         "UPDATE refresh_tokens SET revoked_at = NOW() WHERE user_id = $1 AND revoked_at IS NULL",
     )
