@@ -950,6 +950,11 @@ async fn delete_account(
         .bind(user_id)
         .execute(&mut *tx)
         .await?;
+    // The cascade takes the refresh tokens, but an access token already issued is
+    // checked only against its signature and the revocation cache. Without this it
+    // kept answering for up to its full lifetime after the account was gone, with
+    // the same reach any other session of a deleted account would have.
+    crate::services::revocation::revoke_user(&mut tx, user_id).await?;
     tx.commit().await?;
 
     log::info!("audit: account deleted user_id={user_id}");

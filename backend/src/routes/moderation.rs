@@ -164,8 +164,8 @@ fn transition_allowed(old_status: &str, new_status: &str) -> bool {
 async fn lock_report(
     tx: &mut Transaction<'_, Postgres>,
     report_id: Uuid,
-) -> Result<Option<String>, sqlx::Error> {
-    sqlx::query_scalar("SELECT status FROM user_reports WHERE id = $1 FOR UPDATE")
+) -> Result<Option<(String, Option<Uuid>)>, sqlx::Error> {
+    sqlx::query_as("SELECT status, subject_user_id FROM user_reports WHERE id = $1 FOR UPDATE")
         .bind(report_id)
         .fetch_optional(&mut **tx)
         .await
@@ -185,9 +185,17 @@ async fn update_report_status(
 
     let mut tx = pool.begin().await?;
     require_moderator(&mut *tx, actor_id).await?;
-    let old_status = lock_report(&mut tx, report_id)
+    let (old_status, subject_user_id) = lock_report(&mut tx, report_id)
         .await?
         .ok_or_else(|| AppError::NotFound("Report not found".to_string()))?;
+    // A moderator who is the subject of a report cannot be the one to close it:
+    // dismissing a complaint about yourself is the one decision the audit log
+    // cannot make trustworthy after the fact.
+    if subject_user_id == Some(actor_id) {
+        return Err(AppError::Forbidden(
+            "A report about you must be handled by another moderator".to_string(),
+        ));
+    }
     if !transition_allowed(&old_status, &data.status) {
         return Err(AppError::Conflict(format!(
             "Report cannot move from {old_status} to {}",

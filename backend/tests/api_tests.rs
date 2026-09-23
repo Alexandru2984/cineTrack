@@ -1073,6 +1073,62 @@ async fn reports_are_validated_deduplicated_and_snapshot_server_content() {
 
 #[actix_web::test]
 #[ignore = "requires test DB"]
+async fn a_moderator_cannot_close_a_report_about_themselves() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (moderator_token, _, moderator_id) =
+        register_user(&app, "selfmod", "selfmod@mailbox.dev", "Pass1234").await;
+    let (reporter_token, _, _) =
+        register_user(&app, "selfreporter", "selfreporter@mailbox.dev", "Pass1234").await;
+    let moderator_id = Uuid::parse_str(&moderator_id).unwrap();
+    sqlx::query("UPDATE users SET totp_enabled = TRUE WHERE id = $1")
+        .bind(moderator_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO moderators (user_id, granted_by) VALUES ($1, 'integration-test')")
+        .bind(moderator_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/reports")
+        .insert_header(("Authorization", format!("Bearer {reporter_token}")))
+        .set_json(json!({
+            "target_type": "user",
+            "target_id": moderator_id,
+            "reason": "harassment",
+            "details": "Reported by another member"
+        }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 201);
+    let body: Value = actix_test::read_body_json(resp).await;
+    let report_id = body["id"].as_str().unwrap().to_string();
+
+    let req = actix_test::TestRequest::patch()
+        .uri(&format!("/api/moderation/reports/{report_id}"))
+        .insert_header(("Authorization", format!("Bearer {moderator_token}")))
+        .set_json(json!({"status": "dismissed", "note": "Nothing to see here"}))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 403);
+    let status: String = sqlx::query_scalar("SELECT status FROM user_reports WHERE id = $1::uuid")
+        .bind(&report_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        status, "open",
+        "the report stays open for another moderator"
+    );
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
 async fn moderation_queue_requires_database_role_two_factor_and_append_only_audit() {
     let pool = setup_pool().await;
     clean_db(&pool).await;
@@ -1915,6 +1971,209 @@ async fn test_refresh_reuse_after_grace_is_theft() {
         resp.status(),
         401,
         "Detected theft must revoke every session on the account"
+    );
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn test_a_password_change_ends_a_session_that_is_refreshing_in_a_loop() {
+    // A thief who keeps rotating a stolen refresh token is mid-rotation most of the
+    // time. The revocation used to miss the successor that rotation was inserting,
+    // so the session outlived the password change meant to end it.
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+
+    for trial in 0..20 {
+        let password = format!("Pass{trial:04}xyz");
+        let next_password = format!("Next{trial:04}xyz");
+        let email = format!("racer{trial}@mailbox.dev");
+        let (owner, _, _) = register_user(&app, &format!("racer{trial}"), &email, &password).await;
+
+        let req = actix_test::TestRequest::post()
+            .uri("/api/auth/mobile/login")
+            .set_json(json!({ "email": &email, "password": &password }))
+            .peer_addr(peer_addr())
+            .to_request();
+        let body: Value = actix_test::call_and_read_body_json(&app, req).await;
+        let stolen = body["refresh_token"].as_str().unwrap().to_string();
+
+        let done = std::cell::Cell::new(false);
+        let thief = async {
+            let mut current = stolen;
+            while !done.get() {
+                let req = actix_test::TestRequest::post()
+                    .uri("/api/auth/mobile/refresh")
+                    .set_json(json!({ "refresh_token": &current }))
+                    .peer_addr(peer_addr())
+                    .to_request();
+                let resp = actix_test::call_service(&app, req).await;
+                if resp.status() != 200 {
+                    break;
+                }
+                let body: Value = actix_test::read_body_json(resp).await;
+                current = body["refresh_token"].as_str().unwrap().to_string();
+            }
+            current
+        };
+        let owner_changes_password = async {
+            // Let the thief get a few rotations in first.
+            tokio::time::sleep(std::time::Duration::from_millis(5 + trial % 7)).await;
+            let req = actix_test::TestRequest::patch()
+                .uri("/api/auth/password")
+                .insert_header(("Authorization", format!("Bearer {owner}")))
+                .set_json(json!({ "current_password": &password, "new_password": &next_password }))
+                .peer_addr(peer_addr())
+                .to_request();
+            let status = actix_test::call_service(&app, req).await.status();
+            done.set(true);
+            status
+        };
+        let (last_token, status) = tokio::join!(thief, owner_changes_password);
+        assert_eq!(status, 200, "trial {trial}: the password change succeeds");
+
+        let req = actix_test::TestRequest::post()
+            .uri("/api/auth/mobile/refresh")
+            .set_json(json!({ "refresh_token": &last_token }))
+            .peer_addr(peer_addr())
+            .to_request();
+        assert_eq!(
+            actix_test::call_service(&app, req).await.status(),
+            401,
+            "trial {trial}: the thief's session must not survive the password change"
+        );
+        let live: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM refresh_tokens t JOIN users u ON u.id = t.user_id
+             WHERE u.email = $1 AND t.revoked_at IS NULL AND t.consumed_at IS NULL",
+        )
+        .bind(&email)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(live, 0, "trial {trial}: no live refresh token remains");
+    }
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn test_second_factor_guesses_through_a_sensitive_action_lock_the_account() {
+    // With a stolen session and a phished password, the email-change confirmation
+    // was an unlimited oracle for the second factor.
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+
+    let (access, _, _) = register_user(&app, "guesser", "guesser@mailbox.dev", "Pass1234").await;
+    let req = actix_test::TestRequest::post()
+        .uri("/api/auth/2fa/setup")
+        .insert_header(("Authorization", format!("Bearer {access}")))
+        .peer_addr(peer_addr())
+        .set_json(json!({ "password": "Pass1234" }))
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 200);
+    let secret = totp_secret_bytes(&pool, "guesser@mailbox.dev").await;
+    let req = actix_test::TestRequest::post()
+        .uri("/api/auth/2fa/enable")
+        .insert_header(("Authorization", format!("Bearer {access}")))
+        .peer_addr(peer_addr())
+        .set_json(json!({ "code": current_totp_code(&secret) }))
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 200);
+
+    let change_email = |code: String| {
+        actix_test::TestRequest::post()
+            .uri("/api/auth/email/change")
+            .insert_header(("Authorization", format!("Bearer {access}")))
+            .peer_addr(peer_addr())
+            .set_json(json!({
+                "current_password": "Pass1234",
+                "new_email": "taken-over@mailbox.dev",
+                "totp_code": code
+            }))
+            .to_request()
+    };
+    for _ in 0..5 {
+        let resp = actix_test::call_service(&app, change_email(wrong_totp_code(&secret))).await;
+        assert_eq!(resp.status(), 401);
+    }
+
+    let resp = actix_test::call_service(&app, change_email(next_totp_code(&secret))).await;
+    assert_eq!(
+        resp.status(),
+        429,
+        "after the lock, even the right code is refused"
+    );
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/auth/login")
+        .peer_addr(peer_addr())
+        .set_json(json!({
+            "email": "guesser@mailbox.dev",
+            "password": "Pass1234",
+            "totp_code": next_totp_code(&secret)
+        }))
+        .to_request();
+    assert_eq!(
+        actix_test::call_service(&app, req).await.status(),
+        401,
+        "the guesses count against the same lock sign-in uses"
+    );
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn test_password_guesses_through_a_sensitive_action_count_toward_the_lock() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+
+    let (access, _, _) = register_user(&app, "pwguess", "pwguess@mailbox.dev", "Pass1234").await;
+    let change_password = |current: &str| {
+        actix_test::TestRequest::patch()
+            .uri("/api/auth/password")
+            .insert_header(("Authorization", format!("Bearer {access}")))
+            .peer_addr(peer_addr())
+            .set_json(json!({ "current_password": current, "new_password": "NewPass5678" }))
+            .to_request()
+    };
+    for attempt in 0..5 {
+        let resp =
+            actix_test::call_service(&app, change_password(&format!("Wrong{attempt}pass"))).await;
+        assert_eq!(resp.status(), 401);
+    }
+    let resp = actix_test::call_service(&app, change_password("Pass1234")).await;
+    assert_eq!(
+        resp.status(),
+        429,
+        "a locked account refuses the confirmation"
+    );
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn test_a_deleted_accounts_access_token_stops_working() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+
+    let (token, _, _) = register_user(&app, "vanished", "vanished@mailbox.dev", "Pass1234").await;
+    let req = actix_test::TestRequest::delete()
+        .uri("/api/users/me")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .set_json(json!({ "password": "Pass1234" }))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 200);
+
+    let req = actix_test::TestRequest::get()
+        .uri("/api/stats/me")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(
+        actix_test::call_service(&app, req).await.status(),
+        401,
+        "the token of a deleted account is refused at once"
     );
 }
 
