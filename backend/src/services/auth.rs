@@ -35,10 +35,6 @@ const LOGIN_LOCK_SECONDS: i64 = 15 * 60;
 /// who can already recover by email, and a longer number protects nothing an
 /// attacker could not simply wait out.
 const LOGIN_LOCK_MAX_SECONDS: i64 = 24 * 60 * 60;
-/// A locked account is refused without hashing the submitted password, which
-/// would otherwise make the refusal measurably faster than a real verification
-/// and leak the lock state through timing. Roughly the cost of one Argon2 run.
-const LOGIN_LOCKED_RESPONSE_FLOOR: StdDuration = StdDuration::from_millis(250);
 
 /// How long a just-rotated refresh token stays usable for a benign retry.
 ///
@@ -179,7 +175,6 @@ pub async fn login(
     client: &ClientInfo,
     req: LoginRequest,
 ) -> Result<(AuthResponse, String, bool), AppError> {
-    let respond_at = Instant::now() + LOGIN_LOCKED_RESPONSE_FLOOR;
     // "Keep me logged in", defaulting to yes so a client that never sends the
     // field (and every existing one) keeps the persistent session it had before.
     let remember = req.remember_me.unwrap_or(true);
@@ -193,8 +188,7 @@ pub async fn login(
     // same generic error every other rejection uses. Checking after the hash
     // comparison meant a locked account answered 401 for a wrong password and
     // 429 for the right one, so an attacker could recognise the moment they
-    // guessed correctly and simply wait out the lock. Refusing first also
-    // keeps each attempt from spending an Argon2 run on a locked account.
+    // guessed correctly and simply wait out the lock.
     if let Some(locked_candidate) = user
         .as_ref()
         .filter(|candidate| is_login_locked(candidate.login_locked_until))
@@ -205,7 +199,14 @@ pub async fn login(
         // `record_login_failure`.
         record_login_failure(pool, locked_candidate.id).await?;
         crate::metrics::record_security_event(crate::metrics::SecurityEvent::LoginRejected);
-        tokio::time::sleep_until(respond_at).await;
+        // The refusal still pays for one Argon2 run against the dummy hash, the
+        // same work an address with no account does. A fixed sleep stood in for
+        // it before, but a sleep is not the hash: in production it answered
+        // about 75 ms slower than an unknown address, so a few wrong guesses
+        // that tipped an address into the lock told an attacker it was
+        // registered. The password is not compared against the real hash, so
+        // the right one still cannot be recognised while locked.
+        password::verify_password_or_dummy(&req.password, None).await?;
         return Err(AppError::Unauthorized(
             "Invalid email or password".to_string(),
         ));
@@ -430,6 +431,26 @@ pub async fn refresh_token(
     .bind(stored.id)
     .execute(&mut *tx)
     .await?;
+
+    // A grace-window retry leaves the family with more than one live token, and
+    // the client keeps only one of them. Once a token is rotated normally, the
+    // client has shown which one it kept, so the siblings are orphans; left
+    // alone they would stay valid until expiry. Only siblings older than the
+    // grace window go, so a token handed out in the same burst as this one, and
+    // perhaps still on its way to the client, is not pulled from under it.
+    if stored.consumed_at.is_none() {
+        sqlx::query(
+            "DELETE FROM refresh_tokens
+             WHERE family_id = $1 AND id <> $2
+               AND consumed_at IS NULL AND revoked_at IS NULL
+               AND created_at <= NOW() - ($3 * INTERVAL '1 second')",
+        )
+        .bind(stored.family_id)
+        .bind(stored.id)
+        .bind(REFRESH_REUSE_GRACE_SECONDS)
+        .execute(&mut *tx)
+        .await?;
+    }
 
     let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = $1")
         .bind(stored.user_id)
@@ -1865,12 +1886,18 @@ async fn cap_active_refresh_tokens<'e, E>(executor: E, user_id: Uuid) -> Result<
 where
     E: sqlx::Executor<'e, Database = sqlx::Postgres>,
 {
+    // The cap is on sessions (families), not on rows. A retry inside the refresh
+    // grace window mints a second live token in the same family, and counting
+    // rows let a burst of those retries push every other device off the account.
     sqlx::query(
-        r#"DELETE FROM refresh_tokens WHERE id IN (
-            SELECT id FROM refresh_tokens
+        r#"DELETE FROM refresh_tokens
+        WHERE user_id = $1 AND consumed_at IS NULL AND revoked_at IS NULL
+          AND family_id NOT IN (
+            SELECT family_id FROM refresh_tokens
             WHERE user_id = $1 AND consumed_at IS NULL AND revoked_at IS NULL
-            ORDER BY created_at DESC
-            OFFSET 5
+            GROUP BY family_id
+            ORDER BY max(created_at) DESC
+            LIMIT 5
         )"#,
     )
     .bind(user_id)

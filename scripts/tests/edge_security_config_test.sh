@@ -85,8 +85,12 @@ assert script is not None, "script-src is missing"
 script_value = script.group("value")
 assert "'unsafe-inline'" not in script_value, "inline scripts must remain blocked"
 assert "'unsafe-eval'" not in script_value, "eval must remain blocked"
-assert "https://analytics.micutu.com" in script_value
-assert "https://static.cloudflareinsights.com" in script_value
+# Nothing in the app loads a third-party script. Analytics origins that were
+# allowed "just in case" are only somewhere for an injected script to load from.
+assert script_value.split() == ["'self'"], f"script-src must be 'self' only: {script_value}"
+connect = re.search(r"(?:^|;)\s*connect-src (?P<value>[^;]+)", value)
+assert connect is not None, "connect-src is missing"
+assert connect.group("value").split() == ["'self'"], f"connect-src must be 'self' only: {connect.group('value')}"
 
 assert "limit_conn_zone $binary_remote_addr zone=vazute_assets_conn:10m;" in text
 for path in ("/api/img/", "/api/assets/"):
