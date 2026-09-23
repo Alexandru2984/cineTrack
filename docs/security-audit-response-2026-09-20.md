@@ -27,35 +27,50 @@ Plus a "keep me signed in" choice at sign-in on both clients (default on),
 persistent vs session-scoped. Covered by `test_refresh_reuse_within_grace_*` and
 `test_refresh_reuse_after_grace_is_theft`.
 
-## [SEC-CRIT-01] R2 backup immutability — CONFIRMED OPEN (needs Cloudflare account)
+## [SEC-CRIT-01] R2 backup immutability — MITIGATED 2026-09-23, with proof
 
-Re-tested against the live bucket on 2026-09-22 rather than reasoned about, and
-the finding holds — with one correction in the project's favour and one against.
+Measured on 2026-09-22 rather than argued: backups already use a dedicated bucket
+(`vazute-backups`) and a dedicated key — all four `BACKUP_R2_*` variables are set,
+and `scripts/backup_to_r2.sh` requires that separation by default — so the audit's
+shared-credential scenario was the fallback, not the configuration. But the
+dedicated key could delete: `DeleteObject` succeeded, and the bucket had no lock
+rules at all (`{"rules": []}`).
 
-In its favour: backups do **not** use the application's credentials. All four
-`BACKUP_R2_*` variables are set, so `scripts/backup_to_r2.sh` writes to a
-dedicated bucket (`vazute-backups`) with a dedicated key, and the script requires
-that separation by default (`REQUIRE_DEDICATED_BACKUP_CREDENTIALS`). The audit
-described the shared-credential case, which is the fallback, not the configuration.
+On 2026-09-23 a bucket lock rule was applied to `vazute-backups`:
 
-Against it: the dedicated key **can delete**. Probed with a `DeleteObject` against
-a key that does not exist — which touches no backup and changes nothing — and it
-returned success rather than `AccessDenied`. So a host compromise still reaches
-every snapshot. `GetObjectLockConfiguration` and `GetBucketVersioning` both return
-`AccessDenied` for this key, so the server cannot read, let alone set, the bucket's
-lock state.
+    {"id": "backups-immutable-13d", "enabled": true, "prefix": "",
+     "condition": {"type": "Age", "maxAgeSeconds": 1123200}}
 
-That is why this stays open and cannot be closed from the machine: the fix needs
-account-level authority the host deliberately does not have.
+Thirteen days, not fourteen, deliberately. Backups are kept 14 days and the backup
+script prunes anything older with an unguarded `delete_object`, so a 14-day lock
+would race the pruning and a denied delete would fail the nightly job. At 13 days
+the prune never touches a locked object; the most an attacker holding the backup
+key can delete is the single backup aged 13–14 days, which the prune removes within
+a day anyway. The thirteen newest are untouchable. The restore and drill scripts
+only read, and select from `backups/`, so neither is affected.
 
-1. Enable Object Lock / a default retention (e.g. 30 days) on `vazute-backups`.
-2. Mint a backup-only R2 token with `PutObject` and no `DeleteObject`, and put it
-   in the `BACKUP_R2_*` variables.
-3. Re-probe afterwards: the same `DeleteObject` against a nonexistent key should
-   then answer `AccessDenied`.
+Proven, not assumed: an object uploaded with the backup key and then deleted with
+the same key was refused — `ObjectLockedByBucketPolicy: The object is locked by the
+bucket policy.` (The probe lives at `lock-probe/` so it can never be picked as the
+"latest" backup; it unlocks after 13 days.)
 
-Lifecycle *expiry* is configured (`scripts/configure_r2_lifecycle.sh`), but expiry
-is not immutability and does not address this.
+## [NEW] The Cloudflare Global API Key is stored on the production host — OPEN
+
+Found while fixing the above, and more serious than anything in the external audit.
+`/home/micu/cf_cred.env` holds the account's Global API Key in plaintext. With it,
+anyone who reaches the host can remove the lock rule just added and then delete
+the backups — and far beyond that: every DNS zone, every R2 bucket of every
+project, Workers, tunnels, TLS. For the audit's own scenario (host compromise) it
+is total account takeover, not backup loss.
+
+Nothing running uses it. The analytics bot (`cf_bot.service`) was moved to a
+scoped token on 2026-09-01 — its source says so — but the key file was left
+behind in the same session. The only other reference is `vps-migration/
+cutover-tunnel.sh`, a one-off from 2026-08-17.
+
+Remediation, all owner actions: roll the Global API Key in the dashboard (so the
+copy on disk is dead), delete `cf_cred.env`, and keep any future global key off
+the host.
 
 ## [SEC-HIGH-01] SSE holds a PostgreSQL connection — NOT TRUE (already correct)
 
