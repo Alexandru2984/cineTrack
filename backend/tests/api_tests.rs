@@ -1920,6 +1920,106 @@ async fn test_refresh_reuse_after_grace_is_theft() {
 
 #[actix_web::test]
 #[ignore = "requires test DB"]
+async fn test_grace_retries_do_not_sign_out_other_devices() {
+    // Every retry inside the grace window mints a live token in the same family.
+    // The per-account cap used to count rows, so a burst of retries on one device
+    // pushed the account's other devices out. The cap counts sessions now.
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+
+    let (_, other_device, _) =
+        register_user(&app, "gracecap", "gracecap@mailbox.dev", "Pass1234").await;
+    let (_, retrying_device) = login_user(&app, "gracecap@mailbox.dev", "Pass1234").await;
+
+    for _ in 0..8 {
+        let req = actix_test::TestRequest::post()
+            .uri("/api/auth/refresh")
+            .set_json(json!({ "refresh_token": &retrying_device }))
+            .peer_addr(peer_addr())
+            .to_request();
+        let resp = actix_test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 200, "Retries inside grace are answered");
+    }
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/auth/refresh")
+        .set_json(json!({ "refresh_token": &other_device }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(
+        resp.status(),
+        200,
+        "Another device's session must survive a burst of retries elsewhere"
+    );
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn test_rotation_prunes_tokens_orphaned_by_grace_retries() {
+    // A grace retry leaves two live tokens in one family and the client keeps
+    // one. When the kept one rotates normally, the orphan must stop working
+    // rather than stay valid until it expires.
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+
+    let (_, first, _) = register_user(&app, "graceorph", "graceorph@mailbox.dev", "Pass1234").await;
+
+    let mut successors = Vec::new();
+    for _ in 0..2 {
+        let req = actix_test::TestRequest::post()
+            .uri("/api/auth/refresh")
+            .set_json(json!({ "refresh_token": &first }))
+            .peer_addr(peer_addr())
+            .to_request();
+        let resp = actix_test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 200);
+        successors.push(refresh_cookie_from_response(&resp));
+    }
+    let (orphan, kept) = (&successors[0], &successors[1]);
+
+    // The burst is older than the grace window by the time the client next
+    // refreshes with the token it kept.
+    sqlx::query("UPDATE refresh_tokens SET created_at = NOW() - INTERVAL '5 minutes'")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/auth/refresh")
+        .set_json(json!({ "refresh_token": kept }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200, "The kept token rotates normally");
+    let current = refresh_cookie_from_response(&resp);
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/auth/refresh")
+        .set_json(json!({ "refresh_token": orphan }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 401, "The orphaned sibling no longer works");
+
+    // Pruning the orphan is not a theft verdict: the live session is untouched.
+    let req = actix_test::TestRequest::post()
+        .uri("/api/auth/refresh")
+        .set_json(json!({ "refresh_token": &current }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(
+        resp.status(),
+        200,
+        "The session the client kept still refreshes"
+    );
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
 async fn test_logout_invalidates_refresh_token() {
     let pool = setup_pool().await;
     clean_db(&pool).await;
