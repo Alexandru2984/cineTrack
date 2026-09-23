@@ -293,15 +293,34 @@ header never reaches the message. Unit test in `services/email.rs`.
   17 hooks, and passes static arguments only. `admin`, `analytics` and `uptime`
   have their own logins.
 
-### Recommendations for the host, not applied
+### Host changes
 
-- **Dozzle** holds `docker.sock` and is protected by basic auth alone: one
-  apr1-MD5 entry, and no rate limit on attempts. Actions and shell are off, so
-  it reads logs only. Those logs include Văzute user ids, IPs and user agents.
-  Put it behind Cloudflare Access, as Portainer already is.
-- **coturn** denies loopback and private peers, but not the host's own public
-  address. Add `denied-peer-ip=185.254.97.77`. Only cloudflared's connected
-  QUIC sockets are reachable that way today.
+- **Dozzle is now behind Cloudflare Access (applied 2026-09-23).** It holds
+  `docker.sock`, and was protected only by basic auth: a single apr1-MD5
+  entry, with no rate limit on attempts. Actions and shell are off, so it can
+  only read logs, but those logs include Văzute user ids, IPs and user agents.
+  It now has the same setup as Portainer:
+  - an Access application with the same "Owner only" policy;
+  - a bypass application for `/.well-known/acme-challenge/`.
+
+  Basic auth stays on as a second layer. Checks:
+  - the site redirects to the Access login;
+  - `certbot renew --dry-run` for the certificate succeeds through the new apps.
+- **coturn: denying the host's own address was tried and reverted.** Adding
+  `denied-peer-ip=185.254.97.77` refused relaying to the host, as intended.
+  Tested with `turnutils_uclient`:
+  - 403 for the host;
+  - 403 for loopback;
+  - allowed for a public peer.
+
+  It also refused relay-to-relay calls. When both callers need TURN, each one's
+  peer is the other's relay address on this same host, and client-to-client
+  mode failed with 403 until the line was removed. coturn filters peers by
+  address only, not by port, so the relay range cannot be carved out.
+
+  What the line would have protected is small: cloudflared's connected QUIC
+  sockets, which discard foreign datagrams. The configuration is back to its
+  original state, and relay-to-relay was re-tested working. Accepted as is.
 - **Cloudflare Global API Key** in `~/cf_cred.env`: kept by the owner's
   decision, mode 600. Accepted.
 
