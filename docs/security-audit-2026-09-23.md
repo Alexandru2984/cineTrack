@@ -304,3 +304,46 @@ header never reaches the message. Unit test in `services/email.rs`.
   QUIC sockets are reachable that way today.
 - **Cloudflare Global API Key** in `~/cf_cred.env`: kept by the owner's
   decision, mode 600. Accepted.
+
+## Closing pass
+
+Read after the second pass to leave no module unexamined:
+- `stats`, `badges` (route and service), `push`, `client_errors`, `csp_report`,
+  `import` and `media` (rating, reactions, providers);
+- the SQL-building paths of `tmdb`, `catalog`, `catalog_repair`,
+  `release_schedule` and `discovery`.
+
+`assets.rs` and `storage.rs` have not changed since they were read in full on
+2026-09-15.
+
+Verified clean:
+- **No dynamic SQL anywhere in the backend.** A sweep of every `sqlx::query*`
+  call found six that do not take a string literal. All six are compile-time
+  constants: `concat!` of literal fragments, a `const &str`, or a `match`
+  between two literals.
+- **Stats and badges.** All 21 queries are filtered on the caller's `user_id`.
+- **Push.** A delivery joins `tracked.user_id = device.user_id`, so a device is
+  only told about its owner's own library, and the payload is catalog text only.
+- **Collectors.** `client_errors` requires a session. `csp_report` caps each
+  body at 8 KB. Both log structured JSON, so newlines are escaped, and both drop
+  the query and fragment from every URL.
+- **Import.** Only three named fields are accepted, each once. Titles are
+  capped, and the quota is checked before a job is created. Rejection reasons
+  are fixed strings, never file content. nginx buffers the whole body before
+  the backend sees it (`client_body_timeout 15s`), so a slow upload cannot hold
+  a slot.
+
+Known limits, recorded rather than changed:
+- **Community rating.** It includes private accounts' ratings, behind a floor
+  of 3. Someone who controls two accounts and already knows that a given private
+  member rated a given obscure title can subtract their own two ratings and read
+  that member's. This needs prior knowledge of both facts. Raising the floor
+  moves the number of accounts needed, not the principle. Excluding private
+  ratings entirely is a product decision.
+- **Episode reactions.** Counts are shown with no floor, so the same reasoning
+  applies. A reaction is an emoji on an episode the member has watched.
+- **Import slots.** The two slots are global and held for the whole job, which
+  can take minutes of TMDB lookups. Two free accounts can keep the importer busy
+  for everyone. It is an availability limit on a secondary feature, and it
+  exists to protect the TMDB quota. A per-account queue would lift it if
+  imports ever become common.
