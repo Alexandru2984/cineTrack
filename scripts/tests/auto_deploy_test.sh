@@ -26,6 +26,9 @@ git -C "$REPO" config user.email deploy@test.invalid
 git -C "$REPO" config user.name "Deploy Test"
 
 printf 'services: {}\n' > "$REPO/docker-compose.prod.yml"
+mkdir -p "$REPO/ops/prometheus"
+printf 'global: {}\n' > "$REPO/ops/prometheus/prometheus.yml"
+printf 'groups: [] # base rules\n' > "$REPO/ops/prometheus/cinetrack-alerts.yml"
 printf 'vhost\n' > "$REPO/nginx/vazute.micutu.com.conf"
 cat > "$REPO/scripts/provision_db_role.sh" <<'PROV'
 #!/usr/bin/env bash
@@ -51,6 +54,11 @@ git -C "$REPO" add -A
 git -C "$REPO" commit --quiet -m "touches the mobile app"
 TOUCHES_MOBILE="$(git -C "$REPO" rev-parse HEAD)"
 
+printf 'groups: [] # changed rules\n' > "$REPO/ops/prometheus/cinetrack-alerts.yml"
+git -C "$REPO" add -A
+git -C "$REPO" commit --quiet -m "changes the alert rules"
+RULES_CHANGED="$(git -C "$REPO" rev-parse HEAD)"
+
 STUB_DIR="$WORK_DIR/bin"
 mkdir -p "$STUB_DIR"
 
@@ -60,8 +68,13 @@ cat > "$STUB_DIR/docker" <<'STUB'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$STUB_ACTIONS"
 case "$1" in
-  inspect) printf '%s' "${STUB_DEPLOYED_REVISION:-}"; exit 0 ;;
+  inspect)
+    # The monitoring sync asks which directories Prometheus mounts.
+    if [[ "$*" == *Mounts* ]]; then printf '%s\n' "${STUB_PROM_MOUNT:-}"; exit 0; fi
+    printf '%s' "${STUB_DEPLOYED_REVISION:-}"; exit 0 ;;
   image)   exit 0 ;;   # `image inspect`: the saved images exist
+  run)     [[ "$*" == *promtool* ]] && exit "${STUB_PROMTOOL_EXIT:-0}" ;;
+  exec)    printf 'prometheus_config_last_reload_successful %s\n' "${STUB_PROM_RELOAD:-1}"; exit 0 ;;
 esac
 exit 0
 STUB
@@ -102,6 +115,8 @@ chmod +x "$STUB_DIR/curl"
 # Set here, not inside run_deploy: that runs in a command substitution, so any
 # assignment it makes dies with the subshell.
 ACTIONS="$WORK_DIR/actions.log"
+MONITORING_DIR="$WORK_DIR/state/monitoring/prometheus"
+MONITORING_METRICS="$WORK_DIR/monitoring.prom"
 
 run_deploy() {
   local metrics="$WORK_DIR/metrics.prom"
@@ -119,6 +134,12 @@ run_deploy() {
   AUTO_DEPLOY_VHOST_DEPLOYED="$WORK_DIR/vhost.deployed" \
   AUTO_DEPLOY_HEALTH_ATTEMPTS=2 \
   AUTO_DEPLOY_HEALTH_INTERVAL=0 \
+  AUTO_DEPLOY_MONITORING_DIR="$MONITORING_DIR" \
+  AUTO_DEPLOY_MONITORING_METRICS_FILE="$MONITORING_METRICS" \
+  AUTO_DEPLOY_RELOAD_WAIT=0 \
+  STUB_PROM_MOUNT="${STUB_PROM_MOUNT-$MONITORING_DIR}" \
+  STUB_PROMTOOL_EXIT="${STUB_PROMTOOL_EXIT:-0}" \
+  STUB_PROM_RELOAD="${STUB_PROM_RELOAD:-1}" \
   STUB_DEPLOYED_REVISION="$2" \
   STUB_CHECKS_FILE="$3" \
   STUB_STATUS_FILE="$4" \
@@ -473,6 +494,61 @@ if is_state "$out" blocked_ci; then
   pass "a skipped release verdict does not ship"
 else
   fail "a skipped release verdict was accepted"
+fi
+
+# ── Prometheus follows the revision in production ──────────────────────
+#
+# It used to mount its files one at a time from the working checkout, and a file
+# bind mount keeps the inode it started with: eight alerts were merged and never
+# loaded. The sync is the one writer of the directory Prometheus now mounts.
+sync_success() { awk '$1 == "cinetrack_monitoring_sync_success" {print $2}' "$MONITORING_METRICS" 2>/dev/null; }
+rules_on_disk() { cat "$MONITORING_DIR/cinetrack-alerts.yml" 2>/dev/null; }
+reloads() { grep -c 'kill --signal HUP' "$ACTIONS" || true; }
+
+rm -rf "$MONITORING_DIR" "$MONITORING_METRICS"
+run_deploy "$BASE" "$BASE" "$GREEN" "$NO_STATUS" 1 >/dev/null
+if [[ "$(rules_on_disk)" == *"base rules"* && "$(reloads)" == 1 && "$(sync_success)" == 1 ]]; then
+  pass "the first sync installs the running revision's rules and reloads Prometheus"
+else
+  fail "first sync: rules='$(rules_on_disk)' reloads=$(reloads) success=$(sync_success)"
+fi
+
+run_deploy "$BASE" "$BASE" "$GREEN" "$NO_STATUS" 1 >/dev/null
+if [[ "$(reloads)" == 0 && "$(sync_success)" == 1 ]]; then
+  pass "an unchanged configuration is not reloaded again"
+else
+  fail "unchanged sync: reloads=$(reloads) success=$(sync_success)"
+fi
+
+# A deploy that waits on CI must not put the next revision's rules in front of
+# the revision that is still the one running.
+run_deploy "$RULES_CHANGED" "$BASE" "$NO_CHECKS" "$NO_STATUS" 1 >/dev/null
+if [[ "$(rules_on_disk)" == *"base rules"* && "$(sync_success)" == 1 ]]; then
+  pass "monitoring follows the running revision, not the one waiting on CI"
+else
+  fail "waiting deploy synced ahead of production: rules='$(rules_on_disk)'"
+fi
+
+STUB_PROMTOOL_EXIT=1 run_deploy "$RULES_CHANGED" "$RULES_CHANGED" "$GREEN" "$NO_STATUS" 1 >/dev/null
+if [[ "$(rules_on_disk)" == *"base rules"* && "$(reloads)" == 0 && "$(sync_success)" == 0 ]]; then
+  pass "rules that fail promtool are not installed, and the failure is reported"
+else
+  fail "invalid rules: rules='$(rules_on_disk)' reloads=$(reloads) success=$(sync_success)"
+fi
+
+STUB_PROM_RELOAD=0 run_deploy "$RULES_CHANGED" "$RULES_CHANGED" "$GREEN" "$NO_STATUS" 1 >/dev/null
+if [[ "$(sync_success)" == 0 ]]; then
+  pass "a reload Prometheus rejects is reported as a failed sync"
+else
+  fail "a rejected reload was reported as success"
+fi
+
+rm -rf "$MONITORING_DIR"
+STUB_PROM_MOUNT="" run_deploy "$RULES_CHANGED" "$RULES_CHANGED" "$GREEN" "$NO_STATUS" 1 >/dev/null
+if [[ "$(sync_success)" == 0 ]]; then
+  pass "a Prometheus that does not mount the synced directory is reported, not trusted"
+else
+  fail "a container on the old file mounts was reported as synced"
 fi
 
 if (( FAILURES > 0 )); then

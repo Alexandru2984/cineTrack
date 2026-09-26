@@ -72,3 +72,54 @@ tests:
               description: >-
                 restore_drill.prom is not reaching the node exporter, so a failing
                 or unscheduled drill would go unnoticed.
+
+  - name: a failed monitoring sync warns
+    interval: 1m
+    input_series:
+      - series: cinetrack_monitoring_sync_success
+        values: "0x60"
+      - series: cinetrack_monitoring_sync_timestamp_seconds
+        values: "0+60x60"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: CineTrackMonitoringSyncFailed
+        exp_alerts: []
+      - eval_time: 45m
+        alertname: CineTrackMonitoringSyncFailed
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: Prometheus is not running the deployed monitoring configuration
+              description: >-
+                auto_deploy.sh could not bring Prometheus onto the alert rules of the
+                revision in production. Read the auto-deploy log for the reason: rules
+                failing promtool, a rejected reload, or a container that does not
+                mount the synced directory.
+      # The sync ran every minute, so it is not stale.
+      - eval_time: 45m
+        alertname: CineTrackMonitoringSyncStale
+        exp_alerts: []
+
+  - name: a sync that stopped running goes stale after an hour
+    interval: 5m
+    input_series:
+      - series: cinetrack_monitoring_sync_timestamp_seconds
+        values: "0x40"
+      - series: cinetrack_monitoring_sync_success
+        values: "1x40"
+    alert_rule_test:
+      - eval_time: 50m
+        alertname: CineTrackMonitoringSyncStale
+        exp_alerts: []
+      - eval_time: 90m
+        alertname: CineTrackMonitoringSyncStale
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: The monitoring configuration sync has stopped running
+              description: >-
+                auto_deploy.sh syncs the monitoring configuration on every run, and
+                runs every ten minutes. Nothing has synced for an hour, so either the
+                cron entry is gone or the script stops before it gets there.

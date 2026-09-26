@@ -90,6 +90,34 @@ groups:
             No restore drill has started in eight days. Check that the weekly
             cron entry for scripts/backup_restore_drill.sh is still installed.
 
+      # Prometheus loads its rules from a directory that auto-deploy keeps on the
+      # production revision. Before that, rule changes silently never reached the
+      # running Prometheus; these make a broken sync as loud as a broken backup.
+      - alert: CineTrackMonitoringSyncFailed
+        expr: cinetrack_monitoring_sync_success == 0
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: Prometheus is not running the deployed monitoring configuration
+          description: >-
+            auto_deploy.sh could not bring Prometheus onto the alert rules of the
+            revision in production. Read the auto-deploy log for the reason: rules
+            failing promtool, a rejected reload, or a container that does not
+            mount the synced directory.
+
+      - alert: CineTrackMonitoringSyncStale
+        expr: time() - cinetrack_monitoring_sync_timestamp_seconds > 3600
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: The monitoring configuration sync has stopped running
+          description: >-
+            auto_deploy.sh syncs the monitoring configuration on every run, and
+            runs every ten minutes. Nothing has synced for an hour, so either the
+            cron entry is gone or the script stops before it gets there.
+
       - alert: CineTrackRestoreDrillMetricsMissing
         expr: absent(cinetrack_restore_drill_timestamp_seconds)
         for: 1h
