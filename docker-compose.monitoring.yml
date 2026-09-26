@@ -31,7 +31,7 @@ services:
     # without it becoming world-readable on a host shared with other services.
     user: "nobody:${METRICS_GID:-1001}"
     command:
-      - --config.file=/etc/prometheus/prometheus.yml
+      - --config.file=/etc/prometheus/config/prometheus.yml
       - --storage.tsdb.path=/prometheus
       - --storage.tsdb.retention.time=30d
     read_only: true
@@ -46,8 +46,13 @@ services:
     logging: *monitoring-logging
     networks: [metrics, monitoring]
     volumes:
-      - ./ops/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      - ./ops/prometheus/cinetrack-alerts.yml:/etc/prometheus/rules/cinetrack-alerts.yml:ro
+      # A directory, not one mount per file. A file bind mount keeps the inode it
+      # started with, and `git pull` writes new files, so the container went on
+      # reading configuration that had been replaced: eight alerts were merged
+      # and never loaded. In production this is the directory
+      # scripts/auto_deploy.sh keeps on the deployed revision and reloads
+      # Prometheus from. Unset, it is the checkout, for running this by hand.
+      - ${CINETRACK_PROMETHEUS_CONFIG_DIR:-./ops/prometheus}:/etc/prometheus/config:ro
       # Created by scripts/render_metrics_token.sh from METRICS_BEARER_TOKEN.
       - ./ops/prometheus/metrics_token.generated:/etc/prometheus/secrets/metrics_token:ro
       - prometheus_data:/prometheus

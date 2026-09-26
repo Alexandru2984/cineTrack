@@ -72,6 +72,16 @@ REPO_SLUG="${AUTO_DEPLOY_REPO_SLUG:-}"
 # being worked on, and merging under it would move somebody's branch. A
 # detached worktree also means a half-edited file cannot reach an image.
 BUILD_DIR="${AUTO_DEPLOY_BUILD_DIR:-$STATE_DIR/build}"
+# Where Prometheus reads its configuration and alert rules from, as a mounted
+# directory (see `sync_monitoring`). Like the build tree, never the working
+# checkout.
+MONITORING_DIR="${AUTO_DEPLOY_MONITORING_DIR:-$STATE_DIR/monitoring/prometheus}"
+MONITORING_METRICS_FILE="${AUTO_DEPLOY_MONITORING_METRICS_FILE:-$STATE_DIR/monitoring_sync.prom}"
+PROMETHEUS_CONTAINER="${AUTO_DEPLOY_PROMETHEUS_CONTAINER:-cinetrack-monitoring-prometheus-1}"
+# The image docker-compose.monitoring.yml runs, so rules are validated by the
+# promtool that will load them.
+PROMTOOL_IMAGE="${AUTO_DEPLOY_PROMTOOL_IMAGE:-prom/prometheus:v3.14.0@sha256:5ce7540c3c00ef4ab0c9d2c995c6a5b9c421f44b4a115d97a2c7af3b1c21cbb0}"
+MONITORING_FILES=(prometheus.yml cinetrack-alerts.yml)
 
 # Checks that cannot speak for what this deploys.
 #
@@ -147,6 +157,81 @@ report() {
   say "state=$current revision=${revision:0:8}"
 }
 
+# Keep the running Prometheus on the configuration of the revision in production.
+#
+# Prometheus used to mount prometheus.yml and the alert rules one file at a time
+# from the working checkout. A file bind mount holds the inode it was given, and
+# `git pull` replaces files rather than editing them, so the container kept
+# reading the old copies. Eight auto-deploy alerts merged in August were never
+# loaded, and nothing noticed for a month. Prometheus now mounts this directory,
+# and this function is the one writer. It copies the files from the deployed
+# commit, validates the rules with the same promtool Prometheus runs, swaps them
+# in by rename, and asks Prometheus to reload. Every outcome is written as a
+# metric, so a sync that stops working raises an alert rather than going quiet.
+sync_monitoring() {
+  local revision="$1" staged changed=0 ok=0 file
+  (( DRY_RUN == 1 )) && return 0
+  staged="$(mktemp -d)"
+  if git -C "$REPO_DIR" archive "$revision" -- \
+      "${MONITORING_FILES[@]/#/ops/prometheus/}" | tar -x -C "$staged" 2>/dev/null; then
+    mkdir -p "$MONITORING_DIR"
+    for file in "${MONITORING_FILES[@]}"; do
+      cmp -s "$staged/ops/prometheus/$file" "$MONITORING_DIR/$file" || changed=1
+    done
+    if (( changed == 0 )); then
+      ok=1
+    elif ! docker run --rm --volume "$staged/ops/prometheus:/config:ro" \
+        --entrypoint promtool "$PROMTOOL_IMAGE" check rules /config/cinetrack-alerts.yml >/dev/null 2>&1; then
+      say "monitoring rules at ${revision:0:8} fail promtool; keeping the loaded ones"
+    else
+      for file in "${MONITORING_FILES[@]}"; do
+        cp "$staged/ops/prometheus/$file" "$MONITORING_DIR/.$file.new"
+        chmod 0644 "$MONITORING_DIR/.$file.new"
+        mv -f "$MONITORING_DIR/.$file.new" "$MONITORING_DIR/$file"
+      done
+      # A reload that Prometheus rejects keeps the previous configuration
+      # running, so success is read back from Prometheus, not assumed.
+      if docker kill --signal HUP "$PROMETHEUS_CONTAINER" >/dev/null 2>&1; then
+        sleep "${AUTO_DEPLOY_RELOAD_WAIT:-3}"
+        if docker exec "$PROMETHEUS_CONTAINER" wget -qO- http://localhost:9090/metrics 2>/dev/null \
+            | grep -q '^prometheus_config_last_reload_successful 1$'; then
+          ok=1
+          say "monitoring configuration synced to ${revision:0:8} and reloaded"
+        else
+          say "Prometheus did not accept the configuration from ${revision:0:8}"
+        fi
+      else
+        say "could not signal $PROMETHEUS_CONTAINER to reload"
+      fi
+    fi
+  else
+    say "could not read the monitoring files at ${revision:0:8}"
+  fi
+  rm -rf "$staged"
+
+  # Files written here reach Prometheus only if this is the directory it
+  # mounts. A container still on the old file mounts reloads happily and keeps
+  # the old rules, which is the exact failure this exists to end.
+  if (( ok == 1 )) && ! docker inspect --format '{{range .Mounts}}{{.Source}}{{"\n"}}{{end}}' \
+      "$PROMETHEUS_CONTAINER" 2>/dev/null | grep -qxF "$MONITORING_DIR"; then
+    say "$PROMETHEUS_CONTAINER does not mount $MONITORING_DIR; recreate it from docker-compose.monitoring.yml"
+    ok=0
+  fi
+
+  local tmp
+  tmp="$(mktemp "${MONITORING_METRICS_FILE}.XXXXXX")"
+  {
+    printf '# HELP cinetrack_monitoring_sync_success Whether Prometheus runs the monitoring configuration of the deployed revision.\n'
+    printf '# TYPE cinetrack_monitoring_sync_success gauge\n'
+    printf 'cinetrack_monitoring_sync_success %s\n' "$ok"
+    printf '# HELP cinetrack_monitoring_sync_timestamp_seconds When the monitoring sync last ran.\n'
+    printf '# TYPE cinetrack_monitoring_sync_timestamp_seconds gauge\n'
+    printf 'cinetrack_monitoring_sync_timestamp_seconds %s\n' "$(date -u +%s)"
+  } > "$tmp"
+  chmod 0644 "$tmp"
+  mv -f "$tmp" "$MONITORING_METRICS_FILE"
+}
+
 compose() {
   docker compose -p cinetrack -f "$BUILD_DIR/docker-compose.prod.yml" \
     --project-directory "$BUILD_DIR" --env-file "$ENV_FILE" "$@"
@@ -216,6 +301,13 @@ fi
 git -C "$REPO_DIR" fetch --quiet origin main 2>/dev/null || say "fetch failed; using the last known $BRANCH"
 target="$(git -C "$REPO_DIR" rev-parse "$BRANCH")"
 current="$(deployed_revision)"
+
+# Monitoring follows what is running, whatever this run goes on to decide about
+# the next revision, so a deploy blocked on CI does not also freeze the alerts.
+if [[ -n "$current" && "$current" != unknown ]] \
+  && git -C "$REPO_DIR" cat-file -e "${current}^{commit}" 2>/dev/null; then
+  sync_monitoring "$current"
+fi
 
 if [[ "$target" == "$current" ]]; then
   report idle "$target"
@@ -428,6 +520,7 @@ if healthy; then
   if edge_healthy; then
     say "healthy on ${target:0:8}"
     report deployed "$target"
+    sync_monitoring "$target"
     exit 0
   fi
   # The release itself is good. Something between the containers and the

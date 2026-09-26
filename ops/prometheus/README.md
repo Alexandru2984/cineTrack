@@ -10,12 +10,27 @@ scrape_configs:
       - targets: ["127.0.0.1:8090"]
 ```
 
-Load `cinetrack-alerts.yml` through Prometheus `rule_files`. Validate the live
-configuration before reloading it:
+In production, nobody reloads the rules by hand. `docker-compose.monitoring.yml`
+mounts the directory named by `CINETRACK_PROMETHEUS_CONFIG_DIR` (set in
+`.env.prod` to `~/.local/state/cinetrack/monitoring/prometheus`).
+`scripts/auto_deploy.sh` keeps that directory on the revision that is running
+in production. On every run, and again right after a deploy, it takes
+`prometheus.yml` and `cinetrack-alerts.yml` from that revision, validates the
+rules with Prometheus's own promtool, swaps them in, and sends Prometheus a
+SIGHUP. It then reads back `prometheus_config_last_reload_successful`, and
+publishes the outcome as `cinetrack_monitoring_sync_success` and
+`cinetrack_monitoring_sync_timestamp_seconds`.
+
+Do not go back to mounting these files one at a time. A file bind mount keeps
+the inode it started with, and `git pull` replaces files rather than editing
+them. The container then keeps reading the old copy: that is how eight alerts
+merged in August never reached the running Prometheus.
+
+The rules carry unit tests in `cinetrack-alerts.test.yml`, and CI runs both:
 
 ```bash
-promtool check rules /path/to/cineTrack/ops/prometheus/cinetrack-alerts.yml
-promtool check config /etc/prometheus/prometheus.yml
+promtool check rules ops/prometheus/cinetrack-alerts.yml
+(cd ops/prometheus && promtool test rules cinetrack-alerts.test.yml)
 ```
 
 Backup and release-worker metrics use the node exporter textfile collector.
