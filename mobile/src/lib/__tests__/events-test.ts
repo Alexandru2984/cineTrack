@@ -1,3 +1,4 @@
+import { API_BASE_URL } from '@/lib/config';
 import { connectEventStream, parseFrame } from '@/lib/events';
 
 describe('parseFrame', () => {
@@ -67,6 +68,23 @@ describe('connectEventStream', () => {
     await Promise.resolve();
     await Promise.resolve();
   };
+
+  it('asks for the stream at /api/events, not under a second /api', async () => {
+    // API_BASE_URL already ends in /api. Joining another /api onto it sent every
+    // phone to /api/api/events, which production answered with 404, so the
+    // stream never connected on mobile and nothing here noticed: no test looked
+    // at the URL.
+    answerWith(200);
+
+    const stop = connectEventStream(() => 'good-token', noop, jest.fn());
+    await settle();
+
+    const url = String(mockFetch.mock.calls[0][0]);
+    expect(url).toBe(`${API_BASE_URL}/events`);
+    expect(url.endsWith('/api/events')).toBe(true);
+    expect(url).not.toContain('/api/api/');
+    stop();
+  });
 
   it('refreshes the session when the stream is refused, instead of looping on a dead token', async () => {
     // The bug this covers: a 401 was handled like any other failure, so the
