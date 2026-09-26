@@ -62,6 +62,45 @@ groups:
           summary: CineTrack backup uses application R2 credentials
           description: Configure a least-privilege BACKUP_R2 credential set.
 
+      # A backup that uploads and parses is still not proven restorable; the
+      # weekly drill is what proves it. The drill went unscheduled for two weeks
+      # without a single signal, across a schema change, because nothing watched
+      # it. It writes these metrics on every run, success or failure.
+      - alert: CineTrackRestoreDrillFailed
+        expr: cinetrack_restore_drill_success == 0
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: CineTrack backup restore drill failed
+          description: >-
+            The latest backup could not be restored into a scratch database, so
+            the backups are not known to be usable. Run
+            scripts/backup_restore_drill.sh by hand and read its output.
+
+      # Weekly cron, so eight days allows one late or skipped Sunday before firing.
+      - alert: CineTrackRestoreDrillStale
+        expr: time() - cinetrack_restore_drill_timestamp_seconds > 8 * 86400
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: CineTrack backup restore drill has not run for over a week
+          description: >-
+            No restore drill has started in eight days. Check that the weekly
+            cron entry for scripts/backup_restore_drill.sh is still installed.
+
+      - alert: CineTrackRestoreDrillMetricsMissing
+        expr: absent(cinetrack_restore_drill_timestamp_seconds)
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: CineTrack restore drill metrics are missing
+          description: >-
+            restore_drill.prom is not reaching the node exporter, so a failing
+            or unscheduled drill would go unnoticed.
+
       # Releases are run by hand on purpose — no CI job can reach this host, so
       # a compromised build action cannot reach production either. The cost is
       # that forgetting to deploy is invisible, and it already cost two days of

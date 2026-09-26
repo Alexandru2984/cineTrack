@@ -1,0 +1,74 @@
+# Unit tests for the alert rules: `promtool test rules` replays these series and
+# checks which alerts fire. `promtool check rules` only proves the file parses;
+# this proves a rule fires on the values it was written for, and stays quiet on
+# a healthy system.
+rule_files:
+  - cinetrack-alerts.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: a failed restore drill pages
+    interval: 1m
+    input_series:
+      - series: cinetrack_restore_drill_success
+        values: "0x30"
+      - series: cinetrack_restore_drill_timestamp_seconds
+        values: "0x30"
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: CineTrackRestoreDrillFailed
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+            exp_annotations:
+              summary: CineTrack backup restore drill failed
+              description: >-
+                The latest backup could not be restored into a scratch database, so
+                the backups are not known to be usable. Run
+                scripts/backup_restore_drill.sh by hand and read its output.
+
+  - name: a drill that stopped running goes stale after eight days
+    # Scraped every five minutes, inside the default five-minute lookback, so
+    # the series stays present between samples as it does in production.
+    interval: 5m
+    input_series:
+      # The last drill started at t=0 and none has run since.
+      - series: cinetrack_restore_drill_timestamp_seconds
+        values: "0x3000"
+      - series: cinetrack_restore_drill_success
+        values: "1x3000"
+    alert_rule_test:
+      - eval_time: 7d
+        alertname: CineTrackRestoreDrillStale
+        exp_alerts: []
+      - eval_time: 9d
+        alertname: CineTrackRestoreDrillStale
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: CineTrack backup restore drill has not run for over a week
+              description: >-
+                No restore drill has started in eight days. Check that the weekly
+                cron entry for scripts/backup_restore_drill.sh is still installed.
+      - eval_time: 9d
+        alertname: CineTrackRestoreDrillFailed
+        exp_alerts: []
+
+  - name: missing drill metrics are reported
+    interval: 1m
+    input_series:
+      - series: cinetrack_backup_last_run_timestamp_seconds
+        values: "0x120"
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: CineTrackRestoreDrillMetricsMissing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: CineTrack restore drill metrics are missing
+              description: >-
+                restore_drill.prom is not reaching the node exporter, so a failing
+                or unscheduled drill would go unnoticed.

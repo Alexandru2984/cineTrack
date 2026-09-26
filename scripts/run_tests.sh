@@ -191,6 +191,9 @@ docker run --rm --volume "$ROOT_DIR:$ROOT_DIR:ro" --workdir "$ROOT_DIR" \
 docker run --rm --volume "$ROOT_DIR:/repo:ro" --entrypoint promtool \
   prom/prometheus:v3.6.0@sha256:d9a702d3f7f398540e7190c4d80dbb8a0dc95c1e481e8ebd8a08e5bcf83cf735 \
   check rules /repo/ops/prometheus/cinetrack-alerts.yml
+docker run --rm --volume "$ROOT_DIR:/repo:ro" --workdir /repo/ops/prometheus --entrypoint promtool \
+  prom/prometheus:v3.6.0@sha256:d9a702d3f7f398540e7190c4d80dbb8a0dc95c1e481e8ebd8a08e5bcf83cf735 \
+  test rules cinetrack-alerts.test.yml
 
 section "Backend integration"
 TEST_DB_PORT="$INTEGRATION_DB_PORT" docker compose -p "$TEST_PROJECT" \
