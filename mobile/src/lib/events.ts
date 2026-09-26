@@ -75,7 +75,10 @@ export function connectEventStream(
 
     controller = new AbortController();
     try {
-      const response = await expoFetch(`${API_BASE_URL}/api/events`, {
+      // API_BASE_URL already ends in /api. The stream was requested at
+      // /api/api/events from its first release, and production answered every
+      // phone with 404, so live updates on mobile never arrived at all.
+      const response = await expoFetch(`${API_BASE_URL}/events`, {
         headers: { Authorization: `Bearer ${token}` },
         signal: controller.signal,
       });
