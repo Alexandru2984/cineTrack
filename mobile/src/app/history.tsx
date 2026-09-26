@@ -1,7 +1,7 @@
 import DateTimePicker, {
   type DateTimePickerEvent,
 } from '@react-native-community/datetimepicker';
-import { Redirect, router } from 'expo-router';
+import { router } from 'expo-router';
 import {
   CalendarDays,
   Check,
@@ -32,6 +32,7 @@ import { AppText } from '@/components/app-text';
 import { Poster } from '@/components/poster';
 import { ScreenHeader } from '@/components/screen-header';
 import { EmptyState, ErrorState, LoadingState } from '@/components/screen-state';
+import { SignedOutRedirect } from '@/components/signed-out-redirect';
 import { radius, spacing } from '@/constants/theme';
 import {
   useCreateHistory,
@@ -121,7 +122,7 @@ export default function HistoryScreen() {
       : unique;
   }, [library.data?.pages, libraryQuery]);
 
-  if (!hasSession) return <Redirect href="/" />;
+  if (!hasSession) return <SignedOutRedirect status={status} />;
 
   const openLog = (nextTarget: HistoryTarget) => {
     create.reset();

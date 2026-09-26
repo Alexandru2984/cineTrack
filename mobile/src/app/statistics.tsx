@@ -1,4 +1,4 @@
-import { Redirect, router } from 'expo-router';
+import { router } from 'expo-router';
 import {
   ChevronLeft,
   ChevronRight,
@@ -23,6 +23,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { AppButton } from '@/components/app-button';
 import { AppText } from '@/components/app-text';
 import { EmptyState, ErrorState, LoadingState } from '@/components/screen-state';
+import { SignedOutRedirect } from '@/components/signed-out-redirect';
 import { radius, spacing } from '@/constants/theme';
 import {
   useGenreDistribution,
@@ -66,7 +67,7 @@ export default function StatisticsScreen() {
   const maxGenreCount = Math.max(1, ...visibleGenres.map((entry) => entry.count));
   const hasError = stats.isError || heatmap.isError || genres.isError || monthly.isError;
 
-  if (!hasSession) return <Redirect href="/" />;
+  if (!hasSession) return <SignedOutRedirect status={status} />;
 
   const refresh = async () => {
     setRefreshing(true);

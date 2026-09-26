@@ -1,4 +1,4 @@
-import { Redirect, router } from 'expo-router';
+import { router } from 'expo-router';
 import {
   ChevronRight,
   Globe2,
@@ -24,6 +24,7 @@ import { AppText } from '@/components/app-text';
 import { ListEditorSheet } from '@/components/list-editor-sheet';
 import { ScreenHeader } from '@/components/screen-header';
 import { EmptyState, ErrorState, LoadingState } from '@/components/screen-state';
+import { SignedOutRedirect } from '@/components/signed-out-redirect';
 import { radius, spacing } from '@/constants/theme';
 import {
   useCreateList,
@@ -54,7 +55,7 @@ export default function ListsScreen() {
   const deleteList = useDeleteList();
   const [editor, setEditor] = useState<EditorState>(null);
 
-  if (!hasSession) return <Redirect href="/" />;
+  if (!hasSession) return <SignedOutRedirect status={status} />;
 
   const save = (input: ListInput) => {
     if (!editor) return;

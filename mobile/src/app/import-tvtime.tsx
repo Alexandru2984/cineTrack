@@ -1,4 +1,3 @@
-import { Redirect } from 'expo-router';
 import {
   CheckCircle2,
   FileJson,
@@ -15,6 +14,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { AppButton } from '@/components/app-button';
 import { AppText } from '@/components/app-text';
 import { ErrorState, LoadingState } from '@/components/screen-state';
+import { SignedOutRedirect } from '@/components/signed-out-redirect';
 import { radius, spacing } from '@/constants/theme';
 import { useImportJob, useImportJobs, useStartImport } from '@/hooks/use-import';
 import { useT } from '@/hooks/use-t';
@@ -88,7 +88,7 @@ export default function ImportTVTimeScreen() {
     }
   }, [job, queryClient]);
 
-  if (!hasLocalSession(status)) return <Redirect href="/" />;
+  if (!hasLocalSession(status)) return <SignedOutRedirect status={status} />;
 
   const choose = async (kind: ImportFileKind) => {
     setSelectionError(null);
