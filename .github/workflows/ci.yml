@@ -603,6 +603,10 @@ jobs:
           docker run --rm --volume "$PWD:/repo:ro" --entrypoint promtool \
             prom/prometheus:v3.6.0@sha256:d9a702d3f7f398540e7190c4d80dbb8a0dc95c1e481e8ebd8a08e5bcf83cf735 \
             check rules /repo/ops/prometheus/cinetrack-alerts.yml
+          docker run --rm --volume "$PWD:/repo:ro" --workdir /repo/ops/prometheus \
+            --entrypoint promtool \
+            prom/prometheus:v3.6.0@sha256:d9a702d3f7f398540e7190c4d80dbb8a0dc95c1e481e8ebd8a08e5bcf83cf735 \
+            test rules cinetrack-alerts.test.yml
 
   e2e:
     name: Frontend E2E
