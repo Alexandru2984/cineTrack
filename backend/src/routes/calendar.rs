@@ -85,9 +85,28 @@ async fn new_episodes(
           )
           AND (
               $3::date IS NULL
-              OR (episodes.air_date, episodes.id) < ($3, $4)
+              OR episodes.air_date < $3
+              OR (
+                  episodes.air_date = $3
+                  AND (media.title, media.id, seasons.season_number, episodes.episode_number, episodes.id)
+                      > (
+                          SELECT anchor_media.title, anchor_media.id, anchor_season.season_number,
+                                 anchor.episode_number, anchor.id
+                          FROM episodes anchor
+                          JOIN seasons anchor_season ON anchor_season.id = anchor.season_id
+                          JOIN media anchor_media ON anchor_media.id = anchor_season.media_id
+                          WHERE anchor.id = $4
+                      )
+              )
           )
-        ORDER BY episodes.air_date DESC, episodes.id DESC
+        -- Newest day first, but inside a day in the order the episodes are
+        -- watched. A whole season released on one date used to come back in
+        -- random-UUID order (E10, E07, E08, E06, E09) because the id was the
+        -- only tie-breaker. The cursor is still (date, episode id), as every
+        -- installed client sends it: the rest of the position is read back
+        -- from the episode the cursor names, so no client has to change.
+        ORDER BY episodes.air_date DESC, media.title, media.id,
+                 seasons.season_number, episodes.episode_number, episodes.id
         LIMIT $6"#,
     )
     .bind(user_id)

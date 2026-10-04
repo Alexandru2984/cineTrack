@@ -2,6 +2,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import {
   Check,
   Heart,
+  MoreHorizontal,
   SlidersHorizontal,
   Star,
   Trash2,
@@ -72,7 +73,8 @@ export default function LibraryScreen() {
   const params = useLocalSearchParams<{ status?: string }>();
   const filter = requestedFilter(params.status) ?? 'all';
   const setFilter = (next: LibraryFilter) => router.setParams({ status: next });
-  const [statusItem, setStatusItem] = useState<TrackingItem | null>(null);
+  // The one item whose options sheet is open: status, rating, favorite, removal.
+  const [menuItem, setMenuItem] = useState<TrackingItem | null>(null);
   const [feedbackItem, setFeedbackItem] = useState<TrackingItem | null>(null);
   const tracking = useTrackingInfinite(filter === 'all' ? undefined : filter);
   const update = useUpdateTracking();
@@ -151,6 +153,9 @@ export default function LibraryScreen() {
           tracking.isFetchingNextPage ? <LoadingState label={t('common.loadingMore')} /> : null
         }
         renderItem={({ item }) => (
+          // One compact line per title. The four action buttons that used to sit
+          // under every title took half a phone screen per row, so only about
+          // four titles fitted; they live in the options sheet now, one tap away.
           <View style={[styles.row, { borderBottomColor: theme.border }]}>
             <Pressable
               accessibilityRole="button"
@@ -160,87 +165,47 @@ export default function LibraryScreen() {
                   params: { id: String(item.tmdb_id), type: item.media_type },
                 })
               }
-              style={({ pressed }) => [
-                styles.mainRow,
-                { opacity: pressed ? 0.72 : 1 },
-              ]}
+              style={({ pressed }) => [styles.mainRow, { opacity: pressed ? 0.72 : 1 }]}
             >
-              <Poster path={item.poster_path} width={54} height={81} />
+              <Poster path={item.poster_path} width={46} height={69} />
               <View style={styles.copy}>
                 <AppText variant="label" numberOfLines={2}>
                   {item.title}
                 </AppText>
-                <AppText variant="caption" muted>
+                <AppText variant="caption" muted numberOfLines={1}>
                   {t(item.media_type === 'tv' ? 'mediaType.tv' : 'mediaType.movie')}
+                  {' · '}
+                  {t(`status.${item.status}`)}
                 </AppText>
-                {item.rating ? (
-                  <AppText variant="caption" style={{ color: theme.warning }}>
-                    {t('library.rating', { value: item.rating })}
-                  </AppText>
+                {item.rating || item.is_favorite ? (
+                  <View style={styles.badges}>
+                    {item.rating ? (
+                      <View style={styles.badge}>
+                        <Star color={theme.warning} fill={theme.warning} size={13} />
+                        <AppText variant="caption" style={{ color: theme.warning }}>
+                          {t('library.rating', { value: item.rating })}
+                        </AppText>
+                      </View>
+                    ) : null}
+                    {item.is_favorite ? (
+                      <Heart color={theme.danger} fill={theme.danger} size={13} />
+                    ) : null}
+                  </View>
                 ) : null}
               </View>
             </Pressable>
-            <View style={styles.actions}>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={t('library.editRatingFor', { title: item.title })}
-                onPress={() => {
-                  update.reset();
-                  setFeedbackItem(item);
-                }}
-                style={[styles.iconButton, { borderColor: theme.border }]}
-              >
-                <Star
-                  color={item.rating ? theme.warning : theme.mutedText}
-                  fill={item.rating ? theme.warning : 'transparent'}
-                  size={18}
-                />
-              </Pressable>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={t('library.changeStatusFor', { title: item.title })}
-                onPress={() => setStatusItem(item)}
-                style={({ pressed }) => [
-                  styles.statusButton,
-                  {
-                    borderColor: theme.border,
-                    backgroundColor: theme.elevated,
-                    opacity: pressed ? 0.72 : 1,
-                  },
-                ]}
-              >
-                <SlidersHorizontal color={theme.mutedText} size={16} />
-                <AppText variant="caption" numberOfLines={1}>
-                  {t(`status.${item.status}`)}
-                </AppText>
-              </Pressable>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={
-                  item.is_favorite
-                    ? t('library.removeFavorite', { title: item.title })
-                    : t('library.addFavorite', { title: item.title })
-                }
-                onPress={() =>
-                  update.mutate({ id: item.id, is_favorite: !item.is_favorite })
-                }
-                style={[styles.iconButton, { borderColor: theme.border }]}
-              >
-                <Heart
-                  color={item.is_favorite ? theme.danger : theme.mutedText}
-                  fill={item.is_favorite ? theme.danger : 'transparent'}
-                  size={18}
-                />
-              </Pressable>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={t('library.removeFromLibraryFor', { title: item.title })}
-                onPress={() => confirmRemove(item)}
-                style={[styles.iconButton, { borderColor: theme.border }]}
-              >
-                <Trash2 color={theme.mutedText} size={18} />
-              </Pressable>
-            </View>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={t('library.moreActionsFor', { title: item.title })}
+              hitSlop={6}
+              onPress={() => setMenuItem(item)}
+              style={({ pressed }) => [
+                styles.menuButton,
+                { borderColor: theme.border, opacity: pressed ? 0.72 : 1 },
+              ]}
+            >
+              <MoreHorizontal color={theme.mutedText} size={20} />
+            </Pressable>
           </View>
         )}
       />
@@ -248,15 +213,15 @@ export default function LibraryScreen() {
       <Modal
         transparent
         animationType="slide"
-        visible={Boolean(statusItem)}
-        onRequestClose={() => setStatusItem(null)}
+        visible={Boolean(menuItem)}
+        onRequestClose={() => setMenuItem(null)}
       >
         <Pressable
           // Not a control: the dimmed backdrop behind a sheet. Announcing
           // it as a button would be noise, so it leaves the tree entirely.
           accessible={false}
           style={[styles.overlay, { backgroundColor: theme.overlay }]}
-          onPress={() => setStatusItem(null)}
+          onPress={() => setMenuItem(null)}
         >
           <SafeAreaView
             edges={['bottom']}
@@ -270,20 +235,20 @@ export default function LibraryScreen() {
               <View style={styles.sheetHeader}>
                 <AppText variant="section">{t('library.trackingStatus')}</AppText>
                 <AppText muted numberOfLines={1}>
-                  {statusItem?.title}
+                  {menuItem?.title}
                 </AppText>
               </View>
               <View style={styles.statusList}>
                 {statusOptions.map((option) => {
-                  const selected = statusItem?.status === option.value;
+                  const selected = menuItem?.status === option.value;
                   return (
                     <Pressable
                       accessibilityRole="button"
                       key={option.value}
                       onPress={() => {
-                        if (!statusItem) return;
-                        update.mutate({ id: statusItem.id, status: option.value });
-                        setStatusItem(null);
+                        if (!menuItem) return;
+                        update.mutate({ id: menuItem.id, status: option.value });
+                        setMenuItem(null);
                       }}
                       style={[
                         styles.statusOption,
@@ -296,10 +261,45 @@ export default function LibraryScreen() {
                   );
                 })}
               </View>
+              <AppText variant="caption" muted style={styles.sheetSection}>
+                {t('library.actions')}
+              </AppText>
+              <View style={styles.statusList}>
+                <SheetAction
+                  icon={Star}
+                  label={t('library.rateAction')}
+                  onPress={() => {
+                    if (!menuItem) return;
+                    update.reset();
+                    setFeedbackItem(menuItem);
+                    setMenuItem(null);
+                  }}
+                />
+                <SheetAction
+                  icon={Heart}
+                  label={t(menuItem?.is_favorite ? 'library.favoriteRemove' : 'library.favoriteAdd')}
+                  onPress={() => {
+                    if (!menuItem) return;
+                    update.mutate({ id: menuItem.id, is_favorite: !menuItem.is_favorite });
+                    setMenuItem(null);
+                  }}
+                />
+                <SheetAction
+                  icon={Trash2}
+                  label={t('library.removeAction')}
+                  danger
+                  onPress={() => {
+                    if (!menuItem) return;
+                    const item = menuItem;
+                    setMenuItem(null);
+                    confirmRemove(item);
+                  }}
+                />
+              </View>
               <AppButton
                 label={t('common.cancel')}
                 variant="secondary"
-                onPress={() => setStatusItem(null)}
+                onPress={() => setMenuItem(null)}
               />
             </Pressable>
           </SafeAreaView>
@@ -329,6 +329,37 @@ export default function LibraryScreen() {
   );
 }
 
+function SheetAction({
+  icon: Icon,
+  label,
+  danger = false,
+  onPress,
+}: {
+  icon: typeof Star;
+  label: string;
+  danger?: boolean;
+  onPress: () => void;
+}) {
+  const theme = useTheme();
+  const color = danger ? theme.danger : theme.text;
+  return (
+    <Pressable
+      accessibilityRole="button"
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.statusOption,
+        styles.sheetAction,
+        { borderBottomColor: theme.border, opacity: pressed ? 0.72 : 1 },
+      ]}
+    >
+      <Icon color={color} size={19} />
+      <AppText variant="label" style={{ color }}>
+        {label}
+      </AppText>
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
@@ -345,12 +376,16 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.lg,
   },
   row: {
-    paddingVertical: spacing.md,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingVertical: spacing.sm,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    gap: spacing.md,
   },
   mainRow: {
-    minHeight: 82,
+    flex: 1,
+    minWidth: 0,
+    minHeight: 69,
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.md,
@@ -358,29 +393,21 @@ const styles = StyleSheet.create({
   copy: {
     flex: 1,
     minWidth: 0,
-    gap: spacing.xs,
+    gap: 2,
   },
-  actions: {
-    minHeight: 42,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'flex-end',
-    gap: spacing.sm,
-  },
-  statusButton: {
-    flex: 1,
-    minWidth: 0,
-    minHeight: 42,
+  badges: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
-    borderWidth: 1,
-    borderRadius: radius.md,
-    paddingHorizontal: spacing.md,
   },
-  iconButton: {
-    width: 42,
-    height: 42,
+  badge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+  },
+  menuButton: {
+    width: 44,
+    height: 44,
     borderWidth: 1,
     borderRadius: radius.md,
     alignItems: 'center',
@@ -404,6 +431,14 @@ const styles = StyleSheet.create({
   },
   statusList: {
     marginBottom: spacing.lg,
+  },
+  sheetSection: {
+    textTransform: 'uppercase',
+    paddingBottom: spacing.xs,
+  },
+  sheetAction: {
+    justifyContent: 'flex-start',
+    gap: spacing.md,
   },
   statusOption: {
     minHeight: 50,

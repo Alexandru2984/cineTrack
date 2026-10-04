@@ -526,7 +526,10 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   stat: {
-    minWidth: '47%',
+    // An equal basis, not a minimum width. With `minWidth` the starting width
+    // was each card's own content, so "20 Ore" and "84 Episoade" grew from
+    // different widths and the second row stopped lining up with the first.
+    flexBasis: '47%',
     flexGrow: 1,
     minHeight: 104,
     borderWidth: StyleSheet.hairlineWidth,
