@@ -23,7 +23,7 @@ mapfile -t ignored < <(
 
 for finding in "${ignored[@]}"; do
   case "$finding" in
-    CVE-2026-14456)
+    CVE-2026-14456 | CVE-2026-84782)
       # Accepted because nothing in the image loads OpenSSL: every TLS client is
       # rustls. A dependency switching to native-tls or openssl-sys would make
       # the library reachable and the exception wrong.

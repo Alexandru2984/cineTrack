@@ -70,6 +70,26 @@ ACCEPTED = {
         "1.2.1",
         "build-time image parser, repository-controlled input, denial of service only",
     ),
+    # Both below were published on 2026-10-02 with no patched release: the
+    # vulnerable range ends at the latest version on npm. Reviewed that day.
+    #
+    # braces is reached only through jest's micromatch. It expands the glob
+    # patterns in the test configuration, never anything from a user, and jest
+    # is a devDependency that ships nothing into the APK or AAB.
+    ("braces", "GHSA-vfj7-8cjw-p6xm"): (
+        "3.0.3",
+        "test-runner glob matching on repository patterns, not shipped, denial of service only",
+    ),
+    # node-forge is pulled in by @expo/cli and by expo-updates' code-signing
+    # helper, @expo/code-signing-certificates. Both run on a developer machine
+    # or in EAS. The app's expo-updates runtime never imports it (its build/
+    # output has no reference), and over-the-air updates are disabled outright
+    # (app.config.js refuses them without a signing certificate), so the flawed
+    # signature check has nothing to verify in the shipped app.
+    ("node-forge", "GHSA-86w9-cpqp-85rv"): (
+        "1.4.0",
+        "CLI-side update signing for disabled OTA updates; not in the app runtime",
+    ),
 }
 
 

@@ -16,3 +16,15 @@
 # Revisit when Debian ships a fixed libssl3, or if any dependency switches to
 # native-tls or openssl-sys, which the guard test refuses.
 CVE-2026-14456
+
+# CVE-2026-84782 — OpenSSL information disclosure (compat-openssl).
+#
+# The same library and the same reasoning as CVE-2026-14456 above. Debian lists
+# libssl3 3.0.20-1~deb12u2 as affected with no fixed version, and the backend
+# binary never loads it: on 2026-10-04 `ldd` of the release binary showed only
+# libgcc_s, libm and libc, and neither openssl-sys nor native-tls is in the
+# crate graph. The guard test checks this entry with the same assertions.
+#
+# Revisit when Debian ships a fixed libssl3, or if any dependency switches to
+# native-tls or openssl-sys.
+CVE-2026-84782
