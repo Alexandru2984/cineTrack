@@ -12759,6 +12759,102 @@ async fn seed_finished_show(
 
 #[actix_web::test]
 #[ignore = "requires test DB: docker compose -f docker-compose.test.yml up -d"]
+async fn test_new_episodes_released_together_come_in_watching_order_across_pages() {
+    // A whole season released on one date used to come back in random-UUID
+    // order, because the episode id was the only tie-breaker. Inside a day the
+    // list now runs by show, then season and episode, and the (date, id) cursor
+    // every installed client already sends keeps that order across pages.
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (token, _, user_id) =
+        register_user(&app, "bingeorder", "bingeorder@mailbox.dev", "Pass1234").await;
+    let user_id = Uuid::parse_str(&user_id).unwrap();
+
+    // "Completion Test Show": seven episodes, all on the same date.
+    let later_show = seed_finished_show(&pool, 790101, "Ended", 7).await;
+    // A second show released that same day sorts first by title.
+    let earlier_show = sqlx::query_scalar::<_, Uuid>(
+        "INSERT INTO media (tmdb_id, media_type, title) VALUES (790102, 'tv', 'Alpha Show') RETURNING id",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let season = sqlx::query_scalar::<_, Uuid>(
+        "INSERT INTO seasons (media_id, season_number) VALUES ($1, 1) RETURNING id",
+    )
+    .bind(earlier_show)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    for number in [2, 1] {
+        sqlx::query(
+            "INSERT INTO episodes (season_id, episode_number, air_date) VALUES ($1, $2, CURRENT_DATE - 30)",
+        )
+        .bind(season)
+        .bind(number)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+    for show in [later_show, earlier_show] {
+        sqlx::query(
+            "INSERT INTO user_media (user_id, media_id, status) VALUES ($1, $2, 'watching')",
+        )
+        .bind(user_id)
+        .bind(show)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+
+    let today = chrono::Utc::now().date_naive();
+    let mut seen = Vec::new();
+    let mut cursor: Option<(String, String)> = None;
+    for _ in 0..10 {
+        let mut uri = format!("/api/calendar/new?today={today}&limit=2");
+        if let Some((date, id)) = &cursor {
+            uri.push_str(&format!("&before_date={date}&before_id={id}"));
+        }
+        let req = actix_test::TestRequest::get()
+            .uri(&uri)
+            .insert_header(("Authorization", format!("Bearer {token}")))
+            .peer_addr(peer_addr())
+            .to_request();
+        let resp = actix_test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 200);
+        let page: Value = actix_test::read_body_json(resp).await;
+        for item in page["items"].as_array().unwrap() {
+            seen.push(format!(
+                "{} E{}",
+                item["title"].as_str().unwrap(),
+                item["episode_number"]
+            ));
+        }
+        match page["next_cursor"].as_object() {
+            Some(next) => {
+                cursor = Some((
+                    next["before_date"].as_str().unwrap().to_string(),
+                    next["before_id"].as_str().unwrap().to_string(),
+                ))
+            }
+            None => break,
+        }
+    }
+
+    let expected: Vec<String> = ["Alpha Show E1", "Alpha Show E2"]
+        .into_iter()
+        .map(String::from)
+        .chain((1..=7).map(|n| format!("Completion Test Show E{n}")))
+        .collect();
+    assert_eq!(
+        seen, expected,
+        "same-day episodes in watching order, none lost or repeated"
+    );
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB: docker compose -f docker-compose.test.yml up -d"]
 async fn test_finished_show_completes_when_the_last_episode_is_watched() {
     let pool = setup_pool().await;
     clean_db(&pool).await;
