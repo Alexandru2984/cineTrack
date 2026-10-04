@@ -80,7 +80,7 @@ MONITORING_METRICS_FILE="${AUTO_DEPLOY_MONITORING_METRICS_FILE:-$STATE_DIR/monit
 PROMETHEUS_CONTAINER="${AUTO_DEPLOY_PROMETHEUS_CONTAINER:-cinetrack-monitoring-prometheus-1}"
 # The image docker-compose.monitoring.yml runs, so rules are validated by the
 # promtool that will load them.
-PROMTOOL_IMAGE="${AUTO_DEPLOY_PROMTOOL_IMAGE:-prom/prometheus:v3.14.0@sha256:5ce7540c3c00ef4ab0c9d2c995c6a5b9c421f44b4a115d97a2c7af3b1c21cbb0}"
+PROMTOOL_IMAGE="${AUTO_DEPLOY_PROMTOOL_IMAGE:-prom/prometheus:v3.15.0@sha256:efd719c99d83b060d9daefdcf00360461adf279f45ef5391f8d111892118753e}"
 MONITORING_FILES=(prometheus.yml cinetrack-alerts.yml)
 
 # Checks that cannot speak for what this deploys.
