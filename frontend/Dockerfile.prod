@@ -31,7 +31,14 @@ FROM nginx:1.31-alpine@sha256:7068961d45b07b2af510ac002e9daa63a1d3eba2111202d676
 # day and Alpine published -r1, so an image built against the first answer
 # scanned clean locally and dirty in CI. A version somebody wrote down is a
 # snapshot of an advisory database, not a fact about the package.
-RUN apk add --no-cache --upgrade 'libexpat>=2.8.4-r0' 'libuuid>=2.42.3-r1'
+#
+# `pcre2` joined on 2026-10-02, again found by the daily sweep: four HIGH
+# out-of-bounds writes (CVE-2026-86145, -89157, -89161, -103111) against the
+# base's 10.47-r1, fixed across 10.48-r0 and 10.49-r0. nginx only compiles the
+# regular expressions in its own configuration, never one a client sends, so
+# this was not reachable from outside; the floor is the release that fixes all
+# four, taken from Alpine main like the others.
+RUN apk add --no-cache --upgrade 'libexpat>=2.8.4-r0' 'libuuid>=2.42.3-r1' 'pcre2>=10.49-r0'
 # Asserted after the upgrade, not before. These pins exist so a base image whose
 # contents drift breaks the build loudly instead of shipping different software
 # under the same digest; an assertion that ran first would describe the image we
