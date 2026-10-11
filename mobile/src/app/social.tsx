@@ -1,4 +1,3 @@
-import { Redirect } from 'expo-router';
 import { Check, Inbox, Search, UserCheck, Users, X } from 'lucide-react-native';
 import { type ReactNode, useMemo, useState } from 'react';
 import {
@@ -18,6 +17,7 @@ import { EmptyState, ErrorState, LoadingState } from '@/components/screen-state'
 import { SegmentedControl } from '@/components/segmented-control';
 import { SocialActivityRow } from '@/components/social-activity-row';
 import { SocialUserRow } from '@/components/social-user-row';
+import { SignedOutRedirect } from '@/components/signed-out-redirect';
 import { radius, spacing } from '@/constants/theme';
 import { useDebouncedValue } from '@/hooks/use-debounced-value';
 import {
@@ -100,7 +100,7 @@ export default function SocialScreen() {
   );
   const mutationError = follow.error ?? unfollow.error ?? accept.error ?? reject.error;
 
-  if (status !== 'authenticated') return <Redirect href="/" />;
+  if (status !== 'authenticated') return <SignedOutRedirect status={status} />;
 
   const relationshipAction = (
     username: string,

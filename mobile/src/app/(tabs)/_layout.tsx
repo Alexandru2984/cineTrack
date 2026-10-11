@@ -1,4 +1,4 @@
-import { Redirect, Tabs } from 'expo-router';
+import { Tabs } from 'expo-router';
 import {
   CalendarDays,
   Home,
@@ -9,6 +9,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { LoadingState } from '@/components/screen-state';
+import { SignedOutRedirect } from '@/components/signed-out-redirect';
 import { useT } from '@/hooks/use-t';
 import { useTheme } from '@/hooks/use-theme';
 import { useMessageSummary } from '@/hooks/use-messages';
@@ -37,7 +38,7 @@ export default function TabsLayout() {
     (messageSummary.data?.unread_count ?? 0);
 
   if (status === 'loading') return <LoadingState label="Restoring session" />;
-  if (!hasLocalSession(status)) return <Redirect href="/" />;
+  if (!hasLocalSession(status)) return <SignedOutRedirect status={status} />;
 
   return (
     <Tabs

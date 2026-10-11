@@ -1,5 +1,5 @@
 import { Image } from 'expo-image';
-import { Redirect, router } from 'expo-router';
+import { router } from 'expo-router';
 import { Bell, CheckCheck, UserRound } from 'lucide-react-native';
 import { useState } from 'react';
 import {
@@ -14,6 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { AppText } from '@/components/app-text';
 import { EmptyState, ErrorState, LoadingState } from '@/components/screen-state';
+import { SignedOutRedirect } from '@/components/signed-out-redirect';
 import { radius, spacing } from '@/constants/theme';
 import {
   useMarkAllNotificationsRead,
@@ -49,7 +50,7 @@ export default function NotificationsScreen() {
   const error = summary.isError && notifications.isError;
   const mutationError = markRead.error || markAll.error;
 
-  if (!authenticated) return <Redirect href="/" />;
+  if (!authenticated) return <SignedOutRedirect status={status} />;
 
   const refresh = async () => {
     setRefreshing(true);

@@ -1,4 +1,4 @@
-import { Redirect, router } from 'expo-router';
+import { router } from 'expo-router';
 import {
   CalendarRange,
   ChevronLeft,
@@ -23,6 +23,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { AppText } from '@/components/app-text';
 import { Poster } from '@/components/poster';
 import { EmptyState, ErrorState, LoadingState } from '@/components/screen-state';
+import { SignedOutRedirect } from '@/components/signed-out-redirect';
 import { radius, spacing } from '@/constants/theme';
 import { useWrapped } from '@/hooks/use-stats';
 import { useT } from '@/hooks/use-t';
@@ -42,7 +43,7 @@ export default function WrappedScreen() {
   const [year, setYear] = useState(currentYear);
   const recap = useWrapped(year, hasSession);
 
-  if (!hasSession) return <Redirect href="/" />;
+  if (!hasSession) return <SignedOutRedirect status={status} />;
 
   return (
     <SafeAreaView

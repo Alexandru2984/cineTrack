@@ -1,4 +1,4 @@
-import { Redirect, router } from 'expo-router';
+import { router } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
 
 import { useSensitiveScreen } from '@/hooks/use-sensitive-screen';
@@ -71,6 +71,7 @@ import {
 } from '@/hooks/use-calendar';
 import { useReleaseNotifications } from '@/hooks/use-release-notifications';
 import { EncryptionSettingsCard } from '@/components/encryption-settings-card';
+import { SignedOutRedirect, SIGNED_OUT_ROUTE } from '@/components/signed-out-redirect';
 import { useT } from '@/hooks/use-t';
 import { useTheme } from '@/hooks/use-theme';
 import {
@@ -204,7 +205,7 @@ export default function SettingsScreen() {
   const [exportError, setExportError] = useState<string | null>(null);
   const [exportShared, setExportShared] = useState(false);
 
-  if (status !== 'authenticated' || !user) return <Redirect href="/" />;
+  if (status !== 'authenticated' || !user) return <SignedOutRedirect status={status} />;
 
   const profileDirty =
     username.trim() !== user.username ||
@@ -316,7 +317,7 @@ export default function SettingsScreen() {
         newPassword,
         totpCode: user.two_factor_enabled ? passwordTotpCode : undefined,
       });
-      router.replace('/');
+      router.replace(SIGNED_OUT_ROUTE);
       Alert.alert(t('settings.passwordUpdatedTitle'), t('settings.passwordUpdatedMessage'));
     } catch (error) {
       setPasswordError(getErrorMessage(error, t('settings.passwordChangeError')));
@@ -336,7 +337,7 @@ export default function SettingsScreen() {
           onPress: () => {
             void logoutAllSessions
               .mutateAsync()
-              .then(() => router.replace('/'))
+              .then(() => router.replace(SIGNED_OUT_ROUTE))
               .catch((error) => {
                 setSessionsError(getErrorMessage(error, t('settings.signOutAllError')));
               });
@@ -354,7 +355,7 @@ export default function SettingsScreen() {
         deletionPassword,
         user.two_factor_enabled ? deletionTotpCode : undefined,
       );
-      router.replace('/');
+      router.replace(SIGNED_OUT_ROUTE);
     } catch (error) {
       setDeletionError(getErrorMessage(error, t('settings.deleteAccountError')));
     } finally {

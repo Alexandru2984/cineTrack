@@ -1,4 +1,4 @@
-import { Redirect, router } from 'expo-router';
+import { router } from 'expo-router';
 import { MessageCircle } from 'lucide-react-native';
 import { useMemo } from 'react';
 import {
@@ -14,6 +14,7 @@ import { AppText } from '@/components/app-text';
 import { ScreenHeader } from '@/components/screen-header';
 import { EmptyState, ErrorState, LoadingState } from '@/components/screen-state';
 import { UserAvatar } from '@/components/user-avatar';
+import { SignedOutRedirect } from '@/components/signed-out-redirect';
 import { radius, spacing } from '@/constants/theme';
 import {
   useMessageConversations,
@@ -60,7 +61,7 @@ export default function MessagesScreen() {
       />
     );
   }
-  if (!sessionAvailable) return <Redirect href="/" />;
+  if (!sessionAvailable) return <SignedOutRedirect status={status} />;
   if (!online) {
     return (
       <ErrorState

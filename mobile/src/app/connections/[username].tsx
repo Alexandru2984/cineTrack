@@ -1,4 +1,4 @@
-import { Redirect, router, useLocalSearchParams } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { UserCheck, Users } from 'lucide-react-native';
 import { useMemo } from 'react';
 import { FlatList, RefreshControl, StyleSheet } from 'react-native';
@@ -7,6 +7,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { ScreenHeader } from '@/components/screen-header';
 import { EmptyState, ErrorState, LoadingState } from '@/components/screen-state';
 import { SocialUserRow } from '@/components/social-user-row';
+import { SignedOutRedirect } from '@/components/signed-out-redirect';
 import { spacing } from '@/constants/theme';
 import { useProfileConnections } from '@/hooks/use-social';
 import { useT } from '@/hooks/use-t';
@@ -71,7 +72,7 @@ export default function ProfileConnectionsScreen() {
       />
     );
   }
-  if (!online) return <Redirect href="/" />;
+  if (!online) return <SignedOutRedirect status={status} />;
 
   const title = kind === 'followers' ? t('profile.followers') : t('profile.following');
   const emptyTitle =
