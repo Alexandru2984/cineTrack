@@ -38,7 +38,12 @@ FROM nginx:1.31-alpine@sha256:7068961d45b07b2af510ac002e9daa63a1d3eba2111202d676
 # regular expressions in its own configuration, never one a client sends, so
 # this was not reachable from outside; the floor is the release that fixes all
 # four, taken from Alpine main like the others.
-RUN apk add --no-cache --upgrade 'libexpat>=2.8.4-r0' 'libuuid>=2.42.3-r1' 'pcre2>=10.49-r0'
+#
+# `tiff` followed on 2026-10-09: CVE-2026-4775 (HIGH), arbitrary code execution
+# or denial of service in libtiff 4.7.1-r0, fixed in 4.7.2-r0. nginx carries it
+# only as a dependency of its image-filter module, which this configuration
+# never loads, but the fix is in Alpine main and costs nothing to take.
+RUN apk add --no-cache --upgrade 'libexpat>=2.8.4-r0' 'libuuid>=2.42.3-r1' 'pcre2>=10.49-r0' 'tiff>=4.7.2-r0'
 # Asserted after the upgrade, not before. These pins exist so a base image whose
 # contents drift breaks the build loudly instead of shipping different software
 # under the same digest; an assertion that ran first would describe the image we
