@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import importlib.util
 import json
-import os
 import sys
 from pathlib import Path
 
@@ -40,36 +39,10 @@ AuditUnavailable = npm_audit.AuditUnavailable
 
 # (package, advisory) -> (reviewed version, why it is accepted)
 #
-# image-size parses the project's own icon, splash and adaptive-icon files
-# inside Metro while the bundle is built. The inputs are repository assets, not
-# anything a user or attacker can supply, and the package ships no code into the
-# APK or AAB. The impact is a hung build, not a compromised app.
-#
-# More than that, the vulnerable code is unreachable here. Both advisories are
-# in the ICNS, JXL and HEIF decoders, and Metro picks a decoder by file type;
-# assets/ holds three PNG files and the repository contains no image in any of
-# those three formats.
-#
-# That last clause is now checked rather than asserted, by
-# `unreachable_formats_present` below. It used to be a `find` written in this
-# comment, and the recipe was wrong: it pruned `./node_modules` but not
-# `./mobile/node_modules`, so run from the repository root it reported
-# `@react-native/debugger-shell/.../icon.icns` and told the next reader nothing.
-# The conclusion held — that file is an Electron resource Metro never bundles —
-# but a re-check that cries wolf is a re-check nobody runs twice.
-#
-# There is nothing to upgrade to either. GitHub reports no patched version, the
-# advisories cover every release, and the package has not been published since
-# April 2025.
+# The two image-size advisories that used to open this list are gone, not
+# accepted: metro dropped image-size in 0.84.5, and the last copy came from the
+# older metro the lockfile still carried for react-native's CLI plugin.
 ACCEPTED = {
-    ("image-size", "GHSA-w3rx-r6r6-pgpr"): (
-        "1.2.1",
-        "build-time image parser, repository-controlled input, denial of service only",
-    ),
-    ("image-size", "GHSA-5p2g-fcmc-qvqq"): (
-        "1.2.1",
-        "build-time image parser, repository-controlled input, denial of service only",
-    ),
     # Both below were published on 2026-10-02 with no patched release: the
     # vulnerable range ends at the latest version on npm. Reviewed that day.
     #
@@ -116,38 +89,6 @@ def audit_findings() -> dict[tuple[str, str], str]:
     return npm_audit.findings(report, AUDIT_LEVEL)
 
 
-#: The decoders both advisories live in. Metro dispatches on file type, so an
-#: asset in one of these is what would make the vulnerable path reachable.
-UNREACHABLE_FORMATS = (".icns", ".jxl", ".heic")
-
-
-def unreachable_formats_present() -> list[Path]:
-    """Assets that would put the vulnerable decoders back in reach.
-
-    The exception rests on there being none, so this walks the tree instead of
-    leaving a command in a comment for somebody to run. `node_modules` is
-    skipped at any depth — the version of this check that lived in a comment
-    pruned only the top-level one, and the hit it then reported inside
-    `mobile/node_modules` was an Electron resource that Metro never opens.
-
-    Only what Metro can bundle counts, so the search starts at the mobile
-    project rather than the repository root.
-
-    `os.walk` rather than `rglob` because pruning has to happen before the
-    descent, not after it: `rglob("*")` walks every file in `node_modules` and
-    `.git` and only then discards them, which is several hundred thousand
-    `stat` calls to answer a question about three PNGs.
-    """
-    skip = {"node_modules", ".git"}
-    found: list[Path] = []
-    for directory, subdirectories, filenames in os.walk(MOBILE):
-        subdirectories[:] = [name for name in subdirectories if name not in skip]
-        for filename in filenames:
-            if Path(filename).suffix.lower() in UNREACHABLE_FORMATS:
-                found.append((Path(directory) / filename).relative_to(MOBILE))
-    return found
-
-
 def main() -> int:
     try:
         findings = audit_findings()
@@ -156,15 +97,6 @@ def main() -> int:
         return 0
 
     errors: list[str] = []
-
-    if any(package == "image-size" for package, _ in ACCEPTED):
-        reachable = unreachable_formats_present()
-        if reachable:
-            listed = ", ".join(str(path) for path in sorted(reachable))
-            errors.append(
-                "the image-size exception assumes no ICNS, JXL or HEIF asset exists, "
-                f"and these now do: {listed}. Re-assess before accepting the advisories"
-            )
 
     for key, title in sorted(findings.items()):
         package, advisory = key

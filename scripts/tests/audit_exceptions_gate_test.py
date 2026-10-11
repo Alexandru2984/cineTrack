@@ -21,7 +21,7 @@ assert SPEC is not None and SPEC.loader is not None
 gate = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(gate)
 
-REVIEWED = ("image-size", "GHSA-w3rx-r6r6-pgpr")
+REVIEWED = ("braces", "GHSA-vfj7-8cjw-p6xm")
 
 
 class AuditGateTests(unittest.TestCase):
@@ -83,23 +83,6 @@ class AuditGateTests(unittest.TestCase):
                 reviewed,
                 f"{package} moved away from the reviewed version",
             )
-
-    def test_no_asset_puts_the_vulnerable_decoders_back_in_reach(self) -> None:
-        # The image-size exception rests on there being no ICNS, JXL or HEIF
-        # file for Metro to hand to the vulnerable decoders.
-        self.assertEqual(gate.unreachable_formats_present(), [])
-
-    def test_the_asset_walk_does_not_descend_into_node_modules(self) -> None:
-        # It used to, with `rglob("*")` filtering after the descent: several
-        # hundred thousand stat calls to answer a question about three PNGs.
-        # Timing is not the assertion — the pruning is, and an ICNS inside
-        # node_modules is the thing it must not find.
-        planted = gate.MOBILE / "node_modules/.audit-gate-probe/icon.icns"
-        planted.parent.mkdir(parents=True, exist_ok=True)
-        planted.write_bytes(b"not really an icns")
-        self.addCleanup(lambda: (planted.unlink(missing_ok=True),
-                                 planted.parent.rmdir()))
-        self.assertEqual(gate.unreachable_formats_present(), [])
 
 
 if __name__ == "__main__":
