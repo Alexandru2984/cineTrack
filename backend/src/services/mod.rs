@@ -13,6 +13,7 @@ pub mod events;
 pub mod franking;
 pub mod ical;
 pub mod importer;
+pub mod job_lock;
 pub mod legal;
 pub mod media_cache;
 pub mod notifications;

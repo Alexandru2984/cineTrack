@@ -7,6 +7,7 @@ use uuid::Uuid;
 use crate::errors::AppError;
 use crate::models::Media;
 use crate::services::catalog_backoff::{self, RefreshOutcome};
+use crate::services::job_lock::JobLock;
 use crate::services::tmdb::TmdbService;
 
 const RELEASE_SCHEDULE_ADVISORY_LOCK: i64 = 0x5641_5a55_5445_5343;
@@ -163,17 +164,12 @@ pub async fn backfill_incomplete_seasons(
         ));
     }
 
-    let mut lock_transaction = pool.begin().await?;
-    let acquired = sqlx::query_scalar::<_, bool>("SELECT pg_try_advisory_xact_lock($1)")
-        .bind(SEASON_BACKFILL_ADVISORY_LOCK)
-        .fetch_one(&mut *lock_transaction)
-        .await?;
-    if !acquired {
+    let Some(lock) = JobLock::try_acquire(pool, SEASON_BACKFILL_ADVISORY_LOCK).await? else {
         return Ok(SeasonBackfillSummary {
             skipped_locked: true,
             ..SeasonBackfillSummary::default()
         });
-    }
+    };
 
     let candidates = season_backfill_candidates(pool, options.budget).await?;
 
@@ -228,6 +224,7 @@ pub async fn backfill_incomplete_seasons(
         }
     }
 
+    lock.release().await?;
     Ok(summary)
 }
 
@@ -399,17 +396,12 @@ pub async fn sync_tracked_release_schedules(
         ));
     }
 
-    let mut lock_transaction = pool.begin().await?;
-    let acquired = sqlx::query_scalar::<_, bool>("SELECT pg_try_advisory_xact_lock($1)")
-        .bind(RELEASE_SCHEDULE_ADVISORY_LOCK)
-        .fetch_one(&mut *lock_transaction)
-        .await?;
-    if !acquired {
+    let Some(lock) = JobLock::try_acquire(pool, RELEASE_SCHEDULE_ADVISORY_LOCK).await? else {
         return Ok(ReleaseScheduleSummary {
             skipped_locked: true,
             ..ReleaseScheduleSummary::default()
         });
-    }
+    };
 
     let candidates = candidates(pool, options.budget).await?;
     let mut summary = ReleaseScheduleSummary {
@@ -467,7 +459,7 @@ pub async fn sync_tracked_release_schedules(
         }
     }
 
-    lock_transaction.rollback().await?;
+    lock.release().await?;
     Ok(summary)
 }
 

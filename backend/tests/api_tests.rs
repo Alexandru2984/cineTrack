@@ -6158,6 +6158,152 @@ async fn test_popular_catalog_hydration_is_bounded_and_persistent() {
     upstream.await.unwrap();
 }
 
+// The jobs used to hold their advisory lock in a transaction that sat idle for
+// the whole run. Production roles end such a transaction after 60 seconds, so
+// catalog hydration (minutes per run) could never finish and the release worker
+// failed on its longer runs, both with a bare "Database error". This runs a
+// hydration whose upstream answers slower than a one-second idle timeout.
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn test_catalog_hydration_outlasts_the_idle_in_transaction_timeout() {
+    use cinetrack::services::catalog_hydration::{
+        hydrate_popular_catalog, HydrationOptions, HydrationSummary,
+    };
+    use cinetrack::services::tmdb::TmdbService;
+    use sqlx::Executor;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let upstream = actix_web::rt::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let mut request = vec![0_u8; 4096];
+        let _ = stream.read(&mut request).await.unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(2500)).await;
+        let body = r#"{
+            "id": 650101,
+            "title": "Slow Upstream Fixture",
+            "original_title": "Slow Upstream Fixture",
+            "overview": "Answered after the lock connection would have been idle too long",
+            "release_date": "2026-10-12",
+            "status": "Released",
+            "genres": [],
+            "runtime": 90,
+            "vote_average": 7.0,
+            "alternative_titles": {"titles": []},
+            "translations": {"translations": []}
+        }"#;
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        stream.write_all(response.as_bytes()).await.unwrap();
+    });
+
+    let setup = setup_pool().await;
+    clean_db(&setup).await;
+    sqlx::query(
+        "INSERT INTO catalog_external_ids (media_type, tmdb_id, adult, video, popularity)
+         VALUES ('movie', 650101, false, false, 500.0)",
+    )
+    .execute(&setup)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO catalog_external_titles (media_type, tmdb_id, title)
+         VALUES ('movie', 650101, 'Slow Upstream Fixture')",
+    )
+    .execute(&setup)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO catalog_sync_state
+            (provider, export_date, movie_rows, tv_rows, movie_sha256, tv_sha256,
+             movie_object_key, tv_object_key)
+        VALUES
+            ('tmdb', CURRENT_DATE, 1, 1, repeat('a', 64), repeat('b', 64),
+             'catalog/movie.gz', 'catalog/tv.gz')"#,
+    )
+    .execute(&setup)
+    .await
+    .unwrap();
+
+    // The same budget production roles get, scaled from a minute to a second.
+    let pool = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(5)
+        .after_connect(|connection, _| {
+            Box::pin(async move {
+                connection
+                    .execute("SET idle_in_transaction_session_timeout = '1s'")
+                    .await?;
+                Ok(())
+            })
+        })
+        .connect(&test_db_url())
+        .await
+        .unwrap();
+
+    let mut config = test_config();
+    config.tmdb_base_url = format!("http://{address}");
+    let summary = hydrate_popular_catalog(
+        &pool,
+        &TmdbService::new(&config),
+        HydrationOptions {
+            budget: 1,
+            request_delay: std::time::Duration::ZERO,
+        },
+    )
+    .await
+    .expect("a run longer than the idle timeout must still complete");
+    assert_eq!(
+        summary,
+        HydrationSummary {
+            selected: 1,
+            succeeded: 1,
+            ..HydrationSummary::default()
+        }
+    );
+    upstream.await.unwrap();
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn test_a_job_lock_excludes_a_second_run_until_released_or_dropped() {
+    use cinetrack::services::job_lock::JobLock;
+
+    let pool = setup_pool().await;
+    let key = 0x7465_7374_6c6f_636b;
+
+    let first = JobLock::try_acquire(&pool, key)
+        .await
+        .unwrap()
+        .expect("a free lock is taken");
+    assert!(
+        JobLock::try_acquire(&pool, key).await.unwrap().is_none(),
+        "a second run must see the lock held"
+    );
+    first.release().await.unwrap();
+
+    // A run that fails part-way drops its guard without releasing it. The
+    // connection closes with it, and Postgres frees the lock with the session.
+    let abandoned = JobLock::try_acquire(&pool, key).await.unwrap().unwrap();
+    drop(abandoned);
+    let mut reacquired = None;
+    for _ in 0..50 {
+        reacquired = JobLock::try_acquire(&pool, key).await.unwrap();
+        if reacquired.is_some() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    reacquired
+        .expect("a dropped guard must not leave the lock held")
+        .release()
+        .await
+        .unwrap();
+}
+
 #[actix_web::test]
 #[ignore = "requires test DB"]
 async fn test_tracked_release_schedule_sync_persists_episodes_and_cadence() {
