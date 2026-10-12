@@ -13,7 +13,9 @@ import os
 from pathlib import Path
 import subprocess
 import tempfile
+import time
 import unicodedata
+import urllib.error
 import urllib.request
 
 import boto3
@@ -22,6 +24,9 @@ from botocore.config import Config
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 DEFAULT_ENV_FILE = SCRIPT_DIR.parent / ".env.prod"
+DEFAULT_STATE_DIR = Path(
+    os.environ.get("XDG_STATE_HOME", Path.home() / ".local" / "state")
+) / "cinetrack"
 CHUNK_BYTES = 1024 * 1024
 MAX_EXPORT_LINE_BYTES = 16 * 1024
 MAX_ROWS_PER_EXPORT = 2_000_000
@@ -135,6 +140,81 @@ def download(url: str, destination: Path, max_bytes: int) -> tuple[int, str]:
     if size == 0:
         raise RuntimeError("catalog export is empty")
     return size, digest.hexdigest()
+
+
+def export_filenames(export_date: dt.date) -> dict[str, str]:
+    file_date = export_date.strftime("%m_%d_%Y")
+    return {
+        "movie": f"movie_ids_{file_date}.json.gz",
+        "tv": f"tv_series_ids_{file_date}.json.gz",
+    }
+
+
+def is_published(url: str) -> bool:
+    """Whether TMDB has put this export up yet.
+
+    The exports are served from S3 without list access, so a file that does not
+    exist yet answers 403, not 404. Both mean "not there"; anything else is a
+    real failure and is raised.
+    """
+    request = urllib.request.Request(
+        url, method="HEAD", headers={"User-Agent": "cinetrack-catalog/1.0"}
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=30):
+            return True
+    except urllib.error.HTTPError as error:
+        if error.code in (403, 404):
+            return False
+        raise
+
+
+def newest_published_export(export_base: str, today: dt.date) -> dt.date:
+    """Today's exports if TMDB has published them, otherwise yesterday's.
+
+    TMDB starts the export job at about 07:00 UTC and promises the files by
+    08:00 UTC. From mid-August to October 2026 this ran at 06:15 UTC — the
+    host moved from UTC to Europe/Bucharest and the cron line kept its local
+    09:15 — asked for files that did not exist yet, and failed every day for
+    two months. The cron now runs later, and a run that is early anyway falls
+    back to yesterday's exports, which are a day old rather than missing.
+    """
+    for candidate in (today, today - dt.timedelta(days=1)):
+        names = export_filenames(candidate).values()
+        if all(is_published(f"{export_base}/{name}") for name in names):
+            return candidate
+    raise RuntimeError(
+        f"TMDB has published no complete export for {today.isoformat()} or the day before"
+    )
+
+
+def write_metrics(path: Path, started_at: float, success: bool) -> None:
+    """Publish the run's outcome for the node exporter, atomically.
+
+    Without this the sync failed daily for two months and nothing noticed.
+    A metrics failure is reported but never turns a good sync into a failed one.
+    """
+    finished_at = time.time()
+    lines = [
+        "# HELP cinetrack_catalog_sync_success Whether the last TMDB catalog sync completed.",
+        "# TYPE cinetrack_catalog_sync_success gauge",
+        f"cinetrack_catalog_sync_success {1 if success else 0}",
+        "# HELP cinetrack_catalog_sync_timestamp_seconds Start time of the last TMDB catalog sync.",
+        "# TYPE cinetrack_catalog_sync_timestamp_seconds gauge",
+        f"cinetrack_catalog_sync_timestamp_seconds {int(started_at)}",
+        "# HELP cinetrack_catalog_sync_duration_seconds Duration of the last TMDB catalog sync.",
+        "# TYPE cinetrack_catalog_sync_duration_seconds gauge",
+        f"cinetrack_catalog_sync_duration_seconds {int(finished_at - started_at)}",
+    ]
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(
+            "w", dir=path.parent, prefix=f"{path.name}.tmp.", delete=False
+        ) as tmp:
+            tmp.write("\n".join(lines) + "\n")
+        os.replace(tmp.name, path)
+    except OSError as error:
+        log(f"catalog sync metrics could not be written to {path}: {error}")
 
 
 def normalize_title(raw_title: str) -> str:
@@ -308,7 +388,8 @@ def reconcile_catalog(
     )
 
 
-def main() -> int:
+def main() -> bool:
+    """Run one sync. False means another run held the lock and nothing was done."""
     load_env_file(Path(os.environ.get("ENV_FILE", DEFAULT_ENV_FILE)))
     container = os.environ.get("DB_CONTAINER", "cinetrack-db-1")
     database = required("POSTGRES_DB")
@@ -324,8 +405,6 @@ def main() -> int:
         "CATALOG_MIN_MOVIE_ROWS", 1_000_000, 1, MAX_ROWS_PER_EXPORT
     )
     min_tv_rows = bounded_int("CATALOG_MIN_TV_ROWS", 150_000, 1, MAX_ROWS_PER_EXPORT)
-    sync_date = dt.datetime.now(dt.timezone.utc).date()
-    file_date = sync_date.strftime("%m_%d_%Y")
     runtime_dir = os.environ.get("XDG_RUNTIME_DIR")
     default_lock_dir = (
         Path(runtime_dir) if runtime_dir else Path.home() / ".cache" / "cinetrack"
@@ -340,16 +419,18 @@ def main() -> int:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             log("another catalog sync is already running; skipping")
-            return 0
+            return False
+
+        sync_date = newest_published_export(
+            export_base, dt.datetime.now(dt.timezone.utc).date()
+        )
+        log(f"using the TMDB exports for {sync_date.isoformat()}")
 
         with tempfile.TemporaryDirectory(prefix="cinetrack-catalog-") as temp_name:
             temp = Path(temp_name)
             client = r2_client()
             artifacts: dict[str, dict[str, str | int | Path]] = {}
-            for media_type, filename in (
-                ("movie", f"movie_ids_{file_date}.json.gz"),
-                ("tv", f"tv_series_ids_{file_date}.json.gz"),
-            ):
+            for media_type, filename in export_filenames(sync_date).items():
                 archive = temp / filename
                 tsv = temp / f"{media_type}.tsv"
                 url = f"{export_base}/{filename}"
@@ -379,12 +460,22 @@ def main() -> int:
                 f"catalog sync complete: movie={artifacts['movie']['rows']} "
                 f"tv={artifacts['tv']['rows']}"
             )
-    return 0
+    return True
 
 
 if __name__ == "__main__":
+    started_at = time.time()
+    metrics_path = Path(
+        os.environ.get(
+            "CATALOG_SYNC_METRICS_FILE", DEFAULT_STATE_DIR / "catalog_sync.prom"
+        )
+    )
     try:
-        raise SystemExit(main())
+        ran = main()
     except Exception as error:
         log(f"catalog sync failed: {error}")
+        write_metrics(metrics_path, started_at, success=False)
         raise SystemExit(1)
+    if ran:
+        write_metrics(metrics_path, started_at, success=True)
+    raise SystemExit(0)
