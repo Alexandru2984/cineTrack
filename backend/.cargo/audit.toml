@@ -29,11 +29,6 @@ ignore = []
 # that: a green gate expresses an acceptance policy, not a zero-vulnerability
 # inventory.
 #
-# chacha20 0.10.0 — yanked.
-#
-#   Reached through `rand`, which this crate depends on directly and which
-#   actix-multipart and sqlx-postgres also pull in. Yanked is a publication
-#   status, not a vulnerability: the release was withdrawn from the registry and
-#   the lockfile still pins it. There is no advisory against it.
-#
-#   Revisit when `rand` ships a release that moves off it.
+# None at the moment. The last one was chacha20 0.10.0, yanked and reached
+# through `rand`; it went away in October 2026 when the lockfile moved to
+# chacha20 0.10.2, a compatible release that was never yanked.
