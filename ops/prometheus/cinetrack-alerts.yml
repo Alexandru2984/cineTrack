@@ -503,3 +503,54 @@ groups:
         annotations:
           summary: Văzute release push deliveries are overdue
           description: A push delivery has remained due for submission or receipt processing beyond its allowed window.
+
+  # The TMDB catalog sync failed every day from mid-August to October 2026 and
+  # hydration failed behind it, both silently: they only wrote to a log file.
+  # Daily jobs, so thirty hours allows one late run before reporting.
+  - name: cinetrack-catalog
+    rules:
+      - alert: CineTrackCatalogSyncFailed
+        expr: cinetrack_catalog_sync_success == 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: Văzute TMDB catalog sync failed
+          description: >-
+            The daily import of TMDB's ID exports did not complete, so new titles
+            stop reaching the catalog and hydration soon refuses to run. Read
+            catalog.log and run scripts/sync_tmdb_catalog.py by hand.
+
+      - alert: CineTrackCatalogSyncNotRunning
+        expr: absent(cinetrack_catalog_sync_timestamp_seconds) or time() - cinetrack_catalog_sync_timestamp_seconds > 30 * 3600
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: Văzute TMDB catalog sync has stopped running
+          description: >-
+            No catalog sync has reported in thirty hours. Check that the cron entry
+            for scripts/sync_tmdb_catalog.py is still installed.
+
+      - alert: CineTrackCatalogHydrationFailed
+        expr: cinetrack_catalog_hydration_success == 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: Văzute catalog hydration failed
+          description: >-
+            The daily hydration of popular catalog titles did not complete. If the
+            catalog sync is failing too, fix that first: hydration refuses to run
+            on an inventory more than two days old. Read hydration.log.
+
+      - alert: CineTrackCatalogHydrationNotRunning
+        expr: absent(cinetrack_catalog_hydration_timestamp_seconds) or time() - cinetrack_catalog_hydration_timestamp_seconds > 30 * 3600
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: Văzute catalog hydration has stopped running
+          description: >-
+            No catalog hydration has reported in thirty hours. Check that the cron
+            entry for scripts/hydrate_tmdb_catalog.sh is still installed.

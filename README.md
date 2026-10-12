@@ -443,9 +443,11 @@ Apply the cache lifecycle rules once, then schedule the catalog sync after TMDB'
 ./scripts/configure_r2_lifecycle.sh
 ```
 
+TMDB publishes each day's exports by 08:00 UTC. Cron runs in the host's local time, so check the sync starts after that in UTC: the times below are for a host on Europe/Bucharest, 08:15 UTC in summer and 09:15 UTC in winter. A run that is early anyway imports the previous day's exports. Both jobs write `catalog_sync.prom` and `catalog_hydration.prom` for the node exporter, and the `cinetrack-catalog` alert group reports a failed or missing run.
+
 ```cron
-15 9 * * * /path/to/cineTrack/scripts/sync_tmdb_catalog.py >> /var/log/vazute-catalog.log 2>&1
-0 10 * * * /path/to/cineTrack/scripts/hydrate_tmdb_catalog.sh >> /var/log/vazute-hydration.log 2>&1
+15 11 * * * /path/to/cineTrack/scripts/sync_tmdb_catalog.py >> /var/log/vazute-catalog.log 2>&1
+0 12 * * * /path/to/cineTrack/scripts/hydrate_tmdb_catalog.sh >> /var/log/vazute-hydration.log 2>&1
 20 * * * * /path/to/cineTrack/scripts/sync_release_schedules.sh >> /var/log/vazute-release-schedules.log 2>&1
 ```
 
