@@ -5,6 +5,7 @@ use sqlx::{FromRow, PgPool};
 
 use crate::errors::AppError;
 use crate::services::catalog_backoff::{self, RefreshOutcome};
+use crate::services::job_lock::JobLock;
 use crate::services::tmdb::TmdbService;
 
 const HYDRATION_ADVISORY_LOCK: i64 = 0x4349_4e45_5452_4143;
@@ -98,19 +99,14 @@ pub async fn hydrate_popular_catalog(
         ));
     }
 
-    // A transaction-scoped advisory lock is released on every return path,
-    // including provider and database errors.
-    let mut lock_transaction = pool.begin().await?;
-    let acquired = sqlx::query_scalar::<_, bool>("SELECT pg_try_advisory_xact_lock($1)")
-        .bind(HYDRATION_ADVISORY_LOCK)
-        .fetch_one(&mut *lock_transaction)
-        .await?;
-    if !acquired {
+    // Released on every return path, including provider and database errors:
+    // see `JobLock`.
+    let Some(lock) = JobLock::try_acquire(pool, HYDRATION_ADVISORY_LOCK).await? else {
         return Ok(HydrationSummary {
             skipped_locked: true,
             ..HydrationSummary::default()
         });
-    }
+    };
 
     let inventory_is_fresh = sqlx::query_scalar::<_, bool>(
         r#"SELECT EXISTS (
@@ -202,6 +198,6 @@ pub async fn hydrate_popular_catalog(
         }
     }
 
-    lock_transaction.rollback().await?;
+    lock.release().await?;
     Ok(summary)
 }

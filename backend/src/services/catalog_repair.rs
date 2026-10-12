@@ -12,6 +12,7 @@ use std::time::Duration;
 use sqlx::PgPool;
 
 use crate::errors::AppError;
+use crate::services::job_lock::JobLock;
 use crate::services::tmdb::TmdbService;
 
 /// Distinct from the hydration, release-schedule and push locks so those jobs
@@ -68,19 +69,14 @@ pub async fn repair_stale_catalog_episodes(
 
     // Every candidate costs one upstream request against the key the whole
     // application shares, so two overlapping runs would double that load for no
-    // benefit. The lock is transaction-scoped, so it is released on every return
-    // path including provider and database errors.
-    let mut lock_transaction = pool.begin().await?;
-    let acquired = sqlx::query_scalar::<_, bool>("SELECT pg_try_advisory_xact_lock($1)")
-        .bind(CATALOG_REPAIR_ADVISORY_LOCK)
-        .fetch_one(&mut *lock_transaction)
-        .await?;
-    if !acquired {
+    // benefit. The lock is released on every return path, including provider
+    // and database errors: see `JobLock`.
+    let Some(lock) = JobLock::try_acquire(pool, CATALOG_REPAIR_ADVISORY_LOCK).await? else {
         return Ok(CatalogRepairSummary {
             skipped_locked: true,
             ..CatalogRepairSummary::default()
         });
-    }
+    };
 
     let candidates = sqlx::query_as::<_, (i32, i32, i64)>(CANDIDATES)
         .bind(i64::from(options.budget))
@@ -134,6 +130,7 @@ pub async fn repair_stale_catalog_episodes(
         tokio::time::sleep(options.request_delay).await;
     }
 
+    lock.release().await?;
     Ok(summary)
 }
 

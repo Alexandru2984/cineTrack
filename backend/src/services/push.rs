@@ -10,6 +10,7 @@ use uuid::Uuid;
 
 use crate::config::Config;
 use crate::errors::AppError;
+use crate::services::job_lock::JobLock;
 
 const EXPO_SEND_URL: &str = "https://exp.host/--/api/v2/push/send";
 const EXPO_RECEIPTS_URL: &str = "https://exp.host/--/api/v2/push/getReceipts";
@@ -582,17 +583,12 @@ pub async fn dispatch_release_pushes(
     pool: &PgPool,
     service: &ExpoPushService,
 ) -> Result<PushDispatchSummary, AppError> {
-    let mut lock_transaction = pool.begin().await?;
-    let acquired = sqlx::query_scalar::<_, bool>("SELECT pg_try_advisory_xact_lock($1)")
-        .bind(PUSH_ADVISORY_LOCK)
-        .fetch_one(&mut *lock_transaction)
-        .await?;
-    if !acquired {
+    let Some(lock) = JobLock::try_acquire(pool, PUSH_ADVISORY_LOCK).await? else {
         return Ok(PushDispatchSummary {
             skipped_locked: true,
             ..PushDispatchSummary::default()
         });
-    }
+    };
 
     let mut summary = PushDispatchSummary {
         enqueued: enqueue_due_release_pushes(pool).await?,
@@ -608,7 +604,7 @@ pub async fn dispatch_release_pushes(
     .execute(pool)
     .await?
     .rows_affected();
-    lock_transaction.rollback().await?;
+    lock.release().await?;
     Ok(summary)
 }
 
