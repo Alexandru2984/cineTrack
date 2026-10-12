@@ -258,7 +258,13 @@ def export_to_tsv(source: Path, destination: Path, media_type: str) -> int:
                 adult = (
                     item["adult"] if media_type == "movie" else item.get("adult", False)
                 )
-                video = item.get("video", False)
+                # Since October 2026 TMDB sends `"video": null` for a handful of
+                # movies (seven on 2026-10-12). The flag only marks video
+                # releases, so unknown reads as false rather than failing the
+                # import of a million rows. `adult` stays strict: it gates content.
+                video = item.get("video")
+                if video is None:
+                    video = False
                 popularity = float(item.get("popularity", 0))
             except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
                 raise RuntimeError(f"invalid {media_type} export row {line_number}: {error}") from error

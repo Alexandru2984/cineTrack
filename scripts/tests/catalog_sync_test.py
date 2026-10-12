@@ -10,6 +10,7 @@ exist, S3 answered 403, and the failure went only to a log.
 from __future__ import annotations
 
 import datetime as dt
+import gzip
 import importlib.util
 import shutil
 import sys
@@ -93,6 +94,37 @@ class ExportSelectionTests(unittest.TestCase):
                 "tv": "tv_series_ids_10_12_2026.json.gz",
             },
         )
+
+
+class ExportParsingTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.dir = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.dir)
+
+    def parse(self, *rows: str) -> list[list[str]]:
+        source = self.dir / "movie.json.gz"
+        with gzip.open(source, "wt", encoding="utf-8") as export:
+            export.write("\n".join(rows) + "\n")
+        sync.export_to_tsv(source, self.dir / "movie.tsv", "movie")
+        return [line.split("\t") for line in (self.dir / "movie.tsv").read_text().splitlines()]
+
+    def test_a_null_video_flag_reads_as_false(self) -> None:
+        # Seven rows in the 2026-10-12 export did this, and one was enough to
+        # fail the import of all 1.25 million.
+        rows = self.parse(
+            '{"adult":false,"id":1,"original_title":"Attic Panic","popularity":2.0,"video":null}',
+            '{"adult":false,"id":2,"original_title":"A","popularity":1.0,"video":true}',
+        )
+        self.assertEqual([row[4] for row in rows], ["f", "t"])
+
+    def test_an_unknown_adult_flag_still_stops_the_import(self) -> None:
+        # The adult flag decides what the catalog may show, so it is not guessed.
+        with self.assertRaisesRegex(RuntimeError, "invalid movie flags"):
+            self.parse('{"adult":null,"id":1,"original_title":"A","popularity":1.0,"video":false}')
+
+    def test_a_video_flag_that_is_not_a_boolean_still_stops_the_import(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "invalid movie flags"):
+            self.parse('{"adult":false,"id":1,"original_title":"A","popularity":1.0,"video":"yes"}')
 
 
 class MetricsTests(unittest.TestCase):
