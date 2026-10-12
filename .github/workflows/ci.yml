@@ -525,6 +525,9 @@ jobs:
       - name: Release worker metrics tests
         run: scripts/tests/release_schedule_metrics_test.sh
 
+      - name: Catalog job tests
+        run: scripts/tests/catalog_jobs_test.sh
+
       - name: Validate Alertmanager config permissions
         run: scripts/tests/alertmanager_config_test.sh
 
