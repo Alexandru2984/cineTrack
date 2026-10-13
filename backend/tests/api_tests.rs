@@ -7371,6 +7371,71 @@ async fn seed_marathon(
     }
 }
 
+/// A pool that acts as production's application role does.
+///
+/// Every other test connects as the test database's superuser, which passes
+/// every privilege check. Production's `cinetrack_app` has only what
+/// `scripts/provision_db_role.sh` grants: CONNECT, USAGE on `public`, row
+/// access to the tables, the sequences, and EXECUTE on the functions — no
+/// CREATE and no TEMP. Badge recomputation needed TEMP and failed in production
+/// from August to October 2026 while every test here passed.
+async fn app_role_pool() -> PgPool {
+    use sqlx::Executor;
+
+    let setup = setup_pool().await;
+    let database: String = sqlx::query_scalar("SELECT current_database()")
+        .fetch_one(&setup)
+        .await
+        .unwrap();
+    let grants = [
+        "DO $$ BEGIN
+            IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'cinetrack_app_probe') THEN
+                CREATE ROLE cinetrack_app_probe NOLOGIN;
+            END IF;
+        END $$"
+            .to_string(),
+        // PUBLIC holds TEMP on every new database by default, and every role
+        // inherits from PUBLIC; production revokes it.
+        format!("REVOKE ALL PRIVILEGES ON DATABASE \"{database}\" FROM PUBLIC, cinetrack_app_probe"),
+        format!("GRANT CONNECT ON DATABASE \"{database}\" TO cinetrack_app_probe"),
+        "REVOKE ALL PRIVILEGES ON SCHEMA public FROM PUBLIC, cinetrack_app_probe".to_string(),
+        "GRANT USAGE ON SCHEMA public TO cinetrack_app_probe".to_string(),
+        "GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO cinetrack_app_probe"
+            .to_string(),
+        "GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO cinetrack_app_probe".to_string(),
+        "GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO cinetrack_app_probe".to_string(),
+    ];
+    for statement in grants {
+        // Fixed statements; the only interpolation is the test database name.
+        sqlx::query(sqlx::AssertSqlSafe(statement))
+            .execute(&setup)
+            .await
+            .unwrap();
+    }
+    assert!(
+        !sqlx::query_scalar::<_, bool>(
+            "SELECT has_database_privilege('cinetrack_app_probe', current_database(), 'TEMP')
+                 OR has_database_privilege('cinetrack_app_probe', current_database(), 'CREATE')",
+        )
+        .fetch_one(&setup)
+        .await
+        .unwrap(),
+        "the probe role must be as narrow as production's"
+    );
+
+    sqlx::postgres::PgPoolOptions::new()
+        .max_connections(2)
+        .after_connect(|connection, _| {
+            Box::pin(async move {
+                connection.execute("SET ROLE cinetrack_app_probe").await?;
+                Ok(())
+            })
+        })
+        .connect(&test_db_url())
+        .await
+        .unwrap()
+}
+
 async fn badge_keys(pool: &PgPool, user_id: Uuid) -> Vec<String> {
     sqlx::query_scalar::<_, String>(
         "SELECT badge_key FROM user_badges WHERE user_id = $1 ORDER BY badge_key",
@@ -7402,6 +7467,47 @@ async fn a_run_of_episodes_earns_the_tiers_it_passes() {
     assert!(keys.contains(&"marathon-3".to_string()), "{keys:?}");
     assert!(keys.contains(&"marathon-5".to_string()), "{keys:?}");
     assert!(!keys.contains(&"marathon-10".to_string()), "{keys:?}");
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn badges_are_recomputed_under_the_production_app_role() {
+    // Recomputing used to build its candidates in a temporary table, which the
+    // application role may not create. Every recompute in production failed,
+    // and `recompute_quietly` only logged it.
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (_, _, user_id) = register_user(&app, "approle", "approle@mailbox.dev", "Pass1234").await;
+    let user_id = Uuid::parse_str(&user_id).unwrap();
+    let media_id = seed_show_with_episodes(&pool, "App Role Show", &[]).await;
+    seed_marathon(&pool, user_id, media_id, 3, 30).await;
+
+    let app_pool = app_role_pool().await;
+    cinetrack::services::badges::recompute(&app_pool, user_id, None)
+        .await
+        .expect("the application role must be able to recompute badges");
+    cinetrack::services::badges::recompute(&app_pool, user_id, Some(media_id))
+        .await
+        .expect("and to recompute one show");
+
+    let keys = badge_keys(&pool, user_id).await;
+    assert!(keys.contains(&"marathon-3".to_string()), "{keys:?}");
+
+    // The catch-up run after the fix goes through the same role.
+    sqlx::query("DELETE FROM user_badges WHERE user_id = $1")
+        .bind(user_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        cinetrack::services::badges::recompute_everyone(&app_pool)
+            .await
+            .expect("the catch-up run must work under the application role"),
+        1
+    );
+    let keys = badge_keys(&pool, user_id).await;
+    assert!(keys.contains(&"marathon-3".to_string()), "{keys:?}");
 }
 
 #[actix_web::test]
