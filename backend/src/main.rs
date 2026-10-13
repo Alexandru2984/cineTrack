@@ -48,6 +48,7 @@ enum RunMode {
     SyncReleaseSchedules,
     RepairCatalog,
     RekeyAvatars,
+    RecomputeBadges,
     Migrate,
     CheckConfig,
     CheckSmtp,
@@ -130,13 +131,14 @@ async fn main() -> std::io::Result<()> {
         [argument] if argument == "--sync-release-schedules" => RunMode::SyncReleaseSchedules,
         [argument] if argument == "--repair-catalog" => RunMode::RepairCatalog,
         [argument] if argument == "--rekey-avatars" => RunMode::RekeyAvatars,
+        [argument] if argument == "--recompute-badges" => RunMode::RecomputeBadges,
         [argument] if argument == "--migrate" => RunMode::Migrate,
         [argument] if argument == "--check-config" => RunMode::CheckConfig,
         [argument] if argument == "--check-smtp" => RunMode::CheckSmtp,
         _ => {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
-                "supported arguments are --healthcheck, --hydrate-catalog, --sync-release-schedules, --repair-catalog, --rekey-avatars, --migrate, --check-config and --check-smtp",
+                "supported arguments are --healthcheck, --hydrate-catalog, --sync-release-schedules, --repair-catalog, --rekey-avatars, --recompute-badges, --migrate, --check-config and --check-smtp",
             ));
         }
     };
@@ -264,6 +266,19 @@ async fn main() -> std::io::Result<()> {
             summary.failures,
             summary.skipped_locked,
         );
+        return Ok(());
+    }
+
+    if matches!(mode, RunMode::RecomputeBadges) {
+        // One-off and idempotent: every account's badges are rebuilt from its
+        // history, exactly as recording a watch would.
+        let accounts = cinetrack::services::badges::recompute_everyone(&pool)
+            .await
+            .map_err(|error| {
+                log::error!("Badge recompute failed: {error}");
+                std::io::Error::other("badge recompute failed")
+            })?;
+        log::info!("Badge recompute complete: accounts={accounts}");
         return Ok(());
     }
 

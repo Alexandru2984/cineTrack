@@ -142,7 +142,7 @@ pub const BADGES: &[Badge] = &[
 
 /// Rebuild badges for one account from its history.
 ///
-/// One transaction, and a rewrite rather than a merge: badges state what is
+/// One statement, and a rewrite rather than a merge: badges state what is
 /// currently true of a history, so an episode removed can take one away.
 /// `earned_at` comes from the history itself — the watch that first satisfied
 /// the badge — so recomputing never makes an old achievement look new.
@@ -154,29 +154,26 @@ pub const BADGES: &[Badge] = &[
 /// Account-wide families are always rebuilt: they are counts, and cheap.
 ///
 /// Pass `None` after an import or anything else that rewrites history broadly.
+///
+/// This used to collect the candidates in a temporary table. The application
+/// role has no TEMP privilege — `scripts/provision_db_role.sh` removes it on
+/// purpose — so in production every recompute failed from the day it shipped,
+/// quietly, through `recompute_quietly`, and no badge was earned after the
+/// backfill migration that first awarded them. The candidates are now a CTE;
+/// the delete and the insert read it inside the same statement, which is
+/// atomic on its own.
 pub async fn recompute(
     pool: &PgPool,
     user_id: Uuid,
     media_id: Option<Uuid>,
 ) -> Result<(), sqlx::Error> {
-    let mut tx = pool.begin().await?;
-
-    sqlx::query(
-        r#"CREATE TEMPORARY TABLE earned_badges (
-            badge_key TEXT NOT NULL,
-            media_id UUID,
-            earned_at TIMESTAMPTZ NOT NULL
-        ) ON COMMIT DROP"#,
-    )
-    .execute(&mut *tx)
-    .await?;
-
-    // Runs of one show inside a rolling window. A window function walks the
-    // history once; asking per show would be a query per tracked title, and
-    // some accounts here track more than a thousand.
     sqlx::query(
         r#"
-        WITH runs AS (
+        WITH
+        -- Runs of one show inside a rolling window. A window function walks the
+        -- history once; asking per show would be a query per tracked title, and
+        -- some accounts here track more than a thousand.
+        runs AS (
             SELECT
                 media_id,
                 watched_at,
@@ -193,36 +190,29 @@ pub async fn recompute(
               AND episode_id IS NOT NULL
               AND ($2::uuid IS NULL OR media_id = $2)
         ),
-        tiers (badge_key, window_hours, threshold) AS (
+        marathon_tiers (badge_key, window_hours, threshold) AS (
             VALUES ('marathon-3', 24, 3),
                    ('marathon-5', 24, 5),
                    ('marathon-10', 48, 10),
                    ('marathon-20', 48, 20)
-        )
-        INSERT INTO earned_badges (badge_key, media_id, earned_at)
-        SELECT tiers.badge_key, runs.media_id, MIN(runs.watched_at)
-        FROM runs
-        JOIN tiers
-          ON (tiers.window_hours = 24 AND runs.in_24h >= tiers.threshold)
-          OR (tiers.window_hours = 48 AND runs.in_48h >= tiers.threshold)
-        GROUP BY tiers.badge_key, runs.media_id
-        "#,
-    )
-    .bind(user_id)
-    .bind(media_id)
-    .execute(&mut *tx)
-    .await?;
-
-    // Episodes watched within a day of becoming available, per show.
-    //
-    // Only an upper bound is applied, not a lower one. Going forward the server
-    // refuses to record a watch before an episode has aired, so "earlier than
-    // available" can only come from imported history, where the origin clock we
-    // compute may sit a few hours after whatever clock the old service used.
-    // Discarding those would quietly punish people for importing.
-    sqlx::query(
-        r#"
-        WITH prompt AS (
+        ),
+        marathons AS (
+            SELECT marathon_tiers.badge_key, runs.media_id, MIN(runs.watched_at) AS earned_at
+            FROM runs
+            JOIN marathon_tiers
+              ON (marathon_tiers.window_hours = 24 AND runs.in_24h >= marathon_tiers.threshold)
+              OR (marathon_tiers.window_hours = 48 AND runs.in_48h >= marathon_tiers.threshold)
+            GROUP BY marathon_tiers.badge_key, runs.media_id
+        ),
+        -- Episodes watched within a day of becoming available, per show.
+        --
+        -- Only an upper bound is applied, not a lower one. Going forward the
+        -- server refuses to record a watch before an episode has aired, so
+        -- "earlier than available" can only come from imported history, where
+        -- the origin clock we compute may sit a few hours after whatever clock
+        -- the old service used. Discarding those would quietly punish people
+        -- for importing.
+        prompt AS (
             SELECT
                 seasons.media_id,
                 history.watched_at,
@@ -240,120 +230,120 @@ pub async fn recompute(
                   < episode_available_at(episodes.air_date, media.origin_country)
                     + INTERVAL '24 hours'
         ),
-        tiers (badge_key, threshold) AS (
+        same_day_tiers (badge_key, threshold) AS (
             VALUES ('same-day-3', 3), ('same-day-5', 5),
                    ('same-day-10', 10), ('same-day-25', 25)
-        )
-        INSERT INTO earned_badges (badge_key, media_id, earned_at)
-        SELECT tiers.badge_key, prompt.media_id, prompt.watched_at
-        FROM prompt
-        JOIN tiers ON tiers.threshold = prompt.nth
-        "#,
-    )
-    .bind(user_id)
-    .bind(media_id)
-    .execute(&mut *tx)
-    .await?;
-
-    // Shows being watched at once, dated by when the Nth of them was started.
-    //
-    // Counted rather than ranked. `ROW_NUMBER()` over the whole set has to sort
-    // it; a count plus one offset lookup per tier reads an index and stops.
-    sqlx::query(
-        r#"
-        WITH total AS (
+        ),
+        same_day AS (
+            SELECT same_day_tiers.badge_key, prompt.media_id, prompt.watched_at AS earned_at
+            FROM prompt
+            JOIN same_day_tiers ON same_day_tiers.threshold = prompt.nth
+        ),
+        -- Shows being watched at once, dated by when the Nth of them was
+        -- started.
+        --
+        -- Counted rather than ranked. `ROW_NUMBER()` over the whole set has to
+        -- sort it; a count plus one offset lookup per tier reads an index and
+        -- stops.
+        watching AS (
             SELECT COUNT(*) AS reached
             FROM user_media
             WHERE user_id = $1 AND status = 'watching'
         ),
-        tiers (badge_key, threshold) AS (
+        juggler_tiers (badge_key, threshold) AS (
             VALUES ('juggler-3', 3), ('juggler-8', 8), ('juggler-15', 15)
-        )
-        INSERT INTO earned_badges (badge_key, media_id, earned_at)
-        SELECT tiers.badge_key, NULL, crossed.created_at
-        FROM tiers
-        JOIN total ON total.reached >= tiers.threshold
-        CROSS JOIN LATERAL (
-            SELECT created_at
-            FROM user_media
-            WHERE user_id = $1 AND status = 'watching'
-            ORDER BY created_at
-            OFFSET tiers.threshold - 1
-            LIMIT 1
-        ) AS crossed
-        "#,
-    )
-    .bind(user_id)
-    .execute(&mut *tx)
-    .await?;
-
-    // Sheer volume, dated by the episode that crossed each line.
-    //
-    // This one mattered most. Ranking every watch to find four timestamps cost
-    // 147ms on an account with seventeen thousand of them — paid on every
-    // episode marked watched, and growing with the history it summarises. The
-    // count is 5ms and each offset lookup 1ms, because both read the index in
-    // order and stop.
-    sqlx::query(
-        r#"
-        WITH total AS (
+        ),
+        jugglers AS (
+            SELECT juggler_tiers.badge_key, NULL::uuid AS media_id, crossed.created_at AS earned_at
+            FROM juggler_tiers
+            JOIN watching ON watching.reached >= juggler_tiers.threshold
+            CROSS JOIN LATERAL (
+                SELECT created_at
+                FROM user_media
+                WHERE user_id = $1 AND status = 'watching'
+                ORDER BY created_at
+                OFFSET juggler_tiers.threshold - 1
+                LIMIT 1
+            ) AS crossed
+        ),
+        -- Sheer volume, dated by the episode that crossed each line.
+        --
+        -- This one mattered most. Ranking every watch to find four timestamps
+        -- cost 147ms on an account with seventeen thousand of them — paid on
+        -- every episode marked watched, and growing with the history it
+        -- summarises. The count is 5ms and each offset lookup 1ms, because both
+        -- read the index in order and stop.
+        watched AS (
             SELECT COUNT(*) AS reached
             FROM watch_history
             WHERE user_id = $1 AND episode_id IS NOT NULL
         ),
-        tiers (badge_key, threshold) AS (
+        watcher_tiers (badge_key, threshold) AS (
             VALUES ('watcher-50', 50), ('watcher-250', 250),
                    ('watcher-1000', 1000), ('watcher-5000', 5000)
+        ),
+        watchers AS (
+            SELECT watcher_tiers.badge_key, NULL::uuid AS media_id, crossed.watched_at AS earned_at
+            FROM watcher_tiers
+            JOIN watched ON watched.reached >= watcher_tiers.threshold
+            CROSS JOIN LATERAL (
+                SELECT watched_at
+                FROM watch_history
+                WHERE user_id = $1 AND episode_id IS NOT NULL
+                ORDER BY watched_at
+                OFFSET watcher_tiers.threshold - 1
+                LIMIT 1
+            ) AS crossed
+        ),
+        earned AS (
+            SELECT badge_key, media_id, earned_at FROM marathons
+            UNION ALL SELECT badge_key, media_id, earned_at FROM same_day
+            UNION ALL SELECT badge_key, media_id, earned_at FROM jugglers
+            UNION ALL SELECT badge_key, media_id, earned_at FROM watchers
+        ),
+        -- Anything the history no longer supports goes. This is the half that
+        -- makes recomputing meaningful rather than merely idempotent.
+        unsupported AS (
+            DELETE FROM user_badges
+            WHERE user_id = $1
+              -- Only rows this run actually recomputed. Without it, narrowing
+              -- to one show would delete every other show's badges as
+              -- unsupported.
+              AND ($2::uuid IS NULL OR media_id IS NULL OR media_id = $2)
+              AND NOT EXISTS (
+                  SELECT 1 FROM earned candidate
+                  WHERE candidate.badge_key = user_badges.badge_key
+                    AND candidate.media_id IS NOT DISTINCT FROM user_badges.media_id
+              )
         )
-        INSERT INTO earned_badges (badge_key, media_id, earned_at)
-        SELECT tiers.badge_key, NULL, crossed.watched_at
-        FROM tiers
-        JOIN total ON total.reached >= tiers.threshold
-        CROSS JOIN LATERAL (
-            SELECT watched_at
-            FROM watch_history
-            WHERE user_id = $1 AND episode_id IS NOT NULL
-            ORDER BY watched_at
-            OFFSET tiers.threshold - 1
-            LIMIT 1
-        ) AS crossed
+        INSERT INTO user_badges (user_id, badge_key, media_id, earned_at)
+        SELECT $1, badge_key, media_id, earned_at FROM earned
+        ON CONFLICT (user_id, badge_key, COALESCE(media_id, '00000000-0000-0000-0000-000000000000'::uuid))
+        DO NOTHING
         "#,
     )
     .bind(user_id)
-    .execute(&mut *tx)
-    .await?;
-
-    // Anything the history no longer supports goes. This is the half that
-    // makes recomputing meaningful rather than merely idempotent.
-    sqlx::query(
-        r#"DELETE FROM user_badges
-        WHERE user_id = $1
-          -- Only rows this run actually recomputed. Without it, narrowing to
-          -- one show would delete every other show's badges as unsupported.
-          AND ($2::uuid IS NULL OR media_id IS NULL OR media_id = $2)
-          AND NOT EXISTS (
-              SELECT 1 FROM earned_badges candidate
-              WHERE candidate.badge_key = user_badges.badge_key
-                AND candidate.media_id IS NOT DISTINCT FROM user_badges.media_id
-          )"#,
-    )
-    .bind(user_id)
     .bind(media_id)
-    .execute(&mut *tx)
+    .execute(pool)
     .await?;
-
-    sqlx::query(
-        r#"INSERT INTO user_badges (user_id, badge_key, media_id, earned_at)
-        SELECT $1, badge_key, media_id, earned_at FROM earned_badges
-        ON CONFLICT (user_id, badge_key, COALESCE(media_id, '00000000-0000-0000-0000-000000000000'::uuid))
-        DO NOTHING"#,
-    )
-    .bind(user_id)
-    .execute(&mut *tx)
-    .await?;
-
-    tx.commit().await?;
     Ok(())
+}
+
+/// Recompute every account's badges. Returns how many accounts were done.
+///
+/// For catching up after recomputing has been unable to run, as it was from
+/// August to October 2026: badges only move when somebody records a watch, so
+/// anyone who has not since would keep the shelf they had when it broke.
+pub async fn recompute_everyone(pool: &PgPool) -> Result<usize, sqlx::Error> {
+    let users = sqlx::query_scalar::<_, Uuid>(
+        "SELECT DISTINCT user_id FROM watch_history ORDER BY user_id",
+    )
+    .fetch_all(pool)
+    .await?;
+    for user_id in &users {
+        recompute(pool, *user_id, None).await?;
+    }
+    Ok(users.len())
 }
 
 /// The best value a member currently has in each family, for progress.
