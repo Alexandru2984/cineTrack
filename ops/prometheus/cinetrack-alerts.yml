@@ -168,6 +168,26 @@ groups:
           summary: CineTrack backend metrics endpoint is down
           description: Prometheus cannot scrape the loopback-only CineTrack backend.
 
+      # Errors the backend logged and carried on past. Badge recomputation failed
+      # on every recorded episode from August to October 2026 and said so only
+      # in a log that each deploy threw away. Browser and phone crash reports
+      # are logged at error level too, but they are user-driven and have their
+      # own metric, so they are left out here.
+      - alert: CineTrackBackendLoggingErrors
+        expr: |
+          sum by (target) (
+            increase(cinetrack_log_events_total{level="error", target!="cinetrack::mobile_client"}[1h])
+          ) >= 3
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Văzute backend keeps logging errors from {{ $labels.target }}"
+          description: >-
+            {{ $labels.target }} logged at least three errors in the last hour. The
+            request or job may have carried on, but something is failing. Read the
+            backend log with docker logs cinetrack-backend-1.
+
       - alert: CineTrackHighServerErrorRate
         expr: |
           sum(rate(cinetrack_http_requests_total{status=~"5.."}[10m]))

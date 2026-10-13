@@ -82,7 +82,8 @@ pub async fn complete_show_if_fully_watched_best_effort(
     media_id: Uuid,
 ) {
     if let Err(error) = complete_show_if_fully_watched(pool, user_id, media_id).await {
-        log::warn!(
+        // An error, not a warning, for the same reason as badge recompute.
+        log::error!(
             "failed to evaluate show completion user_id={user_id} media_id={media_id}: {error}"
         );
     }

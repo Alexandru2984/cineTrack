@@ -95,6 +95,7 @@ fn run_healthcheck() -> std::io::Result<()> {
 fn init_logger() {
     env_logger::Builder::from_default_env()
         .format(|buf, record| {
+            cinetrack::metrics::record_log_event(record.level(), record.target());
             let ts = buf.timestamp();
             match current_request_id() {
                 Some(id) => writeln!(

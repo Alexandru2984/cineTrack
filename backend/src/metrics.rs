@@ -416,6 +416,47 @@ impl TmdbMetrics {
     }
 }
 
+/// Warning and error log lines, by the module that wrote them.
+///
+/// Some failures are swallowed on purpose — a badge or a completed show must
+/// never turn a recorded watch into an error — and only logged. The backend's
+/// logs leave with its container on every deploy, so a failure that repeated on
+/// every recorded episode for seven weeks (badge recomputation, August to
+/// October 2026) left nothing anyone saw. Counting them gives the alert rules
+/// something to watch.
+#[derive(Clone)]
+struct LogMetrics {
+    events: IntCounterVec,
+}
+
+impl LogMetrics {
+    fn new() -> Self {
+        Self {
+            events: IntCounterVec::new(
+                Opts::new(
+                    "log_events_total",
+                    "Warning and error log lines written by the backend, by level and module",
+                )
+                .namespace("cinetrack"),
+                &["level", "target"],
+            )
+            .expect("Log event metric must be valid"),
+        }
+    }
+}
+
+/// A label value for a log target that cannot grow without bound.
+///
+/// This crate's targets are its module paths, plus a few named ones, all fixed
+/// at compile time. Anything else is reduced to its crate name.
+pub(crate) fn log_target_label(target: &str) -> &str {
+    if target == "cinetrack" || target.starts_with("cinetrack::") {
+        target
+    } else {
+        target.split("::").next().unwrap_or(target)
+    }
+}
+
 static TMDB_METRICS: LazyLock<TmdbMetrics> = LazyLock::new(TmdbMetrics::new);
 static EMAIL_METRICS: LazyLock<EmailMetrics> = LazyLock::new(EmailMetrics::new);
 static CLIENT_ERROR_METRICS: LazyLock<ClientErrorMetrics> = LazyLock::new(ClientErrorMetrics::new);
@@ -425,6 +466,7 @@ static SECURITY_METRICS: LazyLock<SecurityMetrics> = LazyLock::new(SecurityMetri
 static COMMUNITY_SAFETY_METRICS: LazyLock<CommunitySafetyMetrics> =
     LazyLock::new(CommunitySafetyMetrics::new);
 static EVENT_STREAM_METRICS: LazyLock<EventStreamMetrics> = LazyLock::new(EventStreamMetrics::new);
+static LOG_METRICS: LazyLock<LogMetrics> = LazyLock::new(LogMetrics::new);
 
 /// A stream was accepted and is now held open.
 pub(crate) fn record_event_stream_opened() {
@@ -435,6 +477,19 @@ pub(crate) fn record_event_stream_opened() {
 /// revoked, or the process is shutting down.
 pub(crate) fn record_event_stream_closed() {
     EVENT_STREAM_METRICS.open.dec();
+}
+
+/// Count a log line. Only warnings and errors are counted.
+pub fn record_log_event(level: log::Level, target: &str) {
+    let level = match level {
+        log::Level::Error => "error",
+        log::Level::Warn => "warn",
+        _ => return,
+    };
+    LOG_METRICS
+        .events
+        .with_label_values(&[level, log_target_label(target)])
+        .inc();
 }
 
 pub fn record_tmdb_request(endpoint: &'static str, outcome: &'static str, duration: Duration) {
@@ -649,6 +704,10 @@ pub fn build() -> PrometheusMetrics {
         .register(Box::new(EVENT_STREAM_METRICS.open.clone()))
         .expect("Failed to register event stream metric");
     prometheus
+        .registry
+        .register(Box::new(LOG_METRICS.events.clone()))
+        .expect("Failed to register log event metric");
+    prometheus
 }
 
 #[cfg(test)]
@@ -824,5 +883,23 @@ mod tests {
         assert_eq!(bounded_report_reason("attacker-controlled"), "other");
         assert_eq!(bounded_moderation_status("dismissed"), "dismissed");
         assert_eq!(bounded_moderation_status("unknown"), "open");
+    }
+
+    #[test]
+    fn log_targets_outside_this_crate_collapse_to_their_crate() {
+        assert_eq!(
+            log_target_label("cinetrack::services::badges"),
+            "cinetrack::services::badges"
+        );
+        assert_eq!(
+            log_target_label("cinetrack::mobile_client"),
+            "cinetrack::mobile_client"
+        );
+        assert_eq!(
+            log_target_label("actix_web::middleware::logger"),
+            "actix_web"
+        );
+        assert_eq!(log_target_label("sqlx::query"), "sqlx");
+        assert_eq!(log_target_label("cinetrackish::x"), "cinetrackish");
     }
 }
