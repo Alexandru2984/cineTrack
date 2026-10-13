@@ -74,7 +74,12 @@ case "$1" in
     printf '%s' "${STUB_DEPLOYED_REVISION:-}"; exit 0 ;;
   image)   exit 0 ;;   # `image inspect`: the saved images exist
   run)     [[ "$*" == *promtool* ]] && exit "${STUB_PROMTOOL_EXIT:-0}" ;;
-  exec)    printf 'prometheus_config_last_reload_successful %s\n' "${STUB_PROM_RELOAD:-1}"; exit 0 ;;
+  # The real page is hundreds of kilobytes, and the reload line comes early.
+  # A reader that stops at that line leaves the writer with nowhere to write.
+  exec)    printf 'prometheus_config_last_reload_successful %s\n' "${STUB_PROM_RELOAD:-1}"
+           # The stub writes it itself, so a closed pipe kills it with SIGPIPE
+           # exactly as it kills wget.
+           printf 'go_gc_duration_seconds{quantile="0"} 0 %.0s\n' {1..50000}; exit 0 ;;
   logs)    [[ "${STUB_LOGS_FAIL:-0}" == 1 ]] && exit 1
            printf 'backend log before the swap\n'; exit 0 ;;
 esac

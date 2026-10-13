@@ -193,10 +193,17 @@ sync_monitoring() {
       done
       # A reload that Prometheus rejects keeps the previous configuration
       # running, so success is read back from Prometheus, not assumed.
+      #
+      # Read whole, then searched. `wget | grep -q` under pipefail failed
+      # whenever grep found the line and exited while wget was still writing
+      # the rest of the page: wget died of SIGPIPE, and an accepted reload was
+      # reported as rejected.
       if docker kill --signal HUP "$PROMETHEUS_CONTAINER" >/dev/null 2>&1; then
         sleep "${AUTO_DEPLOY_RELOAD_WAIT:-3}"
-        if docker exec "$PROMETHEUS_CONTAINER" wget -qO- http://localhost:9090/metrics 2>/dev/null \
-            | grep -q '^prometheus_config_last_reload_successful 1$'; then
+        local prometheus_metrics
+        prometheus_metrics="$(docker exec "$PROMETHEUS_CONTAINER" \
+          wget -qO- http://localhost:9090/metrics 2>/dev/null || true)"
+        if grep -q '^prometheus_config_last_reload_successful 1$' <<<"$prometheus_metrics"; then
           ok=1
           say "monitoring configuration synced to ${revision:0:8} and reloaded"
         else
@@ -214,8 +221,10 @@ sync_monitoring() {
   # Files written here reach Prometheus only if this is the directory it
   # mounts. A container still on the old file mounts reloads happily and keeps
   # the old rules, which is the exact failure this exists to end.
-  if (( ok == 1 )) && ! docker inspect --format '{{range .Mounts}}{{.Source}}{{"\n"}}{{end}}' \
-      "$PROMETHEUS_CONTAINER" 2>/dev/null | grep -qxF "$MONITORING_DIR"; then
+  local mounts
+  mounts="$(docker inspect --format '{{range .Mounts}}{{.Source}}{{"\n"}}{{end}}' \
+    "$PROMETHEUS_CONTAINER" 2>/dev/null || true)"
+  if (( ok == 1 )) && ! grep -qxF "$MONITORING_DIR" <<<"$mounts"; then
     say "$PROMETHEUS_CONTAINER does not mount $MONITORING_DIR; recreate it from docker-compose.monitoring.yml"
     ok=0
   fi
