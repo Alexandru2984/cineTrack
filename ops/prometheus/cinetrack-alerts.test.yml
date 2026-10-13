@@ -231,3 +231,29 @@ tests:
       - eval_time: 30m
         alertname: CineTrackCatalogSyncNotRunning
         exp_alerts: []
+
+  - name: repeated logged errors from one module are reported
+    interval: 1m
+    input_series:
+      - series: 'cinetrack_log_events_total{level="error", target="cinetrack::services::badges"}'
+        values: "0+1x60"
+      - series: 'cinetrack_log_events_total{level="error", target="cinetrack::routes::media"}'
+        values: "0x30 1x30"
+      - series: 'cinetrack_log_events_total{level="warn", target="cinetrack::services::tmdb"}'
+        values: "0+10x60"
+      - series: 'cinetrack_log_events_total{level="error", target="cinetrack::mobile_client"}'
+        values: "0+10x60"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: CineTrackBackendLoggingErrors
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              target: cinetrack::services::badges
+            exp_annotations:
+              summary: "Văzute backend keeps logging errors from cinetrack::services::badges"
+              description: >-
+                cinetrack::services::badges logged at least three errors in the last hour. The
+                request or job may have carried on, but something is failing. Read the
+                backend log with docker logs cinetrack-backend-1.
+

@@ -75,6 +75,8 @@ case "$1" in
   image)   exit 0 ;;   # `image inspect`: the saved images exist
   run)     [[ "$*" == *promtool* ]] && exit "${STUB_PROMTOOL_EXIT:-0}" ;;
   exec)    printf 'prometheus_config_last_reload_successful %s\n' "${STUB_PROM_RELOAD:-1}"; exit 0 ;;
+  logs)    [[ "${STUB_LOGS_FAIL:-0}" == 1 ]] && exit 1
+           printf 'backend log before the swap\n'; exit 0 ;;
 esac
 exit 0
 STUB
@@ -140,6 +142,7 @@ run_deploy() {
   STUB_PROM_MOUNT="${STUB_PROM_MOUNT-$MONITORING_DIR}" \
   STUB_PROMTOOL_EXIT="${STUB_PROMTOOL_EXIT:-0}" \
   STUB_PROM_RELOAD="${STUB_PROM_RELOAD:-1}" \
+  STUB_LOGS_FAIL="${STUB_LOGS_FAIL:-0}" \
   STUB_DEPLOYED_REVISION="$2" \
   STUB_CHECKS_FILE="$3" \
   STUB_STATUS_FILE="$4" \
@@ -549,6 +552,42 @@ if [[ "$(sync_success)" == 0 ]]; then
   pass "a Prometheus that does not mount the synced directory is reported, not trusted"
 else
   fail "a container on the old file mounts was reported as synced"
+fi
+
+# ── The outgoing backend's log survives the swap ────────────────────────
+#
+# Docker deletes a container's log with the container, and every deploy
+# replaces it. A failure the backend logged and carried on past for seven weeks
+# left nothing behind for exactly that reason.
+LOG_DIR="$WORK_DIR/state/logs"
+rm -rf "$LOG_DIR"
+mkdir -p "$LOG_DIR"
+for day in $(seq -w 1 31); do : > "$LOG_DIR/backend-202601${day}T000000Z-oldoldol.log.gz"; done
+out="$(run_deploy "$CODE_ONLY" "$BASE" "$GREEN" "$NO_STATUS" 1)"
+archived="$(find "$LOG_DIR" -name "backend-*-${BASE:0:8}.log.gz" | head -1)"
+if is_state "$out" deployed && [[ -n "$archived" ]] \
+    && gzip -dc "$archived" | grep -q "backend log before the swap"; then
+  pass "the outgoing backend's log is archived before the container is replaced"
+else
+  fail "no archive of the outgoing backend's log: '$archived'"
+fi
+if [[ -n "$archived" && "$(stat -c %a "$archived")" == 600 ]]; then
+  pass "an archived log is readable by its owner only"
+else
+  fail "archived log mode: $(stat -c %a "$archived" 2>/dev/null)"
+fi
+kept="$(find "$LOG_DIR" -name 'backend-*.log.gz' | wc -l)"
+if [[ "$kept" == 30 && ! -e "$LOG_DIR/backend-20260101T000000Z-oldoldol.log.gz" \
+    && ! -e "$LOG_DIR/backend-20260102T000000Z-oldoldol.log.gz" ]]; then
+  pass "only the newest thirty logs are kept"
+else
+  fail "archive pruning kept $kept logs"
+fi
+out="$(STUB_LOGS_FAIL=1 run_deploy "$CODE_ONLY" "$BASE" "$GREEN" "$NO_STATUS" 1)"
+if is_state "$out" deployed; then
+  pass "a log that cannot be archived does not stop the deploy"
+else
+  fail "a failed log archive blocked the deploy"
 fi
 
 if (( FAILURES > 0 )); then

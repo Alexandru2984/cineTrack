@@ -41,6 +41,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="${AUTO_DEPLOY_REPO_DIR:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 STATE_DIR="${AUTO_DEPLOY_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/cinetrack}"
 METRICS_FILE="${AUTO_DEPLOY_METRICS_FILE:-$STATE_DIR/auto_deploy.prom}"
+LOG_ARCHIVE_DIR="${AUTO_DEPLOY_LOG_ARCHIVE_DIR:-$STATE_DIR/logs}"
+LOG_ARCHIVE_KEEP="${AUTO_DEPLOY_LOG_ARCHIVE_KEEP:-30}"
 BRANCH="${AUTO_DEPLOY_BRANCH:-origin/main}"
 ENV_FILE="${AUTO_DEPLOY_ENV_FILE:-$REPO_DIR/.env.prod}"
 # Two different questions, and conflating them causes the wrong repair.
@@ -240,6 +242,29 @@ compose() {
 deployed_revision() {
   docker inspect cinetrack-backend-1 \
     --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' 2>/dev/null || true
+}
+
+# Keep the backend's log across the swap. `compose up -d` replaces the
+# container, and Docker deletes a container's log with it, so everything the
+# old one wrote went on every deploy — including failures it logged and carried
+# on past. Badge recomputation failed on every recorded episode for seven weeks
+# that way (August to October 2026). The newest LOG_ARCHIVE_KEEP logs are kept,
+# readable by this user only. Archiving never stops a deploy.
+archive_backend_log() {
+  local revision file
+  revision="$(deployed_revision)"
+  [[ -n "$revision" ]] || return 0
+  (umask 077 && mkdir -p "$LOG_ARCHIVE_DIR") || return 0
+  file="$LOG_ARCHIVE_DIR/backend-$(date -u +%Y%m%dT%H%M%SZ)-${revision:0:8}.log.gz"
+  if ! (umask 077 && docker logs --timestamps cinetrack-backend-1 2>&1 | gzip > "$file"); then
+    rm -f "$file"
+    say "could not archive the backend log; deploying anyway"
+    return 0
+  fi
+  # The timestamp leads the name, so a reverse sort is newest first.
+  find "$LOG_ARCHIVE_DIR" -maxdepth 1 -name 'backend-*.log.gz' -printf '%f\n' \
+    | sort -r | tail -n +"$((LOG_ARCHIVE_KEEP + 1))" \
+    | while read -r old; do rm -f "$LOG_ARCHIVE_DIR/$old"; done || true
 }
 
 probe() { curl --fail --silent --max-time 10 "$1" >/dev/null 2>&1; }
@@ -514,6 +539,7 @@ compose run --rm --no-deps backend /usr/local/bin/cinetrack --check-config
 compose run --rm --no-deps backend /usr/local/bin/cinetrack --check-smtp
 compose --profile ops run --rm migrate
 "$BUILD_DIR/scripts/provision_db_role.sh" "$ENV_FILE"
+archive_backend_log
 compose up -d
 
 if healthy; then
@@ -547,6 +573,8 @@ say "rolling back"
 for image in cinetrack-backend cinetrack-frontend; do
   docker tag "$image:rollback" "$image:latest"
 done
+# The failed revision's log is the one most worth keeping.
+archive_backend_log
 compose up -d
 
 if healthy; then

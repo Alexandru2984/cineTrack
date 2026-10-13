@@ -409,6 +409,8 @@ pub async fn family_standings(
 /// the completion service follows.
 pub async fn recompute_quietly(pool: &PgPool, user_id: Uuid, media_id: Option<Uuid>) {
     if let Err(error) = recompute(pool, user_id, media_id).await {
-        log::warn!("badge recompute failed user_id={user_id} error={error}");
+        // Logged as an error, not a warning: the caller carries on, but a
+        // failure here is a bug, and errors are what the alert rules count.
+        log::error!("badge recompute failed user_id={user_id} error={error}");
     }
 }
