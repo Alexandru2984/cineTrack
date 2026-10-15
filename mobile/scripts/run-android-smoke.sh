@@ -66,6 +66,15 @@ wait_for_android_device() {
   return 1
 }
 
+# Ask the framework not to show crash and "isn't responding" dialogs at all.
+# AOSP reads this setting, but whether every emulator image applies it while
+# running is unverified, so the flow also dismisses the dialog itself. A crash
+# of the app still fails the flow: the screens it asserts are gone with it.
+hide_system_error_dialogs() {
+  adb -s "$DEVICE_SERIAL" shell settings put global hide_error_dialogs 1 \
+    >/dev/null 2>&1 || true
+}
+
 curl --fail --silent --show-error --location --retry 3 \
   --output "$TEMP_DIR/maestro.zip" "$MAESTRO_URL"
 printf '%s  %s\n' "$MAESTRO_SHA256" "$TEMP_DIR/maestro.zip" | sha256sum --check
@@ -75,6 +84,7 @@ mkdir -p "$ARTIFACT_DIR"
 wait_for_android_device 60
 adb -s "$DEVICE_SERIAL" install -r "$APK_PATH"
 wait_for_android_device 60
+hide_system_error_dialogs
 
 export MAESTRO_CLI_NO_ANALYTICS=1
 export MAESTRO_CLI_ANALYSIS_NOTIFICATION_DISABLED=true
@@ -102,6 +112,7 @@ if ! run_maestro "attempt-1"; then
     echo "Maestro lost the Android device; waiting for ADB and retrying once" >&2
     adb reconnect offline >/dev/null 2>&1 || true
     wait_for_android_device 60
+    hide_system_error_dialogs
     run_maestro "attempt-2"
   else
     exit 1
