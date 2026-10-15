@@ -11,6 +11,17 @@ tags:
 - extendedWaitUntil:
     visible: "Continue tracking what you watch"
     timeout: 20000
+    optional: true
+- runFlow:
+    # The CI emulator sometimes reports System UI as not responding, most often
+    # right after it briefly drops off ADB, and the dialog covers the app: on
+    # 2026-10-13 it failed main with the sign-in screen rendered underneath.
+    # It is the emulator's, not the app's, so wait it out and carry on.
+    when:
+      visible: ".*isn't responding"
+    commands:
+      - tapOn: "Wait"
+- assertVisible: "Continue tracking what you watch"
 - assertVisible: "Sign in"
 - tapOn:
     id: "auth-email"
@@ -40,4 +51,13 @@ tags:
 - assertVisible: "Reset password"
 - stopApp
 - launchApp
+- extendedWaitUntil:
+    visible: "Continue tracking what you watch"
+    timeout: 20000
+    optional: true
+- runFlow:
+    when:
+      visible: ".*isn't responding"
+    commands:
+      - tapOn: "Wait"
 - assertVisible: "Continue tracking what you watch"
