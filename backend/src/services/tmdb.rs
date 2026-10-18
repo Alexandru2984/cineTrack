@@ -23,6 +23,11 @@ const SEARCH_CACHE_FRESH_HOURS: i64 = 24;
 const SEARCH_CACHE_STALE_DAYS: i64 = 30;
 const MAX_TITLE_ALIASES_PER_MEDIA: usize = 500;
 const MAX_RELEASE_DATES_PER_MOVIE: usize = 2_000;
+/// The languages the public title pages are published in besides English,
+/// whose text is `media` itself.
+pub const LOCALIZED_LANGUAGES: &[&str] = &["ro"];
+/// Longer than any real synopsis; a bound on what one row can store.
+const MAX_LOCALIZED_OVERVIEW_CHARS: usize = 5_000;
 
 #[derive(sqlx::FromRow)]
 struct ProviderCacheRow {
@@ -35,6 +40,13 @@ struct CachedProviderResponse<T> {
     value: T,
     expires_at: DateTime<Utc>,
     stale_until: DateTime<Utc>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct Localization {
+    language_code: &'static str,
+    title: Option<String>,
+    overview: Option<String>,
 }
 
 struct TitleAlias {
@@ -428,6 +440,76 @@ impl TmdbService {
             );
         }
         aliases
+    }
+
+    /// A title's name and synopsis in each published language, where TMDB has
+    /// them.
+    ///
+    /// TMDB lists one translation per language and region — Romanian may come
+    /// as `ro-RO` and `ro-MD` — so the Romanian region is preferred and any
+    /// other is a fallback, field by field. An empty string is how TMDB says a
+    /// field was never translated, and it is treated as missing, not as text.
+    fn collect_localizations(
+        media_type: &str,
+        translations: &TmdbTranslations,
+    ) -> Vec<Localization> {
+        fn clean(value: Option<&str>, limit: usize) -> Option<String> {
+            let text = value?
+                .chars()
+                .map(|character| {
+                    if character.is_control() && character != '\n' {
+                        ' '
+                    } else {
+                        character
+                    }
+                })
+                .collect::<String>();
+            let text = text
+                .split('\n')
+                .map(|line| line.split_whitespace().collect::<Vec<_>>().join(" "))
+                .filter(|line| !line.is_empty())
+                .collect::<Vec<_>>()
+                .join("\n");
+            (!text.is_empty() && text.chars().count() <= limit).then_some(text)
+        }
+
+        LOCALIZED_LANGUAGES
+            .iter()
+            .filter_map(|&language| {
+                let region = language.to_ascii_uppercase();
+                let mut candidates = translations
+                    .translations
+                    .iter()
+                    .filter(|translation| {
+                        Self::normalize_language_code(&translation.iso_639_1) == language
+                    })
+                    .collect::<Vec<_>>();
+                candidates.sort_by_key(|translation| {
+                    Self::normalize_region_code(&translation.iso_3166_1) != region
+                });
+
+                let title = candidates.iter().find_map(|translation| {
+                    let data = &translation.data;
+                    let name = if media_type == "movie" {
+                        data.title.as_deref().or(data.name.as_deref())
+                    } else {
+                        data.name.as_deref().or(data.title.as_deref())
+                    };
+                    clean(name, 500)
+                });
+                let overview = candidates.iter().find_map(|translation| {
+                    clean(
+                        translation.data.overview.as_deref(),
+                        MAX_LOCALIZED_OVERVIEW_CHARS,
+                    )
+                });
+                (title.is_some() || overview.is_some()).then_some(Localization {
+                    language_code: language,
+                    title,
+                    overview,
+                })
+            })
+            .collect()
     }
 
     async fn load_provider_response<T: DeserializeOwned>(
@@ -1092,6 +1174,41 @@ impl TmdbService {
         Ok(())
     }
 
+    /// Store the published languages' text. A response without translations
+    /// leaves what is stored alone, as the aliases do.
+    async fn replace_localizations(
+        tx: &mut Transaction<'_, Postgres>,
+        media: &Media,
+        translations: Option<&TmdbTranslations>,
+    ) -> Result<(), AppError> {
+        let Some(translations) = translations else {
+            return Ok(());
+        };
+        let localizations = Self::collect_localizations(&media.media_type, translations);
+
+        sqlx::query("DELETE FROM media_localizations WHERE media_id = $1")
+            .bind(media.id)
+            .execute(&mut **tx)
+            .await?;
+        for localization in &localizations {
+            sqlx::query(
+                "INSERT INTO media_localizations (media_id, language_code, title, overview) \
+                 VALUES ($1, $2, $3, $4)",
+            )
+            .bind(media.id)
+            .bind(localization.language_code)
+            .bind(&localization.title)
+            .bind(&localization.overview)
+            .execute(&mut **tx)
+            .await?;
+        }
+        sqlx::query("UPDATE media SET localizations_cached_at = NOW() WHERE id = $1")
+            .bind(media.id)
+            .execute(&mut **tx)
+            .await?;
+        Ok(())
+    }
+
     async fn upsert_movie(
         &self,
         pool: &PgPool,
@@ -1135,6 +1252,7 @@ impl TmdbService {
             detail.translations.as_ref(),
         )
         .await?;
+        Self::replace_localizations(&mut tx, &media, detail.translations.as_ref()).await?;
         tx.commit().await?;
         Ok(media)
     }
@@ -1374,6 +1492,7 @@ impl TmdbService {
             detail.translations.as_ref(),
         )
         .await?;
+        Self::replace_localizations(&mut tx, &media, detail.translations.as_ref()).await?;
 
         // Also cache seasons
         if let Some(seasons) = &detail.seasons {
@@ -1653,6 +1772,96 @@ mod tests {
             Some("Film Românesc".to_string())
         );
         assert!(TmdbService::normalize_alias_title(&"x".repeat(501)).is_none());
+    }
+
+    fn translation(
+        language: &str,
+        region: &str,
+        title: Option<&str>,
+        name: Option<&str>,
+        overview: Option<&str>,
+    ) -> TmdbTranslation {
+        TmdbTranslation {
+            iso_3166_1: region.to_string(),
+            iso_639_1: language.to_string(),
+            data: TmdbTranslationData {
+                title: title.map(str::to_string),
+                name: name.map(str::to_string),
+                overview: overview.map(str::to_string),
+            },
+        }
+    }
+
+    #[test]
+    fn the_romanian_region_is_preferred_field_by_field() {
+        let translations = TmdbTranslations {
+            translations: vec![
+                translation("ro", "MD", Some("Titlu MD"), None, Some("Rezumat MD")),
+                translation("ro", "RO", Some("Titlu RO"), None, Some("")),
+                translation("de", "DE", Some("Titel"), None, Some("Inhalt")),
+            ],
+        };
+        assert_eq!(
+            TmdbService::collect_localizations("movie", &translations),
+            vec![Localization {
+                language_code: "ro",
+                title: Some("Titlu RO".to_string()),
+                // Romania's own entry has no synopsis, so Moldova's is used
+                // rather than none at all.
+                overview: Some("Rezumat MD".to_string()),
+            }]
+        );
+    }
+
+    #[test]
+    fn a_series_is_named_by_its_name_field() {
+        let translations = TmdbTranslations {
+            translations: vec![translation("ro", "RO", None, Some("Serialul"), None)],
+        };
+        let localized = TmdbService::collect_localizations("tv", &translations);
+        assert_eq!(localized[0].title.as_deref(), Some("Serialul"));
+        assert_eq!(localized[0].overview, None);
+    }
+
+    #[test]
+    fn a_language_with_nothing_translated_is_not_stored() {
+        let translations = TmdbTranslations {
+            translations: vec![
+                translation("ro", "RO", Some(""), None, Some("   ")),
+                translation("en", "US", Some("Title"), None, Some("Overview")),
+            ],
+        };
+        assert!(TmdbService::collect_localizations("movie", &translations).is_empty());
+    }
+
+    #[test]
+    fn a_synopsis_keeps_its_paragraphs_and_loses_control_characters() {
+        let translations = TmdbTranslations {
+            translations: vec![translation(
+                "ro",
+                "RO",
+                None,
+                None,
+                Some("  Primul  paragraf.\u{0007}\n\n\nAl doilea.  "),
+            )],
+        };
+        assert_eq!(
+            TmdbService::collect_localizations("movie", &translations)[0]
+                .overview
+                .as_deref(),
+            Some("Primul paragraf.\nAl doilea.")
+        );
+    }
+
+    #[test]
+    fn an_oversized_synopsis_is_dropped_rather_than_stored() {
+        let long = "x".repeat(MAX_LOCALIZED_OVERVIEW_CHARS + 1);
+        let translations = TmdbTranslations {
+            translations: vec![translation("ro", "RO", Some("Titlu"), None, Some(&long))],
+        };
+        let localized = TmdbService::collect_localizations("movie", &translations);
+        assert_eq!(localized[0].title.as_deref(), Some("Titlu"));
+        assert_eq!(localized[0].overview, None);
     }
 
     #[test]

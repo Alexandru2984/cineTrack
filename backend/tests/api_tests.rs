@@ -5552,7 +5552,11 @@ async fn test_summary_media_is_hydrated_before_detail_response() {
                 "translations": [{
                     "iso_3166_1": "RO",
                     "iso_639_1": "ro",
-                    "data": {"title": "Film Hidratat"}
+                    "data": {"title": "Film Hidratat", "overview": "Detaliu complet"}
+                }, {
+                    "iso_3166_1": "DE",
+                    "iso_639_1": "de",
+                    "data": {"title": "Hydrierter Film", "overview": "Vollständig"}
                 }]
             }
         }"#;
@@ -5607,7 +5611,26 @@ async fn test_summary_media_is_hydrated_before_detail_response() {
         .fetch_one(&pool)
         .await
         .unwrap(),
-        ("Hydrated Film".to_string(), true, 2)
+        ("Hydrated Film".to_string(), true, 3)
+    );
+    // The Romanian text is kept for the public pages; a language they are not
+    // published in is not.
+    assert_eq!(
+        sqlx::query_as::<_, (String, Option<String>, Option<String>, bool)>(
+            r#"SELECT l.language_code, l.title, l.overview, m.localizations_cached_at IS NOT NULL
+            FROM media m
+            JOIN media_localizations l ON l.media_id = m.id
+            WHERE m.tmdb_id = 630001"#,
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap(),
+        vec![(
+            "ro".to_string(),
+            Some("Film Hidratat".to_string()),
+            Some("Detaliu complet".to_string()),
+            true
+        )]
     );
     upstream.await.unwrap();
 }

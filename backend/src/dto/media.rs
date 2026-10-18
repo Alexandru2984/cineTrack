@@ -327,6 +327,8 @@ pub struct TmdbTranslation {
 pub struct TmdbTranslationData {
     pub title: Option<String>,
     pub name: Option<String>,
+    #[serde(default)]
+    pub overview: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
