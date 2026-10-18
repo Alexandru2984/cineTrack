@@ -17,6 +17,7 @@ pub mod notifications;
 pub mod push;
 pub mod reports;
 pub mod stats;
+pub mod title_pages;
 pub mod tracking;
 pub mod unfurl;
 pub mod users;
@@ -33,6 +34,7 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
     // Same split as the rate-limited path, minus the limiters: public images
     // are top-level scopes registered before /api.
     assets::configure_public_images_unlimited(cfg);
+    title_pages::configure(cfg);
 
     cfg.service(
         web::scope("/api")
@@ -83,6 +85,8 @@ pub fn configure_with_rate_limits(
     // above is not the one the server builds itself from, which is how the
     // first version of this shipped as a 404 nobody's tests could see.
     unfurl::configure_rate_limited(cfg, shared_rate_limiter);
+    // The public title pages, under /ro and /en, on the same shared budget.
+    title_pages::configure_rate_limited(cfg, shared_rate_limiter);
 
     cfg.service(
         web::scope("/api")

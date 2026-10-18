@@ -1,0 +1,202 @@
+/*
+ * The public title pages (/ro/film/…, /en/movie/…), which the backend renders
+ * as plain HTML. They are not part of the application bundle, and the site's
+ * Content-Security-Policy allows only same-origin stylesheets, so the styles
+ * live here. Colours follow the application's tokens in src/index.css.
+ */
+:root {
+  color-scheme: light dark;
+  --background: hsl(0 0% 100%);
+  --foreground: hsl(240 10% 3.9%);
+  --muted: hsl(240 3.8% 46.1%);
+  --border: hsl(240 5.9% 90%);
+  --surface: hsl(240 4.8% 95.9%);
+  --primary: hsl(262 83% 58%);
+  --primary-foreground: hsl(0 0% 100%);
+  --radius: 0.5rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: hsl(240 10% 3.9%);
+    --foreground: hsl(0 0% 98%);
+    --muted: hsl(240 5% 64.9%);
+    --border: hsl(240 3.7% 15.9%);
+    --surface: hsl(240 3.7% 15.9%);
+    --primary: hsl(258 90% 76%);
+    --primary-foreground: hsl(240 10% 3.9%);
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--background);
+  color: var(--foreground);
+  font-family: system-ui, -apple-system, sans-serif;
+  line-height: 1.6;
+  -webkit-text-size-adjust: 100%;
+}
+
+a {
+  color: var(--primary);
+}
+
+header.site,
+footer.site,
+main {
+  max-width: 60rem;
+  margin: 0 auto;
+  padding: 0 1rem;
+}
+
+header.site {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 1rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.brand {
+  font-weight: 700;
+  font-size: 1.25rem;
+  color: var(--foreground);
+  text-decoration: none;
+}
+
+.language {
+  font-size: 0.9rem;
+}
+
+article {
+  padding: 1.5rem 0 2rem;
+}
+
+.hero {
+  display: grid;
+  gap: 1.25rem;
+}
+
+@media (min-width: 40rem) {
+  .hero {
+    grid-template-columns: 14rem 1fr;
+    align-items: start;
+  }
+}
+
+.poster {
+  width: 100%;
+  max-width: 14rem;
+  height: auto;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+
+h1 {
+  margin: 0.25rem 0 0.5rem;
+  font-size: clamp(1.6rem, 5vw, 2.4rem);
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+}
+
+h2 {
+  margin: 2rem 0 0.75rem;
+  font-size: 1.3rem;
+  line-height: 1.3;
+}
+
+h3 {
+  margin: 1rem 0 0.5rem;
+  font-size: 1rem;
+}
+
+.facts,
+.original,
+.tagline,
+.muted,
+.attribution {
+  color: var(--muted);
+}
+
+.facts {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.original {
+  margin: 0 0 0.75rem;
+}
+
+.tagline {
+  font-size: 0.9rem;
+}
+
+.attribution {
+  font-size: 0.85rem;
+  margin-top: 1rem;
+}
+
+.genres,
+.providers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding: 0;
+  margin: 0 0 1rem;
+  list-style: none;
+}
+
+.genres li {
+  padding: 0.15rem 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 0.85rem;
+}
+
+.providers li {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.75rem 0.35rem 0.35rem;
+  background: var(--surface);
+  border-radius: var(--radius);
+}
+
+.providers img {
+  border-radius: 0.35rem;
+}
+
+.button {
+  display: inline-block;
+  padding: 0.6rem 1.1rem;
+  border-radius: var(--radius);
+  background: var(--primary);
+  color: var(--primary-foreground);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.button:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.seasons,
+.releases {
+  padding-left: 1.25rem;
+}
+
+footer.site {
+  padding-top: 1rem;
+  padding-bottom: 2rem;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 0.85rem;
+}

@@ -13408,6 +13408,9 @@ fn build_rate_limited_app(
     actix_web::App::new()
         .app_data(web::Data::new(pool))
         .app_data(web::Data::new(test_config()))
+        .app_data(web::Data::new(cinetrack::services::tmdb::TmdbService::new(
+            &test_config(),
+        )))
         .app_data(web::Data::new(storage))
         .configure(move |cfg| {
             cinetrack::routes::configure_with_rate_limits(
@@ -13505,7 +13508,201 @@ async fn test_rate_limited_wiring_resolves_every_route_class() {
         }
     }
 
+    // The public title pages are two more top-level scopes. A title that has
+    // no page is the handler's own 404 page, which says `noindex`; a routing
+    // miss is an empty 404 without it.
+    for path in ["/ro/film/1", "/ro/serial/1", "/en/movie/1", "/en/tv/1"] {
+        let req = actix_test::TestRequest::get()
+            .uri(path)
+            .peer_addr(peer_addr())
+            .to_request();
+        let response = actix_test::call_service(&app, req).await;
+        assert_eq!(response.status().as_u16(), 404, "{path}");
+        let body = actix_test::read_body(response).await;
+        assert!(
+            String::from_utf8_lossy(&body).contains(r#"<meta name="robots" content="noindex" />"#),
+            "{path} must reach the title page handler"
+        );
+    }
+
     pool.close().await;
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn public_title_pages_are_served_in_both_languages() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+
+    let film: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO media (tmdb_id, media_type, title, original_title, overview, release_date,
+                              genres, runtime_minutes, metadata_level, popularity)
+        VALUES (910001, 'movie', 'Fight Club', 'Fight Club', 'An insomniac office worker.',
+                '1999-10-15', '[{"id": 18, "name": "Drama"}]', 139, 'detail', 61.4)
+        RETURNING id"#,
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO media_localizations (media_id, language_code, title, overview) \
+         VALUES ($1, 'ro', 'Clubul luptătorilor', 'Un funcționar cu insomnii.')",
+    )
+    .bind(film)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO media_release_dates (media_id, country_code, release_type, release_date) \
+         VALUES ($1, 'RO', 3, '1999-11-26')",
+    )
+    .bind(film)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let series: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO media (tmdb_id, media_type, title, overview, release_date, status,
+                              metadata_level, popularity)
+        VALUES (910002, 'tv', 'Northern Lights', 'A town in the north.', '2024-03-01',
+                'Returning Series', 'detail', 12.0)
+        RETURNING id"#,
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let season: Uuid = sqlx::query_scalar(
+        "INSERT INTO seasons (media_id, season_number, name, episode_count, air_date) \
+         VALUES ($1, 2, 'Season 2', 8, CURRENT_DATE + 7) RETURNING id",
+    )
+    .bind(series)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO episodes (season_id, episode_number, name, air_date) \
+         VALUES ($1, 1, 'Return', CURRENT_DATE + 7)",
+    )
+    .bind(season)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // No inventory row behind it, which is how an adult title looks here.
+    sqlx::query(
+        "INSERT INTO media (tmdb_id, media_type, title, metadata_level) \
+         VALUES (910003, 'movie', 'Hidden', 'detail')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // Availability from the cache, so nothing here reaches TMDB.
+    sqlx::query(
+        r#"INSERT INTO provider_response_cache
+            (provider, cache_key, endpoint, payload, fetched_at, expires_at, stale_until)
+        VALUES ('tmdb', $1, 'watch/providers', $2, NOW(), NOW() + INTERVAL '1 day', NOW() + INTERVAL '3 days')"#,
+    )
+    .bind(cinetrack::services::tmdb::TmdbService::provider_cache_key(
+        "watch_providers",
+        &["movie", "910001"],
+    ))
+    .bind(json!({"results": {"RO": {
+        "link": "https://www.themoviedb.org/movie/910001/watch?locale=RO",
+        "flatrate": [{"provider_id": 8, "provider_name": "Netflix", "logo_path": "/n.png", "display_priority": 1}]
+    }}}))
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let mut config = test_config();
+    // Refused at once: a page must render even when TMDB cannot be reached.
+    config.tmdb_base_url = "http://127.0.0.1:9".to_string();
+    let app = actix_test::init_service(create_app_with_config(pool.clone(), config)).await;
+
+    // A macro, not a function: the app's response body is an opaque type a
+    // function signature cannot name.
+    macro_rules! get {
+        ($app:expr, $path:expr) => {{
+            let response = actix_test::call_service(
+                $app,
+                actix_test::TestRequest::get()
+                    .uri($path)
+                    .peer_addr(peer_addr())
+                    .to_request(),
+            )
+            .await;
+            let status = response.status().as_u16();
+            let location = response
+                .headers()
+                .get(header::LOCATION)
+                .map(|value| value.to_str().unwrap().to_string());
+            let body = String::from_utf8(actix_test::read_body(response).await.to_vec()).unwrap();
+            (status, location, body)
+        }};
+    }
+
+    let (status, _, body) = get!(&app, "/ro/film/910001-clubul-luptatorilor");
+    assert_eq!(status, 200);
+    assert!(body.contains("<h1>Clubul luptătorilor (1999)</h1>"));
+    assert!(body.contains("<p>Un funcționar cu insomnii.</p>"));
+    assert!(body.contains("<span>Netflix</span>"));
+    assert!(body.contains("<strong>La cinema:</strong> 26 noiembrie 1999"));
+    assert!(body
+        .contains(r#"hreflang="en" href="https://vazute.micutu.com/en/movie/910001-fight-club""#));
+    assert!(body.contains(r#"href="/media/910001?type=movie""#));
+
+    let (status, _, body) = get!(&app, "/en/movie/910001-fight-club");
+    assert_eq!(status, 200);
+    assert!(body.contains("<h1>Fight Club (1999)</h1>"));
+    assert!(body.contains("<p>An insomniac office worker.</p>"));
+
+    // A bare id, an old slug and the wrong language's slug all land on the
+    // one address the page has.
+    for (path, canonical) in [
+        ("/ro/film/910001", "/ro/film/910001-clubul-luptatorilor"),
+        (
+            "/ro/film/910001-fight-club",
+            "/ro/film/910001-clubul-luptatorilor",
+        ),
+        ("/en/movie/910001-old-name", "/en/movie/910001-fight-club"),
+    ] {
+        let (status, location, _) = get!(&app, path);
+        assert_eq!(
+            (status, location.as_deref()),
+            (301, Some(canonical)),
+            "{path}"
+        );
+    }
+
+    let (status, _, body) = get!(&app, "/en/tv/910002-northern-lights");
+    assert_eq!(status, 200);
+    assert!(body.contains("TV series · 2024 · Returning series"));
+    assert!(body.contains("<strong>Next episode:</strong> S02E01 — Return"));
+    // TMDB unreachable and nothing cached: the page still renders.
+    assert!(body.contains("Availability could not be checked right now"));
+
+    for path in [
+        "/en/movie/910003-hidden",
+        "/ro/serial/910001-clubul-luptatorilor",
+        "/en/movie/not-a-title",
+        "/en/movie/424242",
+    ] {
+        let (status, _, body) = get!(&app, path);
+        assert_eq!(status, 404, "{path}");
+        assert!(body.contains(r#"content="noindex""#), "{path}");
+    }
+
+    let head = actix_test::call_service(
+        &app,
+        actix_test::TestRequest::default()
+            .method(actix_web::http::Method::HEAD)
+            .uri("/ro/film/910001-clubul-luptatorilor")
+            .peer_addr(peer_addr())
+            .to_request(),
+    )
+    .await;
+    assert_eq!(head.status().as_u16(), 200);
 }
 
 /// Every successful sign-in used to send its own mail. One day of automated
