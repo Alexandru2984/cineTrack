@@ -125,8 +125,56 @@ pub async fn hydrate_popular_catalog(
         ));
     }
 
-    let candidates = sqlx::query_as::<_, HydrationCandidate>(
+    // Titles already held but refreshed before a field was added — the aliases,
+    // then the Romanian text — are taken first. Ranked only by inventory
+    // popularity they competed with hundreds of thousands of titles never
+    // fetched at all, and in October 2026 1,452 of them were left waiting
+    // behind ~18,000 newcomers. Their public pages fell back to English in the
+    // meantime, and each one's Romanian address would change when the text
+    // finally arrived.
+    //
+    // A query of its own, starting from `media`, rather than a leading term in
+    // the ORDER BY below: that term defeats the top-N plan over the inventory
+    // and was measured at 5.2 s against 139 ms. This one reads the ~18,000
+    // rows of `media` and takes about as long as the other.
+    let mut candidates = sqlx::query_as::<_, HydrationCandidate>(
         r#"SELECT
+            media.media_type,
+            media.tmdb_id,
+            COALESCE(state.consecutive_failures, 0::smallint) AS consecutive_failures
+        FROM media
+        JOIN catalog_external_ids ids
+          ON ids.media_type = media.media_type
+         AND ids.tmdb_id = media.tmdb_id
+        JOIN catalog_external_titles titles
+          ON titles.media_type = media.media_type
+         AND titles.tmdb_id = media.tmdb_id
+        LEFT JOIN catalog_hydration_state state
+          ON state.media_type = media.media_type
+         AND state.tmdb_id = media.tmdb_id
+        WHERE ids.adult = FALSE
+          AND ids.video = FALSE
+          AND media.metadata_level = 'detail'
+          AND (
+              media.title_aliases_cached_at IS NULL
+              OR media.localizations_cached_at IS NULL
+          )
+          AND (
+              state.next_attempt_at IS NULL
+              OR state.next_attempt_at <= NOW()
+              OR state.outcome = 'success'
+          )
+        ORDER BY ids.popularity DESC, media.media_type, media.tmdb_id
+        LIMIT $1"#,
+    )
+    .bind(i64::from(options.budget))
+    .fetch_all(pool)
+    .await?;
+
+    let remaining = i64::from(options.budget) - candidates.len() as i64;
+    let popular = if remaining > 0 {
+        sqlx::query_as::<_, HydrationCandidate>(
+            r#"SELECT
             ids.media_type,
             ids.tmdb_id,
             COALESCE(state.consecutive_failures, 0::smallint) AS consecutive_failures
@@ -161,10 +209,28 @@ pub async fn hydrate_popular_catalog(
           )
         ORDER BY ids.popularity DESC, ids.media_type, ids.tmdb_id
         LIMIT $1"#,
-    )
-    .bind(i64::from(options.budget))
-    .fetch_all(pool)
-    .await?;
+        )
+        // The whole budget, not just what is left: this query also matches
+        // the rows taken above, and dropping those must not leave the run
+        // short.
+        .bind(i64::from(options.budget))
+        .fetch_all(pool)
+        .await?
+    } else {
+        Vec::new()
+    };
+    let mut seen = candidates
+        .iter()
+        .map(|candidate| (candidate.media_type.clone(), candidate.tmdb_id))
+        .collect::<std::collections::HashSet<_>>();
+    for candidate in popular {
+        if candidates.len() >= options.budget as usize {
+            break;
+        }
+        if seen.insert((candidate.media_type.clone(), candidate.tmdb_id)) {
+            candidates.push(candidate);
+        }
+    }
 
     let mut summary = HydrationSummary {
         selected: candidates.len(),

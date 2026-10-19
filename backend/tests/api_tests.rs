@@ -13541,6 +13541,126 @@ async fn test_rate_limited_wiring_resolves_every_route_class() {
 
 #[actix_web::test]
 #[ignore = "requires test DB"]
+async fn catalog_hydration_backfills_held_titles_before_fetching_new_ones() {
+    use cinetrack::services::catalog_hydration::{hydrate_popular_catalog, HydrationOptions};
+    use cinetrack::services::tmdb::TmdbService;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let upstream = actix_web::rt::spawn(async move {
+        let mut requested = Vec::new();
+        for _ in 0..2 {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = vec![0_u8; 4096];
+            let read = stream.read(&mut request).await.unwrap();
+            let line = String::from_utf8_lossy(&request[..read])
+                .lines()
+                .next()
+                .unwrap()
+                .to_string();
+            let id = if line.starts_with("GET /movie/660002?") {
+                660002
+            } else {
+                660001
+            };
+            requested.push(id);
+            let body = format!(
+                r#"{{"id": {id}, "title": "Fixture {id}", "overview": "Detail",
+                    "release_date": "2026-01-01", "status": "Released", "genres": [],
+                    "runtime": 90, "vote_average": 7.0,
+                    "alternative_titles": {{"titles": []}},
+                    "translations": {{"translations": [{{"iso_3166_1": "RO", "iso_639_1": "ro",
+                        "data": {{"title": "Titlu {id}", "overview": "Rezumat"}}}}]}}}}"#
+            );
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            stream.write_all(response.as_bytes()).await.unwrap();
+        }
+        requested
+    });
+
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    sqlx::query(
+        r#"INSERT INTO catalog_external_ids (media_type, tmdb_id, adult, video, popularity)
+        VALUES ('movie', 660001, false, false, 1000.0),
+               ('movie', 660002, false, false, 1.0)"#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO catalog_external_titles (media_type, tmdb_id, title)
+        VALUES ('movie', 660001, 'Never Fetched'), ('movie', 660002, 'Held Without Romanian')"#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO catalog_sync_state
+            (provider, export_date, movie_rows, tv_rows, movie_sha256, tv_sha256,
+             movie_object_key, tv_object_key)
+        VALUES ('tmdb', CURRENT_DATE, 2, 1, repeat('a', 64), repeat('b', 64),
+                'catalog/movie.gz', 'catalog/tv.gz')"#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    // Fetched in full before the Romanian text was kept: fresh, aliases done,
+    // not due for another month — only `localizations_cached_at` is missing.
+    sqlx::query(
+        r#"INSERT INTO media (tmdb_id, media_type, title, metadata_level, tmdb_cached_at,
+                              title_aliases_cached_at)
+        VALUES (660002, 'movie', 'Held Without Romanian', 'detail', NOW(), NOW())"#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO catalog_hydration_state
+            (media_type, tmdb_id, outcome, consecutive_failures,
+             last_attempt_at, next_attempt_at, last_success_at)
+        VALUES ('movie', 660002, 'success', 0, NOW(), NOW() + INTERVAL '30 days', NOW())"#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let mut config = test_config();
+    config.tmdb_base_url = format!("http://{address}");
+    let tmdb = TmdbService::new(&config);
+    let options = HydrationOptions {
+        budget: 1,
+        request_delay: std::time::Duration::ZERO,
+    };
+    for _ in 0..2 {
+        let summary = hydrate_popular_catalog(&pool, &tmdb, options)
+            .await
+            .unwrap();
+        assert_eq!((summary.selected, summary.succeeded), (1, 1));
+    }
+
+    // The held title first, though a thousand times less popular; the new one
+    // on the next run, once nothing is left to backfill.
+    assert_eq!(upstream.await.unwrap(), vec![660002, 660001]);
+    assert_eq!(
+        sqlx::query_scalar::<_, String>(
+            r#"SELECT l.title FROM media_localizations l
+            JOIN media m ON m.id = l.media_id WHERE m.tmdb_id = 660002"#,
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap(),
+        "Titlu 660002"
+    );
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
 async fn public_title_pages_are_served_in_both_languages() {
     let pool = setup_pool().await;
     clean_db(&pool).await;
