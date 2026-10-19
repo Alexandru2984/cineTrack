@@ -233,11 +233,32 @@ async fn list_card(
     }))
 }
 
+#[derive(serde::Deserialize)]
+struct MediaCardQuery {
+    #[serde(rename = "type")]
+    media_type: Option<String>,
+}
+
+/// The kind a shared link names, the way the media page reads it: `?type=tv`
+/// is a series, and anything else — including no type at all — a film.
+fn card_media_type(requested: Option<&str>) -> &'static str {
+    match requested {
+        Some("tv") => "tv",
+        _ => "movie",
+    }
+}
+
 async fn media_card(
     pool: web::Data<PgPool>,
     path: web::Path<i32>,
+    query: web::Query<MediaCardQuery>,
 ) -> Result<HttpResponse, AppError> {
     let tmdb_id = path.into_inner();
+    // TMDB numbers films and series separately, so one id names both — 550 is
+    // Fight Club and also a 1966 sitcom. The card used to take whichever row
+    // was touched last and ignore `?type=`, so a shared film could unfurl as an
+    // unrelated series. The link's own type decides, as it does in the app.
+    let media_type = card_media_type(query.media_type.as_deref());
     let found = sqlx::query_as::<
         _,
         (
@@ -250,16 +271,17 @@ async fn media_card(
     >(
         r#"SELECT title, overview, release_date, media_type, poster_path
         FROM media
-        WHERE tmdb_id = $1
-        ORDER BY last_accessed_at DESC
-        LIMIT 1"#,
+        WHERE tmdb_id = $1 AND media_type = $2"#,
     )
     .bind(tmdb_id)
+    .bind(media_type)
     .fetch_optional(pool.get_ref())
     .await?;
 
     let Some((title, overview, release_date, media_type, poster_path)) = found else {
-        return Ok(html(Card::generic(&format!("/media/{tmdb_id}"))));
+        return Ok(html(Card::generic(&format!(
+            "/media/{tmdb_id}?type={media_type}"
+        ))));
     };
 
     let path = format!("/media/{tmdb_id}?type={media_type}");
@@ -333,6 +355,14 @@ mod tests {
             "a quote must not open an attribute"
         );
         assert!(html.contains("&lt;script&gt;"));
+    }
+
+    #[test]
+    fn a_link_without_a_series_type_is_a_film() {
+        assert_eq!(card_media_type(Some("tv")), "tv");
+        assert_eq!(card_media_type(Some("movie")), "movie");
+        assert_eq!(card_media_type(None), "movie");
+        assert_eq!(card_media_type(Some("person")), "movie");
     }
 
     #[test]
