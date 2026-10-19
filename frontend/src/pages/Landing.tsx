@@ -3,6 +3,7 @@ import { Link } from 'react-router';
 
 import { usePageMeta } from '@/hooks/usePageMeta';
 import { useT } from '@/hooks/useT';
+import { useLocaleStore } from '@/store/locale';
 
 /** What somebody sees when they arrive without an account.
  *
@@ -18,7 +19,16 @@ import { useT } from '@/hooks/useT';
  */
 export default function LandingPage() {
   const t = useT();
+  const locale = useLocaleStore((s) => s.locale);
   usePageMeta({ path: '/' });
+
+  // The lists the backend renders, in the reader's language. Plain links, not
+  // router ones: those pages are not part of this application. The home page is
+  // where a crawler starts, so this is also the way into the whole catalogue.
+  const lists =
+    locale === 'ro'
+      ? { movies: '/ro/filme', series: '/ro/seriale', otherMovies: '/en/movies', otherSeries: '/en/series' }
+      : { movies: '/en/movies', series: '/en/series', otherMovies: '/ro/filme', otherSeries: '/ro/seriale' };
 
   const features = [
     {
@@ -82,6 +92,37 @@ export default function LandingPage() {
           </section>
         ))}
       </div>
+
+      <section className="mt-12">
+        <h2 className="text-xl font-semibold">{t('landing.exploreTitle')}</h2>
+        <p className="mt-2 text-sm leading-relaxed text-[hsl(var(--muted-foreground))]">
+          {t('landing.exploreBody')}
+        </p>
+        <div className="mt-4 flex flex-wrap gap-3">
+          <a
+            href={lists.movies}
+            className="inline-flex items-center rounded-lg border border-[hsl(var(--border))] px-4 py-2 text-sm font-medium transition-colors hover:bg-[hsl(var(--accent))]"
+          >
+            {t('landing.popularMovies')}
+          </a>
+          <a
+            href={lists.series}
+            className="inline-flex items-center rounded-lg border border-[hsl(var(--border))] px-4 py-2 text-sm font-medium transition-colors hover:bg-[hsl(var(--accent))]"
+          >
+            {t('landing.popularSeries')}
+          </a>
+        </div>
+        {/* The other language's lists, so both are reachable from here. */}
+        <p className="mt-3 text-sm text-[hsl(var(--muted-foreground))]">
+          <a href={lists.otherMovies} hrefLang={locale === 'ro' ? 'en' : 'ro'} className="underline underline-offset-2">
+            {locale === 'ro' ? 'Popular movies' : 'Filme populare'}
+          </a>
+          {' · '}
+          <a href={lists.otherSeries} hrefLang={locale === 'ro' ? 'en' : 'ro'} className="underline underline-offset-2">
+            {locale === 'ro' ? 'Popular series' : 'Seriale populare'}
+          </a>
+        </p>
+      </section>
 
       <footer className="mt-12 flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-[hsl(var(--border))] pt-6 text-sm text-[hsl(var(--muted-foreground))]">
         <span>{t('landing.languageNote')}</span>

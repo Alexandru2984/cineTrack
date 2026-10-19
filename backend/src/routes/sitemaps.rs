@@ -17,6 +17,7 @@ use chrono::{DateTime, Utc};
 use sqlx::PgPool;
 
 use crate::errors::AppError;
+use crate::routes::hubs::{genre_counts, hub_path, listed_genres};
 use crate::routes::title_pages::{page_path, Kind, Language};
 
 const SITE: &str = "https://vazute.micutu.com";
@@ -82,7 +83,10 @@ fn render_index(titles: i64, newest: Option<DateTime<Utc>>) -> String {
     let lastmod = newest
         .map(|date| format!("<lastmod>{}</lastmod>", date.format("%Y-%m-%d")))
         .unwrap_or_default();
-    let mut entries = format!("<sitemap><loc>{SITE}/sitemap-pages.xml</loc></sitemap>\n");
+    let mut entries = format!(
+        "<sitemap><loc>{SITE}/sitemap-pages.xml</loc></sitemap>\n\
+         <sitemap><loc>{SITE}/sitemaps/lists.xml</loc>{lastmod}</sitemap>\n"
+    );
     for language in ["ro", "en"] {
         for file in 1..=file_count(titles) {
             entries.push_str(&format!(
@@ -125,6 +129,9 @@ async fn title_sitemap(
     pool: web::Data<PgPool>,
     file: web::Path<String>,
 ) -> Result<HttpResponse, AppError> {
+    if file.as_str() == "lists.xml" {
+        return lists_sitemap(pool).await;
+    }
     let Some((language, number)) = parse_file(&file) else {
         return Ok(not_found());
     };
@@ -164,6 +171,42 @@ async fn title_sitemap(
         })
         .collect::<Vec<_>>();
     Ok(xml(render_titles(language, &entries)))
+}
+
+/// The popularity and genre lists, in both languages, each naming its twin.
+async fn lists_sitemap(pool: web::Data<PgPool>) -> Result<HttpResponse, AppError> {
+    let mut lists = Vec::new();
+    for kind in [Kind::Movie, Kind::Tv] {
+        let counts = genre_counts(pool.get_ref(), kind).await?;
+        lists.push((kind, None));
+        lists.extend(
+            listed_genres(kind, &counts)
+                .into_iter()
+                .map(|genre| (kind, Some(genre))),
+        );
+    }
+    let mut urls = String::new();
+    for (kind, genre) in lists {
+        let ro = format!("{SITE}{}", hub_path(Language::Ro, kind, genre));
+        let en = format!("{SITE}{}", hub_path(Language::En, kind, genre));
+        for loc in [&ro, &en] {
+            urls.push_str(&format!(
+                "<url><loc>{loc}</loc>\
+                 <xhtml:link rel=\"alternate\" hreflang=\"ro\" href=\"{ro}\"/>\
+                 <xhtml:link rel=\"alternate\" hreflang=\"en\" href=\"{en}\"/>\
+                 <xhtml:link rel=\"alternate\" hreflang=\"x-default\" href=\"{en}\"/></url>\n",
+                loc = escape(loc),
+                ro = escape(&ro),
+                en = escape(&en),
+            ));
+        }
+    }
+    Ok(xml(format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
+         <urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\" \
+         xmlns:xhtml=\"http://www.w3.org/1999/xhtml\">\n\
+         {urls}</urlset>\n"
+    )))
 }
 
 /// Escape for XML text.
@@ -221,6 +264,7 @@ mod tests {
         let newest = Utc.with_ymd_and_hms(2026, 10, 19, 8, 0, 0).single();
         let index = render_index(PER_FILE + 1, newest);
         assert!(index.contains("<loc>https://vazute.micutu.com/sitemap-pages.xml</loc>"));
+        assert!(index.contains("<loc>https://vazute.micutu.com/sitemaps/lists.xml</loc>"));
         for file in ["titles-ro-1", "titles-ro-2", "titles-en-1", "titles-en-2"] {
             assert!(
                 index.contains(&format!(

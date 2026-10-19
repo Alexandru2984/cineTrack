@@ -200,3 +200,84 @@ footer.site {
   color: var(--muted);
   font-size: 0.85rem;
 }
+
+/* The section links in the header, between the brand and the language. */
+.sections {
+  display: flex;
+  gap: 1rem;
+  margin-left: auto;
+  margin-right: 1rem;
+  font-size: 0.95rem;
+}
+
+.sections a {
+  color: var(--foreground);
+  text-decoration: none;
+}
+
+.sections a:hover,
+.genres a:hover {
+  text-decoration: underline;
+}
+
+.genres a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.genres [aria-current="page"] {
+  font-weight: 600;
+}
+
+.intro {
+  color: var(--muted);
+  max-width: 42rem;
+}
+
+/* The poster grid of the popularity and genre lists. */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(8.5rem, 1fr));
+  gap: 1.25rem 1rem;
+  padding: 0;
+  margin: 1.5rem 0 0;
+  list-style: none;
+}
+
+.grid a {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  color: var(--foreground);
+  text-decoration: none;
+}
+
+.grid img,
+.grid .no-poster {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 2 / 3;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.grid .no-poster {
+  display: block;
+}
+
+.grid .name {
+  font-weight: 600;
+  font-size: 0.95rem;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.grid .year {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.grid a:hover .name {
+  text-decoration: underline;
+}
