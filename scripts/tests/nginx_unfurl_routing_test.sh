@@ -136,7 +136,8 @@ STUBS_PID=$!
 } > "$WORK_DIR/nginx.conf"
 
 for required in 'location ~ "\^/lists/' 'location ~ "\^/media/' \
-                'location ~ "\^/profile/' 'location \^~ /unfurl/'; do
+                'location ~ "\^/profile/' 'location \^~ /unfurl/' \
+                'location ~ "\^/(ro|en)/"'; do
   if ! grep -q "$required" "$WORK_DIR/nginx.conf"; then
     echo "nginx unfurl routing: the vhost no longer contains $required;" \
          "this test is extracting the wrong text and would pass vacuously" >&2
@@ -204,6 +205,17 @@ expect "a sub-page"     "Discordbot/2.0" "/media/550/cast" "frontend /media/550/
 expect "a non-numeric"  "Discordbot/2.0" "/media/abc"      "frontend /media/abc"
 expect "a short id"     "Discordbot/2.0" "/lists/abc"      "frontend /lists/abc"
 expect "the homepage"   "Discordbot/2.0" "/"               "frontend /"
+
+# The public title pages are one document for everybody, rendered by the
+# backend: no User-Agent decides who gets them.
+expect "a title page"   "$BROWSER"        "/ro/film/550-clubul-luptatorilor" \
+  "backend /ro/film/550-clubul-luptatorilor"
+expect "a title page"   "Googlebot/2.1"   "/en/tv/1399-game-of-thrones" \
+  "backend /en/tv/1399-game-of-thrones"
+expect "a title page"   "Discordbot/2.0"  "/ro/serial/1399" "backend /ro/serial/1399"
+# Only the two language prefixes, as whole path segments.
+expect "a lookalike"    "$BROWSER"        "/romania"        "frontend /romania"
+expect "a bare prefix"  "$BROWSER"        "/ro"             "frontend /ro"
 
 # Some preview services ask for the headers before spending a body fetch. The
 # routes were registered for GET only at first, so `HEAD /media/550` answered a

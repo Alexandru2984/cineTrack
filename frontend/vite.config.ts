@@ -67,10 +67,13 @@ export default defineConfig({
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}'],
         // og-image.png is only fetched server-side by social crawlers, so keep
         // it out of the install-time precache along with the launcher icons.
-        globIgnores: ['**/pwa-*.png', '**/maskable-icon-*.png', '**/og-image.png'],
+        globIgnores: ['**/pwa-*.png', '**/maskable-icon-*.png', '**/og-image.png', '**/title-page.css'],
         maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
         navigateFallback: '/index.html',
-        navigateFallbackDenylist: [/^\/api\//],
+        // The public title pages under /ro/ and /en/ are rendered by the
+        // backend. Answering their navigation with the app shell would show an
+        // installed app's not-found screen instead of the page.
+        navigateFallbackDenylist: [/^\/api\//, /^\/(ro|en)\//],
         runtimeCaching: [
           {
             urlPattern: /^https:\/\/image\.tmdb\.org\/t\/p\//,
