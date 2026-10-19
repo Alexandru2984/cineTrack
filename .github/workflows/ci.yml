@@ -536,6 +536,9 @@ jobs:
       - name: Catalog job tests
         run: scripts/tests/catalog_jobs_test.sh
 
+      - name: IndexNow submission tests
+        run: python3 scripts/tests/indexnow_test.py
+
       - name: Validate Alertmanager config permissions
         run: scripts/tests/alertmanager_config_test.sh
 

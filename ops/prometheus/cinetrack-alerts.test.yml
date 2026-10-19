@@ -212,6 +212,51 @@ tests:
         alertname: CineTrackCatalogSyncFailed
         exp_alerts: []
 
+  - name: a failed IndexNow submission is reported
+    interval: 1m
+    input_series:
+      - series: cinetrack_indexnow_success
+        values: "0x30"
+      - series: cinetrack_indexnow_timestamp_seconds
+        values: "0x30"
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: CineTrackIndexNowFailed
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: Văzute IndexNow submission failed
+              description: >-
+                The daily submission of new public pages to IndexNow (Bing, Yandex and
+                the others) did not complete, so new titles wait for those engines to
+                crawl them. Read indexnow.log and run scripts/indexnow_submit.py by hand.
+
+  - name: a stopped IndexNow submission is reported
+    interval: 1h
+    input_series:
+      - series: cinetrack_indexnow_success
+        values: "1x40"
+      - series: cinetrack_indexnow_timestamp_seconds
+        values: "0x40"
+    alert_rule_test:
+      - eval_time: 29h
+        alertname: CineTrackIndexNowNotRunning
+        exp_alerts: []
+      - eval_time: 32h
+        alertname: CineTrackIndexNowNotRunning
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: Văzute IndexNow submission has stopped running
+              description: >-
+                No IndexNow submission has reported in thirty hours. Check that the cron
+                entry for scripts/indexnow_submit.py is still installed.
+      - eval_time: 32h
+        alertname: CineTrackIndexNowFailed
+        exp_alerts: []
+
   - name: missing catalog metrics are reported
     interval: 1m
     input_series:

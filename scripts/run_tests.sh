@@ -162,6 +162,7 @@ scripts/tests/ci_contract_test.sh
 scripts/tests/backup_restore_test.sh
 scripts/tests/release_schedule_metrics_test.sh
 scripts/tests/catalog_jobs_test.sh
+python3 scripts/tests/indexnow_test.py
 scripts/tests/alertmanager_config_test.sh
 scripts/tests/metrics_scrape_auth_test.sh
 scripts/tests/rust_audit_exceptions_test.sh
