@@ -287,7 +287,28 @@ struct Page {
     next_episode: Option<NextEpisode>,
     romanian_releases: Vec<(i32, NaiveDate)>,
     providers: Option<WatchProvidersResponse>,
+    related: Vec<Related>,
 }
+
+/// Another title of the same kind and genre, linked from the page.
+struct Related {
+    tmdb_id: i32,
+    title: String,
+    ro_title: Option<String>,
+    release_date: Option<NaiveDate>,
+}
+
+impl Related {
+    fn title_in(&self, language: Language) -> &str {
+        match language {
+            Language::Ro => self.ro_title.as_deref().unwrap_or(&self.title),
+            Language::En => &self.title,
+        }
+    }
+}
+
+/// How many related titles a page links to.
+const RELATED_LIMIT: i64 = 12;
 
 async fn title_page(
     pool: web::Data<PgPool>,
@@ -371,6 +392,11 @@ async fn title_page(
         }
     };
 
+    let related = match genres(&row).first() {
+        Some(genre) => related(pool.get_ref(), kind, row.id, genre.id).await?,
+        None => Vec::new(),
+    };
+
     let page = Page {
         language,
         kind,
@@ -379,12 +405,55 @@ async fn title_page(
         next_episode,
         romanian_releases,
         providers,
+        related,
     };
     Ok(HttpResponse::Ok()
         .content_type("text/html; charset=utf-8")
         // The same document for everyone: nothing on it depends on who asks.
         .insert_header(("Cache-Control", "public, max-age=3600"))
         .body(render(&page)))
+}
+
+/// The most popular other titles that share the page's first genre and have a
+/// page of their own.
+///
+/// These links are how a crawler that arrives on one title finds the rest: the
+/// application links nowhere it can follow, and the sitemap only says which
+/// pages exist, not how they relate.
+async fn related(
+    pool: &PgPool,
+    kind: Kind,
+    media_id: Uuid,
+    genre_id: i32,
+) -> Result<Vec<Related>, sqlx::Error> {
+    let rows = sqlx::query_as::<_, (i32, String, Option<String>, Option<NaiveDate>)>(
+        r#"SELECT m.tmdb_id, m.title, l.title, m.release_date
+        FROM media m
+        LEFT JOIN media_localizations l
+          ON l.media_id = m.id AND l.language_code = 'ro'
+        WHERE m.media_type = $1
+          AND m.metadata_level = 'detail'
+          AND m.popularity IS NOT NULL
+          AND m.id <> $2
+          AND m.genres @> jsonb_build_array(jsonb_build_object('id', $3::int))
+        ORDER BY m.popularity DESC, m.tmdb_id
+        LIMIT $4"#,
+    )
+    .bind(kind.media_type())
+    .bind(media_id)
+    .bind(genre_id)
+    .bind(RELATED_LIMIT)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|(tmdb_id, title, ro_title, release_date)| Related {
+            tmdb_id,
+            title,
+            ro_title,
+            release_date,
+        })
+        .collect())
 }
 
 async fn seasons(pool: &PgPool, media_id: Uuid) -> Result<Vec<SeasonRow>, sqlx::Error> {
@@ -997,7 +1066,44 @@ fn render(page: &Page) -> String {
         ));
     }
 
-    let app_link = format!("/media/{}?type={}", row.tmdb_id, kind.media_type());
+    if let (Some(genre), false) = (genres(row).first(), page.related.is_empty()) {
+        let genre = genre_name(genre, language);
+        let heading = match (language, kind) {
+            (Language::Ro, Kind::Movie) => format!("Alte filme din genul {genre}"),
+            (Language::Ro, Kind::Tv) => format!("Alte seriale din genul {genre}"),
+            (Language::En, Kind::Movie) => format!("More {genre} movies"),
+            (Language::En, Kind::Tv) => format!("More {genre} series"),
+        };
+        let items = page
+            .related
+            .iter()
+            .map(|other| {
+                let name = other.title_in(language);
+                let released = self::year(other.release_date)
+                    .map(|year| format!(" ({year})"))
+                    .unwrap_or_default();
+                format!(
+                    r#"<li><a href="{}">{}{released}</a></li>"#,
+                    escape(&page_path(language, kind, other.tmdb_id, name)),
+                    escape(name)
+                )
+            })
+            .collect::<String>();
+        sections.push_str(&format!(
+            r#"<section><h2>{}</h2><ul class="related">{items}</ul></section>"#,
+            escape(&heading)
+        ));
+    }
+
+    // Through the sign-in page, which sends a member straight on to the title
+    // and offers everyone else an account first. A direct link to /media/ would
+    // bring a signed-out reader back here, since the application now sends
+    // them to this page.
+    let app_link = format!(
+        "/login?returnTo=%2Fmedia%2F{}%3Ftype%3D{}",
+        row.tmdb_id,
+        kind.media_type()
+    );
     let structured = structured_data(page, title, overview.map(|(text, _)| text), &url);
     let image = row
         .poster_path
@@ -1154,6 +1260,12 @@ mod tests {
             seasons: Vec::new(),
             next_episode: None,
             romanian_releases: vec![(3, NaiveDate::from_ymd_opt(1999, 11, 26).unwrap())],
+            related: vec![Related {
+                tmdb_id: 807,
+                title: "Se7en".to_string(),
+                ro_title: Some("Seven: Cele șapte păcate capitale".to_string()),
+                release_date: NaiveDate::from_ymd_opt(1995, 9, 22),
+            }],
             providers: Some(WatchProvidersResponse {
                 region: "RO".to_string(),
                 link: Some("https://www.themoviedb.org/movie/550/watch?locale=RO".to_string()),
@@ -1307,6 +1419,28 @@ mod tests {
         assert!(html.contains(r#""@type":"Movie""#));
         assert!(html.contains(r#""duration":"PT2H19M""#));
         assert!(html.contains(r#""datePublished":"1999-10-15""#));
+    }
+
+    #[test]
+    fn a_page_links_to_others_of_its_genre_in_its_own_language() {
+        let html = render(&page(Language::Ro, Kind::Movie));
+        assert!(html.contains("<h2>Alte filme din genul Dramă</h2>"));
+        assert!(html.contains(
+            r#"<li><a href="/ro/film/807-seven-cele-sapte-pacate-capitale">Seven: Cele șapte păcate capitale (1995)</a></li>"#
+        ));
+        let html = render(&page(Language::En, Kind::Movie));
+        assert!(html.contains("<h2>More Drama movies</h2>"));
+        assert!(html.contains(r#"<a href="/en/movie/807-se7en">Se7en (1995)</a>"#));
+
+        let mut alone = page(Language::En, Kind::Movie);
+        alone.related.clear();
+        assert!(!render(&alone).contains("More Drama"));
+    }
+
+    #[test]
+    fn the_call_to_action_goes_through_sign_in() {
+        let html = render(&page(Language::En, Kind::Movie));
+        assert!(html.contains(r#"href="/login?returnTo=%2Fmedia%2F550%3Ftype%3Dmovie""#));
     }
 
     #[test]
