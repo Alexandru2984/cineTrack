@@ -946,6 +946,10 @@ export const en = {
       'Your profile is private unless you make it public. Direct messages can be end-to-end encrypted, and the service stores them without being able to read them.',
     languageNote: 'Available in Romanian and English.',
     openSourceNote: 'Independent and ad-free.',
+    exploreTitle: 'Browse without an account',
+    exploreBody: 'Every title has a page: the synopsis, the seasons and next episode, and where to watch it in Romania.',
+    popularMovies: 'Popular movies',
+    popularSeries: 'Popular series',
   },
   about: {
     title: 'About Văzute',

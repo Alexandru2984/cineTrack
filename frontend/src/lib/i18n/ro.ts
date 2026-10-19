@@ -949,6 +949,10 @@ export const ro: Dictionary = {
       'Profilul tău e privat până îl faci public. Mesajele directe pot fi criptate cap-coadă, iar serviciul le stochează fără să le poată citi.',
     languageNote: 'Disponibil în română și engleză.',
     openSourceNote: 'Independent și fără reclame.',
+    exploreTitle: 'Răsfoiește fără cont',
+    exploreBody: 'Fiecare titlu are o pagină: rezumatul, sezoanele și următorul episod, și unde îl poți vedea online în România.',
+    popularMovies: 'Filme populare',
+    popularSeries: 'Seriale populare',
   },
   about: {
     title: 'Despre Văzute',
