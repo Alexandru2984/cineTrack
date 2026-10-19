@@ -8,6 +8,7 @@ pub mod encryption;
 pub mod events;
 pub mod health;
 pub mod history;
+pub mod hubs;
 pub mod import;
 pub mod lists;
 pub mod media;

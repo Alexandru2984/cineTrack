@@ -13525,6 +13525,19 @@ async fn test_rate_limited_wiring_resolves_every_route_class() {
         );
     }
 
+    // The genre and popularity lists share the language scopes.
+    for path in ["/ro/filme", "/ro/seriale", "/en/movies", "/en/series"] {
+        let req = actix_test::TestRequest::get()
+            .uri(path)
+            .peer_addr(peer_addr())
+            .to_request();
+        assert_eq!(
+            actix_test::call_service(&app, req).await.status().as_u16(),
+            200,
+            "{path}"
+        );
+    }
+
     // And the sitemap index, which the backend now answers in place of the
     // frontend's static file.
     let req = actix_test::TestRequest::get()
@@ -13657,6 +13670,121 @@ async fn catalog_hydration_backfills_held_titles_before_fetching_new_ones() {
         .unwrap(),
         "Titlu 660002"
     );
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn genre_and_popularity_lists_link_the_titles_that_have_pages() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+
+    // Twelve dramas, the fewest a genre's list needs; the most popular first.
+    sqlx::query(
+        r#"INSERT INTO media (tmdb_id, media_type, title, release_date, genres, metadata_level, popularity)
+        SELECT 920000 + n, 'movie', 'Drama ' || n, '2020-01-01',
+               '[{"id": 18, "name": "Drama"}]', 'detail', 100 - n
+        FROM generate_series(1, 12) AS n"#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO media_localizations (media_id, language_code, title) \
+         SELECT id, 'ro', 'Drama românească' FROM media WHERE tmdb_id = 920001",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    // One horror film: too few for a list of its own.
+    sqlx::query(
+        r#"INSERT INTO media (tmdb_id, media_type, title, genres, metadata_level, popularity)
+        VALUES (920100, 'movie', 'Lone Horror', '[{"id": 27, "name": "Horror"}]', 'detail', 500)"#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    // A drama with no inventory row has no page, so no list may link it.
+    sqlx::query(
+        r#"INSERT INTO media (tmdb_id, media_type, title, genres, metadata_level)
+        VALUES (920200, 'movie', 'Unlisted', '[{"id": 18, "name": "Drama"}]', 'detail')"#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let app = actix_test::init_service(create_app_with_config(pool.clone(), test_config())).await;
+    macro_rules! get {
+        ($path:expr) => {{
+            let response = actix_test::call_service(
+                &app,
+                actix_test::TestRequest::get()
+                    .uri($path)
+                    .peer_addr(peer_addr())
+                    .to_request(),
+            )
+            .await;
+            let status = response.status().as_u16();
+            let body = String::from_utf8(actix_test::read_body(response).await.to_vec()).unwrap();
+            (status, body)
+        }};
+    }
+
+    let (status, body) = get!("/ro/filme/drama");
+    assert_eq!(status, 200);
+    assert!(body.contains("<h1>Cele mai populare filme din genul Dramă</h1>"));
+    assert!(body.contains(r#"<a href="/ro/film/920001-drama-romaneasca">"#));
+    assert!(body.contains(r#"<a href="/ro/film/920012-drama-12">"#));
+    assert!(!body.contains("920200"));
+    // The horror list does not exist, so the genre menu does not offer it.
+    assert!(!body.contains("/ro/filme/horror"));
+    let first = body.find("920001").unwrap();
+    let last = body.find("920012").unwrap();
+    assert!(first < last, "ordered by popularity");
+
+    let (status, body) = get!("/ro/filme");
+    assert_eq!(status, 200);
+    assert!(body.contains(r#"<li><a href="/ro/filme/drama">Dramă</a></li>"#));
+    // Popular overall includes the lone horror film, the most popular of all.
+    assert!(body.find("920100").unwrap() < body.find("920001").unwrap());
+
+    let (status, body) = get!("/en/movies/drama");
+    assert_eq!(status, 200);
+    assert!(body.contains(r#"hreflang="ro" href="https://vazute.micutu.com/ro/filme/drama""#));
+    assert!(body.contains(r#"<a href="/en/movie/920001-drama-1">"#));
+
+    // An empty kind still has its overall list.
+    assert_eq!(get!("/en/series").0, 200);
+    for path in [
+        "/ro/filme/horror",
+        "/ro/filme/copii",
+        "/en/series/horror",
+        "/en/movies/Drama",
+    ] {
+        let (status, body) = get!(path);
+        assert_eq!(status, 404, "{path}");
+        assert!(body.contains(r#"content="noindex""#), "{path}");
+    }
+
+    let (status, lists) = get!("/sitemaps/lists.xml");
+    assert_eq!(status, 200);
+    for loc in [
+        "/ro/filme",
+        "/ro/filme/drama",
+        "/en/movies/drama",
+        "/ro/seriale",
+        "/en/series",
+    ] {
+        assert!(
+            lists.contains(&format!("<loc>https://vazute.micutu.com{loc}</loc>")),
+            "{loc}"
+        );
+    }
+    assert!(!lists.contains("horror"));
+
+    // And a title page links its genre to the list.
+    let (status, body) = get!("/en/movie/920002-drama-2");
+    assert_eq!(status, 200);
+    assert!(body.contains(r#"<li><a href="/en/movies/drama">Drama</a></li>"#));
 }
 
 #[actix_web::test]

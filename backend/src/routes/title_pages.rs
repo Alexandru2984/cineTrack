@@ -32,8 +32,8 @@ use crate::dto::media::{TmdbGenre, WatchProviderEntry, WatchProvidersResponse};
 use crate::errors::AppError;
 use crate::services::tmdb::TmdbService;
 
-const SITE: &str = "https://vazute.micutu.com";
-const IMAGE_BASE: &str = "https://image.tmdb.org/t/p";
+pub(crate) const SITE: &str = "https://vazute.micutu.com";
+pub(crate) const IMAGE_BASE: &str = "https://image.tmdb.org/t/p";
 /// How long a page waits for streaming availability before rendering without
 /// it. Cached answers return at once; this only bounds a cold fetch.
 const PROVIDERS_DEADLINE: Duration = Duration::from_secs(3);
@@ -56,8 +56,9 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
 // matches every path, and would answer `/api/...` with its own 404 before the
 // API scope registered after it was ever consulted. HEAD as well as GET, for
 // the reason given in `unfurl::configure`.
+// The genre and popularity lists share the scopes, for the same reason.
 fn romanian() -> actix_web::Scope {
-    web::scope("/ro")
+    crate::routes::hubs::romanian_routes(web::scope("/ro"))
         .route("/film/{slug}", web::get().to(ro_movie))
         .route("/film/{slug}", web::head().to(ro_movie))
         .route("/serial/{slug}", web::get().to(ro_tv))
@@ -65,7 +66,7 @@ fn romanian() -> actix_web::Scope {
 }
 
 fn english() -> actix_web::Scope {
-    web::scope("/en")
+    crate::routes::hubs::english_routes(web::scope("/en"))
         .route("/movie/{slug}", web::get().to(en_movie))
         .route("/movie/{slug}", web::head().to(en_movie))
         .route("/tv/{slug}", web::get().to(en_tv))
@@ -119,7 +120,7 @@ pub enum Language {
 }
 
 impl Language {
-    fn code(self) -> &'static str {
+    pub(crate) fn code(self) -> &'static str {
         match self {
             Language::Ro => "ro",
             Language::En => "en",
@@ -520,7 +521,7 @@ async fn romanian_releases(
 }
 
 /// Escape text for HTML, in content or in a quoted attribute.
-fn escape(value: &str) -> String {
+pub(crate) fn escape(value: &str) -> String {
     value
         .replace('&', "&amp;")
         .replace('<', "&lt;")
@@ -590,42 +591,14 @@ fn format_runtime(minutes: i32, language: Language) -> String {
     }
 }
 
-/// TMDB's genre names are English; these are the Romanian ones for its ids.
+/// A genre's name in the page's language, from the table the lists use.
 fn genre_name(genre: &TmdbGenre, language: Language) -> String {
-    if language == Language::En {
-        return genre.name.clone();
+    match crate::routes::hubs::genre_by_id(genre.id) {
+        Some(known) => known.name(language).to_string(),
+        // A genre TMDB adds later keeps its own (English) name rather than
+        // vanishing from the page.
+        None => genre.name.clone(),
     }
-    let romanian = match genre.id {
-        28 => "Acțiune",
-        12 => "Aventură",
-        16 => "Animație",
-        35 => "Comedie",
-        80 => "Crimă",
-        99 => "Documentar",
-        18 => "Dramă",
-        10751 => "Familie",
-        14 => "Fantastic",
-        36 => "Istoric",
-        27 => "Horror",
-        10402 => "Muzical",
-        9648 => "Mister",
-        10749 => "Romantic",
-        878 => "SF",
-        10770 => "Film TV",
-        53 => "Thriller",
-        10752 => "Război",
-        37 => "Western",
-        10759 => "Acțiune și aventură",
-        10762 => "Copii",
-        10763 => "Știri",
-        10764 => "Reality",
-        10765 => "SF și fantasy",
-        10766 => "Telenovelă",
-        10767 => "Talk-show",
-        10768 => "Război și politică",
-        _ => return genre.name.clone(),
-    };
-    romanian.to_string()
 }
 
 fn status_name(status: &str, language: Language) -> Option<&'static str> {
@@ -922,9 +895,21 @@ fn render(page: &Page) -> String {
         })
         .unwrap_or_default();
 
+    // Each genre links to its list, which links back: the path a crawler
+    // takes between titles of a kind.
     let genre_items = genres(row)
         .iter()
-        .map(|genre| format!("<li>{}</li>", escape(&genre_name(genre, language))))
+        .map(|genre| {
+            let name = escape(&genre_name(genre, language));
+            match crate::routes::hubs::genre_by_id(genre.id).filter(|known| known.applies_to(kind))
+            {
+                Some(known) => format!(
+                    r#"<li><a href="{}">{name}</a></li>"#,
+                    crate::routes::hubs::hub_path(language, kind, Some(known))
+                ),
+                None => format!("<li>{name}</li>"),
+            }
+        })
         .collect::<String>();
     let genre_list = if genre_items.is_empty() {
         String::new()
@@ -1144,6 +1129,7 @@ fn render(page: &Page) -> String {
 <body>
 <header class="site">
 <a class="brand" href="/">Văzute</a>
+<nav class="sections"><a href="{movies_href}">{movies_label}</a> <a href="{series_href}">{series_label}</a></nav>
 <a class="language" href="{other_path}" hreflang="{other_lang}" lang="{other_lang}">{other_language}</a>
 </header>
 <main>
@@ -1185,6 +1171,18 @@ fn render(page: &Page) -> String {
         other_path = escape(&other_path),
         other_lang = other.code(),
         other_language = w.other_language,
+        movies_href = crate::routes::hubs::hub_path(language, Kind::Movie, None),
+        series_href = crate::routes::hubs::hub_path(language, Kind::Tv, None),
+        movies_label = if language == Language::Ro {
+            "Filme"
+        } else {
+            "Movies"
+        },
+        series_label = if language == Language::Ro {
+            "Seriale"
+        } else {
+            "Series"
+        },
         heading = escape(&format!("{title}{heading_year}")),
         app_link = escape(&app_link),
         add = w.add,
@@ -1195,7 +1193,7 @@ fn render(page: &Page) -> String {
     )
 }
 
-fn not_found(language: Language) -> HttpResponse {
+pub(crate) fn not_found(language: Language) -> HttpResponse {
     let (title, text, home) = match language {
         Language::Ro => (
             "Titlul nu a fost găsit — Văzute",
@@ -1328,8 +1326,10 @@ mod tests {
         ));
         assert!(html.contains("<h1>Clubul luptătorilor (1999)</h1>"));
         assert!(html.contains("Film · 1999 · 2 h 19 min"));
-        assert!(html.contains("<li>Dramă</li>"));
-        // A genre without a Romanian name keeps TMDB's rather than vanishing.
+        // A known genre links to its list; one TMDB added later keeps its own
+        // name, unlinked, rather than vanishing.
+        assert!(html.contains(r#"<li><a href="/ro/filme/drama">Dramă</a></li>"#));
+        assert!(html.contains(r#"<nav class="sections"><a href="/ro/filme">Filme</a> <a href="/ro/seriale">Seriale</a></nav>"#));
         assert!(html.contains("<li>Unknown</li>"));
         assert!(html.contains("Titlu original: <span lang=\"\">Fight Club</span>"));
         assert!(html.contains("<strong>La cinema:</strong> 26 noiembrie 1999"));
