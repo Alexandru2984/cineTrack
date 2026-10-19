@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect } from 'react';
-import { Routes, Route, Navigate, useLocation } from 'react-router';
+import { Routes, Route, Navigate, useLocation, useParams } from 'react-router';
 import { Loader2 } from 'lucide-react';
 import { useAuthStore } from '@/store/auth';
 import { bootstrapSession } from '@/lib/api';
@@ -10,7 +10,8 @@ import { EventStream } from '@/components/EventStream';
 import { useEncryptionSession } from '@/hooks/useEncryption';
 import { EmailVerificationBanner } from '@/components/EmailVerificationBanner';
 import { TermsAcceptanceGate } from '@/components/TermsAcceptanceGate';
-import { loginPathFor, safeReturnTo } from '@/lib/navigation';
+import { loginPathFor, publicTitlePath, safeReturnTo } from '@/lib/navigation';
+import { useLocaleStore } from '@/store/locale';
 import { useCanonicalUrl } from '@/hooks/useCanonicalUrl';
 
 const LoginPage = lazy(() => import('@/pages/Login'));
@@ -59,6 +60,36 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const returnTo = `${location.pathname}${location.search}${location.hash}`;
   if (!isAuthenticated) return <Navigate to={loginPathFor(returnTo)} replace />;
   return <>{children}</>;
+}
+
+/**
+ * A title in the application for a member; for anyone else, its public page.
+ *
+ * A shared `/media/550` link used to send a signed-out reader to the sign-in
+ * form, with nothing about the film they had been sent. The backend renders a
+ * readable page for every catalogued title, so they go there instead — a full
+ * navigation, since that page is not part of this application. Its call to
+ * action leads back here through sign-in.
+ */
+function MediaRoute() {
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated)();
+  const locale = useLocaleStore((s) => s.locale);
+  const { id } = useParams();
+  const location = useLocation();
+  const publicPath = isAuthenticated
+    ? null
+    : publicTitlePath(locale, new URLSearchParams(location.search).get('type'), id);
+
+  useEffect(() => {
+    if (publicPath) window.location.replace(publicPath);
+  }, [publicPath]);
+
+  if (isAuthenticated) return <MediaDetail />;
+  if (!publicPath) {
+    const returnTo = `${location.pathname}${location.search}${location.hash}`;
+    return <Navigate to={loginPathFor(returnTo)} replace />;
+  }
+  return <PageLoader />;
 }
 
 /** The dashboard for a member, an explanation for everyone else. */
@@ -138,7 +169,7 @@ export default function App() {
               <Route path="/" element={<HomeRoute />} />
               <Route path="/search" element={<ProtectedRoute><SearchPage /></ProtectedRoute>} />
               <Route path="/calendar" element={<ProtectedRoute><CalendarPage /></ProtectedRoute>} />
-              <Route path="/media/:id" element={<ProtectedRoute><MediaDetail /></ProtectedRoute>} />
+              <Route path="/media/:id" element={<MediaRoute />} />
               <Route path="/episodes/:id" element={<ProtectedRoute><EpisodeDetailPage /></ProtectedRoute>} />
               <Route path="/tracking" element={<ProtectedRoute><TrackingPage /></ProtectedRoute>} />
               <Route path="/stats" element={<ProtectedRoute><StatsPage /></ProtectedRoute>} />

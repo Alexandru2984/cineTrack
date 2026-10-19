@@ -28,3 +28,24 @@ export function safeReturnTo(value: string | null | undefined): string {
 export function loginPathFor(returnTo: string): string {
   return `/login?returnTo=${encodeURIComponent(safeReturnTo(returnTo))}`;
 }
+
+/**
+ * The public page for a title, which a signed-out visitor can read.
+ *
+ * `/media/550?type=movie` is the application's page and needs an account; the
+ * backend renders `/ro/film/550-…` and `/en/movie/550-…` for everyone, and
+ * redirects a bare id like this one to the full address. Anything that is not
+ * a TMDB id has no such page, and gets `null`.
+ */
+export function publicTitlePath(
+  locale: 'ro' | 'en',
+  type: string | null,
+  id: string | undefined,
+): string | null {
+  if (!id || !/^[1-9][0-9]{0,8}$/.test(id)) return null;
+  // The same default as the media page itself.
+  const kind = type === 'tv' ? 'tv' : 'movie';
+  const segment =
+    locale === 'ro' ? (kind === 'tv' ? 'serial' : 'film') : kind === 'tv' ? 'tv' : 'movie';
+  return `/${locale}/${segment}/${id}`;
+}

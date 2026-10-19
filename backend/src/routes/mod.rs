@@ -16,6 +16,7 @@ pub mod moderation;
 pub mod notifications;
 pub mod push;
 pub mod reports;
+pub mod sitemaps;
 pub mod stats;
 pub mod title_pages;
 pub mod tracking;
@@ -35,6 +36,7 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
     // are top-level scopes registered before /api.
     assets::configure_public_images_unlimited(cfg);
     title_pages::configure(cfg);
+    sitemaps::configure(cfg);
 
     cfg.service(
         web::scope("/api")
@@ -87,6 +89,7 @@ pub fn configure_with_rate_limits(
     unfurl::configure_rate_limited(cfg, shared_rate_limiter);
     // The public title pages, under /ro and /en, on the same shared budget.
     title_pages::configure_rate_limited(cfg, shared_rate_limiter);
+    sitemaps::configure_rate_limited(cfg, shared_rate_limiter);
 
     cfg.service(
         web::scope("/api")

@@ -8,6 +8,10 @@
   Shared lists are public but user-owned and private by default, so they are
   deliberately left out of the site's own sitemap.
 
+  The pages for films and series are not listed here. The backend serves the
+  sitemap index at /sitemap.xml, which names this file and the title sitemaps
+  it builds from the catalogue.
+
   No lastmod: a hand-maintained date that drifts is worse than none, because a
   crawler that learns the dates are wrong stops trusting them.
 -->

@@ -13525,6 +13525,17 @@ async fn test_rate_limited_wiring_resolves_every_route_class() {
         );
     }
 
+    // And the sitemap index, which the backend now answers in place of the
+    // frontend's static file.
+    let req = actix_test::TestRequest::get()
+        .uri("/sitemap.xml")
+        .peer_addr(peer_addr())
+        .to_request();
+    let response = actix_test::call_service(&app, req).await;
+    assert_eq!(response.status().as_u16(), 200);
+    let body = actix_test::read_body(response).await;
+    assert!(String::from_utf8_lossy(&body).contains("<sitemapindex"));
+
     pool.close().await;
 }
 
@@ -13588,10 +13599,20 @@ async fn public_title_pages_are_served_in_both_languages() {
     .await
     .unwrap();
 
-    // No inventory row behind it, which is how an adult title looks here.
+    // Another drama, less popular, for the related-titles links.
     sqlx::query(
-        "INSERT INTO media (tmdb_id, media_type, title, metadata_level) \
-         VALUES (910003, 'movie', 'Hidden', 'detail')",
+        r#"INSERT INTO media (tmdb_id, media_type, title, release_date, genres, metadata_level, popularity)
+        VALUES (910004, 'movie', 'Quiet Drama', '2001-01-01', '[{"id": 18, "name": "Drama"}]', 'detail', 3.0)"#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // No inventory row behind it, which is how an adult title looks here. It
+    // is a drama too, and must not be linked any more than it is served.
+    sqlx::query(
+        r#"INSERT INTO media (tmdb_id, media_type, title, genres, metadata_level)
+        VALUES (910003, 'movie', 'Hidden', '[{"id": 18, "name": "Drama"}]', 'detail')"#,
     )
     .execute(&pool)
     .await
@@ -13650,11 +13671,13 @@ async fn public_title_pages_are_served_in_both_languages() {
     assert!(body.contains("<strong>La cinema:</strong> 26 noiembrie 1999"));
     assert!(body
         .contains(r#"hreflang="en" href="https://vazute.micutu.com/en/movie/910001-fight-club""#));
-    assert!(body.contains(r#"href="/media/910001?type=movie""#));
+    assert!(body.contains(r#"href="/login?returnTo=%2Fmedia%2F910001%3Ftype%3Dmovie""#));
 
     let (status, _, body) = get!(&app, "/en/movie/910001-fight-club");
     assert_eq!(status, 200);
     assert!(body.contains("<h1>Fight Club (1999)</h1>"));
+    assert!(body.contains(r#"<a href="/en/movie/910004-quiet-drama">Quiet Drama (2001)</a>"#));
+    assert!(!body.contains("910003"));
     assert!(body.contains("<p>An insomniac office worker.</p>"));
 
     // A bare id, an old slug and the wrong language's slug all land on the
@@ -13692,6 +13715,27 @@ async fn public_title_pages_are_served_in_both_languages() {
         assert_eq!(status, 404, "{path}");
         assert!(body.contains(r#"content="noindex""#), "{path}");
     }
+
+    // The sitemaps list exactly the titles that have a page.
+    let (status, _, index) = get!(&app, "/sitemap.xml");
+    assert_eq!(status, 200);
+    assert!(index.contains("<loc>https://vazute.micutu.com/sitemap-pages.xml</loc>"));
+    assert!(index.contains("<loc>https://vazute.micutu.com/sitemaps/titles-ro-1.xml</loc>"));
+    assert!(index.contains("<loc>https://vazute.micutu.com/sitemaps/titles-en-1.xml</loc>"));
+    let (status, _, titles) = get!(&app, "/sitemaps/titles-ro-1.xml");
+    assert_eq!(status, 200);
+    assert!(
+        titles.contains("<loc>https://vazute.micutu.com/ro/film/910001-clubul-luptatorilor</loc>")
+    );
+    assert!(titles.contains(
+        r#"hreflang="en" href="https://vazute.micutu.com/en/movie/910001-fight-club"/>"#
+    ));
+    assert!(
+        titles.contains("<loc>https://vazute.micutu.com/ro/serial/910002-northern-lights</loc>")
+    );
+    assert!(!titles.contains("910003"));
+    assert_eq!(get!(&app, "/sitemaps/titles-ro-2.xml").0, 404);
+    assert_eq!(get!(&app, "/sitemaps/titles-de-1.xml").0, 404);
 
     let head = actix_test::call_service(
         &app,

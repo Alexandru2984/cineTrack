@@ -137,7 +137,8 @@ STUBS_PID=$!
 
 for required in 'location ~ "\^/lists/' 'location ~ "\^/media/' \
                 'location ~ "\^/profile/' 'location \^~ /unfurl/' \
-                'location ~ "\^/(ro|en)/"'; do
+                'location ~ "\^/(ro|en)/"' 'location = /sitemap.xml' \
+                'location \^~ /sitemaps/'; do
   if ! grep -q "$required" "$WORK_DIR/nginx.conf"; then
     echo "nginx unfurl routing: the vhost no longer contains $required;" \
          "this test is extracting the wrong text and would pass vacuously" >&2
@@ -213,6 +214,12 @@ expect "a title page"   "$BROWSER"        "/ro/film/550-clubul-luptatorilor" \
 expect "a title page"   "Googlebot/2.1"   "/en/tv/1399-game-of-thrones" \
   "backend /en/tv/1399-game-of-thrones"
 expect "a title page"   "Discordbot/2.0"  "/ro/serial/1399" "backend /ro/serial/1399"
+# The sitemaps the backend builds, and the static one that stays with the app.
+expect "the sitemap"    "Googlebot/2.1"   "/sitemap.xml"    "backend /sitemap.xml"
+expect "a title sitemap" "Googlebot/2.1"  "/sitemaps/titles-ro-1.xml" \
+  "backend /sitemaps/titles-ro-1.xml"
+expect "the page list"  "Googlebot/2.1"   "/sitemap-pages.xml" "frontend /sitemap-pages.xml"
+
 # Only the two language prefixes, as whole path segments.
 expect "a lookalike"    "$BROWSER"        "/romania"        "frontend /romania"
 expect "a bare prefix"  "$BROWSER"        "/ro"             "frontend /ro"
