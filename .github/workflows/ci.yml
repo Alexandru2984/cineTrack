@@ -405,6 +405,13 @@ jobs:
           java-version: "17"
           cache: gradle
 
+      # Two NDKs, because the build uses two. 27.1 is the one the root project
+      # names. expo-updates names none, so the Android Gradle Plugin gives it
+      # its own default, 27.0.12077973 — and Gradle, finding it missing,
+      # downloaded those ~700 MB in the middle of the compile. Twice that
+      # download arrived corrupt ("Archive is not a ZIP archive") and failed
+      # main: 2026-09-21 and 2026-10-19. Installed here, it is fetched before
+      # the build by the SDK manager instead.
       - name: Install Android SDK
         if: steps.native.outputs.needed == 'true'
         uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
@@ -414,6 +421,7 @@ jobs:
             platforms;android-36
             build-tools;36.0.0
             ndk;27.1.12297006
+            ndk;27.0.12077973
 
       - name: Validate generated native security config
         if: steps.native.outputs.needed == 'true'
