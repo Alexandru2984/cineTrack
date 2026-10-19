@@ -13792,10 +13792,13 @@ async fn genre_and_popularity_lists_link_the_titles_that_have_pages() {
 async fn a_shared_title_unfurls_with_its_poster() {
     let pool = setup_pool().await;
     clean_db(&pool).await;
+    // 930001 is a film and, touched more recently, a series too: TMDB numbers
+    // the two separately.
     sqlx::query(
-        r#"INSERT INTO media (tmdb_id, media_type, title, overview, release_date, poster_path, metadata_level)
-        VALUES (930001, 'movie', 'Poster Film', 'A film with a poster.', '1999-10-15', '/poster930001.jpg', 'detail'),
-               (930002, 'movie', 'Posterless Film', NULL, NULL, NULL, 'detail')"#,
+        r#"INSERT INTO media (tmdb_id, media_type, title, overview, release_date, poster_path, metadata_level, last_accessed_at)
+        VALUES (930001, 'movie', 'Poster Film', 'A film with a poster.', '1999-10-15', '/poster930001.jpg', 'detail', NOW() - INTERVAL '1 day'),
+               (930001, 'tv', 'Same Id Series', 'A series.', '1966-06-06', '/series930001.jpg', 'detail', NOW()),
+               (930002, 'movie', 'Posterless Film', NULL, NULL, NULL, 'detail', NOW())"#,
     )
     .execute(&pool)
     .await
@@ -13825,6 +13828,28 @@ async fn a_shared_title_unfurls_with_its_poster() {
         assert!(body.contains(&format!(
             r#"<meta name="twitter:image" content="{image}" />"#
         )));
+    }
+    // The link's type decides which of the two the card describes.
+    for (uri, title) in [
+        ("/unfurl/media/930001?type=movie", "Poster Film (1999)"),
+        ("/unfurl/media/930001", "Poster Film (1999)"),
+        ("/unfurl/media/930001?type=tv", "Same Id Series (1966)"),
+    ] {
+        let response = actix_test::call_service(
+            &app,
+            actix_test::TestRequest::get()
+                .uri(uri)
+                .peer_addr(peer_addr())
+                .to_request(),
+        )
+        .await;
+        let body = String::from_utf8(actix_test::read_body(response).await.to_vec()).unwrap();
+        assert!(
+            body.contains(&format!(
+                r#"<meta property="og:title" content="{title} — Văzute" />"#
+            )),
+            "{uri}: {body}"
+        );
     }
 }
 
