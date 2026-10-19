@@ -13789,6 +13789,47 @@ async fn genre_and_popularity_lists_link_the_titles_that_have_pages() {
 
 #[actix_web::test]
 #[ignore = "requires test DB"]
+async fn a_shared_title_unfurls_with_its_poster() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    sqlx::query(
+        r#"INSERT INTO media (tmdb_id, media_type, title, overview, release_date, poster_path, metadata_level)
+        VALUES (930001, 'movie', 'Poster Film', 'A film with a poster.', '1999-10-15', '/poster930001.jpg', 'detail'),
+               (930002, 'movie', 'Posterless Film', NULL, NULL, NULL, 'detail')"#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let app = actix_test::init_service(build_rate_limited_app(pool.clone())).await;
+
+    for (id, image) in [
+        (930001, "https://image.tmdb.org/t/p/w780/poster930001.jpg"),
+        (930002, "https://vazute.micutu.com/og-image.png"),
+    ] {
+        let response = actix_test::call_service(
+            &app,
+            actix_test::TestRequest::get()
+                .uri(&format!("/unfurl/media/{id}"))
+                .peer_addr(peer_addr())
+                .to_request(),
+        )
+        .await;
+        assert_eq!(response.status().as_u16(), 200);
+        let body = String::from_utf8(actix_test::read_body(response).await.to_vec()).unwrap();
+        assert!(
+            body.contains(&format!(
+                r#"<meta property="og:image" content="{image}" />"#
+            )),
+            "{id}: {body}"
+        );
+        assert!(body.contains(&format!(
+            r#"<meta name="twitter:image" content="{image}" />"#
+        )));
+    }
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
 async fn public_title_pages_are_served_in_both_languages() {
     let pool = setup_pool().await;
     clean_db(&pool).await;

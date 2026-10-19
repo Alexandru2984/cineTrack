@@ -78,6 +78,21 @@ const DEFAULT_TITLE: &str = "Văzute — track what you watch";
 const DEFAULT_DESCRIPTION: &str =
     "A personal movie and TV tracker: watchlist, episode tracking, release calendar and statistics.";
 
+/// A title's card shows its poster, the one picture that says which film was
+/// sent; the site's generic image is for a title TMDB has none for.
+fn media_image(poster_path: Option<&str>) -> String {
+    match poster_path.filter(|path| {
+        path.starts_with('/')
+            && path.len() > 1
+            && path[1..]
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+    }) {
+        Some(path) => format!("https://image.tmdb.org/t/p/w780{path}"),
+        None => format!("{SITE}/og-image.png"),
+    }
+}
+
 /// Escape for an HTML attribute.
 ///
 /// Every value below comes from a member or from the catalogue, so it is
@@ -223,8 +238,17 @@ async fn media_card(
     path: web::Path<i32>,
 ) -> Result<HttpResponse, AppError> {
     let tmdb_id = path.into_inner();
-    let found = sqlx::query_as::<_, (String, Option<String>, Option<chrono::NaiveDate>, String)>(
-        r#"SELECT title, overview, release_date, media_type
+    let found = sqlx::query_as::<
+        _,
+        (
+            String,
+            Option<String>,
+            Option<chrono::NaiveDate>,
+            String,
+            Option<String>,
+        ),
+    >(
+        r#"SELECT title, overview, release_date, media_type, poster_path
         FROM media
         WHERE tmdb_id = $1
         ORDER BY last_accessed_at DESC
@@ -234,7 +258,7 @@ async fn media_card(
     .fetch_optional(pool.get_ref())
     .await?;
 
-    let Some((title, overview, release_date, media_type)) = found else {
+    let Some((title, overview, release_date, media_type, poster_path)) = found else {
         return Ok(html(Card::generic(&format!("/media/{tmdb_id}"))));
     };
 
@@ -250,7 +274,7 @@ async fn media_card(
         title: format!("{title}{year} — Văzute"),
         description: shorten(&summary, 200),
         url: format!("{SITE}{path}"),
-        image: format!("{SITE}/og-image.png"),
+        image: media_image(poster_path.as_deref()),
     }))
 }
 
@@ -309,6 +333,28 @@ mod tests {
             "a quote must not open an attribute"
         );
         assert!(html.contains("&lt;script&gt;"));
+    }
+
+    #[test]
+    fn a_title_card_shows_its_poster() {
+        assert_eq!(
+            media_image(Some("/pB8BM7pdSp6B6Ih7QZ4DrQ3PmJK.jpg")),
+            "https://image.tmdb.org/t/p/w780/pB8BM7pdSp6B6Ih7QZ4DrQ3PmJK.jpg"
+        );
+        // No poster, or one that is not a plain TMDB file name, falls back.
+        for path in [
+            None,
+            Some(""),
+            Some("/"),
+            Some("//evil.example/x.jpg"),
+            Some("/a\"b.jpg"),
+        ] {
+            assert_eq!(
+                media_image(path),
+                "https://vazute.micutu.com/og-image.png",
+                "{path:?}"
+            );
+        }
     }
 
     #[test]
