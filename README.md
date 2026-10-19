@@ -349,6 +349,7 @@ văzute/
 │   ├── restore_from_r2.sh  # download, hash/decrypt, verify or restore a dump
 │   ├── sync_tmdb_catalog.py # Daily TMDB ID/title inventory -> PostgreSQL + R2
 │   ├── hydrate_tmdb_catalog.sh # Bounded popular-title detail hydration
+│   ├── indexnow_submit.py  # New public pages -> IndexNow (Bing, Yandex, Seznam)
 │   └── sync_release_schedules.sh # Tracked-title episodes/releases -> PostgreSQL
 ├── nginx/                  # Internal reverse proxy config
 ├── docker-compose.yml      # Development stack
@@ -449,6 +450,12 @@ TMDB publishes each day's exports by 08:00 UTC. Cron runs in the host's local ti
 15 11 * * * /path/to/cineTrack/scripts/sync_tmdb_catalog.py >> /var/log/vazute-catalog.log 2>&1
 0 12 * * * /path/to/cineTrack/scripts/hydrate_tmdb_catalog.sh >> /var/log/vazute-hydration.log 2>&1
 20 * * * * /path/to/cineTrack/scripts/sync_release_schedules.sh >> /var/log/vazute-release-schedules.log 2>&1
+```
+
+The public title pages (`/ro/film/…`, `/en/movie/…`) are listed in the sitemaps the backend builds at `/sitemap.xml`. An hour after hydration, the pages it added are announced to IndexNow, which Bing, Yandex and Seznam share. Google does not take part and reads the sitemap. Each URL is sent once; the ones already accepted are kept in `~/.local/state/cinetrack/indexnow_submitted.txt`. The run writes `indexnow.prom`, and two alerts report a failed or missing run. The key IndexNow verifies is the public file `frontend/public/<key>.txt`.
+
+```cron
+0 13 * * * /path/to/cineTrack/scripts/indexnow_submit.py >> /var/log/vazute-indexnow.log 2>&1
 ```
 
 ## License

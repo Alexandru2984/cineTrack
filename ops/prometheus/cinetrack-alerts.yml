@@ -574,3 +574,26 @@ groups:
           description: >-
             No catalog hydration has reported in thirty hours. Check that the cron
             entry for scripts/hydrate_tmdb_catalog.sh is still installed.
+
+      - alert: CineTrackIndexNowFailed
+        expr: cinetrack_indexnow_success == 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: Văzute IndexNow submission failed
+          description: >-
+            The daily submission of new public pages to IndexNow (Bing, Yandex and
+            the others) did not complete, so new titles wait for those engines to
+            crawl them. Read indexnow.log and run scripts/indexnow_submit.py by hand.
+
+      - alert: CineTrackIndexNowNotRunning
+        expr: absent(cinetrack_indexnow_timestamp_seconds) or time() - cinetrack_indexnow_timestamp_seconds > 30 * 3600
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: Văzute IndexNow submission has stopped running
+          description: >-
+            No IndexNow submission has reported in thirty hours. Check that the cron
+            entry for scripts/indexnow_submit.py is still installed.
