@@ -43,7 +43,12 @@ FROM nginx:1.31-alpine@sha256:7068961d45b07b2af510ac002e9daa63a1d3eba2111202d676
 # or denial of service in libtiff 4.7.1-r0, fixed in 4.7.2-r0. nginx carries it
 # only as a dependency of its image-filter module, which this configuration
 # never loads, but the fix is in Alpine main and costs nothing to take.
-RUN apk add --no-cache --upgrade 'libexpat>=2.8.4-r0' 'libuuid>=2.42.3-r1' 'pcre2>=10.49-r0' 'tiff>=4.7.2-r0'
+#
+# `libx11` on 2026-10-19, the same way: CVE-2026-88806 (HIGH), a heap buffer
+# overflow in 1.8.13-r0 driven by a malicious X server, fixed in 1.8.14-r0. It
+# is here for the same image-filter module and is never used to talk to an X
+# server, but the daily sweep blocks main on it and the fix is in Alpine main.
+RUN apk add --no-cache --upgrade 'libexpat>=2.8.4-r0' 'libuuid>=2.42.3-r1' 'pcre2>=10.49-r0' 'tiff>=4.7.2-r0' 'libx11>=1.8.14-r0'
 # Asserted after the upgrade, not before. These pins exist so a base image whose
 # contents drift breaks the build loudly instead of shipping different software
 # under the same digest; an assertion that ran first would describe the image we
