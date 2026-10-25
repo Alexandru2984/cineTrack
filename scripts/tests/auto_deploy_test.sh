@@ -71,6 +71,7 @@ case "$1" in
   inspect)
     # The monitoring sync asks which directories Prometheus mounts.
     if [[ "$*" == *Mounts* ]]; then printf '%s\n' "${STUB_PROM_MOUNT:-}"; exit 0; fi
+    if [[ "$*" == *State.Running* ]]; then printf '%s\n' "${STUB_PROM_RUNNING:-true}"; exit 0; fi
     printf '%s' "${STUB_DEPLOYED_REVISION:-}"; exit 0 ;;
   image)   exit 0 ;;   # `image inspect`: the saved images exist
   run)     [[ "$*" == *promtool* ]] && exit "${STUB_PROMTOOL_EXIT:-0}" ;;
@@ -149,6 +150,7 @@ run_deploy() {
   AUTO_DEPLOY_MONITORING_METRICS_FILE="$MONITORING_METRICS" \
   AUTO_DEPLOY_RELOAD_WAIT=0 \
   STUB_PROM_MOUNT="${STUB_PROM_MOUNT-$MONITORING_DIR}" \
+  STUB_PROM_RUNNING="${STUB_PROM_RUNNING:-true}" \
   STUB_PROMTOOL_EXIT="${STUB_PROMTOOL_EXIT:-0}" \
   STUB_PROM_RELOAD="${STUB_PROM_RELOAD:-1}" \
   STUB_LOGS_FAIL="${STUB_LOGS_FAIL:-0}" \
@@ -627,6 +629,15 @@ if [[ "$(sync_success)" == 0 ]]; then
   pass "a Prometheus that does not mount the synced directory is reported, not trusted"
 else
   fail "a container on the old file mounts was reported as synced"
+fi
+
+# Run again on the same revision: nothing changed, so nothing is reloaded, and
+# a Prometheus that is not running must still not count as synced.
+STUB_PROM_RUNNING=false run_deploy "$RULES_CHANGED" "$RULES_CHANGED" "$GREEN" "$NO_STATUS" 1 >/dev/null
+if [[ "$(sync_success)" == 0 ]]; then
+  pass "a stopped Prometheus is not reported as running the synced rules"
+else
+  fail "a stopped Prometheus was reported as synced"
 fi
 
 # ── The outgoing backend's log survives the swap ────────────────────────
