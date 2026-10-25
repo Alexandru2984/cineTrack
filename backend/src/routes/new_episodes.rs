@@ -239,12 +239,70 @@ fn episode_label(language: Language, entry: &Entry) -> String {
         match entry
             .first_name
             .as_deref()
-            .filter(|name| !name.trim().is_empty())
+            .filter(|name| !is_placeholder(name))
         {
             Some(name) => format!("{code} · {name}"),
             None => code,
         }
     }
+}
+
+/// A name that says nothing the code and the date do not: "Episode 347",
+/// "Sun 25 Oct 2026", "26/10/2026". Daily shows carry these until a real title
+/// is written, and a page of them reads as noise.
+fn is_placeholder(name: &str) -> bool {
+    const FILLER: &[&str] = &[
+        "episode",
+        "episodul",
+        "ep",
+        "st",
+        "nd",
+        "rd",
+        "th",
+        "of",
+        "jan",
+        "january",
+        "feb",
+        "february",
+        "mar",
+        "march",
+        "apr",
+        "april",
+        "may",
+        "jun",
+        "june",
+        "jul",
+        "july",
+        "aug",
+        "august",
+        "sep",
+        "sept",
+        "september",
+        "oct",
+        "october",
+        "nov",
+        "november",
+        "dec",
+        "december",
+        "mon",
+        "monday",
+        "tue",
+        "tuesday",
+        "wed",
+        "wednesday",
+        "thu",
+        "thursday",
+        "fri",
+        "friday",
+        "sat",
+        "saturday",
+        "sun",
+        "sunday",
+    ];
+    name.to_lowercase()
+        .split(|c: char| !c.is_alphabetic())
+        .filter(|word| !word.is_empty())
+        .all(|word| FILLER.contains(&word))
 }
 
 fn render(language: Language, today: NaiveDate, days: &[(NaiveDate, Vec<Entry>)]) -> String {
@@ -396,6 +454,30 @@ mod tests {
     }
 
     #[test]
+    fn placeholder_episode_names_are_left_out() {
+        for name in [
+            "",
+            "  ",
+            "Episode 347",
+            "Episodul 12",
+            "Sun 25 Oct 2026",
+            "Sunday, 25th October 2026",
+            "October 27, 2026",
+            "26/10/2026",
+        ] {
+            assert!(is_placeholder(name), "{name}");
+        }
+        for name in [
+            "Treehouse of Horror XXXVII",
+            "Pilot",
+            "Episode of the Year",
+            "Mon Amour",
+        ] {
+            assert!(!is_placeholder(name), "{name}");
+        }
+    }
+
+    #[test]
     fn days_are_named_from_today() {
         let today = NaiveDate::from_ymd_opt(2026, 10, 25).unwrap();
         assert_eq!(
@@ -440,7 +522,7 @@ mod tests {
     #[test]
     fn a_romanian_week_links_its_series_in_romanian() {
         let today = NaiveDate::from_ymd_opt(2026, 10, 25).unwrap();
-        let days = vec![(entry(1, None).air_date, vec![entry(1, Some("Ep <1>"))])];
+        let days = vec![(entry(1, None).air_date, vec![entry(1, Some("Pilot <1>"))])];
         let html = render(Language::Ro, today, &days);
         assert!(html.contains("<h1>Episoade noi săptămâna aceasta</h1>"));
         assert!(html.contains(
@@ -449,7 +531,7 @@ mod tests {
         assert!(html
             .contains(r#"hreflang="en" href="https://vazute.micutu.com/en/series/new-episodes""#));
         assert!(html.contains(r#"<a href="/ro/serial/1399-urzeala-tronurilor">"#));
-        assert!(html.contains("S02E05 · Ep &lt;1&gt;"));
+        assert!(html.contains("S02E05 · Pilot &lt;1&gt;"));
         assert!(html.contains(r#"<time datetime="2026-10-27">Marți, 27 octombrie</time>"#));
         assert!(html.contains(r#"content="index, follow, max-image-preview:large""#));
     }
