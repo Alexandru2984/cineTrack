@@ -367,7 +367,31 @@ if [[ "$total_checks" != "$returned_checks" ]]; then
   exit 0
 fi
 
-checks="$(jq -r '.check_runs[] | [.name, .status, (.conclusion // "none")] | @tsv' <<<"$checks_json")"
+# Dependabot's updater runs on the default branch's head, and its job shows up
+# among that commit's check runs. It verifies nothing about the revision — it
+# is Dependabot trying to open a pull request — yet when it cannot (a security
+# fix with no compatible path, say) it fails, and that failure held a green
+# release back for eight hours on 2026-10-25. Its runs are told apart by the
+# workflow path GitHub gives them, not by the check name, which is free text.
+if ! runs_json="$(github_api "actions/runs?head_sha=$target&per_page=100")"; then
+  say "cannot read workflow runs from GitHub for ${target:0:8} (rate limit or network)"
+  report blocked_api "$target"
+  exit 0
+fi
+total_runs="$(jq -r '.total_count // 0' <<<"$runs_json")"
+returned_runs="$(jq -r '.workflow_runs | length' <<<"$runs_json")"
+if [[ "$total_runs" != "$returned_runs" ]]; then
+  say "GitHub returned $returned_runs of $total_runs workflow runs for ${target:0:8}; not deciding on a partial answer"
+  report blocked_api "$target"
+  exit 0
+fi
+updater_suites="$(jq -c '[.workflow_runs[]
+  | select(.event == "dynamic" and ((.path // "") | startswith("dynamic/dependabot/")))
+  | .check_suite_id]' <<<"$runs_json")"
+
+checks="$(jq -r --argjson skip "$updater_suites" '.check_runs[]
+  | select(.check_suite.id as $suite | ($skip | index($suite)) == null)
+  | [.name, .status, (.conclusion // "none")] | @tsv' <<<"$checks_json")"
 
 if [[ -z "$checks" ]]; then
   # No check runs at all. Either CI has not started yet or this commit is not
