@@ -281,3 +281,51 @@ footer.site {
 .grid a:hover .name {
   text-decoration: underline;
 }
+
+/* The day-by-day list of new episodes. */
+.schedule {
+  padding: 0;
+  margin: 0;
+  list-style: none;
+  display: grid;
+  gap: 0.6rem;
+}
+
+.schedule a {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  color: var(--foreground);
+  text-decoration: none;
+}
+
+.schedule a > span {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.schedule img,
+.schedule .no-poster {
+  flex: none;
+  width: 46px;
+  height: 69px;
+  border-radius: 0.35rem;
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.schedule .name {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.schedule .episode {
+  color: var(--muted);
+  font-size: 0.9rem;
+  overflow-wrap: anywhere;
+}
+
+.schedule a:hover .name {
+  text-decoration: underline;
+}
