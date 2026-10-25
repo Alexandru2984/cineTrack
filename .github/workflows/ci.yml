@@ -514,7 +514,8 @@ jobs:
             scripts/tests/ci_contract_test.sh \
             scripts/tests/edge_security_config_test.sh \
             scripts/tests/nginx_unfurl_routing_test.sh \
-            scripts/tests/auto_deploy_test.sh
+            scripts/tests/auto_deploy_test.sh \
+            scripts/tests/monitoring_watchdog_test.sh
 
       - name: Validate dependency policy
         run: |
@@ -557,6 +558,10 @@ jobs:
       # rollback decision are the parts that must not regress silently.
       - name: Validate automatic deployment gating
         run: scripts/tests/auto_deploy_test.sh
+
+      # Prometheus cannot alert on itself being down; this is what does.
+      - name: Validate monitoring watchdog
+        run: scripts/tests/monitoring_watchdog_test.sh
 
       - name: Validate calendar feed log redaction
         run: scripts/tests/calendar_feed_log_safety_test.sh
