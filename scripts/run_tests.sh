@@ -157,7 +157,8 @@ python3 scripts/tests/check_embedded_python.py \
   scripts/tests/ci_contract_test.sh \
   scripts/tests/edge_security_config_test.sh \
   scripts/tests/nginx_unfurl_routing_test.sh \
-  scripts/tests/auto_deploy_test.sh
+  scripts/tests/auto_deploy_test.sh \
+  scripts/tests/monitoring_watchdog_test.sh
 scripts/tests/ci_contract_test.sh
 scripts/tests/backup_restore_test.sh
 scripts/tests/release_schedule_metrics_test.sh
@@ -169,6 +170,7 @@ scripts/tests/rust_audit_exceptions_test.sh
 scripts/tests/container_scan_exceptions_test.sh
 scripts/tests/deploy_drift_test.sh
 scripts/tests/auto_deploy_test.sh
+scripts/tests/monitoring_watchdog_test.sh
 scripts/tests/crypto_core_parity_test.sh
 scripts/tests/client_type_parity_test.py
 scripts/tests/mobile_accessibility_test.py
