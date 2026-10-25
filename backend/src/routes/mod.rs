@@ -14,6 +14,7 @@ pub mod lists;
 pub mod media;
 pub mod messages;
 pub mod moderation;
+pub mod new_episodes;
 pub mod notifications;
 pub mod push;
 pub mod reports;
