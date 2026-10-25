@@ -30,7 +30,7 @@ hmac = "0.13"
 # directly so franking signatures can be verified without pulling a second
 # Ed25519 implementation into the tree. Pinned to the version already resolved,
 # so making it explicit cannot silently change what is linked.
-aws-lc-rs = { version = "=1.18.1", default-features = false, features = ["aws-lc-sys"] }
+aws-lc-rs = { version = "=1.18.2", default-features = false, features = ["aws-lc-sys"] }
 aes-gcm = "0.11"
 hex = "0.4"
 log = "0.4"
@@ -48,7 +48,7 @@ actix-http = "3"
 # Same pin as the runtime dependency. The message tests have to produce real
 # Ed25519 signatures now that the server rejects ones it cannot verify, and a
 # test that fakes the signature would only prove the check can be bypassed.
-aws-lc-rs = { version = "=1.18.1", default-features = false, features = ["aws-lc-sys"] }
+aws-lc-rs = { version = "=1.18.2", default-features = false, features = ["aws-lc-sys"] }
 criterion = { version = "0.8", features = ["async_tokio"] }
 
 [[bench]]
