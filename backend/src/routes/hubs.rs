@@ -215,6 +215,20 @@ pub fn hub_path(language: Language, kind: Kind, genre: Option<&Genre>) -> String
 /// Registered inside `title_pages`' language scopes: a scope that matches a
 /// prefix answers every path under it, so a second `/ro` scope would never be
 /// consulted.
+/// The section links in every public page's header.
+pub fn sections_nav(language: Language) -> String {
+    let (movies, series, new_episodes) = match language {
+        Language::Ro => ("Filme", "Seriale", "Episoade noi"),
+        Language::En => ("Movies", "Series", "New episodes"),
+    };
+    format!(
+        r#"<nav class="sections"><a href="{}">{movies}</a> <a href="{}">{series}</a> <a href="{}">{new_episodes}</a></nav>"#,
+        hub_path(language, Kind::Movie, None),
+        hub_path(language, Kind::Tv, None),
+        crate::routes::new_episodes::path(language),
+    )
+}
+
 pub fn romanian_routes(scope: actix_web::Scope) -> actix_web::Scope {
     scope
         .route("/filme", web::get().to(ro_movies))
@@ -223,6 +237,15 @@ pub fn romanian_routes(scope: actix_web::Scope) -> actix_web::Scope {
         .route("/filme/{genre}", web::head().to(ro_movies_genre))
         .route("/seriale", web::get().to(ro_series))
         .route("/seriale", web::head().to(ro_series))
+        // Before the genre route, which would otherwise read it as a genre.
+        .route(
+            "/seriale/episoade-noi",
+            web::get().to(crate::routes::new_episodes::romanian),
+        )
+        .route(
+            "/seriale/episoade-noi",
+            web::head().to(crate::routes::new_episodes::romanian),
+        )
         .route("/seriale/{genre}", web::get().to(ro_series_genre))
         .route("/seriale/{genre}", web::head().to(ro_series_genre))
 }
@@ -235,6 +258,14 @@ pub fn english_routes(scope: actix_web::Scope) -> actix_web::Scope {
         .route("/movies/{genre}", web::head().to(en_movies_genre))
         .route("/series", web::get().to(en_series))
         .route("/series", web::head().to(en_series))
+        .route(
+            "/series/new-episodes",
+            web::get().to(crate::routes::new_episodes::english),
+        )
+        .route(
+            "/series/new-episodes",
+            web::head().to(crate::routes::new_episodes::english),
+        )
         .route("/series/{genre}", web::get().to(en_series_genre))
         .route("/series/{genre}", web::head().to(en_series_genre))
 }
@@ -493,11 +524,6 @@ fn render(
         String::new()
     };
     let genres_heading = if ro { "Genuri" } else { "Genres" };
-    let (movies_label, series_label) = if ro {
-        ("Filme", "Seriale")
-    } else {
-        ("Movies", "Series")
-    };
     let other_language = if ro { "English" } else { "Română" };
     let tmdb_notice = if ro {
         "Date despre filme și seriale de la TMDB. Văzute folosește API-ul TMDB, dar nu este aprobat sau certificat de TMDB."
@@ -535,7 +561,7 @@ fn render(
 <body>
 <header class="site">
 <a class="brand" href="/">Văzute</a>
-<nav class="sections"><a href="{movies_href}">{movies_label}</a> <a href="{series_href}">{series_label}</a></nav>
+{nav}
 <a class="language" href="{other_path}" hreflang="{other_lang}" lang="{other_lang}">{other_language}</a>
 </header>
 <main>
@@ -559,8 +585,7 @@ fn render(
         url = escape(&url),
         ro_path = escape(&ro_path),
         en_path = escape(&en_path),
-        movies_href = hub_path(language, Kind::Movie, None),
-        series_href = hub_path(language, Kind::Tv, None),
+        nav = sections_nav(language),
         other_path = escape(&other_path),
         other_lang = other.code(),
     )

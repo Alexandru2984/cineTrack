@@ -30,6 +30,7 @@ import { TrackingFeedbackSheet } from '@/components/tracking-feedback-sheet';
 import { WatchProviders } from '@/components/watch-providers';
 import { CommunityRating } from '@/components/community-rating';
 import { radius, spacing } from '@/constants/theme';
+import { localDateKey } from '@/hooks/use-calendar';
 import { useEpisodes, useMediaDetail, useSeasons } from '@/hooks/use-media';
 import {
   useCreateTracking,
@@ -60,13 +61,6 @@ import type {
 } from '@/types';
 
 const MAX_TMDB_ID = 2_147_483_647;
-
-function localDateKey() {
-  const date = new Date();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${date.getFullYear()}-${month}-${day}`;
-}
 
 function normalizeTmdbId(value: string | undefined) {
   if (!value || !/^[1-9]\d{0,9}$/.test(value)) return '';

@@ -236,9 +236,17 @@ struct ReleaseScheduleCandidate {
     status: Option<String>,
     release_date: Option<NaiveDate>,
     consecutive_failures: i16,
+    /// A member follows it. The rest are airing series with a public page,
+    /// refreshed so the new-episodes page covers more than what is tracked.
+    tracked: bool,
 }
 
 fn success_delay(candidate: &ReleaseScheduleCandidate) -> chrono::Duration {
+    // Nobody is waiting on these for a notification; a day is fresh enough
+    // for a weekly list, and it keeps three thousand series inside the budget.
+    if !candidate.tracked {
+        return chrono::Duration::days(1);
+    }
     if candidate.media_type == "movie" {
         if candidate
             .release_date
@@ -339,45 +347,63 @@ async fn mark_failure(
     Ok(())
 }
 
+/// Titles due for a refresh, tracked ones first.
+///
+/// Tracked titles are what members are notified about, so they come first and
+/// cannot be crowded out. After them come series still airing that have a
+/// public page — on 2026-10-25 only 12 of 13,230 had a single episode cached
+/// for the coming week, because nothing refreshed a series nobody followed.
+/// Those are taken most popular first; at a day apart, the 3,127 airing then
+/// needed about 130 refreshes an hour against a budget of 200.
 async fn candidates(
     pool: &PgPool,
     budget: u32,
 ) -> Result<Vec<ReleaseScheduleCandidate>, sqlx::Error> {
     sqlx::query_as::<_, ReleaseScheduleCandidate>(
-        r#"SELECT
-            media.id,
-            media.tmdb_id,
-            media.media_type,
-            media.status,
-            media.release_date,
-            COALESCE(state.consecutive_failures, 0::smallint) AS consecutive_failures
-        FROM media
-        LEFT JOIN release_schedule_sync_state state ON state.media_id = media.id
-        WHERE (state.next_attempt_at IS NULL OR state.next_attempt_at <= NOW())
-          AND (
-              (
-                  media.media_type = 'tv'
-                  AND EXISTS (
-                      SELECT 1
-                      FROM user_media tracked
-                      WHERE tracked.media_id = media.id
-                        AND tracked.status <> 'dropped'
-                  )
-              )
-              OR (
-                  media.media_type = 'movie'
-                  AND EXISTS (
-                      SELECT 1
-                      FROM user_media tracked
-                      WHERE tracked.media_id = media.id
-                        AND tracked.status = 'plan_to_watch'
-                  )
-              )
-          )
+        r#"WITH due AS (
+            SELECT
+                media.id,
+                media.tmdb_id,
+                media.media_type,
+                media.status,
+                media.release_date,
+                media.metadata_level,
+                media.popularity,
+                state.next_attempt_at,
+                COALESCE(state.consecutive_failures, 0::smallint) AS consecutive_failures,
+                CASE
+                    WHEN media.media_type = 'tv' THEN EXISTS (
+                        SELECT 1
+                        FROM user_media tracked
+                        WHERE tracked.media_id = media.id
+                          AND tracked.status <> 'dropped'
+                    )
+                    ELSE EXISTS (
+                        SELECT 1
+                        FROM user_media tracked
+                        WHERE tracked.media_id = media.id
+                          AND tracked.status = 'plan_to_watch'
+                    )
+                END AS tracked
+            FROM media
+            LEFT JOIN release_schedule_sync_state state ON state.media_id = media.id
+            WHERE state.next_attempt_at IS NULL OR state.next_attempt_at <= NOW()
+        )
+        SELECT id, tmdb_id, media_type, status, release_date, consecutive_failures, tracked
+        FROM due
+        WHERE tracked
+           OR (
+               media_type = 'tv'
+               AND metadata_level = 'detail'
+               AND popularity IS NOT NULL
+               AND status IN ('Returning Series', 'In Production')
+           )
         ORDER BY
-            CASE WHEN media.media_type = 'tv' THEN 0 ELSE 1 END,
-            state.next_attempt_at NULLS FIRST,
-            media.id
+            tracked DESC,
+            CASE WHEN media_type = 'tv' THEN 0 ELSE 1 END,
+            next_attempt_at NULLS FIRST,
+            popularity DESC NULLS LAST,
+            id
         LIMIT $1"#,
     )
     .bind(i64::from(budget))
@@ -479,6 +505,7 @@ mod tests {
             status: status.map(str::to_string),
             release_date,
             consecutive_failures: 0,
+            tracked: true,
         }
     }
 
@@ -500,5 +527,14 @@ mod tests {
             )),
             chrono::Duration::days(30)
         );
+    }
+
+    #[test]
+    fn an_untracked_airing_series_is_refreshed_daily() {
+        let untracked = ReleaseScheduleCandidate {
+            tracked: false,
+            ..candidate("tv", Some("Returning Series"), None)
+        };
+        assert_eq!(success_delay(&untracked), chrono::Duration::days(1));
     }
 }

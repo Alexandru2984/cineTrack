@@ -1129,7 +1129,7 @@ fn render(page: &Page) -> String {
 <body>
 <header class="site">
 <a class="brand" href="/">Văzute</a>
-<nav class="sections"><a href="{movies_href}">{movies_label}</a> <a href="{series_href}">{series_label}</a></nav>
+{nav}
 <a class="language" href="{other_path}" hreflang="{other_lang}" lang="{other_lang}">{other_language}</a>
 </header>
 <main>
@@ -1171,18 +1171,7 @@ fn render(page: &Page) -> String {
         other_path = escape(&other_path),
         other_lang = other.code(),
         other_language = w.other_language,
-        movies_href = crate::routes::hubs::hub_path(language, Kind::Movie, None),
-        series_href = crate::routes::hubs::hub_path(language, Kind::Tv, None),
-        movies_label = if language == Language::Ro {
-            "Filme"
-        } else {
-            "Movies"
-        },
-        series_label = if language == Language::Ro {
-            "Seriale"
-        } else {
-            "Series"
-        },
+        nav = crate::routes::hubs::sections_nav(language),
         heading = escape(&format!("{title}{heading_year}")),
         app_link = escape(&app_link),
         add = w.add,
@@ -1329,7 +1318,7 @@ mod tests {
         // A known genre links to its list; one TMDB added later keeps its own
         // name, unlinked, rather than vanishing.
         assert!(html.contains(r#"<li><a href="/ro/filme/drama">Dramă</a></li>"#));
-        assert!(html.contains(r#"<nav class="sections"><a href="/ro/filme">Filme</a> <a href="/ro/seriale">Seriale</a></nav>"#));
+        assert!(html.contains(r#"<nav class="sections"><a href="/ro/filme">Filme</a> <a href="/ro/seriale">Seriale</a> <a href="/ro/seriale/episoade-noi">Episoade noi</a></nav>"#));
         assert!(html.contains("<li>Unknown</li>"));
         assert!(html.contains("Titlu original: <span lang=\"\">Fight Club</span>"));
         assert!(html.contains("<strong>La cinema:</strong> 26 noiembrie 1999"));
