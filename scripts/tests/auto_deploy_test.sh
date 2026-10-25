@@ -71,6 +71,7 @@ case "$1" in
   inspect)
     # The monitoring sync asks which directories Prometheus mounts.
     if [[ "$*" == *Mounts* ]]; then printf '%s\n' "${STUB_PROM_MOUNT:-}"; exit 0; fi
+    if [[ "$*" == *State.Running* ]]; then printf '%s\n' "${STUB_PROM_RUNNING:-true}"; exit 0; fi
     printf '%s' "${STUB_DEPLOYED_REVISION:-}"; exit 0 ;;
   image)   exit 0 ;;   # `image inspect`: the saved images exist
   run)     [[ "$*" == *promtool* ]] && exit "${STUB_PROMTOOL_EXIT:-0}" ;;
@@ -103,6 +104,10 @@ case "$url" in
   *check-runs*)
     [[ "$(cat "$STUB_CHECKS_FILE")" == FAIL ]] && exit 22
     cat "$STUB_CHECKS_FILE"; exit 0 ;;
+  *actions/runs*)
+    [[ -z "${STUB_RUNS_FILE:-}" ]] && { printf '{"total_count":0,"workflow_runs":[]}'; exit 0; }
+    [[ "$(cat "$STUB_RUNS_FILE")" == FAIL ]] && exit 22
+    cat "$STUB_RUNS_FILE"; exit 0 ;;
   *api.github.com*/status*)
     [[ "$(cat "$STUB_STATUS_FILE")" == FAIL ]] && exit 22
     cat "$STUB_STATUS_FILE"; exit 0 ;;
@@ -145,11 +150,13 @@ run_deploy() {
   AUTO_DEPLOY_MONITORING_METRICS_FILE="$MONITORING_METRICS" \
   AUTO_DEPLOY_RELOAD_WAIT=0 \
   STUB_PROM_MOUNT="${STUB_PROM_MOUNT-$MONITORING_DIR}" \
+  STUB_PROM_RUNNING="${STUB_PROM_RUNNING:-true}" \
   STUB_PROMTOOL_EXIT="${STUB_PROMTOOL_EXIT:-0}" \
   STUB_PROM_RELOAD="${STUB_PROM_RELOAD:-1}" \
   STUB_LOGS_FAIL="${STUB_LOGS_FAIL:-0}" \
   STUB_DEPLOYED_REVISION="$2" \
   STUB_CHECKS_FILE="$3" \
+  STUB_RUNS_FILE="${STUB_RUNS_FILE:-}" \
   STUB_STATUS_FILE="$4" \
   STUB_HEALTHY="$5" \
   STUB_EDGE_HEALTHY="${6:-1}" \
@@ -172,12 +179,16 @@ import json, sys
 path, *pairs = sys.argv[1:]
 runs = []
 for pair in pairs:
-    name, status, conclusion = pair.split(":")
-    runs.append({
+    # An optional fourth field is the check suite the run belongs to.
+    name, status, conclusion, *suite = pair.split(":")
+    run = {
         "name": name,
         "status": status,
         "conclusion": None if conclusion == "none" else conclusion,
-    })
+    }
+    if suite:
+        run["check_suite"] = {"id": int(suite[0])}
+    runs.append(run)
 with open(path, "w") as fh:
     json.dump({"total_count": len(runs), "check_runs": runs}, fh)
 PY
@@ -222,6 +233,33 @@ printf 'FAIL' > "$API_DOWN"
 TRUNCATED="$WORK_DIR/truncated.json"
 printf '{"total_count": 12, "check_runs": [{"name":"CI Gate","status":"completed","conclusion":"success"}]}' > "$TRUNCATED"
 
+# Workflow runs for the commit: "event:path:check_suite_id" each.
+runs_fixture() {
+  local file="$1"; shift
+  python3 - "$file" "$@" <<'PY'
+import json, sys
+path, *triples = sys.argv[1:]
+runs = []
+for triple in triples:
+    event, workflow, suite = triple.split(":")
+    runs.append({"event": event, "path": workflow, "check_suite_id": int(suite)})
+with open(path, "w") as fh:
+    json.dump({"total_count": len(runs), "workflow_runs": runs}, fh)
+PY
+}
+
+UPDATER_FAILED="$WORK_DIR/updater_failed.json"
+checks_fixture "$UPDATER_FAILED" "CI Gate:completed:success:1" "Backend:completed:success:1" \
+  "Dependabot:completed:failure:2"
+UPDATER_RUNS="$WORK_DIR/updater_runs.json"
+runs_fixture "$UPDATER_RUNS" "push:.github/workflows/ci.yml:1" \
+  "dynamic:dynamic/dependabot/dependabot-updates:2"
+DYNAMIC_OTHER_RUNS="$WORK_DIR/dynamic_other_runs.json"
+runs_fixture "$DYNAMIC_OTHER_RUNS" "push:.github/workflows/ci.yml:1" \
+  "dynamic:dynamic/github-code-scanning/codeql:2"
+TRUNCATED_RUNS="$WORK_DIR/truncated_runs.json"
+printf '{"total_count": 9, "workflow_runs": []}' > "$TRUNCATED_RUNS"
+
 # ── An untested commit is not a passing one ─────────────────────────────
 #
 # Zero check runs is the case that must not be read as consent. It is what a
@@ -252,6 +290,40 @@ if is_state "$out" blocked_ci; then
   pass "a failed check blocks the deploy"
 else
   fail "a failed check did not block the deploy"
+fi
+
+# ── Dependabot's updater does not speak for the revision ────────────────
+#
+# Its job lands among the commit's check runs and fails whenever it cannot
+# open a pull request; on 2026-10-25 that held a green main back for hours.
+out="$(STUB_RUNS_FILE="$UPDATER_RUNS" run_deploy "$CODE_ONLY" "$BASE" "$UPDATER_FAILED" "$NO_STATUS" 1)"
+if is_state "$out" deployed; then
+  pass "a failed Dependabot update job does not block a green revision"
+else
+  fail "a failed Dependabot update job blocked the deploy: $(grep ' 1$' <<<"$out" | head -1)"
+fi
+
+# Only the updater is set aside: another dynamic workflow failing the same
+# check is still a failure.
+out="$(STUB_RUNS_FILE="$DYNAMIC_OTHER_RUNS" run_deploy "$CODE_ONLY" "$BASE" "$UPDATER_FAILED" "$NO_STATUS" 1)"
+if is_state "$out" blocked_ci; then
+  pass "a failure from any other dynamic workflow still blocks"
+else
+  fail "a failure from a non-Dependabot dynamic workflow was ignored"
+fi
+
+# Without the run list the updater cannot be told apart, so nothing is decided.
+out="$(STUB_RUNS_FILE="$API_DOWN" run_deploy "$CODE_ONLY" "$BASE" "$GREEN" "$NO_STATUS" 1)"
+if is_state "$out" blocked_api; then
+  pass "an unreadable workflow-run list blocks rather than guesses"
+else
+  fail "the deploy went ahead without the workflow-run list"
+fi
+out="$(STUB_RUNS_FILE="$TRUNCATED_RUNS" run_deploy "$CODE_ONLY" "$BASE" "$GREEN" "$NO_STATUS" 1)"
+if is_state "$out" blocked_api; then
+  pass "a partial workflow-run list blocks rather than guesses"
+else
+  fail "the deploy decided on a partial workflow-run list"
 fi
 
 # ── A failing commit status blocks too ──────────────────────────────────
@@ -557,6 +629,15 @@ if [[ "$(sync_success)" == 0 ]]; then
   pass "a Prometheus that does not mount the synced directory is reported, not trusted"
 else
   fail "a container on the old file mounts was reported as synced"
+fi
+
+# Run again on the same revision: nothing changed, so nothing is reloaded, and
+# a Prometheus that is not running must still not count as synced.
+STUB_PROM_RUNNING=false run_deploy "$RULES_CHANGED" "$RULES_CHANGED" "$GREEN" "$NO_STATUS" 1 >/dev/null
+if [[ "$(sync_success)" == 0 ]]; then
+  pass "a stopped Prometheus is not reported as running the synced rules"
+else
+  fail "a stopped Prometheus was reported as synced"
 fi
 
 # ── The outgoing backend's log survives the swap ────────────────────────
