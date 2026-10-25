@@ -229,6 +229,15 @@ sync_monitoring() {
     ok=0
   fi
 
+  # Unchanged files are "in sync" only with a Prometheus that is running. A
+  # stopped container still reports its mounts, so the check above passed for
+  # the four and a half days after 2026-10-20 that this one was down.
+  if (( ok == 1 )) && [[ "$(docker inspect --format '{{.State.Running}}' \
+      "$PROMETHEUS_CONTAINER" 2>/dev/null || true)" != true ]]; then
+    say "$PROMETHEUS_CONTAINER is not running; no rules are being evaluated"
+    ok=0
+  fi
+
   local tmp
   tmp="$(mktemp "${MONITORING_METRICS_FILE}.XXXXXX")"
   {
