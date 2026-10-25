@@ -185,10 +185,21 @@ async fn lists_sitemap(pool: web::Data<PgPool>) -> Result<HttpResponse, AppError
                 .map(|genre| (kind, Some(genre))),
         );
     }
+    let mut pairs = lists
+        .into_iter()
+        .map(|(kind, genre)| {
+            (
+                format!("{SITE}{}", hub_path(Language::Ro, kind, genre)),
+                format!("{SITE}{}", hub_path(Language::En, kind, genre)),
+            )
+        })
+        .collect::<Vec<_>>();
+    pairs.push((
+        format!("{SITE}{}", crate::routes::new_episodes::path(Language::Ro)),
+        format!("{SITE}{}", crate::routes::new_episodes::path(Language::En)),
+    ));
     let mut urls = String::new();
-    for (kind, genre) in lists {
-        let ro = format!("{SITE}{}", hub_path(Language::Ro, kind, genre));
-        let en = format!("{SITE}{}", hub_path(Language::En, kind, genre));
+    for (ro, en) in pairs {
         for loc in [&ro, &en] {
             urls.push_str(&format!(
                 "<url><loc>{loc}</loc>\
