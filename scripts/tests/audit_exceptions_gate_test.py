@@ -21,7 +21,7 @@ assert SPEC is not None and SPEC.loader is not None
 gate = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(gate)
 
-REVIEWED = ("braces", "GHSA-vfj7-8cjw-p6xm")
+REVIEWED = ("node-forge", "GHSA-86w9-cpqp-85rv")
 
 
 class AuditGateTests(unittest.TestCase):

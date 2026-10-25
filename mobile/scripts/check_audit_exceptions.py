@@ -43,16 +43,9 @@ AuditUnavailable = npm_audit.AuditUnavailable
 # accepted: metro dropped image-size in 0.84.5, and the last copy came from the
 # older metro the lockfile still carried for react-native's CLI plugin.
 ACCEPTED = {
-    # Both below were published on 2026-10-02 with no patched release: the
+    # node-forge was published on 2026-10-02 with no patched release: the
     # vulnerable range ends at the latest version on npm. Reviewed that day.
     #
-    # braces is reached only through jest's micromatch. It expands the glob
-    # patterns in the test configuration, never anything from a user, and jest
-    # is a devDependency that ships nothing into the APK or AAB.
-    ("braces", "GHSA-vfj7-8cjw-p6xm"): (
-        "3.0.3",
-        "test-runner glob matching on repository patterns, not shipped, denial of service only",
-    ),
     # node-forge is pulled in by @expo/cli and by expo-updates' code-signing
     # helper, @expo/code-signing-certificates. Both run on a developer machine
     # or in EAS. The app's expo-updates runtime never imports it (its build/
@@ -62,6 +55,15 @@ ACCEPTED = {
     ("node-forge", "GHSA-86w9-cpqp-85rv"): (
         "1.4.0",
         "CLI-side update signing for disabled OTA updates; not in the app runtime",
+    ),
+    # zod 3.25.76 is @expo/cli's own copy (expo/node_modules/zod), which
+    # validates the CLI's configuration on a developer machine or in EAS. The
+    # app imports the root zod, which is 4.6.7 and patched; the advisory has no
+    # fixed 3.x release. Its out-of-memory case needs an attacker-sized array,
+    # and the CLI only ever parses the project's own files. Reviewed 2026-10-25.
+    ("zod", "GHSA-mrhx-c7xc-m3w5"): (
+        "3.25.76|4.6.7",
+        "Expo CLI's copy validates project config at build time; app zod is patched",
     ),
 }
 

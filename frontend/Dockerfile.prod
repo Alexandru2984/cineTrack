@@ -48,7 +48,13 @@ FROM nginx:1.31-alpine@sha256:7068961d45b07b2af510ac002e9daa63a1d3eba2111202d676
 # overflow in 1.8.13-r0 driven by a malicious X server, fixed in 1.8.14-r0. It
 # is here for the same image-filter module and is never used to talk to an X
 # server, but the daily sweep blocks main on it and the fix is in Alpine main.
-RUN apk add --no-cache --upgrade 'libexpat>=2.8.4-r0' 'libuuid>=2.42.3-r1' 'pcre2>=10.49-r0' 'tiff>=4.7.2-r0' 'libx11>=1.8.14-r0'
+#
+# `brotli-libs` on 2026-10-25: CVE-2026-111497 (HIGH), an out-of-bounds write
+# in the Brotli decoder of 1.2.0-r1, fixed in 1.2.1-r0. It arrives through the
+# base image's libcurl and through freetype for the image-filter module. nginx
+# loads neither, and the health check is busybox wget, so nothing here decodes
+# Brotli at all; the fix is in Alpine main and costs nothing to take.
+RUN apk add --no-cache --upgrade 'libexpat>=2.8.4-r0' 'libuuid>=2.42.3-r1' 'pcre2>=10.49-r0' 'tiff>=4.7.2-r0' 'libx11>=1.8.14-r0' 'brotli-libs>=1.2.1-r0'
 # Asserted after the upgrade, not before. These pins exist so a base image whose
 # contents drift breaks the build loudly instead of shipping different software
 # under the same digest; an assertion that ran first would describe the image we
