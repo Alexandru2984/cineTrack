@@ -257,29 +257,6 @@ export function useMarkSeasonWatched() {
  *  nothing, and this one is additive by definition. One hook per level, the
  *  same three levels the interface offers.
  */
-export function useRewatchEpisode() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async ({
-      tmdbId,
-      seasonNumber,
-      episodeNumber,
-    }: {
-      tmdbId: number;
-      seasonNumber: number;
-      episodeNumber: number;
-    }) => {
-      const res = await api.post(
-        `/history/tv/${tmdbId}/seasons/${seasonNumber}/episodes/${episodeNumber}/rewatch`,
-      );
-      return res.data as { times_watched: number };
-    },
-    onSuccess: (_data, variables) => {
-      invalidateEpisodeWatchState(qc, variables.tmdbId);
-    },
-  });
-}
-
 export function useRewatchSeason() {
   const qc = useQueryClient();
   return useMutation({

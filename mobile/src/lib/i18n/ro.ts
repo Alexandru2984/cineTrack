@@ -86,19 +86,14 @@ export const ro: Dictionary = {
     encryptedPreview: 'Mesaj criptat',
     lockedPreview: 'Blocat',
     undecryptable: 'Acest mesaj nu poate fi deschis pe acest dispozitiv',
-    encryptedLabel: 'Criptat cap-coadă',
     unplaceableKey:
       'Mesajul este semnat cu o cheie pe care nu o putem asocia acestui cont. Este ascuns până alegi să îl arăți; asta se întâmplă și legitim, după ce cineva își rotește cheile.',
     notFromSender:
       'Acest mesaj nu a fost semnat de acest cont. Este ascuns pentru că s-ar putea să nu fie de la el.',
     malformedMessage:
       'Acest mesaj nu corespunde cu ceea ce a semnat expeditorul, deci nu poate fi raportat. Din acest motiv este ascuns.',
-    notAuthenticated:
-      'Nu a putut fi verificat cu cheia actuală a acestui cont — poate a fost trimis înainte ca ea să fie schimbată.',
     privacyNoticeEncrypted:
       'Mesajele din această conversație sunt criptate cap-coadă. Văzute stochează textul cifrat și nu îl citește. Un mesaj pe care îl raportezi este dezvăluit moderatorilor de către tine, și doar acel mesaj.',
-    encryptionRequired:
-      'Conversația este criptată, iar acest dispozitiv nu are cheia ta. Restaureaz-o pentru a trimite mesaje.',
   },
   badges: {
     title: 'Insigne',
@@ -109,7 +104,6 @@ export const ro: Dictionary = {
     earnedForOne: 'Obținută pentru {title}',
     next: 'Urmează: {label}',
     progress: '{current} din {threshold}',
-    andMore: 'și încă {count}',
     'marathon-3': 'Trei într-o ședință',
     'marathon-5': 'Cinci într-o ședință',
     'marathon-10': 'Zece în două zile',
@@ -648,13 +642,10 @@ export const ro: Dictionary = {
     episodeCountOne: 'un episod',
     episodeCountMany: '{count} episoade',
     watchedOfTotal: '{watched} din {total} văzute',
-    seasonWatched: 'Sezon văzut',
     markSeasonWatched: 'Marchează sezonul ca văzut',
     rewatchSeason: 'Revezi sezonul',
     rewatchShow: 'Revezi serialul',
     rewatchMovie: 'Revezi',
-    seasonPasses_one: 'Sezon văzut o dată',
-    seasonPasses_other: 'Sezon văzut de {count} ori',
     loadingEpisodes: 'Se încarcă episoadele',
     episodesLoadError: 'Episoadele nu au putut fi încărcate',
     episodeWatchedAria: 'Episod văzut',

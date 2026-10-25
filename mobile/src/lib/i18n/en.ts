@@ -86,19 +86,14 @@ export const en = {
     encryptedPreview: 'Encrypted message',
     lockedPreview: 'Locked',
     undecryptable: 'This message cannot be opened on this device',
-    encryptedLabel: 'End-to-end encrypted',
     unplaceableKey:
       'This message is signed with a key we cannot place against this account. It is hidden until you choose to show it; that happens legitimately after someone rotates their keys.',
     notFromSender:
       'This message was not signed by this account. It is hidden because it may not be from them.',
     malformedMessage:
       'This message does not match what its sender committed to, so it cannot be reported. It is hidden for that reason.',
-    notAuthenticated:
-      'Could not be checked against this account’s current key — it may have been sent before they changed it.',
     privacyNoticeEncrypted:
       'Messages in this conversation are end-to-end encrypted. Văzute stores the ciphertext and does not read it. A message you report is revealed to moderators by you, and only that message.',
-    encryptionRequired:
-      'This conversation is encrypted and this device does not hold your key. Restore it to send messages.',
   },
   badges: {
     title: 'Badges',
@@ -109,7 +104,6 @@ export const en = {
     earnedForOne: 'Earned for {title}',
     next: 'Next: {label}',
     progress: '{current} of {threshold}',
-    andMore: 'and {count} more',
     'marathon-3': 'Three in a sitting',
     'marathon-5': 'Five in a sitting',
     'marathon-10': 'Ten in two days',
@@ -643,13 +637,10 @@ export const en = {
     episodeCountOne: '1 episode',
     episodeCountMany: '{count} episodes',
     watchedOfTotal: '{watched} of {total} watched',
-    seasonWatched: 'Season watched',
     markSeasonWatched: 'Mark season watched',
     rewatchSeason: 'Watch season again',
     rewatchShow: 'Watch series again',
     rewatchMovie: 'Watch again',
-    seasonPasses_one: 'Season seen once',
-    seasonPasses_other: 'Season seen {count} times',
     loadingEpisodes: 'Loading episodes',
     episodesLoadError: 'Episodes could not be loaded',
     episodeWatchedAria: 'Episode watched',
