@@ -171,6 +171,7 @@ scripts/tests/container_scan_exceptions_test.sh
 scripts/tests/deploy_drift_test.sh
 scripts/tests/auto_deploy_test.sh
 scripts/tests/monitoring_watchdog_test.sh
+scripts/tests/ci_playwright_install_test.sh
 scripts/tests/crypto_core_parity_test.sh
 scripts/tests/client_type_parity_test.py
 scripts/tests/mobile_accessibility_test.py
