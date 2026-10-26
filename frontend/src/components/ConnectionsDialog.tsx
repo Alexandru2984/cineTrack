@@ -1,9 +1,10 @@
 import { Loader2, UserRound, UsersRound, X } from 'lucide-react';
-import { useEffect, useId, useRef } from 'react';
+import { useId, useRef } from 'react';
 import { Link } from 'react-router';
 
 import { useUserConnections, type UserConnectionKind } from '@/hooks/useSocial';
 import { useT } from '@/hooks/useT';
+import { useModalDialog } from '@/hooks/useModalDialog';
 import { getApiErrorMessage } from '@/lib/api';
 
 export function ConnectionsDialog({
@@ -18,58 +19,10 @@ export function ConnectionsDialog({
   const t = useT();
   const titleId = useId();
   const dialogRef = useRef<HTMLElement>(null);
-  const closeRef = useRef(onClose);
   const connections = useUserConnections(username, kind);
   const users = connections.data?.pages.flat() ?? [];
 
-  useEffect(() => {
-    closeRef.current = onClose;
-  }, [onClose]);
-
-  useEffect(() => {
-    const previousOverflow = document.body.style.overflow;
-    const previouslyFocused =
-      document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    document.body.style.overflow = 'hidden';
-    const focusableSelector =
-      'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])';
-    const focusableElements = () =>
-      Array.from(dialogRef.current?.querySelectorAll<HTMLElement>(focusableSelector) ?? []);
-    focusableElements()[0]?.focus();
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        closeRef.current();
-        return;
-      }
-      if (event.key !== 'Tab') return;
-
-      const elements = focusableElements();
-      if (elements.length === 0) {
-        event.preventDefault();
-        dialogRef.current?.focus();
-        return;
-      }
-      const first = elements[0];
-      const last = elements[elements.length - 1];
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      } else if (!dialogRef.current?.contains(document.activeElement)) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-    document.addEventListener('keydown', handleKeyDown);
-    return () => {
-      document.body.style.overflow = previousOverflow;
-      document.removeEventListener('keydown', handleKeyDown);
-      previouslyFocused?.focus();
-    };
-  }, []);
+  useModalDialog(dialogRef, onClose);
 
   const title = t(
     kind === 'followers' ? 'profile.followersTitle' : 'profile.followingTitle',
