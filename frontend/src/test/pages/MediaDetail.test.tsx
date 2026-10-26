@@ -13,7 +13,6 @@ const mocks = vi.hoisted(() => ({
   unmarkEpisodeWatched: vi.fn(),
   markSeasonWatched: vi.fn(),
   markEpisodesWatchedThrough: vi.fn(),
-  rewatchEpisode: vi.fn(),
   rewatchSeason: vi.fn(),
   rewatchShow: vi.fn(),
   rewatchMovie: vi.fn(),
@@ -81,7 +80,6 @@ vi.mock('@/hooks/useTracking', () => ({
   }),
   // Rewatching is offered at three levels; the page reads all of them even
   // when the fixture is not finished, so the mock has to carry them.
-  useRewatchEpisode: () => ({ mutate: mocks.rewatchEpisode, isPending: false, error: null }),
   useRewatchSeason: () => ({ mutate: mocks.rewatchSeason, isPending: false, error: null }),
   useRewatchShow: () => ({ mutate: mocks.rewatchShow, isPending: false, error: null }),
   useRewatchMovie: () => ({ mutate: mocks.rewatchMovie, isPending: false, error: null }),

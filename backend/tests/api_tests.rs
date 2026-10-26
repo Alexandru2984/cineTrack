@@ -10208,7 +10208,8 @@ async fn test_media_rejects_invalid_upstream_parameters() {
     for uri in [
         "/api/media/-1?type=movie",
         "/api/media/1?type=person",
-        "/api/media/1/seasons/501/episodes",
+        "/api/media/1/seasons/10000/episodes",
+        "/api/media/1/seasons/-1/episodes",
     ] {
         let req = actix_test::TestRequest::get()
             .uri(uri)
@@ -13526,7 +13527,14 @@ async fn test_rate_limited_wiring_resolves_every_route_class() {
     }
 
     // The genre and popularity lists share the language scopes.
-    for path in ["/ro/filme", "/ro/seriale", "/en/movies", "/en/series"] {
+    for path in [
+        "/ro/filme",
+        "/ro/seriale",
+        "/en/movies",
+        "/en/series",
+        "/ro/seriale/episoade-noi",
+        "/en/series/new-episodes",
+    ] {
         let req = actix_test::TestRequest::get()
             .uri(path)
             .peer_addr(peer_addr())
@@ -13785,6 +13793,297 @@ async fn genre_and_popularity_lists_link_the_titles_that_have_pages() {
     let (status, body) = get!("/en/movie/920002-drama-2");
     assert_eq!(status, 200);
     assert!(body.contains(r#"<li><a href="/en/movies/drama">Drama</a></li>"#));
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn the_new_episodes_page_lists_the_week_day_by_day() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+
+    // Today in Romania, which is what the page counts from; the test database
+    // runs in UTC, and the two dates differ for two hours every night.
+    let today = sqlx::query_scalar::<_, chrono::NaiveDate>(
+        "SELECT (NOW() AT TIME ZONE 'Europe/Bucharest')::date",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    // tmdb_id, title, genres, popularity (NULL: no page)
+    let shows: [(i32, &str, &str, Option<f64>); 4] = [
+        (
+            940001,
+            "Weekly Drama",
+            r#"[{"id": 18, "name": "Drama"}]"#,
+            Some(50.0),
+        ),
+        (
+            940002,
+            "Binge Drop",
+            r#"[{"id": 35, "name": "Comedy"}]"#,
+            Some(90.0),
+        ),
+        (
+            940003,
+            "Late Talk",
+            r#"[{"id": 10767, "name": "Talk"}]"#,
+            Some(99.0),
+        ),
+        (940004, "No Page Show", "[]", None),
+    ];
+    for (tmdb_id, title, genres, popularity) in shows {
+        sqlx::query(
+            r#"INSERT INTO media (tmdb_id, media_type, title, genres, metadata_level, popularity, status)
+            VALUES ($1, 'tv', $2, $3::jsonb, 'detail', $4, 'Returning Series')"#,
+        )
+        .bind(tmdb_id)
+        .bind(title)
+        .bind(genres)
+        .bind(popularity)
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO seasons (media_id, season_number, name) \
+             SELECT id, 1, 'Season 1' FROM media WHERE tmdb_id = $1",
+        )
+        .bind(tmdb_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+    sqlx::query(
+        "INSERT INTO media_localizations (media_id, language_code, title) \
+         SELECT id, 'ro', 'Dramă săptămânală' FROM media WHERE tmdb_id = 940001",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    // tmdb_id, episode, days from today, name
+    let episodes: [(i32, i32, i64, &str); 9] = [
+        (940001, 3, 0, "Today's Episode"),
+        (940001, 4, 7, "Next Week"),
+        (940001, 2, -1, "Yesterday"),
+        (940002, 1, 2, "One"),
+        (940002, 2, 2, "Two"),
+        (940002, 3, 2, "Three"),
+        (940003, 101, 0, "Talk Tonight"),
+        (940004, 1, 0, "Hidden"),
+        (940001, 5, 6, "Last Day"),
+    ];
+    for (tmdb_id, number, offset, name) in episodes {
+        sqlx::query(
+            "INSERT INTO episodes (season_id, episode_number, name, air_date) \
+             SELECT s.id, $2, $3, $4 FROM seasons s JOIN media m ON m.id = s.media_id \
+             WHERE m.tmdb_id = $1",
+        )
+        .bind(tmdb_id)
+        .bind(number)
+        .bind(name)
+        .bind(today + chrono::Duration::days(offset))
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+
+    let app = actix_test::init_service(create_app_with_config(pool.clone(), test_config())).await;
+    macro_rules! get {
+        ($path:expr) => {{
+            let response = actix_test::call_service(
+                &app,
+                actix_test::TestRequest::get()
+                    .uri($path)
+                    .peer_addr(peer_addr())
+                    .to_request(),
+            )
+            .await;
+            let status = response.status().as_u16();
+            let body = String::from_utf8(actix_test::read_body(response).await.to_vec()).unwrap();
+            (status, body)
+        }};
+    }
+
+    let (status, body) = get!("/ro/seriale/episoade-noi");
+    assert_eq!(status, 200);
+    assert!(body.contains("<h1>Episoade noi săptămâna aceasta</h1>"));
+    assert!(body.contains(&format!(r#"<time datetime="{today}">Azi · "#)));
+    assert!(body.contains(r#"<a href="/ro/serial/940001-drama-saptamanala">"#));
+    assert!(body.contains("S01E03 · Today&#39;s Episode"));
+    // Released together, they are one line.
+    assert!(body.contains("S01E01–E03 · 3 episoade"));
+    assert!(body.contains("S01E05 · Last Day"), "the seventh day is in");
+    for absent in ["Next Week", "Yesterday", "Talk Tonight", "Hidden", "940004"] {
+        assert!(!body.contains(absent), "{absent}");
+    }
+    assert!(body.contains(r#"content="index, follow, max-image-preview:large""#));
+
+    let (status, body) = get!("/en/series/new-episodes");
+    assert_eq!(status, 200);
+    assert!(body.contains(r#"<a href="/en/tv/940001-weekly-drama">"#));
+    assert!(body.contains("S01E01–E03 · 3 episodes"));
+
+    // It sits beside the genre lists without being read as a genre, and the
+    // genre lists still answer.
+    assert_eq!(
+        get!("/ro/seriale/drama").0,
+        404,
+        "too few dramas for a list"
+    );
+    let (_, lists) = get!("/sitemaps/lists.xml");
+    assert!(lists.contains("<loc>https://vazute.micutu.com/ro/seriale/episoade-noi</loc>"));
+    assert!(lists.contains("<loc>https://vazute.micutu.com/en/series/new-episodes</loc>"));
+
+    // Every public page links to it.
+    let (_, page) = get!("/ro/serial/940001-drama-saptamanala");
+    assert!(page.contains(r#"<a href="/ro/seriale/episoade-noi">Episoade noi</a>"#));
+
+    // A week with nothing in it is still a page, but not one to index.
+    sqlx::query("DELETE FROM episodes")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (status, body) = get!("/en/series/new-episodes");
+    assert_eq!(status, 200);
+    assert!(body.contains(r#"<meta name="robots" content="noindex, follow" />"#));
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn release_schedules_also_refresh_airing_series_with_a_page() {
+    use cinetrack::services::release_schedule::{
+        sync_tracked_release_schedules, ReleaseScheduleOptions,
+    };
+    use cinetrack::services::tmdb::TmdbService;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let detail = |id: i32| {
+        format!(
+            r#"{{"id": {id}, "name": "Show {id}", "original_name": "Show {id}",
+                "status": "Returning Series", "genres": [], "episode_run_time": [30],
+                "vote_average": 7.0,
+                "seasons": [{{"id": {id}1, "season_number": 1, "name": "Season 1",
+                              "episode_count": 1, "air_date": "2026-01-01"}}],
+                "next_episode_to_air": {{"season_number": 1}},
+                "last_episode_to_air": {{"season_number": 1}}}}"#
+        )
+    };
+    let season = r#"{"episodes": [{"episode_number": 1, "name": "E1", "air_date": "2026-01-01"}]}"#;
+    // Tracked first even though it is the least popular, then the airing
+    // series with a page by popularity. Nothing else may be asked for: the
+    // server below accepts exactly these requests, in this order.
+    let responses = vec![
+        ("/tv/950001?".to_string(), detail(950001)),
+        ("/tv/950001/season/1?".to_string(), season.to_string()),
+        ("/tv/950003?".to_string(), detail(950003)),
+        ("/tv/950003/season/1?".to_string(), season.to_string()),
+        ("/tv/950002?".to_string(), detail(950002)),
+        ("/tv/950002/season/1?".to_string(), season.to_string()),
+    ];
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let upstream = actix_web::rt::spawn(async move {
+        for (expected_path, body) in responses {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = vec![0_u8; 4096];
+            let read = stream.read(&mut request).await.unwrap();
+            let line = String::from_utf8_lossy(&request[..read]).to_string();
+            assert!(
+                line.starts_with(&format!("GET {expected_path}")),
+                "expected {expected_path}, got {}",
+                line.lines().next().unwrap_or_default()
+            );
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            stream.write_all(response.as_bytes()).await.unwrap();
+        }
+    });
+
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    // tmdb_id, status, popularity (NULL: no page), tracked
+    let seeds: [(i32, &str, Option<f64>, bool); 6] = [
+        (950001, "Returning Series", Some(1.0), true),
+        (950002, "Returning Series", Some(10.0), false),
+        (950003, "In Production", Some(20.0), false),
+        (950004, "Ended", Some(99.0), false),
+        (950005, "Returning Series", None, false),
+        (950006, "Returning Series", Some(50.0), false),
+    ];
+    let user_id = sqlx::query_scalar::<_, Uuid>(
+        "INSERT INTO users (username, email) VALUES ('airing', 'airing@mailbox.dev') RETURNING id",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    for (tmdb_id, status, popularity, tracked) in seeds {
+        let media_id = sqlx::query_scalar::<_, Uuid>(
+            r#"INSERT INTO media (tmdb_id, media_type, title, status, metadata_level, popularity)
+            VALUES ($1, 'tv', 'Seed', $2, 'detail', $3) RETURNING id"#,
+        )
+        .bind(tmdb_id)
+        .bind(status)
+        .bind(popularity)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        if tracked {
+            sqlx::query(
+                "INSERT INTO user_media (user_id, media_id, status) VALUES ($1, $2, 'watching')",
+            )
+            .bind(user_id)
+            .bind(media_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+    }
+    // Refreshed an hour ago: not due yet, however popular.
+    sqlx::query(
+        r#"INSERT INTO release_schedule_sync_state
+            (media_id, outcome, consecutive_failures, last_attempt_at, next_attempt_at, last_success_at)
+        SELECT id, 'success', 0, NOW() - INTERVAL '1 hour', NOW() + INTERVAL '23 hours', NOW() - INTERVAL '1 hour'
+        FROM media WHERE tmdb_id = 950006"#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let mut config = test_config();
+    config.tmdb_base_url = format!("http://{address}");
+    let tmdb = TmdbService::new(&config);
+    let summary = sync_tracked_release_schedules(
+        &pool,
+        &tmdb,
+        ReleaseScheduleOptions {
+            budget: 10,
+            request_delay: std::time::Duration::ZERO,
+        },
+    )
+    .await
+    .unwrap();
+    upstream.await.unwrap();
+    assert_eq!(summary.selected, 3);
+    assert_eq!(summary.succeeded, 3);
+
+    // Tracked keeps its six-hour cadence; the untracked come back in a day.
+    let cadence = sqlx::query_as::<_, (i32, f64)>(
+        r#"SELECT m.tmdb_id, EXTRACT(EPOCH FROM (s.next_attempt_at - s.last_attempt_at))::float8 / 3600
+        FROM release_schedule_sync_state s JOIN media m ON m.id = s.media_id
+        WHERE m.tmdb_id IN (950001, 950002, 950003)
+        ORDER BY m.tmdb_id"#,
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    let hours = cadence
+        .iter()
+        .map(|(_, h)| h.round() as i64)
+        .collect::<Vec<_>>();
+    assert_eq!(hours, vec![6, 24, 24]);
 }
 
 #[actix_web::test]

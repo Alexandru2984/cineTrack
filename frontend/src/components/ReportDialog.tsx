@@ -1,8 +1,9 @@
 import { CheckCircle2, Flag, Loader2, X } from 'lucide-react';
-import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
+import { useId, useRef, useState, type FormEvent } from 'react';
 
 import { useReportContent } from '@/hooks/useCommunitySafety';
 import { useT } from '@/hooks/useT';
+import { useModalDialog } from '@/hooks/useModalDialog';
 import { getApiErrorMessage } from '@/lib/api';
 import {
   REPORT_REASONS,
@@ -33,58 +34,8 @@ export function ReportDialog({
   const [details, setDetails] = useState('');
   const report = useReportContent();
   const dialogRef = useRef<HTMLElement>(null);
-  const closeRef = useRef(onClose);
-  const pendingRef = useRef(report.isPending);
 
-  useEffect(() => {
-    closeRef.current = onClose;
-    pendingRef.current = report.isPending;
-  }, [onClose, report.isPending]);
-
-  useEffect(() => {
-    const previousOverflow = document.body.style.overflow;
-    const previouslyFocused =
-      document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    document.body.style.overflow = 'hidden';
-    const focusableSelector =
-      'a[href], button:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
-    const focusableElements = () =>
-      Array.from(dialogRef.current?.querySelectorAll<HTMLElement>(focusableSelector) ?? []);
-    focusableElements()[0]?.focus();
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && !pendingRef.current) {
-        closeRef.current();
-        return;
-      }
-      if (event.key !== 'Tab') return;
-
-      const elements = focusableElements();
-      if (elements.length === 0) {
-        event.preventDefault();
-        dialogRef.current?.focus();
-        return;
-      }
-      const first = elements[0];
-      const last = elements[elements.length - 1];
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      } else if (!dialogRef.current?.contains(document.activeElement)) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-    document.addEventListener('keydown', handleKeyDown);
-    return () => {
-      document.body.style.overflow = previousOverflow;
-      document.removeEventListener('keydown', handleKeyDown);
-      previouslyFocused?.focus();
-    };
-  }, []);
+  useModalDialog(dialogRef, onClose, !report.isPending);
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();

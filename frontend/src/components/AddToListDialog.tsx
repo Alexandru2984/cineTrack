@@ -1,10 +1,11 @@
 import { ListPlus, Loader2, Lock, Plus, X } from 'lucide-react';
-import { useEffect, useId } from 'react';
+import { useId, useRef } from 'react';
 import { Link } from 'react-router';
 
 import { useAddListItem, useMyLists } from '@/hooks/useLists';
 import { getApiErrorMessage } from '@/lib/api';
 import { useT } from '@/hooks/useT';
+import { useModalDialog } from '@/hooks/useModalDialog';
 
 export function AddToListDialog({
   mediaId,
@@ -22,18 +23,8 @@ export function AddToListDialog({
   const lists = useMyLists();
   const addItem = useAddListItem();
 
-  useEffect(() => {
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && !addItem.isPending) onClose();
-    };
-    document.addEventListener('keydown', closeOnEscape);
-    return () => {
-      document.body.style.overflow = previousOverflow;
-      document.removeEventListener('keydown', closeOnEscape);
-    };
-  }, [addItem.isPending, onClose]);
+  const dialogRef = useRef<HTMLElement>(null);
+  useModalDialog(dialogRef, onClose, !addItem.isPending);
 
   return (
     <div
@@ -44,7 +35,9 @@ export function AddToListDialog({
       }}
     >
       <section
+        ref={dialogRef}
         role="dialog"
+        tabIndex={-1}
         aria-modal="true"
         aria-labelledby={titleId}
         className="flex max-h-[calc(100dvh-env(safe-area-inset-top))] w-full flex-col rounded-t-lg border border-[hsl(var(--border))] bg-[hsl(var(--background))] shadow-2xl sm:max-w-lg sm:rounded-lg"

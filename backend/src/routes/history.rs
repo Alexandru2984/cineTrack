@@ -25,14 +25,6 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
                 web::get().to(list_watched_episodes),
             )
             .route("/tv/{tmdb_id}/progress", web::get().to(show_watch_progress))
-            // How many times each episode of a season has been seen. Separate
-            // from the endpoint above rather than added to it: that one returns
-            // a list of episode numbers and is called by app versions already
-            // installed, which would break on a changed shape.
-            .route(
-                "/tv/{tmdb_id}/seasons/{season_number}/episodes/counts",
-                web::get().to(list_episode_watch_counts),
-            )
             .route(
                 "/tv/{tmdb_id}/seasons/{season_number}/watched",
                 web::post().to(mark_season_watched),
@@ -75,7 +67,7 @@ fn validate_episode_path(
     season_number: i32,
     episode_number: Option<i32>,
 ) -> Result<(), AppError> {
-    if tmdb_id <= 0 || !(0..=500).contains(&season_number) {
+    if tmdb_id <= 0 || !(0..=crate::services::tmdb::MAX_SEASON_NUMBER).contains(&season_number) {
         return Err(AppError::BadRequest(
             "Invalid TMDB ID or season number".to_string(),
         ));
@@ -256,50 +248,6 @@ async fn create_history(
     crate::services::badges::recompute_quietly(pool.get_ref(), user_id, Some(data.media_id)).await;
 
     Ok(HttpResponse::Created().json(history))
-}
-
-/// How many times each episode of a season has been watched.
-///
-/// Only episodes with at least one viewing appear; the interface treats a
-/// missing entry as zero, which is what it already does with the watched set.
-async fn list_episode_watch_counts(
-    pool: web::Data<PgPool>,
-    req: HttpRequest,
-    path: web::Path<(i32, i32)>,
-) -> Result<HttpResponse, AppError> {
-    let user_id = require_auth(&req).await?;
-    let (tmdb_id, season_number) = path.into_inner();
-    validate_episode_path(tmdb_id, season_number, None)?;
-
-    let counts = sqlx::query_as::<_, (i32, i64)>(
-        r#"SELECT e.episode_number, COUNT(*)::bigint
-        FROM watch_history wh
-        JOIN episodes e ON e.id = wh.episode_id
-        JOIN seasons s ON s.id = e.season_id
-        JOIN media m ON m.id = s.media_id
-        WHERE wh.user_id = $1
-          AND m.tmdb_id = $2
-          AND m.media_type = 'tv'
-          AND s.season_number = $3
-        GROUP BY e.episode_number
-        ORDER BY e.episode_number"#,
-    )
-    .bind(user_id)
-    .bind(tmdb_id)
-    .bind(season_number)
-    .fetch_all(pool.get_ref())
-    .await?;
-
-    let response: Vec<_> = counts
-        .into_iter()
-        .map(|(episode_number, times_watched)| {
-            serde_json::json!({
-                "episode_number": episode_number,
-                "times_watched": times_watched,
-            })
-        })
-        .collect();
-    Ok(HttpResponse::Ok().json(response))
 }
 
 async fn list_watched_episodes(
@@ -1153,4 +1101,17 @@ async fn delete_history(
     crate::services::badges::recompute_quietly(pool.get_ref(), user_id, Some(media_id)).await;
 
     Ok(HttpResponse::Ok().json(serde_json::json!({"message": "Deleted"})))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_season_numbered_by_year_is_accepted() {
+        assert!(validate_episode_path(1905, 2026, Some(40)).is_ok());
+        assert!(validate_episode_path(1905, 0, None).is_ok());
+        assert!(validate_episode_path(1905, -1, None).is_err());
+        assert!(validate_episode_path(1905, 10_000, None).is_err());
+    }
 }

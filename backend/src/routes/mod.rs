@@ -14,6 +14,7 @@ pub mod lists;
 pub mod media;
 pub mod messages;
 pub mod moderation;
+pub mod new_episodes;
 pub mod notifications;
 pub mod push;
 pub mod reports;
@@ -119,4 +120,40 @@ pub fn configure_with_rate_limits(
             .configure(stats::configure)
             .configure(import::configure),
     );
+}
+
+#[cfg(test)]
+mod tests {
+    /// The module names configured inside the `/api` scope of `function`, in
+    /// order, read from this file's own source.
+    fn api_modules(function: &str) -> Vec<String> {
+        let source = include_str!("mod.rs");
+        let start = source
+            .find(&format!("pub fn {function}("))
+            .unwrap_or_else(|| panic!("{function} not found"));
+        let body = &source[start..];
+        let body = &body[..body.find("\n}\n").expect("function end")];
+        let scope = &body[body.find("web::scope(\"/api\")").expect("/api scope")..];
+        scope
+            .split(".configure(")
+            .skip(1)
+            .map(|call| {
+                // `users::configure` or `|cfg| auth::configure_rate_limited(...)`
+                let call = call.trim_start_matches("|cfg| ");
+                call[..call.find("::").expect("module path")].to_string()
+            })
+            .collect()
+    }
+
+    /// Integration tests build the app from `configure`; production builds it
+    /// from `configure_with_rate_limits`. A module added to one and not the
+    /// other passes every test and answers 404 in production, which is how the
+    /// unfurl routes first shipped. The two lists must be the same.
+    #[test]
+    fn tests_and_production_mount_the_same_api_modules() {
+        let tested = api_modules("configure");
+        let served = api_modules("configure_with_rate_limits");
+        assert!(tested.len() > 15, "parsed too few modules: {tested:?}");
+        assert_eq!(tested, served);
+    }
 }
