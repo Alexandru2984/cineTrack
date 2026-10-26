@@ -1,4 +1,4 @@
-use actix_web::{dev::ServiceRequest, web, HttpMessage, HttpRequest};
+use actix_web::{web, HttpRequest};
 use uuid::Uuid;
 
 use crate::config::Config;
@@ -23,35 +23,6 @@ fn reject_revoked(claims: jwt::Claims) -> Result<Uuid, AppError> {
         return Err(AppError::Unauthorized("Not authenticated".to_string()));
     }
     Ok(claims.sub)
-}
-
-pub fn extract_user_id(req: &HttpRequest) -> Result<Uuid, AppError> {
-    req.extensions()
-        .get::<Uuid>()
-        .copied()
-        .ok_or_else(|| AppError::Unauthorized("Not authenticated".to_string()))
-}
-
-pub fn extract_optional_user_id(req: &HttpRequest) -> Option<Uuid> {
-    req.extensions().get::<Uuid>().copied()
-}
-
-pub async fn validate_token_from_request(
-    req: &ServiceRequest,
-    config: &Config,
-) -> Result<Uuid, AppError> {
-    let auth_header = req
-        .headers()
-        .get("Authorization")
-        .and_then(|v| v.to_str().ok())
-        .ok_or_else(|| AppError::Unauthorized("Missing Authorization header".to_string()))?;
-
-    let token = auth_header
-        .strip_prefix("Bearer ")
-        .ok_or_else(|| AppError::Unauthorized("Invalid Authorization format".to_string()))?;
-
-    let claims = jwt::validate_token(token, &config.jwt_secret)?;
-    reject_revoked(claims)
 }
 
 /// Middleware extractor: call this at the start of protected route handlers
@@ -246,79 +217,5 @@ mod tests {
         let kept = request_with_auth(Some(&format!("Bearer {kept_token}")));
         assert!(require_auth(&revoked).await.is_err());
         assert_eq!(require_auth(&kept).await.unwrap(), user_id);
-    }
-
-    #[actix_web::test]
-    async fn validate_token_from_request_also_rejects_a_revoked_session() {
-        // Both entry points must apply the check; a gap in either is a bypass.
-        let session_id = Uuid::new_v4();
-        let token = token_for_session(Uuid::new_v4(), session_id);
-        revocation::revoke_session_in_memory(session_id);
-
-        let req = TestRequest::default()
-            .insert_header(("Authorization", format!("Bearer {token}")))
-            .to_srv_request();
-        assert!(validate_token_from_request(&req, &test_config())
-            .await
-            .is_err());
-    }
-
-    // ── validate_token_from_request ─────────────────────────────
-
-    #[actix_web::test]
-    async fn validate_token_from_request_accepts_a_valid_token() {
-        let user_id = Uuid::new_v4();
-        let req = TestRequest::default()
-            .insert_header((
-                "Authorization",
-                format!("Bearer {}", token_for(user_id, 15)),
-            ))
-            .to_srv_request();
-        assert_eq!(
-            validate_token_from_request(&req, &test_config())
-                .await
-                .unwrap(),
-            user_id
-        );
-    }
-
-    #[actix_web::test]
-    async fn validate_token_from_request_rejects_expired_and_missing() {
-        let config = test_config();
-
-        let expired = TestRequest::default()
-            .insert_header((
-                "Authorization",
-                format!("Bearer {}", token_for(Uuid::new_v4(), -60)),
-            ))
-            .to_srv_request();
-        assert!(validate_token_from_request(&expired, &config)
-            .await
-            .is_err());
-
-        let missing = TestRequest::default().to_srv_request();
-        assert!(validate_token_from_request(&missing, &config)
-            .await
-            .is_err());
-    }
-
-    // ── extract_user_id / extract_optional_user_id ──────────────
-
-    #[actix_web::test]
-    async fn extract_user_id_reads_the_request_extension() {
-        let user_id = Uuid::new_v4();
-        let req = TestRequest::default().to_http_request();
-        req.extensions_mut().insert(user_id);
-
-        assert_eq!(extract_user_id(&req).unwrap(), user_id);
-        assert_eq!(extract_optional_user_id(&req), Some(user_id));
-    }
-
-    #[actix_web::test]
-    async fn extract_user_id_without_an_extension_is_unauthenticated() {
-        let req = TestRequest::default().to_http_request();
-
-        assert!(extract_user_id(&req).is_err());
-        assert_eq!(extract_optional_user_id(&req), None);
     }
 }

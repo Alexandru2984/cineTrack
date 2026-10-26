@@ -291,12 +291,8 @@ export const en = {
       'This message was not signed by this account. It is hidden because it may not be from them.',
     malformedMessage:
       'This message does not match what its sender committed to, so it cannot be reported. It is hidden for that reason.',
-    notAuthenticated:
-      'Could not be checked against this account’s current key — it may have been sent before they changed it.',
     privacyNoticeEncrypted:
       'Messages in this conversation are end-to-end encrypted. Văzute stores the ciphertext and does not read it. A message you report is revealed to moderators by you, and only that message.',
-    encryptionRequired:
-      'This conversation is encrypted and this device does not hold your key. Restore it to send messages.',
   },
   encryption: {
     setupTitle: 'Turn on end-to-end encryption',
@@ -364,7 +360,6 @@ export const en = {
     earnedForOne: 'Earned for {title}',
     next: 'Next: {label}',
     progress: '{current} of {threshold}',
-    andMore: 'and {count} more',
     'marathon-3': 'Three in a sitting',
     'marathon-5': 'Five in a sitting',
     'marathon-10': 'Ten in two days',
@@ -406,7 +401,6 @@ export const en = {
   },
   stats: {
     genreOther: 'Other genres',
-    genreTitles: '{count} titles',
     genreSlice: '{genre}: {count} titles ({percent}%)',
     monthlyHours: '{hours} h in {month}',
     heatmapDay: '{count} episodes on {date}',
@@ -464,13 +458,8 @@ export const en = {
     rewatchSeason: 'Watch season again',
     rewatchShow: 'Watch series again',
     rewatchMovie: 'Watch again',
-    rewatchEpisode: 'Watch episode again',
-    timesWatched: 'Seen {count}×',
-    seenTimes_one: 'You have seen this once',
-    seenTimes_other: 'You have seen this {count} times',
     seasonPasses_one: 'Season seen once',
     seasonPasses_other: 'Season seen {count} times',
-    seasonWatched: 'Season watched',
     markSeasonWatched: 'Mark season watched',
     episodeN: 'Episode {number}',
     watched: 'Watched',

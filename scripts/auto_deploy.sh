@@ -229,6 +229,15 @@ sync_monitoring() {
     ok=0
   fi
 
+  # Unchanged files are "in sync" only with a Prometheus that is running. A
+  # stopped container still reports its mounts, so the check above passed for
+  # the four and a half days after 2026-10-20 that this one was down.
+  if (( ok == 1 )) && [[ "$(docker inspect --format '{{.State.Running}}' \
+      "$PROMETHEUS_CONTAINER" 2>/dev/null || true)" != true ]]; then
+    say "$PROMETHEUS_CONTAINER is not running; no rules are being evaluated"
+    ok=0
+  fi
+
   local tmp
   tmp="$(mktemp "${MONITORING_METRICS_FILE}.XXXXXX")"
   {
@@ -367,7 +376,31 @@ if [[ "$total_checks" != "$returned_checks" ]]; then
   exit 0
 fi
 
-checks="$(jq -r '.check_runs[] | [.name, .status, (.conclusion // "none")] | @tsv' <<<"$checks_json")"
+# Dependabot's updater runs on the default branch's head, and its job shows up
+# among that commit's check runs. It verifies nothing about the revision — it
+# is Dependabot trying to open a pull request — yet when it cannot (a security
+# fix with no compatible path, say) it fails, and that failure held a green
+# release back for eight hours on 2026-10-25. Its runs are told apart by the
+# workflow path GitHub gives them, not by the check name, which is free text.
+if ! runs_json="$(github_api "actions/runs?head_sha=$target&per_page=100")"; then
+  say "cannot read workflow runs from GitHub for ${target:0:8} (rate limit or network)"
+  report blocked_api "$target"
+  exit 0
+fi
+total_runs="$(jq -r '.total_count // 0' <<<"$runs_json")"
+returned_runs="$(jq -r '.workflow_runs | length' <<<"$runs_json")"
+if [[ "$total_runs" != "$returned_runs" ]]; then
+  say "GitHub returned $returned_runs of $total_runs workflow runs for ${target:0:8}; not deciding on a partial answer"
+  report blocked_api "$target"
+  exit 0
+fi
+updater_suites="$(jq -c '[.workflow_runs[]
+  | select(.event == "dynamic" and ((.path // "") | startswith("dynamic/dependabot/")))
+  | .check_suite_id]' <<<"$runs_json")"
+
+checks="$(jq -r --argjson skip "$updater_suites" '.check_runs[]
+  | select(.check_suite.id as $suite | ($skip | index($suite)) == null)
+  | [.name, .status, (.conclusion // "none")] | @tsv' <<<"$checks_json")"
 
 if [[ -z "$checks" ]]; then
   # No check runs at all. Either CI has not started yet or this commit is not

@@ -350,6 +350,7 @@ văzute/
 │   ├── sync_tmdb_catalog.py # Daily TMDB ID/title inventory -> PostgreSQL + R2
 │   ├── hydrate_tmdb_catalog.sh # Bounded popular-title detail hydration
 │   ├── indexnow_submit.py  # New public pages -> IndexNow (Bing, Yandex, Seznam)
+│   ├── monitoring_watchdog.sh # Restarts and reports a dead Prometheus, outside it
 │   └── sync_release_schedules.sh # Tracked-title episodes/releases -> PostgreSQL
 ├── nginx/                  # Internal reverse proxy config
 ├── docker-compose.yml      # Development stack
@@ -456,6 +457,14 @@ The public title pages (`/ro/film/…`, `/en/movie/…`) are listed in the sitem
 
 ```cron
 0 13 * * * /path/to/cineTrack/scripts/indexnow_submit.py >> /var/log/vazute-indexnow.log 2>&1
+```
+
+Every alert above depends on Prometheus running, which no Prometheus rule can check. The watchdog runs from cron instead:
+- It starts a monitoring container that went down with the host and was not brought back.
+- It mails `CineTrackMonitoringDown` straight through Alertmanager when Prometheus is down, unhealthy, has no rules loaded, or has no Alertmanager.
+
+```cron
+*/5 * * * * /path/to/cineTrack/scripts/monitoring_watchdog.sh >> /var/log/vazute-monitoring-watchdog.log 2>&1
 ```
 
 ## License

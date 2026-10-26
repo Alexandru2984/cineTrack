@@ -208,29 +208,14 @@ impl StorageService {
     /// does not leave an image uploaded last year.
     pub async fn delete_avatar_variants(&self, user_id: uuid::Uuid) -> anyhow::Result<()> {
         let versioned = self.delete_prefix(&format!("avatars/{user_id}/")).await;
-        let legacy = self.delete_avatar_variants_except(user_id, None).await;
+        let legacy = self.delete_legacy_avatars(user_id).await;
         versioned.and(legacy)
     }
 
-    pub async fn delete_other_avatar_variants(
-        &self,
-        user_id: uuid::Uuid,
-        retained_extension: &str,
-    ) -> anyhow::Result<()> {
-        self.delete_avatar_variants_except(user_id, Some(retained_extension))
-            .await
-    }
-
-    async fn delete_avatar_variants_except(
-        &self,
-        user_id: uuid::Uuid,
-        retained_extension: Option<&str>,
-    ) -> anyhow::Result<()> {
+    /// The unversioned `avatars/{id}.{ext}` keys, one per format ever accepted.
+    async fn delete_legacy_avatars(&self, user_id: uuid::Uuid) -> anyhow::Result<()> {
         let mut first_error = None;
         for extension in AVATAR_EXTENSIONS {
-            if retained_extension == Some(*extension) {
-                continue;
-            }
             let key = format!("avatars/{user_id}.{extension}");
             if let Err(error) = self.delete(&key).await {
                 if first_error.is_none() {

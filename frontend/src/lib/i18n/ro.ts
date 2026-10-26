@@ -293,12 +293,8 @@ export const ro: Dictionary = {
       'Acest mesaj nu a fost semnat de acest cont. Este ascuns pentru că s-ar putea să nu fie de la el.',
     malformedMessage:
       'Acest mesaj nu corespunde cu ceea ce a semnat expeditorul, deci nu poate fi raportat. Din acest motiv este ascuns.',
-    notAuthenticated:
-      'Nu a putut fi verificat cu cheia actuală a acestui cont — poate a fost trimis înainte ca ea să fie schimbată.',
     privacyNoticeEncrypted:
       'Mesajele din această conversație sunt criptate cap-coadă. Văzute stochează textul cifrat și nu îl citește. Un mesaj pe care îl raportezi este dezvăluit moderatorilor de către tine, și doar acel mesaj.',
-    encryptionRequired:
-      'Conversația este criptată, iar acest dispozitiv nu are cheia ta. Restaureaz-o pentru a trimite mesaje.',
   },
   encryption: {
     setupTitle: 'Activează criptarea cap-coadă',
@@ -367,7 +363,6 @@ export const ro: Dictionary = {
     earnedForOne: 'Obținută pentru {title}',
     next: 'Urmează: {label}',
     progress: '{current} din {threshold}',
-    andMore: 'și încă {count}',
     'marathon-3': 'Trei într-o ședință',
     'marathon-5': 'Cinci într-o ședință',
     'marathon-10': 'Zece în două zile',
@@ -409,7 +404,6 @@ export const ro: Dictionary = {
   },
   stats: {
     genreOther: 'Alte genuri',
-    genreTitles: '{count} titluri',
     genreSlice: '{genre}: {count} titluri ({percent}%)',
     monthlyHours: '{hours} h în {month}',
     heatmapDay: '{count} episoade pe {date}',
@@ -467,13 +461,8 @@ export const ro: Dictionary = {
     rewatchSeason: 'Revezi sezonul',
     rewatchShow: 'Revezi serialul',
     rewatchMovie: 'Revezi',
-    rewatchEpisode: 'Revezi episodul',
-    timesWatched: 'V\u0103zut de {count}\u00d7',
-    seenTimes_one: 'L-ai v\u0103zut o dat\u0103',
-    seenTimes_other: 'L-ai v\u0103zut de {count} ori',
     seasonPasses_one: 'Sezon v\u0103zut o dat\u0103',
     seasonPasses_other: 'Sezon v\u0103zut de {count} ori',
-    seasonWatched: 'Sezon vizionat',
     markSeasonWatched: 'Marchează sezonul vizionat',
     episodeN: 'Episodul {number}',
     watched: 'Vizionat',

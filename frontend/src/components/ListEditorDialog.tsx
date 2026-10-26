@@ -1,9 +1,10 @@
 import { Loader2, X } from 'lucide-react';
-import { useEffect, useId, useState, type FormEvent } from 'react';
+import { useId, useRef, useState, type FormEvent } from 'react';
 
 import { getApiErrorMessage } from '@/lib/api';
 import { useT } from '@/hooks/useT';
 import type { ListInput } from '@/hooks/useLists';
+import { useModalDialog } from '@/hooks/useModalDialog';
 
 interface EditableList {
   name: string;
@@ -32,18 +33,8 @@ export function ListEditorDialog({
   const [isPublic, setIsPublic] = useState(list?.is_public ?? false);
   const [validationError, setValidationError] = useState<string | null>(null);
 
-  useEffect(() => {
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && !pending) onClose();
-    };
-    document.addEventListener('keydown', closeOnEscape);
-    return () => {
-      document.body.style.overflow = previousOverflow;
-      document.removeEventListener('keydown', closeOnEscape);
-    };
-  }, [onClose, pending]);
+  const dialogRef = useRef<HTMLElement>(null);
+  useModalDialog(dialogRef, onClose, !pending);
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -69,7 +60,9 @@ export function ListEditorDialog({
       }}
     >
       <section
+        ref={dialogRef}
         role="dialog"
+        tabIndex={-1}
         aria-modal="true"
         aria-labelledby={titleId}
         className="max-h-[calc(100dvh-env(safe-area-inset-top))] w-full overflow-y-auto rounded-t-lg border border-[hsl(var(--border))] bg-[hsl(var(--background))] p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))] shadow-2xl sm:max-w-lg sm:rounded-lg sm:p-6"
