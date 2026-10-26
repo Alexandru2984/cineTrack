@@ -664,14 +664,19 @@ jobs:
       - name: Cache Playwright browsers
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('frontend/package-lock.json') }}
+          # The browsers, and the system packages apt fetched for them; see
+          # scripts/ci_playwright_install.sh. One key per job: the two install
+          # different browsers, and a shared key let either restore the other's.
+          path: |
+            ~/.cache/ms-playwright
+            ~/.cache/playwright-apt
+          key: playwright-e2e-v2-${{ runner.os }}-${{ hashFiles('frontend/package-lock.json') }}
 
-      # The cache holds the browsers, but `--with-deps` still apt-installs their
-      # system libraries every run, and a stalled mirror once hung here until
-      # the job was cancelled. The script caps and retries; see its header.
+      # A slow apt mirror once held this step until the job was cancelled; the
+      # script caches, caps and retries. The step limit leaves the tests their
+      # time.
       - name: Install Playwright browsers
-        timeout-minutes: 20
+        timeout-minutes: 25
         run: ../scripts/ci_playwright_install.sh chromium webkit
 
       - name: E2E tests
@@ -759,11 +764,16 @@ jobs:
       - name: Cache Playwright browsers
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('frontend/package-lock.json') }}
+          # The browsers, and the system packages apt fetched for them; see
+          # scripts/ci_playwright_install.sh. One key per job: the two install
+          # different browsers, and a shared key let either restore the other's.
+          path: |
+            ~/.cache/ms-playwright
+            ~/.cache/playwright-apt
+          key: playwright-realstack-v2-${{ runner.os }}-${{ hashFiles('frontend/package-lock.json') }}
 
       - name: Install Playwright browser
-        timeout-minutes: 20
+        timeout-minutes: 25
         run: ../scripts/ci_playwright_install.sh chromium
 
       - name: E2E tests (real backend + Postgres)
