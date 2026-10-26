@@ -25,6 +25,13 @@ const MAX_TITLE_ALIASES_PER_MEDIA: usize = 500;
 const MAX_RELEASE_DATES_PER_MOVIE: usize = 2_000;
 /// The languages the public title pages are published in besides English,
 /// whose text is `media` itself.
+/// The highest season number accepted anywhere. Most series count from 1, but
+/// TMDB numbers the seasons of daily and long-running shows by year: The
+/// Situation Room, Newsnight and Alles was zählt all have a season 2026. A
+/// bound of 500 rejected those, so the season page answered 400 and the
+/// release-schedule job recorded the series as invalid every day.
+pub const MAX_SEASON_NUMBER: i32 = 9_999;
+
 pub const LOCALIZED_LANGUAGES: &[&str] = &["ro"];
 /// Longer than any real synopsis; a bound on what one row can store.
 const MAX_LOCALIZED_OVERVIEW_CHARS: usize = 5_000;
@@ -896,7 +903,7 @@ impl TmdbService {
         tmdb_id: i32,
         season_number: i32,
     ) -> Result<TmdbSeasonDetail, AppError> {
-        if tmdb_id <= 0 || !(0..=500).contains(&season_number) {
+        if tmdb_id <= 0 || !(0..=MAX_SEASON_NUMBER).contains(&season_number) {
             return Err(AppError::BadRequest(
                 "Invalid TMDB ID or season number".to_string(),
             ));
