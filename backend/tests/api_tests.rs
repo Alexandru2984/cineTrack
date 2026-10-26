@@ -10208,7 +10208,8 @@ async fn test_media_rejects_invalid_upstream_parameters() {
     for uri in [
         "/api/media/-1?type=movie",
         "/api/media/1?type=person",
-        "/api/media/1/seasons/501/episodes",
+        "/api/media/1/seasons/10000/episodes",
+        "/api/media/1/seasons/-1/episodes",
     ] {
         let req = actix_test::TestRequest::get()
             .uri(uri)

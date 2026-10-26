@@ -470,7 +470,17 @@ pub async fn sync_tracked_release_schedules(
             // recorded against the candidate and counted the same way in both
             // jobs, which is the whole reason the policy is shared.
             Err(error) => {
+                // The summary only counts these; without the title and the
+                // reason, a failure that repeats every run cannot be told
+                // from one that happened once.
+                let reason = error.to_string();
                 let outcome = catalog_backoff::classify(error)?;
+                log::warn!(
+                    "release schedule refresh failed tmdb_id={} type={} outcome={}: {reason}",
+                    candidate.tmdb_id,
+                    candidate.media_type,
+                    outcome.label()
+                );
                 mark_failure(pool, candidate, outcome).await?;
                 match outcome {
                     RefreshOutcome::NotFound => summary.not_found += 1,

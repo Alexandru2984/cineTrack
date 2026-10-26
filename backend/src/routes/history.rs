@@ -67,7 +67,7 @@ fn validate_episode_path(
     season_number: i32,
     episode_number: Option<i32>,
 ) -> Result<(), AppError> {
-    if tmdb_id <= 0 || !(0..=500).contains(&season_number) {
+    if tmdb_id <= 0 || !(0..=crate::services::tmdb::MAX_SEASON_NUMBER).contains(&season_number) {
         return Err(AppError::BadRequest(
             "Invalid TMDB ID or season number".to_string(),
         ));
@@ -1101,4 +1101,17 @@ async fn delete_history(
     crate::services::badges::recompute_quietly(pool.get_ref(), user_id, Some(media_id)).await;
 
     Ok(HttpResponse::Ok().json(serde_json::json!({"message": "Deleted"})))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_season_numbered_by_year_is_accepted() {
+        assert!(validate_episode_path(1905, 2026, Some(40)).is_ok());
+        assert!(validate_episode_path(1905, 0, None).is_ok());
+        assert!(validate_episode_path(1905, -1, None).is_err());
+        assert!(validate_episode_path(1905, 10_000, None).is_err());
+    }
 }

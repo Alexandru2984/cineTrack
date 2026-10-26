@@ -162,12 +162,13 @@ fn parse_tmdb_id(value: &str) -> Result<i32, AppError> {
 }
 
 fn validate_season_number(season_number: i32) -> Result<(), AppError> {
-    if (0..=500).contains(&season_number) {
+    use crate::services::tmdb::MAX_SEASON_NUMBER;
+    if (0..=MAX_SEASON_NUMBER).contains(&season_number) {
         Ok(())
     } else {
-        Err(AppError::BadRequest(
-            "Season number must be between 0 and 500".to_string(),
-        ))
+        Err(AppError::BadRequest(format!(
+            "Season number must be between 0 and {MAX_SEASON_NUMBER}"
+        )))
     }
 }
 
@@ -584,4 +585,17 @@ async fn remove_episode_reaction(
         .await?;
 
     Ok(HttpResponse::Ok().json(serde_json::json!({ "message": "Reaction removed" })))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_season_numbered_by_year_is_accepted() {
+        assert!(validate_season_number(2026).is_ok());
+        assert!(validate_season_number(0).is_ok());
+        assert!(validate_season_number(-1).is_err());
+        assert!(validate_season_number(10_000).is_err());
+    }
 }

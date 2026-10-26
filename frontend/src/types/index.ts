@@ -268,22 +268,6 @@ export interface TrackingItem {
   completed_at: string | null;
 }
 
-export interface HistoryItem {
-  id: string;
-  media_id: string;
-  /** Sent by `HistoryResponse` and absent here until now, so the web client
-   *  could not show which episode an entry was without refetching the show. */
-  tmdb_id: number;
-  media_title: string;
-  media_type: string;
-  poster_path: string | null;
-  episode_id: string | null;
-  episode_name: string | null;
-  season_number: number | null;
-  episode_number: number | null;
-  watched_at: string;
-}
-
 export interface CalendarEpisode {
   episode_id: string;
   media_id: string;

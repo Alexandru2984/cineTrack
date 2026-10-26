@@ -530,8 +530,8 @@ pub(crate) fn escape(value: &str) -> String {
         .replace('\'', "&#39;")
 }
 
-/// Cut on a word boundary, for a meta description.
-fn shorten(value: &str, limit: usize) -> String {
+/// Cut on a word boundary, for a meta description or an unfurl card.
+pub(crate) fn shorten(value: &str, limit: usize) -> String {
     let text = value.split_whitespace().collect::<Vec<_>>().join(" ");
     if text.chars().count() <= limit {
         return text;
