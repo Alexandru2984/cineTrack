@@ -22,6 +22,7 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::errors::AppError;
+use crate::routes::title_pages::{escape, shorten};
 
 /// The same routes, carrying the shared budget.
 ///
@@ -90,33 +91,6 @@ fn media_image(poster_path: Option<&str>) -> String {
     }) {
         Some(path) => format!("https://image.tmdb.org/t/p/w780{path}"),
         None => format!("{SITE}/og-image.png"),
-    }
-}
-
-/// Escape for an HTML attribute.
-///
-/// Every value below comes from a member or from the catalogue, so it is
-/// untrusted text going into markup. `&` first, or it would double-escape the
-/// entities the later replacements introduce.
-fn escape(value: &str) -> String {
-    value
-        .replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\'', "&#39;")
-}
-
-/// Cut to a length an unfurler will actually show, on a word boundary.
-fn shorten(value: &str, limit: usize) -> String {
-    let text = value.split_whitespace().collect::<Vec<_>>().join(" ");
-    if text.chars().count() <= limit {
-        return text;
-    }
-    let truncated: String = text.chars().take(limit).collect();
-    match truncated.rsplit_once(' ') {
-        Some((head, _)) => format!("{head}…"),
-        None => format!("{truncated}…"),
     }
 }
 
