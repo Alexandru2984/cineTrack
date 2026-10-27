@@ -22,7 +22,7 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::errors::AppError;
-use crate::routes::title_pages::{escape, shorten};
+use crate::routes::title_pages::{escape, html_page, shorten};
 
 /// The same routes, carrying the shared budget.
 ///
@@ -150,19 +150,17 @@ fn render(card: &Card) -> String {
 }
 
 fn html(card: Card) -> HttpResponse {
-    HttpResponse::Ok()
-        .content_type("text/html; charset=utf-8")
-        // `private`, not `public`. This address answers a reader with the
-        // application and a preview crawler with this card, so a shared cache
-        // that stored one response under the plain URL would hand it to the
-        // other: a reader served a bare card, or a crawler served a shell it
-        // cannot read. Cloudflare reports these pages as DYNAMIC today, but the
-        // response should not be asking to be cached in the first place.
-        //
-        // `Vary` states the same thing in the terms a well-behaved intermediary
-        // reads, and the short lifetime still spares the database when one
-        // service fetches a link several times.
-        .insert_header(("Cache-Control", "private, max-age=300"))
+    // `private`, not `public`. This address answers a reader with the
+    // application and a preview crawler with this card, so a shared cache
+    // that stored one response under the plain URL would hand it to the
+    // other: a reader served a bare card, or a crawler served a shell it
+    // cannot read. Cloudflare reports these pages as DYNAMIC today, but the
+    // response should not be asking to be cached in the first place.
+    //
+    // `Vary` states the same thing in the terms a well-behaved intermediary
+    // reads, and the short lifetime still spares the database when one
+    // service fetches a link several times.
+    html_page(HttpResponse::Ok(), "private, max-age=300")
         .insert_header(("Vary", "User-Agent"))
         .body(render(&card))
 }
