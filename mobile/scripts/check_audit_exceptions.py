@@ -41,22 +41,11 @@ AuditUnavailable = npm_audit.AuditUnavailable
 #
 # The two image-size advisories that used to open this list are gone, not
 # accepted: metro dropped image-size in 0.84.5, and the last copy came from the
-# older metro the lockfile still carried for react-native's CLI plugin.
+# older metro the lockfile still carried for react-native's CLI plugin. So is
+# node-forge's GHSA-86w9-cpqp-85rv, accepted from 2026-10-02 until 1.4.1 fixed
+# it.
 ACCEPTED = {
-    # node-forge was published on 2026-10-02 with no patched release: the
-    # vulnerable range ends at the latest version on npm. Reviewed that day.
-    #
-    # node-forge is pulled in by @expo/cli and by expo-updates' code-signing
-    # helper, @expo/code-signing-certificates. Both run on a developer machine
-    # or in EAS. The app's expo-updates runtime never imports it (its build/
-    # output has no reference), and over-the-air updates are disabled outright
-    # (app.config.js refuses them without a signing certificate), so the flawed
-    # signature check has nothing to verify in the shipped app.
-    ("node-forge", "GHSA-86w9-cpqp-85rv"): (
-        "1.4.0",
-        "CLI-side update signing for disabled OTA updates; not in the app runtime",
-    ),
-    # zod 3.25.76 is @expo/cli's own copy (expo/node_modules/zod), which
+    # zod 3.25.76 is @expo/cli's own copy (@expo/cli/node_modules/zod), which
     # validates the CLI's configuration on a developer machine or in EAS. The
     # app imports the root zod, which is 4.6.7 and patched; the advisory has no
     # fixed 3.x release. Its out-of-memory case needs an attacker-sized array,

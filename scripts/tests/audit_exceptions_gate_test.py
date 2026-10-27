@@ -21,8 +21,6 @@ assert SPEC is not None and SPEC.loader is not None
 gate = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(gate)
 
-REVIEWED = ("node-forge", "GHSA-86w9-cpqp-85rv")
-
 
 class AuditGateTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -55,7 +53,9 @@ class AuditGateTests(unittest.TestCase):
     def test_an_exception_that_no_longer_applies_fails(self) -> None:
         # Entries get deleted when upstream fixes them rather than accumulating,
         # so a listed advisory that stopped appearing is an error.
-        self.stub_findings({REVIEWED: "still here"})
+        self.addCleanup(setattr, gate, "ACCEPTED", gate.ACCEPTED)
+        gate.ACCEPTED = {("left-pad", "GHSA-fixed-upstream"): ("1.0.0", "fixed since")}
+        self.stub_findings({})
         code, _, stderr = self.run_main()
         self.assertEqual(code, 1)
         self.assertIn("delete the stale exception", stderr)
