@@ -119,6 +119,11 @@ if ! run_maestro "attempt-1"; then
   fi
 fi
 
+# Maestro uninstalls its driver app as it exits, and ADB can lose the emulator
+# for a moment while it does: on 2026-10-27 a passed flow failed here on
+# "device 'emulator-5554' not found" while the emulator itself was still
+# running. If the device does not come back, this says so instead.
+wait_for_android_device 60
 installed_version="$(
   adb -s "$DEVICE_SERIAL" shell dumpsys package "$APP_ID" \
     | awk -F= '/versionName=/{ print $2; exit }' \
