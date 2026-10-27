@@ -15,7 +15,7 @@ use chrono::{Datelike, NaiveDate};
 use sqlx::PgPool;
 
 use crate::errors::AppError;
-use crate::routes::title_pages::{escape, page_path, Kind, Language, IMAGE_BASE, SITE};
+use crate::routes::title_pages::{escape, html_page, page_path, Kind, Language, IMAGE_BASE, SITE};
 
 /// Titles on one list.
 const HUB_SIZE: i64 = 60;
@@ -412,9 +412,7 @@ async fn hub(
         )
         .collect::<Vec<_>>();
 
-    Ok(HttpResponse::Ok()
-        .content_type("text/html; charset=utf-8")
-        .insert_header(("Cache-Control", "public, max-age=3600"))
+    Ok(html_page(HttpResponse::Ok(), "public, max-age=3600")
         .body(render(language, kind, genre, &listed, &items)))
 }
 

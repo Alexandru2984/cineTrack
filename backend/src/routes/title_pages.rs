@@ -22,7 +22,7 @@
 
 use std::time::Duration;
 
-use actix_web::{web, HttpRequest, HttpResponse};
+use actix_web::{http::header, web, HttpRequest, HttpResponse, HttpResponseBuilder};
 use chrono::{Datelike, NaiveDate};
 use serde_json::json;
 use sqlx::PgPool;
@@ -38,6 +38,21 @@ pub(crate) const IMAGE_BASE: &str = "https://image.tmdb.org/t/p";
 /// it. Cached answers return at once; this only bounds a cold fetch.
 const PROVIDERS_DEADLINE: Duration = Duration::from_secs(3);
 const DESCRIPTION_CHARS: usize = 155;
+
+/// Starts a server-rendered HTML response, kept by caches as `cache` says.
+///
+/// Every one of these pages adds `no-transform`. Without it Cloudflare's
+/// JavaScript Detections and Web Analytics rewrite the document on its way out,
+/// adding an inline bootstrap and a beacon script that the strict CSP then
+/// blocks: the page gains nothing, and each visit files two CSP violation
+/// reports. `frontend/nginx-spa.conf` says the same for the application's own
+/// HTML; these pages came later and went without it until October 2026.
+pub(crate) fn html_page(mut response: HttpResponseBuilder, cache: &str) -> HttpResponseBuilder {
+    response
+        .content_type("text/html; charset=utf-8")
+        .insert_header((header::CACHE_CONTROL, format!("{cache}, no-transform")));
+    response
+}
 
 pub fn configure_rate_limited(
     cfg: &mut web::ServiceConfig,
@@ -408,11 +423,8 @@ async fn title_page(
         providers,
         related,
     };
-    Ok(HttpResponse::Ok()
-        .content_type("text/html; charset=utf-8")
-        // The same document for everyone: nothing on it depends on who asks.
-        .insert_header(("Cache-Control", "public, max-age=3600"))
-        .body(render(&page)))
+    // The same document for everyone: nothing on it depends on who asks.
+    Ok(html_page(HttpResponse::Ok(), "public, max-age=3600").body(render(&page)))
 }
 
 /// The most popular other titles that share the page's first genre and have a
@@ -1195,11 +1207,8 @@ pub(crate) fn not_found(language: Language) -> HttpResponse {
             "Go to Văzute",
         ),
     };
-    HttpResponse::NotFound()
-        .content_type("text/html; charset=utf-8")
-        .insert_header(("Cache-Control", "public, max-age=600"))
-        .body(format!(
-            r#"<!doctype html>
+    html_page(HttpResponse::NotFound(), "public, max-age=600").body(format!(
+        r#"<!doctype html>
 <html lang="{lang}">
 <head>
 <meta charset="utf-8" />
@@ -1214,13 +1223,57 @@ pub(crate) fn not_found(language: Language) -> HttpResponse {
 </body>
 </html>
 "#,
-            lang = language.code()
-        ))
+        lang = language.code()
+    ))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn cache_control(response: &HttpResponse) -> &str {
+        response
+            .headers()
+            .get(header::CACHE_CONTROL)
+            .unwrap()
+            .to_str()
+            .unwrap()
+    }
+
+    #[test]
+    fn html_pages_ask_the_cdn_not_to_rewrite_them() {
+        let page = html_page(HttpResponse::Ok(), "public, max-age=3600").finish();
+        assert_eq!(cache_control(&page), "public, max-age=3600, no-transform");
+        assert_eq!(
+            page.headers().get(header::CONTENT_TYPE).unwrap(),
+            "text/html; charset=utf-8"
+        );
+        assert_eq!(
+            cache_control(&not_found(Language::En)),
+            "public, max-age=600, no-transform"
+        );
+    }
+
+    #[test]
+    fn every_html_response_starts_from_html_page() {
+        // A page that sets its own content type also sets its own caching, and
+        // the four pages that did so forgot `no-transform` (see `html_page`).
+        let needle = concat!(".content_type(", "\"text/html");
+        let routes = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/routes");
+        let mut found = Vec::new();
+        for entry in std::fs::read_dir(&routes).unwrap() {
+            let path = entry.unwrap().path();
+            let source = std::fs::read_to_string(&path).unwrap();
+            for _ in source.matches(needle) {
+                found.push(path.file_name().unwrap().to_string_lossy().into_owned());
+            }
+        }
+        assert_eq!(
+            found,
+            ["title_pages.rs"],
+            "only html_page may set an HTML content type"
+        );
+    }
 
     fn row() -> TitleRow {
         TitleRow {
