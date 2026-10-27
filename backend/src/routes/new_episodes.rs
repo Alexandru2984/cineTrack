@@ -15,7 +15,7 @@ use sqlx::PgPool;
 
 use crate::errors::AppError;
 use crate::routes::hubs::sections_nav;
-use crate::routes::title_pages::{escape, page_path, Kind, Language, IMAGE_BASE, SITE};
+use crate::routes::title_pages::{escape, html_page, page_path, Kind, Language, IMAGE_BASE, SITE};
 
 /// Days covered, today included.
 const DAYS: i32 = 7;
@@ -132,10 +132,7 @@ async fn page(pool: &PgPool, language: Language) -> Result<HttpResponse, AppErro
         }
     }
 
-    Ok(HttpResponse::Ok()
-        .content_type("text/html; charset=utf-8")
-        .insert_header(("Cache-Control", "public, max-age=3600"))
-        .body(render(language, today, &days)))
+    Ok(html_page(HttpResponse::Ok(), "public, max-age=3600").body(render(language, today, &days)))
 }
 
 fn weekday(language: Language, day: Weekday) -> &'static str {
