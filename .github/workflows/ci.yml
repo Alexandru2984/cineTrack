@@ -671,6 +671,9 @@ jobs:
             ~/.cache/ms-playwright
             ~/.cache/playwright-apt
           key: playwright-e2e-v2-${{ runner.os }}-${{ hashFiles('frontend/package-lock.json') }}
+          # Any frontend bump changes the lockfile, and an exact miss meant the
+          # whole download again; the latest cache still holds nearly all of it.
+          restore-keys: playwright-e2e-v2-${{ runner.os }}-
 
       # A slow apt mirror once held this step until the job was cancelled; the
       # script caches, caps and retries. The step limit leaves the tests their
@@ -771,6 +774,9 @@ jobs:
             ~/.cache/ms-playwright
             ~/.cache/playwright-apt
           key: playwright-realstack-v2-${{ runner.os }}-${{ hashFiles('frontend/package-lock.json') }}
+          # Any frontend bump changes the lockfile, and an exact miss meant the
+          # whole download again; the latest cache still holds nearly all of it.
+          restore-keys: playwright-realstack-v2-${{ runner.os }}-
 
       - name: Install Playwright browser
         timeout-minutes: 25
