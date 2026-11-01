@@ -233,7 +233,7 @@ trap 'rm -f "$PLAN_LOG" "$REPORT"' EXIT
     JOIN seasons se ON se.media_id = m.id
     JOIN episodes ep ON ep.season_id = se.id
     WHERE um.user_id = '$USER_ID' AND um.status = 'watching'
-      AND episode_has_aired(ep.air_date, m.origin_country)
+      AND episode_has_aired(ep.air_date, m.origin_country, m.streaming_only)
       AND NOT EXISTS (
         SELECT 1 FROM watch_history wh
         WHERE wh.user_id = um.user_id AND wh.episode_id = ep.id)
