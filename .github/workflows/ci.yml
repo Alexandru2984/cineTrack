@@ -653,6 +653,16 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # `ubuntu-latest` moves to a new Ubuntu release on GitHub's schedule.
+      # Playwright treats a browser as installed when its directory exists, so
+      # a cache from the old release hands it a build linked against the old
+      # libraries: on 2026-10-31 the image became 26.04 and every WebKit test
+      # failed on the 24.04 build's missing libicudata.so.74. The cache key
+      # names the release, so a new one starts clean.
+      - name: Name the Ubuntu release
+        id: distro
+        run: echo "id=$(. /etc/os-release && echo "$ID-$VERSION_ID")" >> "$GITHUB_OUTPUT"
+
       # Playwright's browser download is the one step here with a duration
       # nobody controls: the tests themselves run in about thirteen minutes,
       # and this job has twice been killed at the twenty-five minute limit
@@ -670,10 +680,10 @@ jobs:
           path: |
             ~/.cache/ms-playwright
             ~/.cache/playwright-apt
-          key: playwright-e2e-v2-${{ runner.os }}-${{ hashFiles('frontend/package-lock.json') }}
+          key: playwright-e2e-v2-${{ runner.os }}-${{ steps.distro.outputs.id }}-${{ hashFiles('frontend/package-lock.json') }}
           # Any frontend bump changes the lockfile, and an exact miss meant the
           # whole download again; the latest cache still holds nearly all of it.
-          restore-keys: playwright-e2e-v2-${{ runner.os }}-
+          restore-keys: playwright-e2e-v2-${{ runner.os }}-${{ steps.distro.outputs.id }}-
 
       # A slow apt mirror once held this step until the job was cancelled; the
       # script caches, caps and retries. The step limit leaves the tests their
@@ -756,6 +766,16 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # `ubuntu-latest` moves to a new Ubuntu release on GitHub's schedule.
+      # Playwright treats a browser as installed when its directory exists, so
+      # a cache from the old release hands it a build linked against the old
+      # libraries: on 2026-10-31 the image became 26.04 and every WebKit test
+      # failed on the 24.04 build's missing libicudata.so.74. The cache key
+      # names the release, so a new one starts clean.
+      - name: Name the Ubuntu release
+        id: distro
+        run: echo "id=$(. /etc/os-release && echo "$ID-$VERSION_ID")" >> "$GITHUB_OUTPUT"
+
       # Playwright's browser download is the one step here with a duration
       # nobody controls: the tests themselves run in about thirteen minutes,
       # and this job has twice been killed at the twenty-five minute limit
@@ -773,10 +793,10 @@ jobs:
           path: |
             ~/.cache/ms-playwright
             ~/.cache/playwright-apt
-          key: playwright-realstack-v2-${{ runner.os }}-${{ hashFiles('frontend/package-lock.json') }}
+          key: playwright-realstack-v2-${{ runner.os }}-${{ steps.distro.outputs.id }}-${{ hashFiles('frontend/package-lock.json') }}
           # Any frontend bump changes the lockfile, and an exact miss meant the
           # whole download again; the latest cache still holds nearly all of it.
-          restore-keys: playwright-realstack-v2-${{ runner.os }}-
+          restore-keys: playwright-realstack-v2-${{ runner.os }}-${{ steps.distro.outputs.id }}-
 
       - name: Install Playwright browser
         timeout-minutes: 25
