@@ -417,7 +417,7 @@ async fn record_completion_history(
     let (missing_episodes, catalog_episode_count) = sqlx::query_as::<_, (i64, i64)>(
         r#"SELECT
             COUNT(*) FILTER (
-                WHERE episode_has_aired(e.air_date, m.origin_country)
+                WHERE episode_has_aired(e.air_date, m.origin_country, m.streaming_only)
                 AND NOT EXISTS (
                     SELECT 1 FROM watch_history wh
                     WHERE wh.user_id = $1 AND wh.media_id = $2 AND wh.episode_id = e.id
@@ -459,7 +459,7 @@ async fn record_completion_history(
         JOIN seasons s ON e.season_id = s.id
         JOIN media m ON m.id = s.media_id
         WHERE s.media_id = $2 AND s.season_number > 0
-        AND episode_has_aired(e.air_date, m.origin_country)
+        AND episode_has_aired(e.air_date, m.origin_country, m.streaming_only)
         AND NOT EXISTS (
             SELECT 1 FROM watch_history wh
             WHERE wh.user_id = $1 AND wh.media_id = $2 AND wh.episode_id = e.id

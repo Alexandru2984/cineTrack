@@ -226,8 +226,12 @@ pub async fn recompute(
             WHERE history.user_id = $1
               AND ($2::uuid IS NULL OR seasons.media_id = $2)
               AND episodes.air_date IS NOT NULL
+              -- Measured from the end of the air date even for a streaming
+              -- release, which is out hours earlier. The badges are recomputed
+              -- and anything unsupported is deleted, so moving the window
+              -- forward would take back badges people already hold.
               AND history.watched_at
-                  < episode_available_at(episodes.air_date, media.origin_country)
+                  < episode_available_at(episodes.air_date, media.origin_country, false)
                     + INTERVAL '24 hours'
         ),
         same_day_tiers (badge_key, threshold) AS (
@@ -379,8 +383,9 @@ pub async fn family_standings(
             JOIN media ON media.id = seasons.media_id
             WHERE history.user_id = $1
               AND episodes.air_date IS NOT NULL
+              -- The same window as the same-day badges above, for the same reason.
               AND history.watched_at
-                  < episode_available_at(episodes.air_date, media.origin_country)
+                  < episode_available_at(episodes.air_date, media.origin_country, false)
                     + INTERVAL '24 hours'
             GROUP BY seasons.media_id
         )
