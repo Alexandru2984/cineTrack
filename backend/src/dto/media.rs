@@ -344,6 +344,9 @@ pub struct TmdbTvDetail {
     /// Where the show is made. TMDB returns a list; the first entry is the
     /// primary origin and is the one whose broadcast date `air_date` carries.
     pub origin_country: Option<Vec<String>>,
+    /// Who airs or streams it. Whether every one is a streaming service decides
+    /// when an episode counts as out; see `streaming_only`.
+    pub networks: Option<Vec<TmdbNetwork>>,
     pub genres: Option<Vec<TmdbGenre>>,
     pub episode_run_time: Option<Vec<i32>>,
     pub vote_average: Option<f64>,
@@ -354,6 +357,11 @@ pub struct TmdbTvDetail {
     pub alternative_titles: Option<TmdbAlternativeTitles>,
     #[serde(default)]
     pub translations: Option<TmdbTranslations>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TmdbNetwork {
+    pub id: i32,
 }
 
 #[derive(Debug, Deserialize)]

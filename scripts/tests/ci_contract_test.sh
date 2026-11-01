@@ -281,5 +281,33 @@ for profile, settings in eas["build"].items():
         f"EAS build profile {profile!r} builds on Node {pinned}, but CI tests mobile on Node {ci_node.group(1)}",
     )
 
+# Playwright counts a browser as installed when its directory exists, whatever
+# release it was built for. `ubuntu-latest` became 26.04 on 2026-10-31, the
+# E2E job restored the WebKit it had cached on 24.04, and every WebKit test
+# failed on a missing libicudata.so.74. A Playwright cache has to be keyed on
+# the release, in its restore prefix as much as its key.
+playwright_caches = re.findall(
+    r"~/\.cache/ms-playwright\n.*?\n\s*key:([^\n]*)\n.*?restore-keys:([^\n]*)",
+    ci_steps,
+    re.S,
+)
+require(len(playwright_caches) == 2, "expected the two E2E jobs' Playwright caches")
+for key, restore in playwright_caches:
+    require(
+        "steps.distro.outputs.id" in key and "steps.distro.outputs.id" in restore,
+        f"Playwright cache {key.strip()!r} must be keyed on the Ubuntu release",
+    )
+
+# The Prometheus image is pinned once, in the compose file Dependabot updates.
+# Copies of the pin in the rule checks and the deploy script did not move with
+# it: on 2026-11-01 CI validated the alert rules with promtool 3.6.0 against a
+# Prometheus on 3.15.
+for path in (".github/workflows/ci.yml", "scripts/run_tests.sh", "scripts/auto_deploy.sh"):
+    text = without_comments((root / path).read_text(encoding="utf-8"))
+    require(
+        "prom/prometheus:" not in text,
+        f"{path} pins prom/prometheus itself; read it with scripts/prometheus_image.sh",
+    )
+
 print("CI security and smoke-test contracts passed")
 PY

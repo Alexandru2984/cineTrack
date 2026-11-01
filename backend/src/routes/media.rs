@@ -68,7 +68,7 @@ async fn get_episode_detail(
             episodes.air_date,
             episodes.still_path,
             tracked.status AS tracking_status,
-            episode_has_aired(episodes.air_date, media.origin_country) AS is_available,
+            episode_has_aired(episodes.air_date, media.origin_country, media.streaming_only) AS is_available,
             COALESCE(history.watch_count, 0) > 0 AS is_watched,
             plans.episode_id IS NOT NULL AS is_planned,
             COALESCE(history.watch_count, 0) AS watch_count,
