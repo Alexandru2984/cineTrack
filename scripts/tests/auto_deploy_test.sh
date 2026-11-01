@@ -72,6 +72,7 @@ case "$1" in
     # The monitoring sync asks which directories Prometheus mounts.
     if [[ "$*" == *Mounts* ]]; then printf '%s\n' "${STUB_PROM_MOUNT:-}"; exit 0; fi
     if [[ "$*" == *State.Running* ]]; then printf '%s\n' "${STUB_PROM_RUNNING:-true}"; exit 0; fi
+    if [[ "$*" == *Config.Image* ]]; then printf '%s\n' "${STUB_PROM_IMAGE-prom/prometheus:running}"; exit 0; fi
     printf '%s' "${STUB_DEPLOYED_REVISION:-}"; exit 0 ;;
   image)   exit 0 ;;   # `image inspect`: the saved images exist
   run)     [[ "$*" == *promtool* ]] && exit "${STUB_PROMTOOL_EXIT:-0}" ;;
@@ -152,6 +153,7 @@ run_deploy() {
   STUB_PROM_MOUNT="${STUB_PROM_MOUNT-$MONITORING_DIR}" \
   STUB_PROM_RUNNING="${STUB_PROM_RUNNING:-true}" \
   STUB_PROMTOOL_EXIT="${STUB_PROMTOOL_EXIT:-0}" \
+  STUB_PROM_IMAGE="${STUB_PROM_IMAGE-prom/prometheus:running}" \
   STUB_PROM_RELOAD="${STUB_PROM_RELOAD:-1}" \
   STUB_LOGS_FAIL="${STUB_LOGS_FAIL:-0}" \
   STUB_DEPLOYED_REVISION="$2" \
@@ -609,6 +611,25 @@ else
   fail "waiting deploy synced ahead of production: rules='$(rules_on_disk)'"
 fi
 
+# The rules are checked by the promtool of the image Prometheus runs. A copy of
+# the compose file's pin used to sit here and fell a release behind it.
+rm -rf "$MONITORING_DIR"
+run_deploy "$BASE" "$BASE" "$GREEN" "$NO_STATUS" 1 >/dev/null
+if grep -q -- '--entrypoint promtool prom/prometheus:running check rules' "$ACTIONS"; then
+  pass "rules are checked with the promtool Prometheus is running"
+else
+  fail "promtool did not come from the running image: $(grep promtool "$ACTIONS" || true)"
+fi
+
+rm -rf "$MONITORING_DIR"
+STUB_PROM_IMAGE="" run_deploy "$BASE" "$BASE" "$GREEN" "$NO_STATUS" 1 >/dev/null
+if [[ -z "$(rules_on_disk)" && "$(sync_success)" == 0 ]]; then
+  pass "rules are not installed when nothing says which promtool would load them"
+else
+  fail "unknown Prometheus image: rules='$(rules_on_disk)' success=$(sync_success)"
+fi
+
+run_deploy "$BASE" "$BASE" "$GREEN" "$NO_STATUS" 1 >/dev/null
 STUB_PROMTOOL_EXIT=1 run_deploy "$RULES_CHANGED" "$RULES_CHANGED" "$GREEN" "$NO_STATUS" 1 >/dev/null
 if [[ "$(rules_on_disk)" == *"base rules"* && "$(reloads)" == 0 && "$(sync_success)" == 0 ]]; then
   pass "rules that fail promtool are not installed, and the failure is reported"

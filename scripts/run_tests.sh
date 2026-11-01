@@ -193,12 +193,11 @@ docker run --rm --volume "$ROOT_DIR:$ROOT_DIR:ro" --workdir "$ROOT_DIR" \
 docker run --rm --volume "$ROOT_DIR:$ROOT_DIR:ro" --workdir "$ROOT_DIR" \
   koalaman/shellcheck:v0.10.0@sha256:0fa384f2a6171aef8aab2999a531c8c8158727d54a8f20157a5c3c51a734d6b2 \
   --external-sources scripts/*.sh scripts/tests/*.sh bench/*.sh bench/db/*.sh
-docker run --rm --volume "$ROOT_DIR:/repo:ro" --entrypoint promtool \
-  prom/prometheus:v3.6.0@sha256:d9a702d3f7f398540e7190c4d80dbb8a0dc95c1e481e8ebd8a08e5bcf83cf735 \
+PROMETHEUS_IMAGE="$(scripts/prometheus_image.sh)"
+docker run --rm --volume "$ROOT_DIR:/repo:ro" --entrypoint promtool "$PROMETHEUS_IMAGE" \
   check rules /repo/ops/prometheus/cinetrack-alerts.yml
 docker run --rm --volume "$ROOT_DIR:/repo:ro" --workdir /repo/ops/prometheus --entrypoint promtool \
-  prom/prometheus:v3.6.0@sha256:d9a702d3f7f398540e7190c4d80dbb8a0dc95c1e481e8ebd8a08e5bcf83cf735 \
-  test rules cinetrack-alerts.test.yml
+  "$PROMETHEUS_IMAGE" test rules cinetrack-alerts.test.yml
 
 section "Backend integration"
 TEST_DB_PORT="$INTEGRATION_DB_PORT" docker compose -p "$TEST_PROJECT" \

@@ -620,14 +620,14 @@ jobs:
       - name: Validate secret hygiene checks
         run: scripts/tests/secret_hygiene_test.sh
 
+      # With the promtool of the image production runs; see the script.
       - name: Validate Prometheus alert rules
         run: |
-          docker run --rm --volume "$PWD:/repo:ro" --entrypoint promtool \
-            prom/prometheus:v3.6.0@sha256:d9a702d3f7f398540e7190c4d80dbb8a0dc95c1e481e8ebd8a08e5bcf83cf735 \
+          image="$(scripts/prometheus_image.sh)"
+          docker run --rm --volume "$PWD:/repo:ro" --entrypoint promtool "$image" \
             check rules /repo/ops/prometheus/cinetrack-alerts.yml
           docker run --rm --volume "$PWD:/repo:ro" --workdir /repo/ops/prometheus \
-            --entrypoint promtool \
-            prom/prometheus:v3.6.0@sha256:d9a702d3f7f398540e7190c4d80dbb8a0dc95c1e481e8ebd8a08e5bcf83cf735 \
+            --entrypoint promtool "$image" \
             test rules cinetrack-alerts.test.yml
 
   e2e:

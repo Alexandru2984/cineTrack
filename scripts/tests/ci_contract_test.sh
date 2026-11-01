@@ -298,5 +298,16 @@ for key, restore in playwright_caches:
         f"Playwright cache {key.strip()!r} must be keyed on the Ubuntu release",
     )
 
+# The Prometheus image is pinned once, in the compose file Dependabot updates.
+# Copies of the pin in the rule checks and the deploy script did not move with
+# it: on 2026-11-01 CI validated the alert rules with promtool 3.6.0 against a
+# Prometheus on 3.15.
+for path in (".github/workflows/ci.yml", "scripts/run_tests.sh", "scripts/auto_deploy.sh"):
+    text = without_comments((root / path).read_text(encoding="utf-8"))
+    require(
+        "prom/prometheus:" not in text,
+        f"{path} pins prom/prometheus itself; read it with scripts/prometheus_image.sh",
+    )
+
 print("CI security and smoke-test contracts passed")
 PY
