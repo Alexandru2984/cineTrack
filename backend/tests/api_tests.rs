@@ -4220,7 +4220,7 @@ async fn test_completing_show_records_cached_episodes_idempotently() {
         JOIN episodes ON episodes.id = history.episode_id
         WHERE history.user_id = $1
           AND history.media_id = $2
-          AND NOT episode_has_aired(episodes.air_date, NULL)"#,
+          AND NOT episode_has_aired(episodes.air_date, NULL, false)"#,
     )
     .bind(user_id)
     .bind(media_id)
@@ -7820,8 +7820,8 @@ async fn availability_follows_the_origin_network_clock() {
 
     let (japan, united_states): (chrono::DateTime<chrono::Utc>, chrono::DateTime<chrono::Utc>) =
         sqlx::query_as(
-            "SELECT episode_available_at(DATE '2026-08-23', 'JP'),
-                    episode_available_at(DATE '2026-08-23', 'US')",
+            "SELECT episode_available_at(DATE '2026-08-23', 'JP', false),
+                    episode_available_at(DATE '2026-08-23', 'US', false)",
         )
         .fetch_one(&pool)
         .await
@@ -7839,7 +7839,7 @@ async fn availability_follows_the_origin_network_clock() {
     // An unmapped country falls back to UTC, which is exactly the behaviour
     // this replaced — so an unknown origin is no worse off than before.
     let unmapped: chrono::DateTime<chrono::Utc> =
-        sqlx::query_scalar("SELECT episode_available_at(DATE '2026-08-23', 'ZZ')")
+        sqlx::query_scalar("SELECT episode_available_at(DATE '2026-08-23', 'ZZ', false)")
             .fetch_one(&pool)
             .await
             .unwrap();
@@ -7847,7 +7847,7 @@ async fn availability_follows_the_origin_network_clock() {
 
     // And no date means nothing to withhold.
     let undated: Option<chrono::DateTime<chrono::Utc>> =
-        sqlx::query_scalar("SELECT episode_available_at(NULL, 'US')")
+        sqlx::query_scalar("SELECT episode_available_at(NULL, 'US', false)")
             .fetch_one(&pool)
             .await
             .unwrap();
@@ -7925,6 +7925,147 @@ async fn an_episode_whose_date_has_passed_is_offered() {
     .await;
     track_and_watch_first_episode(&pool, user_id, media_id).await;
 
+    let req = actix_test::TestRequest::get()
+        .uri("/api/calendar/up-next")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let body: Value = actix_test::call_and_read_body_json(&app, req).await;
+    assert_eq!(body["items"][0]["episode_number"], 2, "body was {body}");
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn a_streaming_release_is_offered_on_its_air_date() {
+    // Dexter: Resurrection's second season came out on Paramount+ with
+    // Showtime on 2026-11-01, and Up Next held it back until 05:00 UTC the
+    // next day: waiting for the end of the air date is the rule for a
+    // broadcast. A show carried only by streaming services is out from
+    // midnight Pacific on its air date, the latest time those release.
+    use cinetrack::services::release_schedule::{
+        sync_tracked_release_schedules, ReleaseScheduleOptions,
+    };
+    use cinetrack::services::tmdb::TmdbService;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+
+    let (streaming, broadcast): (chrono::DateTime<chrono::Utc>, chrono::DateTime<chrono::Utc>) =
+        sqlx::query_as(
+            "SELECT episode_available_at(DATE '2026-11-01', 'US', true),
+                    episode_available_at(DATE '2026-11-01', 'US', false)",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(streaming.to_rfc3339(), "2026-11-01T07:00:00+00:00");
+    assert_eq!(broadcast.to_rfc3339(), "2026-11-02T05:00:00+00:00");
+
+    // Today where midnight Pacific has always already passed, so the episode
+    // below is out under the streaming rule at any hour this test runs.
+    let today: chrono::NaiveDate =
+        sqlx::query_scalar("SELECT (NOW() AT TIME ZONE 'America/Los_Angeles')::date")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    let week_ago = today - chrono::Duration::days(7);
+    let detail = r#"{"id": 950101, "name": "Streamed", "original_name": "Streamed",
+        "status": "Returning Series", "genres": [], "episode_run_time": [50],
+        "vote_average": 8.0, "origin_country": ["US"],
+        "networks": [{"id": 6631, "name": "Paramount+ with Showtime"}],
+        "seasons": [{"id": 9501011, "season_number": 1, "name": "Season 1",
+                     "episode_count": 2, "air_date": "2026-01-01"}],
+        "next_episode_to_air": {"season_number": 1},
+        "last_episode_to_air": {"season_number": 1}}"#
+        .to_string();
+    let season = format!(
+        r#"{{"episodes": [
+            {{"episode_number": 1, "name": "Before", "air_date": "{week_ago}"}},
+            {{"episode_number": 2, "name": "Today", "air_date": "{today}"}}]}}"#
+    );
+    let responses = vec![
+        ("/tv/950101?".to_string(), detail),
+        ("/tv/950101/season/1?".to_string(), season),
+    ];
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let upstream = actix_web::rt::spawn(async move {
+        for (expected_path, body) in responses {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = vec![0_u8; 4096];
+            let read = stream.read(&mut request).await.unwrap();
+            let line = String::from_utf8_lossy(&request[..read]).to_string();
+            assert!(
+                line.starts_with(&format!("GET {expected_path}")),
+                "expected {expected_path}, got {}",
+                line.lines().next().unwrap_or_default()
+            );
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            stream.write_all(response.as_bytes()).await.unwrap();
+        }
+    });
+
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (token, _, user_id) =
+        register_user(&app, "streamer", "streamer@mailbox.dev", "Pass1234").await;
+    let user_id = Uuid::parse_str(&user_id).unwrap();
+    let media_id = sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO media (tmdb_id, media_type, title, status, metadata_level)
+        VALUES (950101, 'tv', 'Streamed', 'Returning Series', 'detail') RETURNING id"#,
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO user_media (user_id, media_id, status) VALUES ($1, $2, 'completed')")
+        .bind(user_id)
+        .bind(media_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let mut config = test_config();
+    config.tmdb_base_url = format!("http://{address}");
+    let summary = sync_tracked_release_schedules(
+        &pool,
+        &TmdbService::new(&config),
+        ReleaseScheduleOptions {
+            budget: 1,
+            request_delay: std::time::Duration::ZERO,
+        },
+    )
+    .await
+    .unwrap();
+    upstream.await.unwrap();
+    assert_eq!(summary.succeeded, 1);
+
+    let streaming_only: bool = sqlx::query_scalar("SELECT streaming_only FROM media WHERE id = $1")
+        .bind(media_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert!(
+        streaming_only,
+        "the network list must mark the show as streamed"
+    );
+
+    sqlx::query(
+        r#"INSERT INTO watch_history (user_id, media_id, episode_id, watched_at)
+        SELECT $1, $2, episodes.id, NOW() - INTERVAL '1 day'
+        FROM episodes JOIN seasons ON seasons.id = episodes.season_id
+        WHERE seasons.media_id = $2 AND episodes.episode_number = 1"#,
+    )
+    .bind(user_id)
+    .bind(media_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // Tracked as completed after the first season, as the show was.
     let req = actix_test::TestRequest::get()
         .uri("/api/calendar/up-next")
         .insert_header(("Authorization", format!("Bearer {token}")))
