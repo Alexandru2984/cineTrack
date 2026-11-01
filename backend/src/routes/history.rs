@@ -188,7 +188,7 @@ async fn create_history(
     // is not evidence that the episode is in the future.
     if let Some(ep_id) = data.episode_id {
         let episode = sqlx::query_scalar::<_, bool>(
-            r#"SELECT episode_has_aired(episodes.air_date, media.origin_country)
+            r#"SELECT episode_has_aired(episodes.air_date, media.origin_country, media.streaming_only)
             FROM episodes
             JOIN seasons ON seasons.id = episodes.season_id
             JOIN media ON media.id = seasons.media_id
@@ -315,14 +315,14 @@ async fn show_watch_progress(
             LEFT JOIN watch_history history
               ON history.episode_id = episodes.id AND history.user_id = $2
             WHERE seasons.media_id = $1
-              AND episode_has_aired(episodes.air_date, media.origin_country)
+              AND episode_has_aired(episodes.air_date, media.origin_country, media.streaming_only)
             GROUP BY seasons.id, episodes.id
         )
         SELECT
             seasons.season_number,
             seasons.episode_count,
             COUNT(DISTINCT episodes.id) FILTER (
-                WHERE episode_has_aired(episodes.air_date, media.origin_country)
+                WHERE episode_has_aired(episodes.air_date, media.origin_country, media.streaming_only)
             )::bigint AS available_episode_count,
             COUNT(DISTINCT history.episode_id)::bigint AS watched_count,
             COALESCE(
@@ -602,7 +602,7 @@ async fn mark_season_watched(
         JOIN media ON media.id = seasons.media_id
         WHERE seasons.media_id = $1
           AND seasons.season_number = $2
-          AND episode_has_aired(episodes.air_date, media.origin_country)
+          AND episode_has_aired(episodes.air_date, media.origin_country, media.streaming_only)
         ORDER BY episodes.episode_number"#,
     )
     .bind(media.id)
@@ -825,7 +825,7 @@ async fn aired_episode_ids(
         JOIN media ON media.id = seasons.media_id
         WHERE seasons.media_id = $1
           AND ($2::int IS NULL OR seasons.season_number = $2)
-          AND episode_has_aired(episodes.air_date, media.origin_country)
+          AND episode_has_aired(episodes.air_date, media.origin_country, media.streaming_only)
         ORDER BY seasons.season_number, episodes.episode_number"#,
     )
     .bind(media_id)
@@ -852,7 +852,7 @@ async fn mark_episodes_watched_through(
     // could disagree with the one the query below uses — rejecting exactly the
     // episodes that query is willing to insert, for a few hours a day.
     let target_has_aired = sqlx::query_scalar::<_, bool>(
-        r#"SELECT episode_has_aired(episodes.air_date, media.origin_country)
+        r#"SELECT episode_has_aired(episodes.air_date, media.origin_country, media.streaming_only)
         FROM episodes
         JOIN seasons ON seasons.id = episodes.season_id
         JOIN media ON media.id = seasons.media_id
@@ -889,7 +889,7 @@ async fn mark_episodes_watched_through(
                   )
               )
           )
-          AND episode_has_aired(episodes.air_date, media.origin_country)
+          AND episode_has_aired(episodes.air_date, media.origin_country, media.streaming_only)
         ORDER BY seasons.season_number, episodes.episode_number"#,
     )
     .bind(media.id)
