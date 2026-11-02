@@ -5,6 +5,7 @@ import { radius, spacing } from '@/constants/theme';
 import { useT } from '@/hooks/use-t';
 import { useTheme } from '@/hooks/use-theme';
 import {
+  nextReaction,
   REACTION_EMOJI,
   reactionAccessibilityLabel,
   reactionCaption,
@@ -62,8 +63,7 @@ export function EpisodeReactions({
           return (
             <Pressable
               key={reaction}
-              // Tapping your own reaction again clears it.
-              onPress={() => onSelect(mine ? null : reaction)}
+              onPress={() => onSelect(nextReaction(reaction, myReaction))}
               disabled={!canReact || pending}
               accessibilityRole="button"
               accessibilityState={{ selected: mine, disabled: !canReact || pending }}

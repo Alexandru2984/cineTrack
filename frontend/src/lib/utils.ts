@@ -1,10 +1,3 @@
-import { clsx, type ClassValue } from 'clsx';
-import { twMerge } from 'tailwind-merge';
-
-export function cn(...inputs: ClassValue[]) {
-  return twMerge(clsx(inputs));
-}
-
 // When VITE_USE_R2_IMAGES is enabled, images are served through the backend's
 // write-through R2 cache (/api/img) instead of TMDB directly. Off by default.
 const USE_R2_IMAGES = import.meta.env.VITE_USE_R2_IMAGES === 'true';
@@ -54,14 +47,6 @@ export function formatRuntime(minutes: number | null | undefined): string {
   const m = minutes % 60;
   return h > 0 ? `${h}h ${m}m` : `${m}m`;
 }
-
-export const STATUS_LABELS: Record<string, string> = {
-  watching: 'Watching',
-  completed: 'Completed',
-  plan_to_watch: 'Plan to Watch',
-  dropped: 'Dropped',
-  on_hold: 'On Hold',
-};
 
 export const STATUS_COLORS: Record<string, string> = {
   watching: 'bg-blue-500',

@@ -1,25 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { cn, getPosterUrl, getBackdropUrl, formatDate, formatRuntime, STATUS_LABELS, STATUS_COLORS } from '@/lib/utils';
-
-describe('cn (class merging)', () => {
-  it('merges simple classes', () => {
-    expect(cn('foo', 'bar')).toBe('foo bar');
-  });
-
-  it('handles conditional classes', () => {
-    const hidden = Boolean(0);
-    expect(cn('base', hidden && 'hidden', 'extra')).toBe('base extra');
-  });
-
-  it('merges tailwind conflicting classes', () => {
-    const result = cn('p-4', 'p-2');
-    expect(result).toBe('p-2');
-  });
-
-  it('handles empty input', () => {
-    expect(cn()).toBe('');
-  });
-});
+import { getPosterUrl, getBackdropUrl, formatDate, formatRuntime, STATUS_COLORS } from '@/lib/utils';
 
 describe('getPosterUrl', () => {
   it('returns TMDB URL for valid path', () => {
@@ -104,23 +84,9 @@ describe('formatRuntime', () => {
   });
 });
 
-describe('STATUS_LABELS', () => {
-  it('has all expected statuses', () => {
-    expect(STATUS_LABELS.watching).toBe('Watching');
-    expect(STATUS_LABELS.completed).toBe('Completed');
-    expect(STATUS_LABELS.plan_to_watch).toBe('Plan to Watch');
-    expect(STATUS_LABELS.dropped).toBe('Dropped');
-    expect(STATUS_LABELS.on_hold).toBe('On Hold');
-  });
-
-  it('has 5 statuses', () => {
-    expect(Object.keys(STATUS_LABELS)).toHaveLength(5);
-  });
-});
-
 describe('STATUS_COLORS', () => {
   it('has colors for all statuses', () => {
-    for (const key of Object.keys(STATUS_LABELS)) {
+    for (const key of ['watching', 'completed', 'plan_to_watch', 'dropped', 'on_hold']) {
       expect(STATUS_COLORS[key]).toBeDefined();
     }
   });
