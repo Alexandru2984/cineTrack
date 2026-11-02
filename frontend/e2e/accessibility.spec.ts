@@ -117,6 +117,84 @@ async function stubAuthenticatedApp(page: Page) {
         },
       });
     }
+    // The signed-in member's own profile. Without it the `[]` fallback left
+    // the page with an empty heading, and the sweep audited a profile with no
+    // name on it.
+    if (path === `/api/users/${USER.username}`) {
+      return route.fulfill({
+        json: {
+          id: USER.id,
+          username: USER.username,
+          avatar_url: null,
+          bio: null,
+          is_public: true,
+          created_at: USER.created_at,
+          followers_count: 0,
+          following_count: 0,
+          is_following: false,
+          is_followed_by: false,
+          follow_status: null,
+          can_view_activity: true,
+        },
+      });
+    }
+    // A page of new episodes, not the `[]` fallback: reading `items` from that
+    // threw inside the calendar, and the sweep audited the error screen.
+    if (path === '/api/calendar/new') {
+      return route.fulfill({ json: { items: [], next_cursor: null } });
+    }
+    // The rest of the payloads a page reads fields from. Each one, left to the
+    // fallback, threw on its first field and put the error screen in its place.
+    if (path === '/api/badges') {
+      return route.fulfill({ json: { earned: [], progress: [] } });
+    }
+    if (path === '/api/stats/me/wrapped') {
+      return route.fulfill({
+        json: {
+          year: 2026,
+          total_watches: 0,
+          movies_watched: 0,
+          episodes_watched: 0,
+          distinct_titles: 0,
+          total_hours: 0,
+          longest_streak: 0,
+          first_watch: null,
+          last_watch: null,
+          top_genres: [],
+          top_shows: [],
+          monthly: [],
+        },
+      });
+    }
+    if (path === '/api/media/episodes/1') {
+      return route.fulfill({
+        json: {
+          episode_id: '1',
+          media_id: '00000000-0000-4000-8000-000000000003',
+          tmdb_id: 1399,
+          title: 'Accessibility Series',
+          poster_path: null,
+          backdrop_path: null,
+          season_id: '00000000-0000-4000-8000-000000000004',
+          season_number: 1,
+          season_name: 'Season 1',
+          episode_number: 1,
+          episode_name: 'Pilot',
+          overview: 'A fixture used to render the episode page.',
+          runtime_minutes: 50,
+          air_date: '2026-01-01',
+          still_path: null,
+          tracking_status: 'watching',
+          is_available: true,
+          is_watched: false,
+          is_planned: false,
+          watch_count: 0,
+          last_watched_at: null,
+          reactions: [],
+          my_reaction: null,
+        },
+      });
+    }
     if (path === '/api/users/reported-user') {
       return route.fulfill({
         json: {
@@ -193,14 +271,30 @@ test('public pages meet WCAG A/AA checks', async ({ page }) => {
   }
 });
 
-test('signed-in pages meet WCAG A/AA checks', async ({ page }) => {
-  await stubAuthenticatedApp(page);
-  for (const path of PRIVATE_ROUTES) {
+// One test per page: auditing the rendered page rather than its loading
+// spinner takes long enough that fourteen of them overran one test's timeout.
+for (const path of PRIVATE_ROUTES) {
+  test(`signed-in page ${path} meets WCAG A/AA checks`, async ({ page }) => {
+    // A page that throws renders the error screen instead, which can pass the
+    // audit on its own merits.
+    const uiErrors: string[] = [];
+    page.on('console', (message) => {
+      if (message.type() === 'error' && message.text().startsWith('Unhandled UI error')) {
+        uiErrors.push(message.text());
+      }
+    });
+    await stubAuthenticatedApp(page);
     await page.goto(path);
-    await expect(page.locator('main')).toBeVisible();
+    // The page itself, not the spinner its lazy route shows first. Waiting on
+    // `main` alone audited the spinner whenever the page was slower than the
+    // check, and missed that Notifications nested a second `main` in the
+    // layout's: the strict locator only tripped on it when the page was faster.
+    await expect(page.locator('main h1').first()).toBeVisible();
+    await expect(page.locator('main')).toHaveCount(1);
     await expectNoAccessibilityViolations(page);
-  }
-});
+    expect(uiErrors).toEqual([]);
+  });
+}
 
 test('report dialog is keyboard reachable and meets WCAG A/AA checks', async ({ page }) => {
   await stubAuthenticatedApp(page);
