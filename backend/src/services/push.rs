@@ -289,13 +289,27 @@ pub async fn enqueue_due_release_pushes(pool: &PgPool) -> Result<u64, sqlx::Erro
         JOIN media ON media.id = tracked.media_id AND media.media_type = 'tv'
         JOIN seasons season ON season.media_id = media.id AND season.season_number > 0
         JOIN episodes episode ON episode.season_id = season.id
+        CROSS JOIN LATERAL (
+            SELECT episode_available_at(
+                episode.air_date, media.origin_country, media.streaming_only
+            ) AS at
+        ) available
         WHERE tracked.status <> 'dropped'
-          AND episode.air_date = (
-              NOW() + MAKE_INTERVAL(mins => device.utc_offset_minutes)
-          )::date
-          AND episode.air_date >= (
-              device.enabled_at + MAKE_INTERVAL(mins => device.utc_offset_minutes)
-          )::date
+          -- Says "now available", so it waits for the rule Up Next uses. On
+          -- the air date in the device's time zone it went out up to a day
+          -- early: a US show airing Sunday evening was announced in Bucharest
+          -- at midnight on Sunday, before it had aired.
+          --
+          -- Only narrows the search, on the air-date index: availability is
+          -- 7 to 30 hours after the air date's UTC midnight, so anything that
+          -- became available in the last day aired in the last three.
+          AND episode.air_date BETWEEN (NOW() AT TIME ZONE 'UTC')::date - 3
+                                   AND (NOW() AT TIME ZONE 'UTC')::date
+          AND available.at <= NOW()
+          -- A day back, so a run that was missed, or a show whose release time
+          -- moved earlier, still announces it once; the event key stops a
+          -- second push. Nothing from before the device enabled alerts.
+          AND available.at > GREATEST(NOW() - INTERVAL '1 day', device.enabled_at)
           AND NOT EXISTS (
               SELECT 1 FROM watch_history history
               WHERE history.user_id = device.user_id

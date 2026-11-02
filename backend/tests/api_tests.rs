@@ -12571,7 +12571,7 @@ async fn test_release_push_outbox_is_local_personalized_and_idempotent() {
             (user_id, expo_push_token, unregister_secret_hash, platform,
              app_version, utc_offset_minutes, enabled_at)
          VALUES ($1, 'ExpoPushToken[abcdefghijklmnopqrstuv]', repeat('a', 64),
-                 'android', '1.1.0', 0, NOW() - INTERVAL '1 hour')",
+                 'android', '1.1.0', 0, NOW() - INTERVAL '3 days')",
     )
     .bind(user_id)
     .execute(&pool)
@@ -12595,7 +12595,7 @@ async fn test_release_push_outbox_is_local_personalized_and_idempotent() {
     .unwrap();
     let due_episode_id = sqlx::query_scalar::<_, Uuid>(
         "INSERT INTO episodes (season_id, episode_number, name, air_date)
-         VALUES ($1, 1, 'Today', CURRENT_DATE) RETURNING id",
+         VALUES ($1, 1, 'Out since midnight UTC', CURRENT_DATE - 1) RETURNING id",
     )
     .bind(season_id)
     .fetch_one(&pool)
@@ -12603,7 +12603,7 @@ async fn test_release_push_outbox_is_local_personalized_and_idempotent() {
     .unwrap();
     let watched_episode_id = sqlx::query_scalar::<_, Uuid>(
         "INSERT INTO episodes (season_id, episode_number, name, air_date)
-         VALUES ($1, 2, 'Already watched', CURRENT_DATE) RETURNING id",
+         VALUES ($1, 2, 'Already watched', CURRENT_DATE - 1) RETURNING id",
     )
     .bind(season_id)
     .fetch_one(&pool)
@@ -12625,6 +12625,46 @@ async fn test_release_push_outbox_is_local_personalized_and_idempotent() {
     .bind(user_id)
     .bind(show_id)
     .bind(watched_episode_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    // Long out: alerts are for what has just become available.
+    sqlx::query(
+        "INSERT INTO episodes (season_id, episode_number, name, air_date)
+         VALUES ($1, 3, 'Last week', CURRENT_DATE - 5)",
+    )
+    .bind(season_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // Airs tonight in New York, so it is not out anywhere yet. The device is on
+    // UTC and today is its local air date, which used to be enough.
+    let broadcast_id = sqlx::query_scalar::<_, Uuid>(
+        "INSERT INTO media (tmdb_id, media_type, title, origin_country)
+         VALUES (880003, 'tv', 'Push Broadcast', 'US') RETURNING id",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "WITH season AS (
+             INSERT INTO seasons (media_id, season_number, name)
+             VALUES ($1, 1, 'Season 1') RETURNING id
+         )
+         INSERT INTO episodes (season_id, episode_number, name, air_date)
+         SELECT id, 1, 'Tonight', CURRENT_DATE FROM season",
+    )
+    .bind(broadcast_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO user_media (user_id, media_id, status)
+         VALUES ($1, $2, 'watching')",
+    )
+    .bind(user_id)
+    .bind(broadcast_id)
     .execute(&pool)
     .await
     .unwrap();
