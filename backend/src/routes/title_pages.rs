@@ -440,17 +440,23 @@ async fn related(
     genre_id: i32,
 ) -> Result<Vec<Related>, sqlx::Error> {
     let rows = sqlx::query_as::<_, (i32, String, Option<String>, Option<NaiveDate>)>(
+        // The top titles first, then their Romanian names: joined before the
+        // limit, every Romanian title in the table was read to keep twelve.
         r#"SELECT m.tmdb_id, m.title, l.title, m.release_date
-        FROM media m
+        FROM (
+            SELECT id, tmdb_id, title, release_date, popularity
+            FROM media
+            WHERE media_type = $1
+              AND metadata_level = 'detail'
+              AND popularity IS NOT NULL
+              AND id <> $2
+              AND genres @> jsonb_build_array(jsonb_build_object('id', $3::int))
+            ORDER BY popularity DESC, tmdb_id
+            LIMIT $4
+        ) m
         LEFT JOIN media_localizations l
           ON l.media_id = m.id AND l.language_code = 'ro'
-        WHERE m.media_type = $1
-          AND m.metadata_level = 'detail'
-          AND m.popularity IS NOT NULL
-          AND m.id <> $2
-          AND m.genres @> jsonb_build_array(jsonb_build_object('id', $3::int))
-        ORDER BY m.popularity DESC, m.tmdb_id
-        LIMIT $4"#,
+        ORDER BY m.popularity DESC, m.tmdb_id"#,
     )
     .bind(kind.media_type())
     .bind(media_id)
