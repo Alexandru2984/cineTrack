@@ -116,7 +116,7 @@ export default function EpisodeDetailPage() {
                 type="button"
                 disabled={!canManage || item.is_watched || markWatched.isPending}
                 onClick={() => markWatched.mutate(item.episode_id)}
-                className="inline-flex h-11 items-center gap-2 rounded-md bg-emerald-600 px-4 text-sm font-semibold text-white disabled:opacity-55"
+                className="inline-flex h-11 items-center gap-2 rounded-md bg-emerald-700 px-4 text-sm font-semibold text-white disabled:opacity-55"
               >
                 {markWatched.isPending ? (
                   <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
