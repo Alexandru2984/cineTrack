@@ -23,8 +23,6 @@ const SEARCH_CACHE_FRESH_HOURS: i64 = 24;
 const SEARCH_CACHE_STALE_DAYS: i64 = 30;
 const MAX_TITLE_ALIASES_PER_MEDIA: usize = 500;
 const MAX_RELEASE_DATES_PER_MOVIE: usize = 2_000;
-/// The languages the public title pages are published in besides English,
-/// whose text is `media` itself.
 /// The highest season number accepted anywhere. Most series count from 1, but
 /// TMDB numbers the seasons of daily and long-running shows by year: The
 /// Situation Room, Newsnight and Alles was zählt all have a season 2026. A
@@ -32,9 +30,43 @@ const MAX_RELEASE_DATES_PER_MOVIE: usize = 2_000;
 /// release-schedule job recorded the series as invalid every day.
 pub const MAX_SEASON_NUMBER: i32 = 9_999;
 
+/// The languages the public title pages are published in besides English,
+/// whose text is `media` itself.
 pub const LOCALIZED_LANGUAGES: &[&str] = &["ro"];
 /// Longer than any real synopsis; a bound on what one row can store.
 const MAX_LOCALIZED_OVERVIEW_CHARS: usize = 5_000;
+
+/// TMDB's ids for the streaming services, which release an episode at
+/// midnight Pacific on its air date or earlier. Checked against TMDB's
+/// `/network/{id}` on 2026-11-01. Crunchyroll is left out on purpose: its
+/// simulcasts follow the Japanese broadcast whose date the episode carries.
+const STREAMING_NETWORKS: &[i32] = &[
+    213,  // Netflix
+    1024, // Prime Video
+    2739, // Disney+
+    2552, // Apple TV
+    453,  // Hulu
+    4330, // Paramount+
+    6631, // Paramount+ with Showtime
+    3186, // HBO Max
+    8304, // HBO Max
+    3353, // Peacock
+];
+
+/// Whether every network that carries the show is a streaming service, so its
+/// episodes are out from the start of their air date rather than its end (see
+/// the `streaming_availability` migration). One broadcaster among them keeps
+/// the later rule, since the air date is then that broadcast's. `None` when
+/// TMDB sent no list, so a refresh without one keeps what is known.
+fn streaming_only(networks: Option<&[TmdbNetwork]>) -> Option<bool> {
+    let networks = networks?;
+    Some(
+        !networks.is_empty()
+            && networks
+                .iter()
+                .all(|network| STREAMING_NETWORKS.contains(&network.id)),
+    )
+}
 
 #[derive(sqlx::FromRow)]
 struct ProviderCacheRow {
@@ -1467,13 +1499,14 @@ impl TmdbService {
 
         let mut tx = pool.begin().await?;
         let media = sqlx::query_as::<_, Media>(
-            r#"INSERT INTO media (tmdb_id, media_type, title, original_title, overview, poster_path, backdrop_path, release_date, status, genres, runtime_minutes, tmdb_vote_average, origin_country, tmdb_cached_at, last_accessed_at, metadata_level)
-            VALUES ($1, 'tv', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), NOW(), 'detail')
+            r#"INSERT INTO media (tmdb_id, media_type, title, original_title, overview, poster_path, backdrop_path, release_date, status, genres, runtime_minutes, tmdb_vote_average, origin_country, streaming_only, tmdb_cached_at, last_accessed_at, metadata_level)
+            VALUES ($1, 'tv', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, COALESCE($13, false), NOW(), NOW(), 'detail')
             ON CONFLICT (tmdb_id, media_type)
             DO UPDATE SET title = $2, original_title = $3, overview = $4, poster_path = $5, backdrop_path = $6, release_date = $7, status = $8, genres = $9, runtime_minutes = $10, tmdb_vote_average = $11,
                 -- Kept when the refresh has nothing to say, so a response
                 -- missing the field does not erase a country already known.
                 origin_country = COALESCE($12, media.origin_country),
+                streaming_only = COALESCE($13, media.streaming_only),
                 tmdb_cached_at = NOW(), last_accessed_at = NOW(), metadata_level = 'detail'
             RETURNING *"#
         )
@@ -1489,6 +1522,7 @@ impl TmdbService {
         .bind(runtime)
         .bind(detail.vote_average)
         .bind(&origin_country)
+        .bind(streaming_only(detail.networks.as_deref()))
         .fetch_one(&mut *tx)
         .await?;
 
@@ -1692,6 +1726,25 @@ mod tests {
     use super::*;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::sync::oneshot;
+
+    fn networks(ids: &[i32]) -> Vec<TmdbNetwork> {
+        ids.iter().map(|&id| TmdbNetwork { id }).collect()
+    }
+
+    #[test]
+    fn only_a_show_carried_by_streaming_services_alone_streams_on_the_day() {
+        // Dexter: Resurrection, on Paramount+ with Showtime only.
+        assert_eq!(streaming_only(Some(&networks(&[6631]))), Some(true));
+        assert_eq!(streaming_only(Some(&networks(&[213, 2739]))), Some(true));
+        // American Horror Story is on FX: a broadcast, judged by its end of day.
+        assert_eq!(streaming_only(Some(&networks(&[88]))), Some(false));
+        // An anime on Tokyo MX and Netflix carries the broadcast's date.
+        assert_eq!(streaming_only(Some(&networks(&[614, 213]))), Some(false));
+        // No network at all is no evidence of streaming.
+        assert_eq!(streaming_only(Some(&[])), Some(false));
+        // And a response without the list leaves the stored answer alone.
+        assert_eq!(streaming_only(None), None);
+    }
 
     fn config_with_token(read_access_token: Option<&str>) -> Config {
         Config {

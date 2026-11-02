@@ -253,7 +253,7 @@ next_ids AS (
       -- excluded them by accident — NULL is not <= anything — and losing that
       -- accident took the endpoint down.
       AND episodes.air_date IS NOT NULL
-      AND episode_has_aired(episodes.air_date, media.origin_country)
+      AND episode_has_aired(episodes.air_date, media.origin_country, media.streaming_only)
       AND ($2 OR seasons.season_number > 0)
       AND NOT EXISTS (
           SELECT 1 FROM watched
@@ -888,7 +888,7 @@ async fn mark_episode_watched(
     quota::lock_tracking_writes(&mut tx, user_id).await?;
     let (media_id, is_available) = sqlx::query_as::<_, (Uuid, bool)>(
         r#"SELECT seasons.media_id,
-            episode_has_aired(episodes.air_date, media.origin_country)
+            episode_has_aired(episodes.air_date, media.origin_country, media.streaming_only)
         FROM episodes
         JOIN seasons ON seasons.id = episodes.season_id
         JOIN media ON media.id = seasons.media_id AND media.media_type = 'tv'

@@ -80,9 +80,11 @@ BUILD_DIR="${AUTO_DEPLOY_BUILD_DIR:-$STATE_DIR/build}"
 MONITORING_DIR="${AUTO_DEPLOY_MONITORING_DIR:-$STATE_DIR/monitoring/prometheus}"
 MONITORING_METRICS_FILE="${AUTO_DEPLOY_MONITORING_METRICS_FILE:-$STATE_DIR/monitoring_sync.prom}"
 PROMETHEUS_CONTAINER="${AUTO_DEPLOY_PROMETHEUS_CONTAINER:-cinetrack-monitoring-prometheus-1}"
-# The image docker-compose.monitoring.yml runs, so rules are validated by the
-# promtool that will load them.
-PROMTOOL_IMAGE="${AUTO_DEPLOY_PROMTOOL_IMAGE:-prom/prometheus:v3.15.0@sha256:efd719c99d83b060d9daefdcf00360461adf279f45ef5391f8d111892118753e}"
+# Rules are validated by the promtool in the image Prometheus is running, so
+# by the version that will load them. This used to be a copy of the pin in
+# docker-compose.monitoring.yml, and it was a release behind the first time
+# Dependabot bumped that file (2026-11-01).
+PROMTOOL_IMAGE="${AUTO_DEPLOY_PROMTOOL_IMAGE:-}"
 MONITORING_FILES=(prometheus.yml cinetrack-alerts.yml)
 
 # Checks that cannot speak for what this deploys.
@@ -180,10 +182,17 @@ sync_monitoring() {
     for file in "${MONITORING_FILES[@]}"; do
       cmp -s "$staged/ops/prometheus/$file" "$MONITORING_DIR/$file" || changed=1
     done
+    local promtool_image="$PROMTOOL_IMAGE"
+    if [[ -z "$promtool_image" ]]; then
+      promtool_image="$(docker inspect --format '{{.Config.Image}}' \
+        "$PROMETHEUS_CONTAINER" 2>/dev/null || true)"
+    fi
     if (( changed == 0 )); then
       ok=1
+    elif [[ -z "$promtool_image" ]]; then
+      say "cannot tell which image $PROMETHEUS_CONTAINER runs; keeping the loaded rules"
     elif ! docker run --rm --volume "$staged/ops/prometheus:/config:ro" \
-        --entrypoint promtool "$PROMTOOL_IMAGE" check rules /config/cinetrack-alerts.yml >/dev/null 2>&1; then
+        --entrypoint promtool "$promtool_image" check rules /config/cinetrack-alerts.yml >/dev/null 2>&1; then
       say "monitoring rules at ${revision:0:8} fail promtool; keeping the loaded ones"
     else
       for file in "${MONITORING_FILES[@]}"; do
