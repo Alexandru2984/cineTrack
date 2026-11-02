@@ -35,7 +35,7 @@ export default function NotificationsPage() {
     summary.data?.unread_count ?? notifications.data?.pages[0]?.unread_count ?? 0;
 
   return (
-    <main className="mx-auto max-w-3xl px-4 py-8 sm:px-6">
+    <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold">{t('nav.notifications')}</h1>
@@ -98,6 +98,6 @@ export default function NotificationsPage() {
           )}
         </p>
       )}
-    </main>
+    </div>
   );
 }

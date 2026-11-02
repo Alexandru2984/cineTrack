@@ -738,7 +738,7 @@ function WatchConfirmationDialog({
                 type="button"
                 disabled={pending}
                 onClick={onEpisodeAndPrevious}
-                className="flex h-10 items-center justify-center gap-2 rounded-md bg-emerald-600 px-4 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
+                className="flex h-10 items-center justify-center gap-2 rounded-md bg-emerald-700 px-4 text-sm font-semibold text-white hover:bg-emerald-800 disabled:opacity-50"
               >
                 {pending && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
                 {t('media.thisAndPrevious')}
@@ -750,7 +750,7 @@ function WatchConfirmationDialog({
               autoFocus
               disabled={pending}
               onClick={onSeason}
-              className="flex h-10 items-center justify-center gap-2 rounded-md bg-emerald-600 px-4 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
+              className="flex h-10 items-center justify-center gap-2 rounded-md bg-emerald-700 px-4 text-sm font-semibold text-white hover:bg-emerald-800 disabled:opacity-50"
             >
               {pending && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
               {t('media.markSeason')}
