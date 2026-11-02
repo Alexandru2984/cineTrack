@@ -84,11 +84,17 @@ export default function StatsPage() {
 
       {/* Heatmap */}
       <div className="rounded-lg border border-[hsl(var(--border))] p-6 bg-[hsl(var(--card))]">
-        <h2 className="text-lg font-semibold mb-4">{t('stats.heatmapTitle')}</h2>
+        <h2 id="stats-heatmap-title" className="text-lg font-semibold mb-4">{t('stats.heatmapTitle')}</h2>
         {/* Scrolls rather than shrinks. A year of squares compressed into a
             phone width is a grey smudge; at a fixed minimum they stay square
-            and the month labels stay apart. */}
-        <div className="overflow-x-auto">
+            and the month labels stay apart. Focusable, so the part past the
+            edge can be scrolled into view from the keyboard too. */}
+        <div
+          className="overflow-x-auto"
+          role="region"
+          aria-labelledby="stats-heatmap-title"
+          tabIndex={0}
+        >
           <div className="min-w-[46rem]">
             <CalendarHeatmap
               startDate={startDate}
