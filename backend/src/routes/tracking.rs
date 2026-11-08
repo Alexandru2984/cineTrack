@@ -2,12 +2,15 @@ use actix_web::{web, HttpRequest, HttpResponse};
 use chrono::{NaiveDate, Utc};
 use sqlx::{PgPool, Postgres, Transaction};
 use std::collections::HashSet;
+use std::sync::LazyLock;
 use uuid::Uuid;
 use validator::Validate;
 
 use crate::dto::tracking::*;
 use crate::errors::AppError;
 use crate::middleware::auth::require_auth;
+use crate::routes::hubs::genre_by_id;
+use crate::routes::title_pages::Language;
 use crate::services::quota;
 use crate::services::tmdb::TmdbService;
 
@@ -15,6 +18,7 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
     cfg.service(
         web::scope("/tracking")
             .route("", web::get().to(list_tracking))
+            .route("/facets", web::get().to(tracking_facets))
             .route("", web::post().to(create_tracking))
             .route("/lookup", web::post().to(lookup_tracking))
             .route("/{id}", web::patch().to(update_tracking))
@@ -35,6 +39,7 @@ type TrackingRow = (
     bool,
     Option<NaiveDate>,
     Option<NaiveDate>,
+    Option<NaiveDate>,
 );
 
 fn tracking_response(
@@ -51,6 +56,7 @@ fn tracking_response(
         is_favorite,
         started_at,
         completed_at,
+        release_date,
     ): TrackingRow,
 ) -> TrackingResponse {
     TrackingResponse {
@@ -66,8 +72,197 @@ fn tracking_response(
         is_favorite,
         started_at,
         completed_at,
+        release_date,
     }
 }
+
+/// Accents people leave out when they type, and what they type instead, one
+/// character for one: "sarbatori" finds "Sărbători", "pokemon" finds
+/// "Pokémon". Both sides of the comparison are lowered first, so only
+/// lowercase letters are needed here.
+const FOLD_FROM: &str = "ăâîșşțţáàäãåéèêëíìïóòôöõőúùûüűñçčćšžýÿōū";
+const FOLD_TO: &str = "aaissttaaaaaeeeeiiioooooouuuuuncccszyyou";
+
+fn folded(expression: &str) -> String {
+    format!("translate(lower({expression}), '{FOLD_FROM}', '{FOLD_TO}')")
+}
+
+/// One user's library with every filter evaluated but none applied yet:
+/// the list keeps the rows that pass them all, and each facet counts with all
+/// but its own. That is what makes a facet's number the length of the list
+/// its choice would give.
+///
+/// The title search is applied here rather than counted around, so the
+/// facets describe what the search found. It looks at every name the title
+/// is known by — TMDB's, the original, translations, alternatives — because
+/// the list shows the English title and the person may remember another.
+///
+/// Anime is Animation (TMDB genre 16) made in Japanese. TMDB has no genre for
+/// it, and the country is not stored for films; see the
+/// `media_original_language` migration.
+///
+/// Binds: $1 user, $2 status, $3 media type, $4 genre id, $5 anime only,
+/// $6 favourite, $7 title search.
+fn library_cte() -> String {
+    let needle = folded("$7");
+    let title = folded("names.title");
+    format!(
+        r#"WITH library AS (
+            SELECT
+                um.id, um.media_id, m.tmdb_id, m.media_type, m.title, m.poster_path,
+                um.status, um.rating, um.review, um.is_favorite, um.started_at,
+                um.completed_at, m.release_date, um.updated_at, um.created_at, m.genres,
+                COALESCE(
+                    m.genres @> '[{{"id": 16}}]' AND m.original_language = 'ja',
+                    FALSE
+                ) AS is_anime
+            FROM user_media um
+            JOIN media m ON m.id = um.media_id
+            WHERE um.user_id = $1
+              AND ($7::text IS NULL OR EXISTS (
+                  SELECT 1
+                  FROM (
+                      SELECT m.title
+                      UNION ALL SELECT m.original_title
+                      UNION ALL
+                      SELECT aliases.title
+                      FROM media_title_aliases aliases
+                      WHERE aliases.media_id = m.id
+                      UNION ALL
+                      SELECT localized.title
+                      FROM media_localizations localized
+                      WHERE localized.media_id = m.id
+                  ) names (title)
+                  WHERE strpos({title}, {needle}) > 0
+              ))
+        ), matched AS (
+            SELECT
+                library.*,
+                ($2::text IS NULL OR status = $2) AS status_matches,
+                ($3::text IS NULL OR media_type = $3) AS type_matches,
+                CASE
+                    WHEN $5::bool THEN is_anime
+                    WHEN $4::int IS NULL THEN TRUE
+                    ELSE COALESCE(
+                        genres @> jsonb_build_array(jsonb_build_object('id', $4::int)),
+                        FALSE
+                    )
+                END AS genre_matches,
+                ($6::bool IS NULL OR is_favorite = $6) AS favorite_matches
+            FROM library
+        )"#
+    )
+}
+
+/// The filters as the queries bind them.
+struct LibraryFilter {
+    status: Option<String>,
+    media_type: Option<String>,
+    genre_id: Option<i32>,
+    anime: bool,
+    favorite: Option<bool>,
+    title: Option<String>,
+}
+
+impl LibraryFilter {
+    fn new(params: &TrackingQueryParams) -> Self {
+        let genre = params.genre.as_deref();
+        Self {
+            status: params.status.clone(),
+            media_type: params.media_type.clone(),
+            genre_id: genre.and_then(|genre| genre.parse().ok()),
+            anime: genre == Some("anime"),
+            favorite: params.favorite,
+            title: params
+                .q
+                .as_deref()
+                .map(str::trim)
+                .filter(|q| !q.is_empty())
+                .map(str::to_string),
+        }
+    }
+
+    fn bind<'q, O>(
+        &'q self,
+        query: sqlx::query::QueryAs<'q, Postgres, O, sqlx::postgres::PgArguments>,
+        user_id: Uuid,
+    ) -> sqlx::query::QueryAs<'q, Postgres, O, sqlx::postgres::PgArguments> {
+        query
+            .bind(user_id)
+            .bind(self.status.as_deref())
+            .bind(self.media_type.as_deref())
+            .bind(self.genre_id)
+            .bind(self.anime)
+            .bind(self.favorite)
+            .bind(self.title.as_deref())
+    }
+}
+
+/// Every order ends on the entry id, so a page boundary never falls between
+/// two rows that compare equal and shows one of them twice.
+fn library_order(sort: Option<&str>) -> &'static str {
+    match sort {
+        Some("added") => "created_at DESC, id DESC",
+        Some("title") => "lower(title), id",
+        Some("rating") => "rating DESC NULLS LAST, updated_at DESC, id DESC",
+        Some("release") => "release_date DESC NULLS LAST, id DESC",
+        _ => "updated_at DESC, id DESC",
+    }
+}
+
+/// The list in each order `VALID_TRACKING_SORTS` names, in that order. Built
+/// once from constant pieces: nothing a request sends ends up in the text.
+static LIST_SQL: LazyLock<Vec<String>> = LazyLock::new(|| {
+    VALID_TRACKING_SORTS
+        .iter()
+        .map(|sort| {
+            format!(
+                r#"{}
+        SELECT id, media_id, tmdb_id, media_type, title, poster_path, status, rating,
+               review, is_favorite, started_at, completed_at, release_date
+        FROM matched
+        WHERE status_matches AND type_matches AND genre_matches AND favorite_matches
+        ORDER BY {}
+        LIMIT $8 OFFSET $9"#,
+                library_cte(),
+                library_order(Some(sort)),
+            )
+        })
+        .collect()
+});
+
+/// Each facet counts the rows that pass every filter but its own.
+static FACETS_SQL: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        r#"{}
+        SELECT 'status', status, NULL, COUNT(*)
+        FROM matched WHERE type_matches AND genre_matches AND favorite_matches
+        GROUP BY status
+        UNION ALL
+        SELECT 'media_type', media_type, NULL, COUNT(*)
+        FROM matched WHERE status_matches AND genre_matches AND favorite_matches
+        GROUP BY media_type
+        UNION ALL
+        SELECT 'genre', genre->>'id', MAX(genre->>'name'), COUNT(*)
+        FROM matched
+        CROSS JOIN LATERAL jsonb_array_elements(
+            CASE WHEN jsonb_typeof(genres) = 'array' THEN genres ELSE '[]'::jsonb END
+        ) genre
+        WHERE status_matches AND type_matches AND favorite_matches
+        GROUP BY genre->>'id'
+        UNION ALL
+        SELECT 'anime', NULL, NULL, COUNT(*) FILTER (WHERE is_anime)
+        FROM matched WHERE status_matches AND type_matches AND favorite_matches
+        UNION ALL
+        SELECT 'favorite', NULL, NULL, COUNT(*) FILTER (WHERE is_favorite)
+        FROM matched WHERE status_matches AND type_matches AND genre_matches
+        UNION ALL
+        SELECT 'total', NULL, NULL, COUNT(*)
+        FROM matched
+        WHERE status_matches AND type_matches AND genre_matches AND favorite_matches"#,
+        library_cte(),
+    )
+});
 
 async fn list_tracking(
     pool: web::Data<PgPool>,
@@ -79,39 +274,97 @@ async fn list_tracking(
     let params = query.into_inner();
     let limit = params.limit.unwrap_or(50).min(100) as i64;
     let offset = ((params.page.unwrap_or(1).max(1) - 1) as i64) * limit;
+    let filter = LibraryFilter::new(&params);
 
-    let rows = if let Some(status) = params.status {
-        sqlx::query_as::<_, TrackingRow>(
-            r#"SELECT um.id, um.media_id, m.tmdb_id, m.media_type, m.title, m.poster_path, um.status, um.rating, um.review, um.is_favorite, um.started_at, um.completed_at
-            FROM user_media um JOIN media m ON um.media_id = m.id
-            WHERE um.user_id = $1 AND um.status = $2
-            ORDER BY um.updated_at DESC
-            LIMIT $3 OFFSET $4"#
-        )
-        .bind(user_id)
-        .bind(status)
+    // Validation has already refused any other sort; the default is first.
+    let order = VALID_TRACKING_SORTS
+        .iter()
+        .position(|sort| Some(*sort) == params.sort.as_deref())
+        .unwrap_or(0);
+    let sql = LIST_SQL[order].as_str();
+    let rows = filter
+        .bind(sqlx::query_as::<_, TrackingRow>(sql), user_id)
         .bind(limit)
         .bind(offset)
         .fetch_all(pool.get_ref())
-        .await?
-    } else {
-        sqlx::query_as::<_, TrackingRow>(
-            r#"SELECT um.id, um.media_id, m.tmdb_id, m.media_type, m.title, m.poster_path, um.status, um.rating, um.review, um.is_favorite, um.started_at, um.completed_at
-            FROM user_media um JOIN media m ON um.media_id = m.id
-            WHERE um.user_id = $1
-            ORDER BY um.updated_at DESC
-            LIMIT $2 OFFSET $3"#
-        )
-        .bind(user_id)
-        .bind(limit)
-        .bind(offset)
-        .fetch_all(pool.get_ref())
-        .await?
-    };
+        .await?;
 
     let response: Vec<TrackingResponse> = rows.into_iter().map(tracking_response).collect();
 
     Ok(HttpResponse::Ok().json(response))
+}
+
+async fn tracking_facets(
+    pool: web::Data<PgPool>,
+    req: HttpRequest,
+    query: web::Query<TrackingQueryParams>,
+) -> Result<HttpResponse, AppError> {
+    let user_id = require_auth(&req).await?;
+    query.validate()?;
+    let params = query.into_inner();
+    let filter = LibraryFilter::new(&params);
+    let language = match params.language.as_deref() {
+        Some(language) if language.to_ascii_lowercase().starts_with("ro") => Language::Ro,
+        _ => Language::En,
+    };
+
+    let rows = filter
+        .bind(
+            sqlx::query_as::<_, (String, Option<String>, Option<String>, i64)>(FACETS_SQL.as_str()),
+            user_id,
+        )
+        .fetch_all(pool.get_ref())
+        .await?;
+
+    Ok(HttpResponse::Ok().json(facets_from_rows(rows, language)))
+}
+
+fn facets_from_rows(
+    rows: Vec<(String, Option<String>, Option<String>, i64)>,
+    language: Language,
+) -> TrackingFacets {
+    let mut facets = TrackingFacets {
+        total: 0,
+        statuses: Default::default(),
+        media_types: Default::default(),
+        genres: Vec::new(),
+        anime: 0,
+        favorites: 0,
+    };
+    for (facet, key, stored_name, count) in rows {
+        match (facet.as_str(), key) {
+            ("status", Some(status)) => {
+                facets.statuses.insert(status, count);
+            }
+            ("media_type", Some(media_type)) => {
+                facets.media_types.insert(media_type, count);
+            }
+            ("genre", Some(id)) => {
+                let Ok(id) = id.parse::<i32>() else { continue };
+                // TMDB's name is English whatever the reader's language, and
+                // the hub table has both. A genre TMDB adds later keeps its
+                // own name until the table learns it.
+                let name = genre_by_id(id)
+                    .map(|genre| genre.name(language).to_string())
+                    .or(stored_name)
+                    .filter(|name| !name.trim().is_empty());
+                if let Some(name) = name {
+                    facets.genres.push(GenreFacet { id, name, count });
+                }
+            }
+            ("anime", _) => facets.anime = count,
+            ("favorite", _) => facets.favorites = count,
+            ("total", _) => facets.total = count,
+            _ => {}
+        }
+    }
+    facets.genres.sort_by(|left, right| {
+        right
+            .count
+            .cmp(&left.count)
+            .then_with(|| left.name.cmp(&right.name))
+    });
+    facets
 }
 
 async fn lookup_tracking(
@@ -141,7 +394,8 @@ async fn lookup_tracking(
             FROM UNNEST($2::integer[], $3::text[]) AS item(tmdb_id, media_type)
         )
         SELECT um.id, um.media_id, m.tmdb_id, m.media_type, m.title, m.poster_path,
-               um.status, um.rating, um.review, um.is_favorite, um.started_at, um.completed_at
+               um.status, um.rating, um.review, um.is_favorite, um.started_at, um.completed_at,
+               m.release_date
         FROM requested item
         JOIN media m ON m.tmdb_id = item.tmdb_id AND m.media_type = item.media_type
         JOIN user_media um ON um.media_id = m.id AND um.user_id = $1"#,
@@ -247,6 +501,7 @@ async fn create_tracking(
         is_favorite: user_media.is_favorite,
         started_at: user_media.started_at,
         completed_at: user_media.completed_at,
+        release_date: media.release_date,
     }))
 }
 
@@ -357,6 +612,7 @@ async fn update_tracking(
         is_favorite: updated.is_favorite,
         started_at: updated.started_at,
         completed_at: updated.completed_at,
+        release_date: media.release_date,
     }))
 }
 
@@ -511,4 +767,108 @@ async fn delete_tracking(
     tx.commit().await?;
 
     Ok(HttpResponse::Ok().json(serde_json::json!({"message": "Deleted successfully"})))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_folded_letter_has_its_replacement() {
+        // translate() drops a letter with no counterpart instead of keeping
+        // it, so one missing character would quietly change what matches.
+        assert_eq!(FOLD_FROM.chars().count(), FOLD_TO.chars().count());
+        assert!(FOLD_TO.chars().all(|letter| letter.is_ascii_lowercase()));
+    }
+
+    #[test]
+    fn every_sort_the_api_accepts_has_its_own_order() {
+        let orders = VALID_TRACKING_SORTS
+            .iter()
+            .map(|sort| library_order(Some(sort)))
+            .collect::<HashSet<_>>();
+        assert_eq!(orders.len(), VALID_TRACKING_SORTS.len());
+        assert_eq!(library_order(None), library_order(Some("updated")));
+        for order in orders {
+            assert!(
+                order.ends_with("id") || order.ends_with("id DESC"),
+                "{order}"
+            );
+        }
+    }
+
+    #[test]
+    fn facets_name_genres_in_the_readers_language_most_common_first() {
+        let rows = vec![
+            ("status".to_string(), Some("completed".to_string()), None, 3),
+            ("media_type".to_string(), Some("tv".to_string()), None, 4),
+            (
+                "genre".to_string(),
+                Some("18".to_string()),
+                Some("Drama".to_string()),
+                2,
+            ),
+            (
+                "genre".to_string(),
+                Some("16".to_string()),
+                Some("Animation".to_string()),
+                4,
+            ),
+            // Not in the hub table: TMDB's own name is all there is.
+            (
+                "genre".to_string(),
+                Some("99999".to_string()),
+                Some("Newgenre".to_string()),
+                1,
+            ),
+            (
+                "genre".to_string(),
+                Some("not a number".to_string()),
+                None,
+                9,
+            ),
+            ("anime".to_string(), None, None, 2),
+            ("favorite".to_string(), None, None, 1),
+            ("total".to_string(), None, None, 4),
+        ];
+        let facets = facets_from_rows(rows, Language::Ro);
+        assert_eq!(facets.total, 4);
+        assert_eq!(facets.anime, 2);
+        assert_eq!(facets.favorites, 1);
+        assert_eq!(facets.statuses.get("completed"), Some(&3));
+        assert_eq!(facets.media_types.get("tv"), Some(&4));
+        let genres = facets
+            .genres
+            .iter()
+            .map(|genre| (genre.id, genre.name.as_str(), genre.count))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            genres,
+            vec![
+                (16, "Animație", 4),
+                (18, "Dramă", 2),
+                (99999, "Newgenre", 1)
+            ]
+        );
+    }
+
+    #[test]
+    fn only_a_non_empty_search_filters() {
+        for q in [None, Some(""), Some("   ")] {
+            let params = TrackingQueryParams {
+                q: q.map(str::to_string),
+                ..Default::default()
+            };
+            assert_eq!(LibraryFilter::new(&params).title, None, "{q:?}");
+        }
+        let params = TrackingQueryParams {
+            q: Some("  naruto ".to_string()),
+            genre: Some("anime".to_string()),
+            ..Default::default()
+        };
+        let filter = LibraryFilter::new(&params);
+        assert_eq!(filter.title.as_deref(), Some("naruto"));
+        assert!(filter.anime);
+        assert_eq!(filter.genre_id, None);
+    }
 }
