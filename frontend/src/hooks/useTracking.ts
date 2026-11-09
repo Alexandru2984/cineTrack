@@ -6,6 +6,7 @@ import {
   useQueryClient,
 } from '@tanstack/react-query';
 import api from '@/lib/api';
+import { localDateStamp, saveFile } from '@/lib/download';
 import type {
   BulkWatchResponse,
   SeasonWatchProgress,
@@ -111,6 +112,19 @@ export function useTrackingInfinite(filters: LibraryFilters = {}) {
     // Keep the old list on screen while a new filter loads, instead of
     // flashing a spinner on every keystroke.
     placeholderData: keepPreviousData,
+  });
+}
+
+/** Download the library as CSV, filtered and ordered as given. */
+export function useExportLibrary() {
+  return useMutation({
+    mutationFn: async ({ filters, language }: { filters: LibraryFilters; language: string }) => {
+      const res = await api.get<Blob>('/tracking/export', {
+        params: { ...libraryParams(filters), language },
+        responseType: 'blob',
+      });
+      saveFile(res.data, `vazute-library-${localDateStamp()}.csv`);
+    },
   });
 }
 

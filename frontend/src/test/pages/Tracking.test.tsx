@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   fetchNextPage: vi.fn(),
   listFilters: vi.fn(),
   facetFilters: vi.fn(),
+  exportLibrary: vi.fn(),
 }));
 
 vi.mock('@/hooks/useTracking', () => ({
@@ -64,6 +65,7 @@ vi.mock('@/hooks/useTracking', () => ({
     error: null,
   }),
   useDeleteTracking: () => ({ mutate: mocks.remove }),
+  useExportLibrary: () => ({ mutate: mocks.exportLibrary, isPending: false, isError: false }),
 }));
 
 describe('Tracking rating and review editor', () => {
@@ -186,6 +188,17 @@ describe('Tracking filters', () => {
     // The status tab and the order are where the person is, not filters.
     expect(screen.getByLabelText('address')).toHaveTextContent('?status=completed&sort=rating');
     expect(screen.queryByRole('button', { name: 'Clear filters' })).not.toBeInTheDocument();
+  });
+
+  it('exports the list as it is filtered and ordered', async () => {
+    const user = userEvent.setup();
+    renderAt('?status=completed&genre=anime&sort=title');
+
+    await user.click(screen.getByRole('button', { name: 'Export CSV' }));
+    expect(mocks.exportLibrary).toHaveBeenCalledWith({
+      filters: { status: 'completed', genre: 'anime', sort: 'title' },
+      language: 'en',
+    });
   });
 
   it('searches once typing pauses', async () => {
