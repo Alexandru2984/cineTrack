@@ -626,6 +626,18 @@ test('edits library feedback on a narrow screen', async ({ page }) => {
     trackingListUrl = route.request().url();
     return route.fulfill({ json: [trackedTitle] });
   });
+  await page.route('**/api/tracking/facets**', (route) =>
+    route.fulfill({
+      json: {
+        total: 1,
+        statuses: { completed: 1 },
+        media_types: { movie: 1 },
+        genres: [{ id: 878, name: 'Science Fiction & Fantasy Adventures', count: 1 }],
+        anime: 0,
+        favorites: 0,
+      },
+    })
+  );
   let updatePayload: unknown;
   await page.route(`**/api/tracking/${trackedTitle.id}`, async (route) => {
     updatePayload = route.request().postDataJSON();

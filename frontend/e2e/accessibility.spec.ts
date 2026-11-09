@@ -145,6 +145,11 @@ async function stubAuthenticatedApp(page: Page) {
     }
     // The rest of the payloads a page reads fields from. Each one, left to the
     // fallback, threw on its first field and put the error screen in its place.
+    if (path === '/api/tracking/facets') {
+      return route.fulfill({
+        json: { total: 0, statuses: {}, media_types: {}, genres: [], anime: 0, favorites: 0 },
+      });
+    }
     if (path === '/api/badges') {
       return route.fulfill({ json: { earned: [], progress: [] } });
     }

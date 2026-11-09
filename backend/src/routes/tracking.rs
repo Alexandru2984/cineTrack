@@ -340,12 +340,16 @@ async fn tracking_facets(
         .fetch_all(pool.get_ref())
         .await?;
 
-    Ok(HttpResponse::Ok().json(facets_from_rows(rows, language)))
+    Ok(HttpResponse::Ok().json(facets_from_rows(rows, language, filter.genre_id)))
 }
 
+/// `selected` is the genre the list is filtered by. It is kept with a count of
+/// zero when the other filters leave nothing in it, so the control showing
+/// the choice still has it to show.
 fn facets_from_rows(
     rows: Vec<(String, Option<String>, Option<String>, i64)>,
     language: Language,
+    selected: Option<i32>,
 ) -> TrackingFacets {
     let mut facets = TrackingFacets {
         total: 0,
@@ -381,6 +385,16 @@ fn facets_from_rows(
             ("total", _) => facets.total = count,
             _ => {}
         }
+    }
+    if let Some(genre) = selected
+        .filter(|id| !facets.genres.iter().any(|genre| genre.id == *id))
+        .and_then(genre_by_id)
+    {
+        facets.genres.push(GenreFacet {
+            id: genre.id,
+            name: genre.name(language).to_string(),
+            count: 0,
+        });
     }
     facets.genres.sort_by(|left, right| {
         right
@@ -863,7 +877,7 @@ mod tests {
             ("favorite".to_string(), None, None, 1),
             ("total".to_string(), None, None, 4),
         ];
-        let facets = facets_from_rows(rows, Language::Ro);
+        let facets = facets_from_rows(rows, Language::Ro, None);
         assert_eq!(facets.total, 4);
         assert_eq!(facets.anime, 2);
         assert_eq!(facets.favorites, 1);
@@ -881,6 +895,37 @@ mod tests {
                 (18, "Dramă", 2),
                 (99999, "Newgenre", 1)
             ]
+        );
+    }
+
+    #[test]
+    fn the_chosen_genre_stays_listed_when_nothing_is_left_in_it() {
+        let rows = vec![(
+            "genre".to_string(),
+            Some("18".to_string()),
+            Some("Drama".to_string()),
+            2,
+        )];
+        let facets = facets_from_rows(rows.clone(), Language::En, Some(16));
+        let genres = facets
+            .genres
+            .iter()
+            .map(|genre| (genre.id, genre.name.as_str(), genre.count))
+            .collect::<Vec<_>>();
+        assert_eq!(genres, vec![(18, "Drama", 2), (16, "Animation", 0)]);
+        // Already listed: not twice.
+        assert_eq!(
+            facets_from_rows(rows.clone(), Language::En, Some(18))
+                .genres
+                .len(),
+            1
+        );
+        // Unknown to the hub table: there is no name to show it by.
+        assert_eq!(
+            facets_from_rows(rows, Language::En, Some(424242))
+                .genres
+                .len(),
+            1
         );
     }
 
