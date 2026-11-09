@@ -53,6 +53,9 @@ export interface RawRequestOptions {
   headers?: Record<string, string>;
   signal?: AbortSignal;
   timeoutMs?: number;
+  /** `text` returns a successful body as it came, for a file such as a CSV.
+   *  An error body is still read as JSON for its message. */
+  responseType?: 'json' | 'text';
 }
 
 interface RawMultipartRequestOptions {
@@ -87,6 +90,7 @@ async function request<T>(
   init: RequestInit,
   callerSignal: AbortSignal | undefined,
   timeoutMs: number,
+  responseType: 'json' | 'text' = 'json',
 ): Promise<T> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -100,6 +104,7 @@ async function request<T>(
       signal: controller.signal,
     });
     const text = await response.text();
+    if (response.ok && responseType === 'text') return text as T;
     let payload: unknown = undefined;
     if (text) {
       try {
@@ -148,7 +153,7 @@ export function rawRequest<T>(
     {
       method: options.method ?? 'GET',
       headers: {
-        Accept: 'application/json',
+        Accept: options.responseType === 'text' ? '*/*' : 'application/json',
         ...(options.body === undefined ? {} : { 'Content-Type': 'application/json' }),
         ...options.headers,
       },
@@ -159,6 +164,7 @@ export function rawRequest<T>(
       MAX_REQUEST_TIMEOUT_MS,
       Math.max(1_000, options.timeoutMs ?? REQUEST_TIMEOUT_MS),
     ),
+    options.responseType,
   );
 }
 

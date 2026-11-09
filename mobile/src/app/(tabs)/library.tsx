@@ -34,6 +34,7 @@ import { EmptyState, ErrorState, LoadingState } from '@/components/screen-state'
 import { SegmentedControl } from '@/components/segmented-control';
 import { TrackingFeedbackSheet } from '@/components/tracking-feedback-sheet';
 import { radius, spacing } from '@/constants/theme';
+import { useExportLibrary } from '@/hooks/use-library-export';
 import {
   useDeleteTracking,
   useTrackingFacets,
@@ -145,6 +146,7 @@ export default function LibraryScreen() {
   const facets = useTrackingFacets(filters, locale);
   const update = useUpdateTracking();
   const remove = useDeleteTracking();
+  const exportLibrary = useExportLibrary();
   const mutationError = update.error || remove.error;
   const items = tracking.data?.pages.flatMap((page) => page) ?? [];
 
@@ -447,7 +449,15 @@ export default function LibraryScreen() {
           clearFilters();
           router.setParams({ sort: undefined });
         }}
-        onClose={() => setFiltersOpen(false)}
+        onClose={() => {
+          setFiltersOpen(false);
+          exportLibrary.reset();
+        }}
+        onExport={() => exportLibrary.mutate({ filters, language: locale })}
+        exporting={exportLibrary.isPending}
+        exportError={
+          exportLibrary.error ? getErrorMessage(exportLibrary.error, t('library.exportError')) : null
+        }
       />
       {feedbackItem ? (
         <TrackingFeedbackSheet
