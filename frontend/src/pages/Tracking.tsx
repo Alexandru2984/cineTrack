@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import {
+  useExportLibrary,
   useTrackingInfinite,
   useTrackingFacets,
   useUpdateTracking,
@@ -9,7 +10,7 @@ import {
 } from '@/hooks/useTracking';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
 import { getPosterUrl, STATUS_COLORS } from '@/lib/utils';
-import { Loader2, Star, Trash2, Heart, ListPlus, Search, X } from 'lucide-react';
+import { Download, Loader2, Star, Trash2, Heart, ListPlus, Search, X } from 'lucide-react';
 import { Link, useSearchParams } from 'react-router';
 import { TrackingFeedbackDialog } from '@/components/TrackingFeedbackDialog';
 import { getApiErrorMessage } from '@/lib/api';
@@ -68,6 +69,7 @@ export default function TrackingPage() {
   const items = tracking.data?.pages.flatMap((page) => page) ?? [];
   const updateTracking = useUpdateTracking();
   const deleteTracking = useDeleteTracking();
+  const exportLibrary = useExportLibrary();
   const tab = filters.status ?? 'all';
   const narrowed = Boolean(filters.mediaType || filters.genre || filters.favorite || filters.q);
 
@@ -100,14 +102,34 @@ export default function TrackingPage() {
     <div className="mx-auto max-w-7xl space-y-6 px-4 py-6 sm:py-8">
       <div className="flex items-center justify-between gap-4">
         <h1 className="text-2xl font-bold sm:text-3xl">{t('nav.myList')}</h1>
-        <Link
-          to="/lists"
-          className="flex h-10 shrink-0 items-center gap-2 rounded-md border border-[hsl(var(--border))] px-3 text-sm font-medium"
-        >
-          <ListPlus className="h-4 w-4" aria-hidden="true" />
-          {t('tracking.customLists')}
-        </Link>
+        <div className="flex shrink-0 gap-2">
+          {/* What is on screen, filters and order included. */}
+          <button
+            type="button"
+            disabled={exportLibrary.isPending}
+            onClick={() => exportLibrary.mutate({ filters, language: locale })}
+            title={t('tracking.exportCsvHint')}
+            className="flex h-10 items-center gap-2 rounded-md border border-[hsl(var(--border))] px-3 text-sm font-medium disabled:opacity-50"
+          >
+            {exportLibrary.isPending
+              ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+              : <Download className="h-4 w-4" aria-hidden="true" />}
+            <span className="sr-only sm:not-sr-only">{t('tracking.exportCsv')}</span>
+          </button>
+          <Link
+            to="/lists"
+            className="flex h-10 items-center gap-2 rounded-md border border-[hsl(var(--border))] px-3 text-sm font-medium"
+          >
+            <ListPlus className="h-4 w-4" aria-hidden="true" />
+            {t('tracking.customLists')}
+          </Link>
+        </div>
       </div>
+      {exportLibrary.isError && (
+        <p role="alert" className="text-sm text-[hsl(var(--destructive))]">
+          {t('tracking.exportError')}
+        </p>
+      )}
 
       {/* Tabs */}
       <div

@@ -4283,6 +4283,68 @@ async fn library_filters_sorts_and_facets_describe_the_same_list() {
     )
     .await;
     assert_eq!(resp.status(), 401);
+
+    // The export is the same list: same filters, same order, every row.
+    sqlx::query(
+        r#"INSERT INTO watch_history (user_id, media_id, episode_id)
+        SELECT $1, m.id, NULL::uuid FROM media m WHERE m.tmdb_id = 881001
+        UNION ALL
+        SELECT $1, m.id, NULL::uuid FROM media m WHERE m.tmdb_id = 881001"#,
+    )
+    .bind(user_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let resp = actix_test::call_service(
+        &app,
+        get("/api/tracking/export?genre=16&sort=title&language=ro".into()),
+    )
+    .await;
+    assert_eq!(resp.status(), 200);
+    assert_eq!(
+        resp.headers().get("content-type").unwrap(),
+        "text/csv; charset=utf-8"
+    );
+    assert!(resp
+        .headers()
+        .get("content-disposition")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .starts_with("attachment; filename=\"vazute-library-"));
+    assert_eq!(resp.headers().get("cache-control").unwrap(), "no-store");
+    let body = actix_test::read_body(resp).await;
+    let body = std::str::from_utf8(&body).unwrap();
+    assert!(body.starts_with('\u{feff}'));
+    let lines = body
+        .trim_start_matches('\u{feff}')
+        .trim_end()
+        .split("\r\n")
+        .collect::<Vec<_>>();
+    assert_eq!(lines.len(), 4, "{body}");
+    assert!(lines[0].starts_with("tmdb_id,type,title,original_title,year"));
+    assert!(lines[1].starts_with("881003,tv,Arcane,,2021,2021-11-06,completed,10,no"));
+    assert!(lines[2].starts_with("881001,movie,Jujutsu Kaisen 0,呪術廻戦 0,2021,"));
+    assert!(
+        lines[2].contains(",yes,,,,2,Animație; Acțiune,"),
+        "{}",
+        lines[2]
+    );
+    assert!(lines[3].starts_with("881002,tv,Naruto,"));
+    assert!(lines[3].contains(",0,,Animație; "), "{}", lines[3]);
+
+    let resp =
+        actix_test::call_service(&app, get("/api/tracking/export?sort=popularity".into())).await;
+    assert_eq!(resp.status(), 400);
+    let resp = actix_test::call_service(
+        &app,
+        actix_test::TestRequest::get()
+            .uri("/api/tracking/export")
+            .peer_addr(peer_addr())
+            .to_request(),
+    )
+    .await;
+    assert_eq!(resp.status(), 401);
 }
 
 #[actix_web::test]
