@@ -83,8 +83,29 @@ fn tracking_response(
 const FOLD_FROM: &str = "ăâîșşțţáàäãåéèêëíìïóòôöõőúùûüűñçčćšžýÿōū";
 const FOLD_TO: &str = "aaissttaaaaaeeeeiiioooooouuuuuncccszyyou";
 
-fn folded(expression: &str) -> String {
-    format!("translate(lower({expression}), '{FOLD_FROM}', '{FOLD_TO}')")
+/// The search as the SQL compares it: folded here once, not per name.
+fn fold(text: &str) -> String {
+    text.to_lowercase()
+        .chars()
+        .map(|letter| {
+            FOLD_FROM
+                .chars()
+                .position(|accented| accented == letter)
+                .and_then(|index| FOLD_TO.chars().nth(index))
+                .unwrap_or(letter)
+        })
+        .collect()
+}
+
+/// A name, folded the way `fold` folds the search. translate() is most of
+/// the search's cost, and most titles are plain ASCII, which only needs
+/// lowering: one byte per character says so without looking further.
+fn folded_name(expression: &str) -> String {
+    format!(
+        "CASE WHEN octet_length({expression}) = char_length({expression}) \
+         THEN lower({expression}) \
+         ELSE translate(lower({expression}), '{FOLD_FROM}', '{FOLD_TO}') END"
+    )
 }
 
 /// One user's library with every filter evaluated but none applied yet:
@@ -93,19 +114,22 @@ fn folded(expression: &str) -> String {
 /// its choice would give.
 ///
 /// The title search is applied here rather than counted around, so the
-/// facets describe what the search found. It looks at every name the title
-/// is known by — TMDB's, the original, translations, alternatives — because
-/// the list shows the English title and the person may remember another.
+/// facets describe what the search found. The list shows TMDB's English
+/// title and the person may remember another, so it also reads the original
+/// title, the Romanian and English translations, and the alternative titles
+/// used in Romania, the US, the UK and Japan (romanised anime names are filed
+/// under Japan). Every alias would be ~35,000 names for a 900-title library
+/// and 900 ms a search, nearly all of them in scripts nobody types here; these
+/// are about a third of that, and 90 ms.
 ///
 /// Anime is Animation (TMDB genre 16) made in Japanese. TMDB has no genre for
 /// it, and the country is not stored for films; see the
 /// `media_original_language` migration.
 ///
 /// Binds: $1 user, $2 status, $3 media type, $4 genre id, $5 anime only,
-/// $6 favourite, $7 title search.
+/// $6 favourite, $7 title search, already folded.
 fn library_cte() -> String {
-    let needle = folded("$7");
-    let title = folded("names.title");
+    let name = folded_name("names.title");
     format!(
         r#"WITH library AS (
             SELECT
@@ -128,12 +152,12 @@ fn library_cte() -> String {
                       SELECT aliases.title
                       FROM media_title_aliases aliases
                       WHERE aliases.media_id = m.id
-                      UNION ALL
-                      SELECT localized.title
-                      FROM media_localizations localized
-                      WHERE localized.media_id = m.id
+                        AND (
+                            (aliases.kind = 'translation' AND aliases.language_code IN ('ro', 'en'))
+                            OR (aliases.kind = 'alternative' AND aliases.region_code IN ('RO', 'US', 'GB', 'JP'))
+                        )
                   ) names (title)
-                  WHERE strpos({title}, {needle}) > 0
+                  WHERE strpos({name}, $7) > 0
               ))
         ), matched AS (
             SELECT
@@ -178,7 +202,7 @@ impl LibraryFilter {
                 .as_deref()
                 .map(str::trim)
                 .filter(|q| !q.is_empty())
-                .map(str::to_string),
+                .map(fold),
         }
     }
 
@@ -782,6 +806,14 @@ mod tests {
     }
 
     #[test]
+    fn a_search_is_folded_the_way_names_are() {
+        assert_eq!(fold("Sărbători ȘI Pokémon"), "sarbatori si pokemon");
+        assert_eq!(fold("SHŌGUN"), "shogun");
+        // Scripts without a plain-letter spelling are left as they are.
+        assert_eq!(fold("呪術廻戦"), "呪術廻戦");
+    }
+
+    #[test]
     fn every_sort_the_api_accepts_has_its_own_order() {
         let orders = VALID_TRACKING_SORTS
             .iter()
@@ -868,6 +900,14 @@ mod tests {
         };
         let filter = LibraryFilter::new(&params);
         assert_eq!(filter.title.as_deref(), Some("naruto"));
+        let params = TrackingQueryParams {
+            q: Some(" Sărbători ".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(
+            LibraryFilter::new(&params).title.as_deref(),
+            Some("sarbatori")
+        );
         assert!(filter.anime);
         assert_eq!(filter.genre_id, None);
     }
