@@ -487,6 +487,7 @@ async fn main() -> std::io::Result<()> {
             match cinetrack::services::storage::StorageService::new(r2, &config.frontend_url) {
                 Ok(s) => {
                     log::info!("R2 object storage enabled (bucket configured)");
+                    cinetrack::routes::title_pages::serve_page_images_locally();
                     Some(s)
                 }
                 Err(e) => {
