@@ -43,18 +43,9 @@ AuditUnavailable = npm_audit.AuditUnavailable
 # accepted: metro dropped image-size in 0.84.5, and the last copy came from the
 # older metro the lockfile still carried for react-native's CLI plugin. So is
 # node-forge's GHSA-86w9-cpqp-85rv, accepted from 2026-10-02 until 1.4.1 fixed
-# it.
-ACCEPTED = {
-    # zod 3.25.76 is @expo/cli's own copy (@expo/cli/node_modules/zod), which
-    # validates the CLI's configuration on a developer machine or in EAS. The
-    # app imports the root zod, which is 4.6.7 and patched; the advisory has no
-    # fixed 3.x release. Its out-of-memory case needs an attacker-sized array,
-    # and the CLI only ever parses the project's own files. Reviewed 2026-10-25.
-    ("zod", "GHSA-mrhx-c7xc-m3w5"): (
-        "3.25.76|4.6.7",
-        "Expo CLI's copy validates project config at build time; app zod is patched",
-    ),
-}
+# it, and zod's GHSA-mrhx-c7xc-m3w5, accepted from 2026-10-25 for Expo CLI's
+# own zod 3 until the advisory sweep of 2026-11-08 moved it to a patched one.
+ACCEPTED: dict[tuple[str, str], tuple[str, str]] = {}
 
 
 def installed_version(package: str) -> str | None:
