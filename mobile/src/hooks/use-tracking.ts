@@ -90,7 +90,7 @@ export interface LibraryFilters {
   sort?: LibrarySort;
 }
 
-function libraryParams(filters: LibraryFilters) {
+export function libraryParams(filters: LibraryFilters) {
   return {
     status: filters.status,
     media_type: filters.mediaType,

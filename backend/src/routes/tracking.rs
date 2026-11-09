@@ -19,6 +19,7 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
         web::scope("/tracking")
             .route("", web::get().to(list_tracking))
             .route("/facets", web::get().to(tracking_facets))
+            .route("/export", web::get().to(export_tracking))
             .route("", web::post().to(create_tracking))
             .route("/lookup", web::post().to(lookup_tracking))
             .route("/{id}", web::patch().to(update_tracking))
@@ -133,7 +134,7 @@ fn library_cte() -> String {
     format!(
         r#"WITH library AS (
             SELECT
-                um.id, um.media_id, m.tmdb_id, m.media_type, m.title, m.poster_path,
+                um.id, um.media_id, m.tmdb_id, m.media_type, m.title, m.original_title, m.poster_path,
                 um.status, um.rating, um.review, um.is_favorite, um.started_at,
                 um.completed_at, m.release_date, um.updated_at, um.created_at, m.genres,
                 COALESCE(
@@ -288,6 +289,23 @@ static FACETS_SQL: LazyLock<String> = LazyLock::new(|| {
     )
 });
 
+/// Where the requested order sits in `VALID_TRACKING_SORTS`, and so in the
+/// statement lists built from it. Validation has already refused any other
+/// sort; the default is first.
+fn sort_index(params: &TrackingQueryParams) -> usize {
+    VALID_TRACKING_SORTS
+        .iter()
+        .position(|sort| Some(*sort) == params.sort.as_deref())
+        .unwrap_or(0)
+}
+
+fn genre_language(params: &TrackingQueryParams) -> Language {
+    match params.language.as_deref() {
+        Some(language) if language.to_ascii_lowercase().starts_with("ro") => Language::Ro,
+        _ => Language::En,
+    }
+}
+
 async fn list_tracking(
     pool: web::Data<PgPool>,
     req: HttpRequest,
@@ -300,12 +318,7 @@ async fn list_tracking(
     let offset = ((params.page.unwrap_or(1).max(1) - 1) as i64) * limit;
     let filter = LibraryFilter::new(&params);
 
-    // Validation has already refused any other sort; the default is first.
-    let order = VALID_TRACKING_SORTS
-        .iter()
-        .position(|sort| Some(*sort) == params.sort.as_deref())
-        .unwrap_or(0);
-    let sql = LIST_SQL[order].as_str();
+    let sql = LIST_SQL[sort_index(&params)].as_str();
     let rows = filter
         .bind(sqlx::query_as::<_, TrackingRow>(sql), user_id)
         .bind(limit)
@@ -327,10 +340,7 @@ async fn tracking_facets(
     query.validate()?;
     let params = query.into_inner();
     let filter = LibraryFilter::new(&params);
-    let language = match params.language.as_deref() {
-        Some(language) if language.to_ascii_lowercase().starts_with("ro") => Language::Ro,
-        _ => Language::En,
-    };
+    let language = genre_language(&params);
 
     let rows = filter
         .bind(
@@ -403,6 +413,197 @@ fn facets_from_rows(
             .then_with(|| left.name.cmp(&right.name))
     });
     facets
+}
+
+/// The library as a spreadsheet, in each order `VALID_TRACKING_SORTS` names.
+/// No page: the tracking quota bounds it at 10,000 rows, a few megabytes.
+static EXPORT_SQL: LazyLock<Vec<String>> = LazyLock::new(|| {
+    VALID_TRACKING_SORTS
+        .iter()
+        .map(|sort| {
+            format!(
+                r#"{}
+        SELECT tmdb_id, media_type, title, original_title, release_date, status, rating,
+               is_favorite, started_at, completed_at, genres, created_at, updated_at, review,
+               CASE WHEN media_type = 'tv' THEN (
+                   SELECT COUNT(DISTINCT watched.episode_id)
+                   FROM watch_history watched
+                   WHERE watched.user_id = $1
+                     AND watched.media_id = matched.media_id
+                     AND watched.episode_id IS NOT NULL
+               ) END AS episodes_watched,
+               CASE WHEN media_type = 'movie' THEN (
+                   SELECT COUNT(*)
+                   FROM watch_history watched
+                   WHERE watched.user_id = $1
+                     AND watched.media_id = matched.media_id
+                     AND watched.episode_id IS NULL
+               ) END AS times_watched
+        FROM matched
+        WHERE status_matches AND type_matches AND genre_matches AND favorite_matches
+        ORDER BY {}"#,
+                library_cte(),
+                library_order(Some(sort)),
+            )
+        })
+        .collect()
+});
+
+#[derive(sqlx::FromRow)]
+struct ExportRow {
+    tmdb_id: i32,
+    media_type: String,
+    title: String,
+    original_title: Option<String>,
+    release_date: Option<NaiveDate>,
+    status: String,
+    rating: Option<i16>,
+    is_favorite: bool,
+    started_at: Option<NaiveDate>,
+    completed_at: Option<NaiveDate>,
+    genres: Option<serde_json::Value>,
+    created_at: chrono::DateTime<Utc>,
+    updated_at: chrono::DateTime<Utc>,
+    review: Option<String>,
+    episodes_watched: Option<i64>,
+    times_watched: Option<i64>,
+}
+
+/// The library, filtered and ordered the way the list is, as CSV.
+///
+/// The same rows as the list a signed-in reader already sees, so the same
+/// authentication and nothing more: not the password the account export asks
+/// for, which also carries messages, sessions and security history.
+async fn export_tracking(
+    pool: web::Data<PgPool>,
+    req: HttpRequest,
+    query: web::Query<TrackingQueryParams>,
+) -> Result<HttpResponse, AppError> {
+    let user_id = require_auth(&req).await?;
+    query.validate()?;
+    let params = query.into_inner();
+    let filter = LibraryFilter::new(&params);
+    let rows = filter
+        .bind(
+            sqlx::query_as::<_, ExportRow>(EXPORT_SQL[sort_index(&params)].as_str()),
+            user_id,
+        )
+        .fetch_all(pool.get_ref())
+        .await?;
+    let body = library_csv(&rows, genre_language(&params))?;
+
+    Ok(HttpResponse::Ok()
+        .content_type("text/csv; charset=utf-8")
+        .insert_header(("Cache-Control", "no-store"))
+        .insert_header(("X-Content-Type-Options", "nosniff"))
+        .insert_header((
+            "Content-Disposition",
+            format!(
+                "attachment; filename=\"vazute-library-{}.csv\"",
+                Utc::now().format("%Y-%m-%d")
+            ),
+        ))
+        .body(body))
+}
+
+const EXPORT_HEADER: [&str; 17] = [
+    "tmdb_id",
+    "type",
+    "title",
+    "original_title",
+    "year",
+    "release_date",
+    "status",
+    "rating",
+    "favorite",
+    "started_at",
+    "completed_at",
+    "episodes_watched",
+    "times_watched",
+    "genres",
+    "added_at",
+    "updated_at",
+    "review",
+];
+
+/// Text a spreadsheet would run as a formula if it began a cell: `=`, `+`,
+/// `-`, `@`, and a tab or carriage return ahead of one. Titles come from TMDB
+/// and reviews from the reader, so neither is trusted to be inert; a leading
+/// apostrophe makes the cell plain text and is the usual guard.
+fn inert(text: &str) -> std::borrow::Cow<'_, str> {
+    if text.starts_with(['=', '+', '-', '@', '\t', '\r']) {
+        format!("'{text}").into()
+    } else {
+        text.into()
+    }
+}
+
+fn genre_names(genres: Option<&serde_json::Value>, language: Language) -> String {
+    let Some(serde_json::Value::Array(genres)) = genres else {
+        return String::new();
+    };
+    genres
+        .iter()
+        .filter_map(|genre| {
+            let known = genre
+                .get("id")
+                .and_then(serde_json::Value::as_i64)
+                .and_then(|id| i32::try_from(id).ok())
+                .and_then(genre_by_id)
+                .map(|genre| genre.name(language).to_string());
+            known.or_else(|| genre.get("name")?.as_str().map(str::to_string))
+        })
+        .filter(|name| !name.trim().is_empty())
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
+/// UTF-8 with a byte-order mark: without it Excel reads the file as the
+/// system code page and every ă and ș comes out wrong.
+fn library_csv(rows: &[ExportRow], language: Language) -> Result<Vec<u8>, AppError> {
+    let failed =
+        |error: csv::Error| AppError::InternalError(anyhow::anyhow!("library export: {error}"));
+    let mut writer = csv::WriterBuilder::new()
+        .terminator(csv::Terminator::CRLF)
+        .from_writer("\u{feff}".as_bytes().to_vec());
+    writer.write_record(EXPORT_HEADER).map_err(failed)?;
+    let date = |date: Option<NaiveDate>| date.map(|date| date.to_string()).unwrap_or_default();
+    let count = |count: Option<i64>| count.map(|count| count.to_string()).unwrap_or_default();
+    for row in rows {
+        let tmdb_kind = if row.media_type == "tv" {
+            "tv"
+        } else {
+            "movie"
+        };
+        writer
+            .write_record([
+                row.tmdb_id.to_string().as_str(),
+                tmdb_kind,
+                &inert(&row.title),
+                &inert(row.original_title.as_deref().unwrap_or_default()),
+                &row.release_date
+                    .map(|date| date.format("%Y").to_string())
+                    .unwrap_or_default(),
+                &date(row.release_date),
+                &row.status,
+                &row.rating
+                    .map(|rating| rating.to_string())
+                    .unwrap_or_default(),
+                if row.is_favorite { "yes" } else { "no" },
+                &date(row.started_at),
+                &date(row.completed_at),
+                &count(row.episodes_watched),
+                &count(row.times_watched),
+                &inert(&genre_names(row.genres.as_ref(), language)),
+                &row.created_at.to_rfc3339(),
+                &row.updated_at.to_rfc3339(),
+                &inert(row.review.as_deref().unwrap_or_default()),
+            ])
+            .map_err(failed)?;
+    }
+    writer
+        .into_inner()
+        .map_err(|error| AppError::InternalError(anyhow::anyhow!("library export: {error}")))
 }
 
 async fn lookup_tracking(
@@ -927,6 +1128,64 @@ mod tests {
                 .len(),
             1
         );
+    }
+
+    fn export_row(title: &str, review: Option<&str>) -> ExportRow {
+        ExportRow {
+            tmdb_id: 372058,
+            media_type: "movie".to_string(),
+            title: title.to_string(),
+            original_title: Some("君の名は。".to_string()),
+            release_date: NaiveDate::from_ymd_opt(2016, 8, 26),
+            status: "completed".to_string(),
+            rating: Some(9),
+            is_favorite: true,
+            started_at: None,
+            completed_at: NaiveDate::from_ymd_opt(2026, 1, 3),
+            genres: Some(serde_json::json!([
+                {"id": 16, "name": "Animation"},
+                {"id": 10749, "name": "Romance"},
+                {"id": 99999, "name": "Newgenre"}
+            ])),
+            created_at: "2026-01-01T10:00:00Z".parse().unwrap(),
+            updated_at: "2026-01-03T21:30:00Z".parse().unwrap(),
+            review: review.map(str::to_string),
+            episodes_watched: None,
+            times_watched: Some(2),
+        }
+    }
+
+    #[test]
+    fn the_export_opens_cleanly_in_a_spreadsheet() {
+        let rows = [
+            export_row("Your Name.", Some("Frumos, \"plâns\"\nde două ori")),
+            export_row(
+                "=HYPERLINK(\"https://example.com\")",
+                Some("-1 for the ending"),
+            ),
+        ];
+        let csv = String::from_utf8(library_csv(&rows, Language::Ro).unwrap()).unwrap();
+        assert!(csv.starts_with('\u{feff}'), "a byte-order mark for Excel");
+        let mut lines = csv.trim_start_matches('\u{feff}').split("\r\n");
+        assert_eq!(lines.next().unwrap(), EXPORT_HEADER.join(","));
+
+        let mut reader = csv::Reader::from_reader(csv.trim_start_matches('\u{feff}').as_bytes());
+        let records = reader.records().collect::<Result<Vec<_>, _>>().unwrap();
+        assert_eq!(records.len(), 2);
+        let first = &records[0];
+        assert_eq!(&first[0], "372058");
+        assert_eq!(&first[3], "君の名は。");
+        assert_eq!(&first[4], "2016");
+        assert_eq!(&first[8], "yes");
+        assert_eq!(&first[10], "2026-01-03");
+        assert_eq!(&first[11], "");
+        assert_eq!(&first[12], "2");
+        assert_eq!(&first[13], "Animație; Romantic; Newgenre");
+        assert_eq!(&first[14], "2026-01-01T10:00:00+00:00");
+        assert_eq!(&first[16], "Frumos, \"plâns\"\nde două ori");
+        // Nothing a spreadsheet would run.
+        assert_eq!(&records[1][2], "'=HYPERLINK(\"https://example.com\")");
+        assert_eq!(&records[1][16], "'-1 for the ending");
     }
 
     #[test]

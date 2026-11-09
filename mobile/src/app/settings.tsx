@@ -1,6 +1,7 @@
 import { router } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
 
+import { useExportLibrary } from '@/hooks/use-library-export';
 import { useSensitiveScreen } from '@/hooks/use-sensitive-screen';
 import {
   AlertTriangle,
@@ -9,6 +10,7 @@ import {
   ExternalLink,
   Eye,
   EyeOff,
+  FileSpreadsheet,
   Globe2,
   HelpCircle,
   History,
@@ -87,6 +89,7 @@ import { getErrorMessage } from '@/lib/http';
 import { clearOfflineQueryCache } from '@/lib/query-persistence';
 import { validateSecondFactorInput } from '@/lib/two-factor';
 import { useAuthStore } from '@/store/auth';
+import { useLocaleStore } from '@/store/locale';
 import type { AccountSession, SecurityActivity } from '@/types';
 
 const COUNTRY_OPTIONS: readonly { value: string; label: string }[] = [
@@ -204,6 +207,8 @@ export default function SettingsScreen() {
   const [exportPending, setExportPending] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
   const [exportShared, setExportShared] = useState(false);
+  const exportLibrary = useExportLibrary();
+  const locale = useLocaleStore((state) => state.locale);
 
   if (status !== 'authenticated' || !user) return <SignedOutRedirect status={status} />;
 
@@ -1279,6 +1284,37 @@ export default function SettingsScreen() {
               </View>
               <ExternalLink color={theme.mutedText} size={18} />
             </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={t('settings.libraryCsv')}
+              accessibilityState={{ busy: exportLibrary.isPending }}
+              disabled={exportLibrary.isPending}
+              onPress={() => exportLibrary.mutate({ filters: {}, language: locale })}
+              style={({ pressed }) => [
+                styles.linkRow,
+                { borderColor: theme.border, opacity: pressed || exportLibrary.isPending ? 0.72 : 1 },
+              ]}
+            >
+              <View style={styles.linkCopy}>
+                <FileSpreadsheet color={theme.success} size={18} />
+                <View style={styles.headingCopy}>
+                  <AppText variant="label">{t('settings.libraryCsv')}</AppText>
+                  <AppText variant="caption" muted>
+                    {t('settings.libraryCsvHint')}
+                  </AppText>
+                </View>
+              </View>
+              {exportLibrary.isPending ? (
+                <ActivityIndicator color={theme.primary} />
+              ) : (
+                <ExternalLink color={theme.mutedText} size={18} />
+              )}
+            </Pressable>
+            {exportLibrary.error ? (
+              <FormMessage
+                message={getErrorMessage(exportLibrary.error, t('settings.libraryCsvError'))}
+              />
+            ) : null}
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={t('settings.exportAria')}
