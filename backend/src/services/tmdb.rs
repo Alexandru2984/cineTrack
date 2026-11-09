@@ -68,6 +68,15 @@ fn streaming_only(networks: Option<&[TmdbNetwork]>) -> Option<bool> {
     )
 }
 
+/// TMDB's `original_language` when it fits the column: two lowercase letters.
+/// Anything else is dropped rather than stored, so a malformed value costs the
+/// Anime filter one title instead of failing the whole refresh on the CHECK.
+fn language_code(language: Option<&str>) -> Option<String> {
+    let language = language?.trim();
+    (language.len() == 2 && language.bytes().all(|byte| byte.is_ascii_lowercase()))
+        .then(|| language.to_string())
+}
+
 #[derive(sqlx::FromRow)]
 struct ProviderCacheRow {
     payload: serde_json::Value,
@@ -1264,10 +1273,12 @@ impl TmdbService {
 
         let mut tx = pool.begin().await?;
         let media = sqlx::query_as::<_, Media>(
-            r#"INSERT INTO media (tmdb_id, media_type, title, original_title, overview, poster_path, backdrop_path, release_date, status, genres, runtime_minutes, tmdb_vote_average, tmdb_cached_at, last_accessed_at, metadata_level)
-            VALUES ($1, 'movie', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW(), NOW(), 'detail')
+            r#"INSERT INTO media (tmdb_id, media_type, title, original_title, overview, poster_path, backdrop_path, release_date, status, genres, runtime_minutes, tmdb_vote_average, original_language, tmdb_cached_at, last_accessed_at, metadata_level)
+            VALUES ($1, 'movie', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), NOW(), 'detail')
             ON CONFLICT (tmdb_id, media_type)
-            DO UPDATE SET title = $2, original_title = $3, overview = $4, poster_path = $5, backdrop_path = $6, release_date = $7, status = $8, genres = $9, runtime_minutes = $10, tmdb_vote_average = $11, tmdb_cached_at = NOW(), last_accessed_at = NOW(), metadata_level = 'detail'
+            DO UPDATE SET title = $2, original_title = $3, overview = $4, poster_path = $5, backdrop_path = $6, release_date = $7, status = $8, genres = $9, runtime_minutes = $10, tmdb_vote_average = $11,
+                original_language = COALESCE($12, media.original_language),
+                tmdb_cached_at = NOW(), last_accessed_at = NOW(), metadata_level = 'detail'
             RETURNING *"#
         )
         .bind(detail.id)
@@ -1281,6 +1292,7 @@ impl TmdbService {
         .bind(&genres_json)
         .bind(detail.runtime)
         .bind(detail.vote_average)
+        .bind(language_code(detail.original_language.as_deref()))
         .fetch_one(&mut *tx)
         .await?;
 
@@ -1499,14 +1511,15 @@ impl TmdbService {
 
         let mut tx = pool.begin().await?;
         let media = sqlx::query_as::<_, Media>(
-            r#"INSERT INTO media (tmdb_id, media_type, title, original_title, overview, poster_path, backdrop_path, release_date, status, genres, runtime_minutes, tmdb_vote_average, origin_country, streaming_only, tmdb_cached_at, last_accessed_at, metadata_level)
-            VALUES ($1, 'tv', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, COALESCE($13, false), NOW(), NOW(), 'detail')
+            r#"INSERT INTO media (tmdb_id, media_type, title, original_title, overview, poster_path, backdrop_path, release_date, status, genres, runtime_minutes, tmdb_vote_average, origin_country, streaming_only, original_language, tmdb_cached_at, last_accessed_at, metadata_level)
+            VALUES ($1, 'tv', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, COALESCE($13, false), $14, NOW(), NOW(), 'detail')
             ON CONFLICT (tmdb_id, media_type)
             DO UPDATE SET title = $2, original_title = $3, overview = $4, poster_path = $5, backdrop_path = $6, release_date = $7, status = $8, genres = $9, runtime_minutes = $10, tmdb_vote_average = $11,
                 -- Kept when the refresh has nothing to say, so a response
                 -- missing the field does not erase a country already known.
                 origin_country = COALESCE($12, media.origin_country),
                 streaming_only = COALESCE($13, media.streaming_only),
+                original_language = COALESCE($14, media.original_language),
                 tmdb_cached_at = NOW(), last_accessed_at = NOW(), metadata_level = 'detail'
             RETURNING *"#
         )
@@ -1523,6 +1536,7 @@ impl TmdbService {
         .bind(detail.vote_average)
         .bind(&origin_country)
         .bind(streaming_only(detail.networks.as_deref()))
+        .bind(language_code(detail.original_language.as_deref()))
         .fetch_one(&mut *tx)
         .await?;
 
@@ -1729,6 +1743,18 @@ mod tests {
 
     fn networks(ids: &[i32]) -> Vec<TmdbNetwork> {
         ids.iter().map(|&id| TmdbNetwork { id }).collect()
+    }
+
+    #[test]
+    fn only_a_two_letter_language_code_is_stored() {
+        assert_eq!(language_code(Some("ja")), Some("ja".to_string()));
+        assert_eq!(language_code(Some(" en ")), Some("en".to_string()));
+        // TMDB's "no language" is still two letters, and still a code.
+        assert_eq!(language_code(Some("xx")), Some("xx".to_string()));
+        for rejected in ["", "JA", "jpn", "j1", "日本"] {
+            assert_eq!(language_code(Some(rejected)), None, "{rejected:?}");
+        }
+        assert_eq!(language_code(None), None);
     }
 
     #[test]
