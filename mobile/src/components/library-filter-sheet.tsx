@@ -1,4 +1,4 @@
-import { Check } from 'lucide-react-native';
+import { Check, Download } from 'lucide-react-native';
 import { Modal, Pressable, ScrollView, StyleSheet, Switch, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -45,6 +45,9 @@ export function LibraryFilterSheet({
   onChange,
   onClear,
   onClose,
+  onExport,
+  exporting = false,
+  exportError,
 }: {
   visible: boolean;
   filters: LibraryFilters;
@@ -52,6 +55,10 @@ export function LibraryFilterSheet({
   onChange: (changes: LibraryFilterChanges) => void;
   onClear: () => void;
   onClose: () => void;
+  /** Shares the list behind the sheet as a CSV. */
+  onExport?: () => void;
+  exporting?: boolean;
+  exportError?: string | null;
 }) {
   const theme = useTheme();
   const t = useT();
@@ -137,6 +144,27 @@ export function LibraryFilterSheet({
                   onPress={() => onChange({ genre: genre.value })}
                 />
               ))}
+
+              {onExport ? (
+                <View style={styles.exportBlock}>
+                  <AppButton
+                    label={t('library.exportCsv')}
+                    variant="secondary"
+                    icon={<Download color={theme.primary} size={18} />}
+                    loading={exporting}
+                    disabled={facets?.total === 0}
+                    onPress={onExport}
+                  />
+                  <AppText variant="caption" muted>
+                    {t('library.exportCsvHint')}
+                  </AppText>
+                  {exportError ? (
+                    <AppText variant="caption" style={{ color: theme.danger }}>
+                      {exportError}
+                    </AppText>
+                  ) : null}
+                </View>
+              ) : null}
             </ScrollView>
             <View style={styles.actions}>
               <AppButton
@@ -229,6 +257,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  exportBlock: {
+    paddingTop: spacing.xl,
+    gap: spacing.xs,
   },
   actions: {
     flexDirection: 'row',

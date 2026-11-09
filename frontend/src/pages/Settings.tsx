@@ -52,6 +52,7 @@ import { InstallAppCard } from '@/components/InstallAppCard';
 import { CalendarFeedCard } from '@/components/CalendarFeedCard';
 import { BlockedUsersCard } from '@/components/BlockedUsersCard';
 import { LanguageCard } from '@/components/LanguageCard';
+import { DataExportCard } from '@/components/DataExportCard';
 import { Switch } from '@/components/Switch';
 import { useAuthStore } from '@/store/auth';
 import { EncryptionSettingsCard } from '@/components/EncryptionSettingsCard';
@@ -1235,6 +1236,7 @@ export default function SettingsPage() {
       <BlockedUsersCard />
       <ModerationCard />
       <ImportCard />
+      <DataExportCard />
       <ChangeEmailCard />
       <ChangePasswordCard />
       <TwoFactorCard />
