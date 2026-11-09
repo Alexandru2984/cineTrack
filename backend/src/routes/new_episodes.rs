@@ -15,7 +15,9 @@ use sqlx::PgPool;
 
 use crate::errors::AppError;
 use crate::routes::hubs::sections_nav;
-use crate::routes::title_pages::{escape, html_page, page_path, Kind, Language, IMAGE_BASE, SITE};
+use crate::routes::title_pages::{
+    escape, html_page, page_image_base, page_path, Kind, Language, SITE,
+};
 
 /// Days covered, today included.
 const DAYS: i32 = 7;
@@ -345,7 +347,8 @@ fn render(language: Language, today: NaiveDate, days: &[(NaiveDate, Vec<Entry>)]
                             .as_deref()
                             .map(|poster| {
                                 format!(
-                                    r#"<img src="{IMAGE_BASE}/w92{}" alt="" width="46" height="69" loading="lazy" decoding="async" />"#,
+                                    r#"<img src="{}/w92{}" alt="" width="46" height="69" loading="lazy" decoding="async" />"#,
+                                    page_image_base(),
                                     escape(poster)
                                 )
                             })
