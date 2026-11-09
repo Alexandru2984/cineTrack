@@ -3941,6 +3941,352 @@ async fn test_tracking_requires_auth() {
 
 #[actix_web::test]
 #[ignore = "requires test DB"]
+async fn library_filters_sorts_and_facets_describe_the_same_list() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (token, _, user_id) = register_user(
+        &app,
+        "libraryfilters",
+        "libraryfilters@mailbox.dev",
+        "Pass1234",
+    )
+    .await;
+    let user_id = Uuid::parse_str(&user_id).unwrap();
+    let (_, _, other_id) =
+        register_user(&app, "otherlibrary", "otherlibrary@mailbox.dev", "Pass1234").await;
+    let other_id = Uuid::parse_str(&other_id).unwrap();
+
+    struct Entry {
+        tmdb_id: i32,
+        media_type: &'static str,
+        title: &'static str,
+        original_title: Option<&'static str>,
+        genres: Option<Value>,
+        language: Option<&'static str>,
+        release: Option<&'static str>,
+        status: &'static str,
+        rating: Option<i16>,
+        favorite: bool,
+        /// How long ago it was added (in days) and last changed (in hours).
+        age: i32,
+    }
+    let entry = |tmdb_id, media_type, title, genres: Value, language, release, status| Entry {
+        tmdb_id,
+        media_type,
+        title,
+        original_title: None,
+        genres: Some(genres),
+        language: Some(language),
+        release: Some(release),
+        status,
+        rating: None,
+        favorite: false,
+        age: tmdb_id - 881000,
+    };
+    let entries = [
+        Entry {
+            original_title: Some("呪術廻戦 0"),
+            rating: Some(9),
+            favorite: true,
+            ..entry(
+                881001,
+                "movie",
+                "Jujutsu Kaisen 0",
+                json!([{"id": 16, "name": "Animation"}, {"id": 28, "name": "Action"}]),
+                "ja",
+                "2021-12-24",
+                "completed",
+            )
+        },
+        Entry {
+            original_title: Some("NARUTO -ナルト-"),
+            ..entry(
+                881002,
+                "tv",
+                "Naruto",
+                json!([{"id": 16, "name": "Animation"}, {"id": 10759, "name": "Action & Adventure"}]),
+                "ja",
+                "2002-10-03",
+                "watching",
+            )
+        },
+        Entry {
+            rating: Some(10),
+            ..entry(
+                881003,
+                "tv",
+                "Arcane",
+                json!([{"id": 16, "name": "Animation"}, {"id": 10765, "name": "Sci-Fi & Fantasy"}]),
+                "en",
+                "2021-11-06",
+                "completed",
+            )
+        },
+        entry(
+            881004,
+            "movie",
+            "The Holdovers",
+            json!([{"id": 18, "name": "Drama"}, {"id": 35, "name": "Comedy"}]),
+            "en",
+            "2023-10-27",
+            "plan_to_watch",
+        ),
+        entry(
+            881005,
+            "tv",
+            "Shōgun",
+            json!([{"id": 18, "name": "Drama"}]),
+            "en",
+            "2024-02-27",
+            "completed",
+        ),
+        // Refreshed before the language was stored, and with no genres.
+        Entry {
+            genres: None,
+            language: None,
+            release: None,
+            ..entry(
+                881006,
+                "movie",
+                "Mystery Box",
+                json!([]),
+                "en",
+                "",
+                "dropped",
+            )
+        },
+    ];
+    for entry in &entries {
+        let media_id = sqlx::query_scalar::<_, Uuid>(
+            r#"INSERT INTO media (tmdb_id, media_type, title, original_title, genres, original_language, release_date)
+            VALUES ($1, $2, $3, $4, $5, $6, $7::date)
+            RETURNING id"#,
+        )
+        .bind(entry.tmdb_id)
+        .bind(entry.media_type)
+        .bind(entry.title)
+        .bind(entry.original_title)
+        .bind(&entry.genres)
+        .bind(entry.language)
+        .bind(entry.release)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            r#"INSERT INTO user_media (user_id, media_id, status, rating, is_favorite, created_at, updated_at)
+            VALUES ($1, $2, $3, $4, $5,
+                    NOW() - make_interval(days => $6), NOW() - make_interval(hours => $6))"#,
+        )
+        .bind(user_id)
+        .bind(media_id)
+        .bind(entry.status)
+        .bind(entry.rating)
+        .bind(entry.favorite)
+        .bind(entry.age)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+    // Known in Romanian by a name the list does not show.
+    sqlx::query(
+        r#"INSERT INTO media_title_aliases (media_id, kind, language_code, region_code, title)
+        SELECT id, 'translation', 'ro', '', 'Cei rămași în urmă' FROM media WHERE tmdb_id = 881004"#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    // Someone else's anime stays theirs.
+    sqlx::query(
+        r#"WITH other AS (
+            INSERT INTO media (tmdb_id, media_type, title, genres, original_language)
+            VALUES (881099, 'tv', 'One Piece', '[{"id": 16, "name": "Animation"}]', 'ja')
+            RETURNING id
+        )
+        INSERT INTO user_media (user_id, media_id, status, is_favorite)
+        SELECT $1, id, 'completed', TRUE FROM other"#,
+    )
+    .bind(other_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let get = |uri: String| {
+        actix_test::TestRequest::get()
+            .uri(&uri)
+            .insert_header(("Authorization", format!("Bearer {token}")))
+            .peer_addr(peer_addr())
+            .to_request()
+    };
+    macro_rules! titles_for {
+        ($query:expr) => {{
+            let resp =
+                actix_test::call_service(&app, get(format!("/api/tracking?{}", $query))).await;
+            assert_eq!(resp.status(), 200, "{}", $query);
+            let body: Value = actix_test::read_body_json(resp).await;
+            body.as_array()
+                .unwrap()
+                .iter()
+                .map(|item| item["title"].as_str().unwrap().to_string())
+                .collect::<Vec<_>>()
+        }};
+    }
+
+    // The default order is still the last change first, and an old client's
+    // query still means what it did.
+    assert_eq!(
+        titles_for!("page=1&limit=100"),
+        [
+            "Jujutsu Kaisen 0",
+            "Naruto",
+            "Arcane",
+            "The Holdovers",
+            "Shōgun",
+            "Mystery Box"
+        ]
+    );
+    assert_eq!(
+        titles_for!("status=completed&page=1&limit=100"),
+        ["Jujutsu Kaisen 0", "Arcane", "Shōgun"]
+    );
+    // Anime is Animation in Japanese: Arcane is animated, in English.
+    assert_eq!(titles_for!("genre=anime"), ["Jujutsu Kaisen 0", "Naruto"]);
+    assert_eq!(
+        titles_for!("genre=16"),
+        ["Jujutsu Kaisen 0", "Naruto", "Arcane"]
+    );
+    assert_eq!(titles_for!("genre=16&media_type=tv"), ["Naruto", "Arcane"]);
+    assert_eq!(
+        titles_for!("genre=anime&status=completed"),
+        ["Jujutsu Kaisen 0"]
+    );
+    assert_eq!(titles_for!("favorite=true"), ["Jujutsu Kaisen 0"]);
+    // Any name the title is known by, typed without its accents.
+    assert_eq!(titles_for!("q=ramasi"), ["The Holdovers"]);
+    assert_eq!(titles_for!("q=SHOGUN"), ["Shōgun"]);
+    assert_eq!(titles_for!("q=%E5%91%AA%E8%A1%93"), ["Jujutsu Kaisen 0"]);
+    assert_eq!(titles_for!("q=%20%20"), titles_for!("page=1"));
+    assert!(titles_for!("q=one%20piece").is_empty());
+
+    assert_eq!(
+        titles_for!("sort=title"),
+        [
+            "Arcane",
+            "Jujutsu Kaisen 0",
+            "Mystery Box",
+            "Naruto",
+            "Shōgun",
+            "The Holdovers"
+        ]
+    );
+    assert_eq!(
+        titles_for!("sort=rating"),
+        [
+            "Arcane",
+            "Jujutsu Kaisen 0",
+            "Naruto",
+            "The Holdovers",
+            "Shōgun",
+            "Mystery Box"
+        ]
+    );
+    assert_eq!(
+        titles_for!("sort=release"),
+        [
+            "Shōgun",
+            "The Holdovers",
+            "Jujutsu Kaisen 0",
+            "Arcane",
+            "Naruto",
+            "Mystery Box"
+        ]
+    );
+    assert_eq!(
+        titles_for!("sort=added"),
+        titles_for!("sort=updated"),
+        "added in the same order they last changed"
+    );
+    assert_eq!(
+        titles_for!("sort=title&limit=2&page=2"),
+        ["Mystery Box", "Naruto"]
+    );
+
+    let resp = actix_test::call_service(&app, get("/api/tracking?genre=anime".into())).await;
+    let body: Value = actix_test::read_body_json(resp).await;
+    assert_eq!(body[0]["release_date"], "2021-12-24");
+
+    for rejected in [
+        "genre=Animation",
+        "genre=0",
+        "media_type=anime",
+        "sort=popularity",
+        "favorite=yes",
+    ] {
+        let resp = actix_test::call_service(&app, get(format!("/api/tracking?{rejected}"))).await;
+        assert_eq!(resp.status(), 400, "{rejected}");
+        let resp =
+            actix_test::call_service(&app, get(format!("/api/tracking/facets?{rejected}"))).await;
+        assert_eq!(resp.status(), 400, "facets {rejected}");
+    }
+
+    // Each facet counts with every filter but its own, so the number beside
+    // a choice is the length of the list that choice gives.
+    let resp = actix_test::call_service(
+        &app,
+        get("/api/tracking/facets?status=completed&language=ro".into()),
+    )
+    .await;
+    assert_eq!(resp.status(), 200);
+    let facets: Value = actix_test::read_body_json(resp).await;
+    assert_eq!(facets["total"], 3);
+    assert_eq!(
+        facets["statuses"],
+        json!({"completed": 3, "dropped": 1, "plan_to_watch": 1, "watching": 1})
+    );
+    assert_eq!(facets["media_types"], json!({"movie": 1, "tv": 2}));
+    assert_eq!(facets["anime"], 1);
+    assert_eq!(facets["favorites"], 1);
+    let genres = facets["genres"].as_array().unwrap();
+    assert_eq!(genres[0], json!({"id": 16, "name": "Animație", "count": 2}));
+    assert!(genres.contains(&json!({"id": 18, "name": "Dramă", "count": 1})));
+    assert!(
+        genres.iter().all(|genre| genre["id"] != 35),
+        "only genres that would show something"
+    );
+
+    let resp = actix_test::call_service(&app, get("/api/tracking/facets?genre=anime".into())).await;
+    let facets: Value = actix_test::read_body_json(resp).await;
+    assert_eq!(facets["total"], 2);
+    assert_eq!(facets["statuses"], json!({"completed": 1, "watching": 1}));
+    assert_eq!(facets["media_types"], json!({"movie": 1, "tv": 1}));
+    assert_eq!(
+        facets["anime"], 2,
+        "anime counts beside the other genres, not within itself"
+    );
+    assert_eq!(facets["favorites"], 1);
+    assert_eq!(
+        facets["genres"][0]["name"], "Animation",
+        "English without a language"
+    );
+
+    let resp = actix_test::call_service(&app, get("/api/tracking/facets?q=ramasi".into())).await;
+    let facets: Value = actix_test::read_body_json(resp).await;
+    assert_eq!(facets["total"], 1);
+    assert_eq!(facets["statuses"], json!({"plan_to_watch": 1}));
+
+    let resp = actix_test::call_service(
+        &app,
+        actix_test::TestRequest::get()
+            .uri("/api/tracking/facets")
+            .peer_addr(peer_addr())
+            .to_request(),
+    )
+    .await;
+    assert_eq!(resp.status(), 401);
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
 async fn test_tracking_lookup_is_complete_beyond_first_list_page() {
     let pool = setup_pool().await;
     clean_db(&pool).await;
@@ -13859,6 +14205,126 @@ async fn catalog_hydration_backfills_held_titles_before_fetching_new_ones() {
         .unwrap(),
         "Titlu 660002"
     );
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn catalog_hydration_fills_the_language_of_tracked_titles_first() {
+    use cinetrack::services::catalog_hydration::{hydrate_popular_catalog, HydrationOptions};
+    use cinetrack::services::tmdb::TmdbService;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let upstream = actix_web::rt::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let mut request = vec![0_u8; 4096];
+        let read = stream.read(&mut request).await.unwrap();
+        let line = String::from_utf8_lossy(&request[..read])
+            .lines()
+            .next()
+            .unwrap()
+            .to_string();
+        let body = r#"{"id": 660012, "title": "Tracked Anime", "overview": "Detail",
+            "release_date": "2021-12-24", "status": "Released", "original_language": "ja",
+            "genres": [{"id": 16, "name": "Animation"}], "runtime": 105, "vote_average": 8.0,
+            "alternative_titles": {"titles": []}, "translations": {"translations": []}}"#;
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        stream.write_all(response.as_bytes()).await.unwrap();
+        line
+    });
+
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (_, _, user_id) =
+        register_user(&app, "languagefill", "languagefill@mailbox.dev", "Pass1234").await;
+    let user_id = Uuid::parse_str(&user_id).unwrap();
+    sqlx::query(
+        r#"INSERT INTO catalog_external_ids (media_type, tmdb_id, adult, video, popularity)
+        VALUES ('movie', 660011, false, false, 1000.0), ('movie', 660012, false, false, 1.0)"#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO catalog_external_titles (media_type, tmdb_id, title)
+        VALUES ('movie', 660011, 'Untracked'), ('movie', 660012, 'Tracked Anime')"#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO catalog_sync_state
+            (provider, export_date, movie_rows, tv_rows, movie_sha256, tv_sha256,
+             movie_object_key, tv_object_key)
+        VALUES ('tmdb', CURRENT_DATE, 2, 1, repeat('a', 64), repeat('b', 64),
+                'catalog/movie.gz', 'catalog/tv.gz')"#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    // Both fetched in full, fresh and not due, before the language was kept.
+    sqlx::query(
+        r#"INSERT INTO media (tmdb_id, media_type, title, metadata_level, tmdb_cached_at,
+                              title_aliases_cached_at, localizations_cached_at)
+        VALUES (660011, 'movie', 'Untracked', 'detail', NOW(), NOW(), NOW()),
+               (660012, 'movie', 'Tracked Anime', 'detail', NOW(), NOW(), NOW())"#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO catalog_hydration_state
+            (media_type, tmdb_id, outcome, consecutive_failures,
+             last_attempt_at, next_attempt_at, last_success_at)
+        SELECT 'movie', tmdb_id, 'success', 0, NOW(), NOW() + INTERVAL '30 days', NOW()
+        FROM media"#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO user_media (user_id, media_id, status)
+        SELECT $1, id, 'completed' FROM media WHERE tmdb_id = 660012"#,
+    )
+    .bind(user_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let mut config = test_config();
+    config.tmdb_base_url = format!("http://{address}");
+    let tmdb = TmdbService::new(&config);
+    let options = HydrationOptions {
+        budget: 5,
+        request_delay: std::time::Duration::ZERO,
+    };
+    let summary = hydrate_popular_catalog(&pool, &tmdb, options)
+        .await
+        .unwrap();
+    assert_eq!((summary.selected, summary.succeeded), (1, 1));
+    assert!(upstream.await.unwrap().starts_with("GET /movie/660012?"));
+    assert_eq!(
+        sqlx::query_scalar::<_, Option<String>>(
+            "SELECT original_language FROM media WHERE tmdb_id = 660012"
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap()
+        .as_deref(),
+        Some("ja")
+    );
+
+    // Filled, it is not taken again; the untracked one waits for its turn.
+    let summary = hydrate_popular_catalog(&pool, &tmdb, options)
+        .await
+        .unwrap();
+    assert_eq!(summary.selected, 0);
 }
 
 #[actix_web::test]

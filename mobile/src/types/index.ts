@@ -243,6 +243,20 @@ export interface TrackingItem {
   is_favorite: boolean;
   started_at: string | null;
   completed_at: string | null;
+  /** The film's release or the series' first air date. Absent from an
+   *  offline copy saved before the server sent it. */
+  release_date?: string | null;
+}
+
+export interface TrackingFacets {
+  /** Titles matching every filter: the length of the list. */
+  total: number;
+  statuses: Partial<Record<TrackingStatus, number>>;
+  media_types: Partial<Record<MediaType, number>>;
+  /** Most common first, named in the requested language. */
+  genres: { id: number; name: string; count: number }[];
+  anime: number;
+  favorites: number;
 }
 
 export interface HistoryItem {

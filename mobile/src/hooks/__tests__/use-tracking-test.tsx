@@ -2,7 +2,12 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { renderHook, waitFor } from '@testing-library/react-native';
 import type { ReactNode } from 'react';
 
-import { useUpdateTracking, useWatchlistPreview } from '@/hooks/use-tracking';
+import {
+  useTrackingFacets,
+  useTrackingInfinite,
+  useUpdateTracking,
+  useWatchlistPreview,
+} from '@/hooks/use-tracking';
 
 const mockApiRequest = jest.fn();
 
@@ -100,5 +105,90 @@ describe('useWatchlistPreview', () => {
 
     client.clear();
     client.unmount();
+  });
+});
+
+describe('library filters', () => {
+  beforeEach(() => {
+    mockApiRequest.mockReset();
+  });
+
+  // The app gives `tracking` queries the offline cache's week.
+  const WEEK = 7 * 24 * 60 * 60 * 1000;
+  function client() {
+    return new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: WEEK } } });
+  }
+  // Unmount before clearing: a query whose last observer leaves schedules its
+  // collection, and with a week's gcTime that timer keeps Jest from exiting.
+  async function done(unmount: () => void | Promise<void>, queryClient: QueryClient) {
+    await unmount();
+    queryClient.clear();
+  }
+
+  it('sends each filter the way the API spells it', async () => {
+    mockApiRequest.mockResolvedValue([]);
+    const queryClient = client();
+    const { result, unmount } = await renderHook(
+      () =>
+        useTrackingInfinite({
+          status: 'completed',
+          mediaType: 'tv',
+          genre: 'anime',
+          favorite: true,
+          q: '  one piece ',
+          sort: 'title',
+        }),
+      { wrapper: wrapper(queryClient) },
+    );
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    const [path] = mockApiRequest.mock.calls[0] as [string];
+    const params = new URLSearchParams(path.split('?')[1]);
+    expect(Object.fromEntries(params)).toEqual({
+      status: 'completed',
+      media_type: 'tv',
+      genre: 'anime',
+      favorite: 'true',
+      q: 'one piece',
+      sort: 'title',
+      page: '1',
+      limit: '100',
+    });
+    // A search or a genre is not kept for the week the offline cache keeps
+    // the library itself.
+    const [query] = queryClient.getQueryCache().getAll();
+    expect(query.gcTime).toBe(5 * 60 * 1000);
+    await done(unmount, queryClient);
+  });
+
+  it('keeps the key a plain status view had, so an older offline copy still opens', async () => {
+    mockApiRequest.mockResolvedValue([]);
+    const queryClient = client();
+    const { result, unmount } = await renderHook(
+      () => useTrackingInfinite({ status: 'watching', sort: 'updated', q: '  ' }),
+      { wrapper: wrapper(queryClient) },
+    );
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    const [query] = queryClient.getQueryCache().getAll();
+    expect(query.queryKey).toEqual(['tracking', 'watching', 'infinite']);
+    expect(query.gcTime).toBe(WEEK);
+    expect(mockApiRequest.mock.calls[0][0]).toBe('/tracking?status=watching&page=1&limit=100');
+    await done(unmount, queryClient);
+  });
+
+  it('asks for the facets in the reader\'s language and without the order', async () => {
+    mockApiRequest.mockResolvedValue({
+      total: 0, statuses: {}, media_types: {}, genres: [], anime: 0, favorites: 0,
+    });
+    const queryClient = client();
+    const { result, unmount } = await renderHook(
+      () => useTrackingFacets({ genre: '16', sort: 'rating' }, 'ro'),
+      { wrapper: wrapper(queryClient) },
+    );
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    expect(mockApiRequest.mock.calls[0][0]).toBe('/tracking/facets?genre=16&language=ro');
+    await done(unmount, queryClient);
   });
 });

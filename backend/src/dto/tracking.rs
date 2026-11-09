@@ -122,14 +122,78 @@ impl UpdateTrackingRequest {
     }
 }
 
-#[derive(Debug, Deserialize, Validate)]
+/// How the library can be ordered. `updated` (the default) is the order it has
+/// always had: whatever changed last comes first.
+pub const VALID_TRACKING_SORTS: &[&str] = &["updated", "added", "title", "rating", "release"];
+
+fn validate_tracking_sort(sort: &str) -> Result<(), ValidationError> {
+    if VALID_TRACKING_SORTS.contains(&sort) {
+        Ok(())
+    } else {
+        let mut err = ValidationError::new("invalid_sort");
+        err.message = Some("Invalid sort".into());
+        Err(err)
+    }
+}
+
+/// A TMDB genre id, or `anime`: Animation made in Japanese, which TMDB has no
+/// genre for.
+fn validate_genre_filter(genre: &str) -> Result<(), ValidationError> {
+    if genre == "anime" || genre.parse::<i32>().is_ok_and(|id| id > 0) {
+        Ok(())
+    } else {
+        let mut err = ValidationError::new("invalid_genre");
+        err.message = Some("Genre must be a TMDB genre id or anime".into());
+        Err(err)
+    }
+}
+
+/// The library's filters, shared by the list and by its facet counts.
+///
+/// Not `deny_unknown_fields`, and every filter optional: an app released
+/// before a filter existed sends only `status`, `page` and `limit`, and has to
+/// keep getting the list it always got.
+#[derive(Debug, Default, Deserialize, Validate)]
 pub struct TrackingQueryParams {
     #[validate(custom(function = "validate_tracking_status"))]
     pub status: Option<String>,
+    #[validate(custom(function = "validate_media_type"))]
+    pub media_type: Option<String>,
+    #[validate(custom(function = "validate_genre_filter"))]
+    pub genre: Option<String>,
+    pub favorite: Option<bool>,
+    /// Part of a title, in any language the title is known by.
+    #[validate(length(max = 100, message = "Search must be at most 100 characters"))]
+    pub q: Option<String>,
+    #[validate(custom(function = "validate_tracking_sort"))]
+    pub sort: Option<String>,
+    /// The language to name genres in; only the facets read it.
+    pub language: Option<String>,
     #[validate(range(min = 1, max = 1000, message = "Page must be between 1 and 1000"))]
     pub page: Option<u32>,
     #[validate(range(min = 1, max = 100, message = "Limit must be between 1 and 100"))]
     pub limit: Option<u32>,
+}
+
+/// How many library entries each choice of a filter would show, with every
+/// other filter as it is. Choosing the genre that says 12 shows 12.
+#[derive(Debug, Serialize)]
+pub struct TrackingFacets {
+    /// Entries that match every filter: the length of the list.
+    pub total: i64,
+    pub statuses: std::collections::BTreeMap<String, i64>,
+    pub media_types: std::collections::BTreeMap<String, i64>,
+    /// Most common first. Only genres that would show something.
+    pub genres: Vec<GenreFacet>,
+    pub anime: i64,
+    pub favorites: i64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct GenreFacet {
+    pub id: i32,
+    pub name: String,
+    pub count: i64,
 }
 
 #[derive(Debug, Deserialize, Serialize, Validate)]
@@ -166,6 +230,8 @@ pub struct TrackingResponse {
     pub is_favorite: bool,
     pub started_at: Option<chrono::NaiveDate>,
     pub completed_at: Option<chrono::NaiveDate>,
+    /// The film's release or the series' first air date.
+    pub release_date: Option<chrono::NaiveDate>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -212,35 +278,78 @@ mod tests {
     #[test]
     fn tracking_pagination_is_bounded() {
         let valid = TrackingQueryParams {
-            status: None,
             page: Some(1000),
             limit: Some(100),
+            ..Default::default()
         };
         assert!(valid.validate().is_ok());
 
         for invalid in [
             TrackingQueryParams {
-                status: None,
                 page: Some(0),
                 limit: Some(50),
+                ..Default::default()
             },
             TrackingQueryParams {
-                status: None,
                 page: Some(1001),
                 limit: Some(50),
+                ..Default::default()
             },
             TrackingQueryParams {
-                status: None,
                 page: Some(1),
                 limit: Some(0),
+                ..Default::default()
             },
             TrackingQueryParams {
-                status: None,
                 page: Some(1),
                 limit: Some(101),
+                ..Default::default()
             },
         ] {
             assert!(invalid.validate().is_err());
+        }
+    }
+
+    #[test]
+    fn library_filters_take_only_known_values() {
+        let valid = TrackingQueryParams {
+            media_type: Some("tv".to_string()),
+            genre: Some("16".to_string()),
+            favorite: Some(true),
+            q: Some("ă".repeat(100)),
+            sort: Some("title".to_string()),
+            ..Default::default()
+        };
+        assert!(valid.validate().is_ok());
+        let anime = TrackingQueryParams {
+            genre: Some("anime".to_string()),
+            ..Default::default()
+        };
+        assert!(anime.validate().is_ok());
+
+        for invalid in [
+            TrackingQueryParams {
+                media_type: Some("anime".to_string()),
+                ..Default::default()
+            },
+            TrackingQueryParams {
+                genre: Some("0".to_string()),
+                ..Default::default()
+            },
+            TrackingQueryParams {
+                genre: Some("Animation".to_string()),
+                ..Default::default()
+            },
+            TrackingQueryParams {
+                sort: Some("popularity".to_string()),
+                ..Default::default()
+            },
+            TrackingQueryParams {
+                q: Some("a".repeat(101)),
+                ..Default::default()
+            },
+        ] {
+            assert!(invalid.validate().is_err(), "{invalid:?}");
         }
     }
 

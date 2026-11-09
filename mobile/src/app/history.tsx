@@ -94,7 +94,7 @@ export default function HistoryScreen() {
   const hasSession = hasLocalSession(status);
   const [pickerVisible, setPickerVisible] = useState(false);
   const history = useHistory(hasSession);
-  const library = useTrackingInfinite(undefined, hasSession && pickerVisible);
+  const library = useTrackingInfinite({}, hasSession && pickerVisible);
   const create = useCreateHistory();
   const remove = useDeleteHistory();
   const [target, setTarget] = useState<HistoryTarget | null>(null);
