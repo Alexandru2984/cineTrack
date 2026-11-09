@@ -3,6 +3,7 @@ import { shouldPersistQueryKey } from '@/lib/query-cache-policy';
 describe('offline query cache policy', () => {
   it('keeps core viewing data available offline', () => {
     expect(shouldPersistQueryKey(['tracking', undefined, 'infinite'])).toBe(true);
+    expect(shouldPersistQueryKey(['tracking', 'facets', {}, 'ro'])).toBe(true);
     expect(shouldPersistQueryKey(['calendar', 'up-next', '2026-07-17', 10])).toBe(true);
     expect(shouldPersistQueryKey(['episode', 42])).toBe(true);
     expect(shouldPersistQueryKey(['watched-episodes', 100, 2])).toBe(true);

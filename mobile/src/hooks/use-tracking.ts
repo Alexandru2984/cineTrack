@@ -1,4 +1,5 @@
 import {
+  keepPreviousData,
   useInfiniteQuery,
   useMutation,
   useQuery,
@@ -16,6 +17,7 @@ import type {
   BulkWatchResponse,
   MediaType,
   SeasonWatchProgress,
+  TrackingFacets,
   TrackingItem,
   TrackingStatus,
 } from '@/types';
@@ -75,17 +77,71 @@ export function useTrackingLookup(targets: readonly TrackingLookupTarget[]) {
   });
 }
 
-export function useTrackingInfinite(status?: TrackingStatus, enabled = true) {
+export type LibrarySort = 'updated' | 'added' | 'title' | 'rating' | 'release';
+
+/** The library's filters, as the screen's route and the API both spell them. */
+export interface LibraryFilters {
+  status?: TrackingStatus;
+  mediaType?: MediaType;
+  /** A TMDB genre id, or `anime`. */
+  genre?: string;
+  favorite?: boolean;
+  q?: string;
+  sort?: LibrarySort;
+}
+
+function libraryParams(filters: LibraryFilters) {
+  return {
+    status: filters.status,
+    media_type: filters.mediaType,
+    genre: filters.genre,
+    favorite: filters.favorite ? 'true' : undefined,
+    q: filters.q?.trim() || undefined,
+    sort: filters.sort === 'updated' ? undefined : filters.sort,
+  };
+}
+
+/** A query the offline cache should not keep for a week. `tracking` queries
+ *  live as long as the cache does so the library opens offline; one per search
+ *  term or genre would fill it with views nobody reopens. */
+function isNarrowed(filters: LibraryFilters) {
+  return Boolean(filters.mediaType || filters.genre || filters.favorite || filters.q?.trim());
+}
+const NARROWED_GC_TIME = 5 * 60 * 1000;
+
+export function useTrackingInfinite(filters: LibraryFilters = {}, enabled = true) {
+  const params = libraryParams(filters);
+  const plain = !isNarrowed(filters) && !params.sort;
   return useInfiniteQuery({
-    queryKey: ['tracking', status, 'infinite'],
+    // A plain status view keeps the key it had before there were filters, so
+    // the library saved for offline use by an earlier release still opens.
+    queryKey: plain ? ['tracking', filters.status, 'infinite'] : ['tracking', 'infinite', params],
     queryFn: ({ pageParam }) =>
       apiRequest<TrackingItem[]>(
-        withQuery('/tracking', { status, page: pageParam, limit: 100 }),
+        withQuery('/tracking', { ...params, page: pageParam, limit: 100 }),
       ),
     initialPageParam: 1,
     getNextPageParam: (lastPage, pages) =>
       lastPage.length === 100 ? pages.length + 1 : undefined,
     enabled,
+    // The old list stays up while a new filter loads, instead of a spinner on
+    // every keystroke.
+    placeholderData: keepPreviousData,
+    ...(isNarrowed(filters) && { gcTime: NARROWED_GC_TIME }),
+  });
+}
+
+/** How many titles each choice of a filter would show, with the others as they
+ *  are; see `tracking_facets` on the server. */
+export function useTrackingFacets(filters: LibraryFilters, language: string, enabled = true) {
+  const { sort: _sort, ...params } = libraryParams(filters);
+  return useQuery({
+    queryKey: ['tracking', 'facets', params, language],
+    queryFn: () =>
+      apiRequest<TrackingFacets>(withQuery('/tracking/facets', { ...params, language })),
+    enabled,
+    placeholderData: keepPreviousData,
+    ...(isNarrowed(filters) && { gcTime: NARROWED_GC_TIME }),
   });
 }
 
