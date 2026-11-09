@@ -29,7 +29,9 @@ MANIFEST="$ROOT_DIR/backend/Cargo.toml"
 # resolve it offline; the checks that need it say so instead of passing.
 built_tree=""
 if command -v cargo >/dev/null 2>&1; then
-  built_tree="$(cd "$ROOT_DIR/backend" && cargo tree --offline --prefix none 2>/dev/null || true)"
+  if ! built_tree="$(cd "$ROOT_DIR/backend" && cargo tree --offline --prefix none 2>/dev/null)"; then
+    built_tree=""
+  fi
 fi
 tree_has() {
   printf '%s\n' "$built_tree" | grep -qE "^$1 v"
