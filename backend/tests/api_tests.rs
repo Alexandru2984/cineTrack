@@ -14209,6 +14209,126 @@ async fn catalog_hydration_backfills_held_titles_before_fetching_new_ones() {
 
 #[actix_web::test]
 #[ignore = "requires test DB"]
+async fn catalog_hydration_fills_the_language_of_tracked_titles_first() {
+    use cinetrack::services::catalog_hydration::{hydrate_popular_catalog, HydrationOptions};
+    use cinetrack::services::tmdb::TmdbService;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let upstream = actix_web::rt::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let mut request = vec![0_u8; 4096];
+        let read = stream.read(&mut request).await.unwrap();
+        let line = String::from_utf8_lossy(&request[..read])
+            .lines()
+            .next()
+            .unwrap()
+            .to_string();
+        let body = r#"{"id": 660012, "title": "Tracked Anime", "overview": "Detail",
+            "release_date": "2021-12-24", "status": "Released", "original_language": "ja",
+            "genres": [{"id": 16, "name": "Animation"}], "runtime": 105, "vote_average": 8.0,
+            "alternative_titles": {"titles": []}, "translations": {"translations": []}}"#;
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        stream.write_all(response.as_bytes()).await.unwrap();
+        line
+    });
+
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (_, _, user_id) =
+        register_user(&app, "languagefill", "languagefill@mailbox.dev", "Pass1234").await;
+    let user_id = Uuid::parse_str(&user_id).unwrap();
+    sqlx::query(
+        r#"INSERT INTO catalog_external_ids (media_type, tmdb_id, adult, video, popularity)
+        VALUES ('movie', 660011, false, false, 1000.0), ('movie', 660012, false, false, 1.0)"#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO catalog_external_titles (media_type, tmdb_id, title)
+        VALUES ('movie', 660011, 'Untracked'), ('movie', 660012, 'Tracked Anime')"#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO catalog_sync_state
+            (provider, export_date, movie_rows, tv_rows, movie_sha256, tv_sha256,
+             movie_object_key, tv_object_key)
+        VALUES ('tmdb', CURRENT_DATE, 2, 1, repeat('a', 64), repeat('b', 64),
+                'catalog/movie.gz', 'catalog/tv.gz')"#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    // Both fetched in full, fresh and not due, before the language was kept.
+    sqlx::query(
+        r#"INSERT INTO media (tmdb_id, media_type, title, metadata_level, tmdb_cached_at,
+                              title_aliases_cached_at, localizations_cached_at)
+        VALUES (660011, 'movie', 'Untracked', 'detail', NOW(), NOW(), NOW()),
+               (660012, 'movie', 'Tracked Anime', 'detail', NOW(), NOW(), NOW())"#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO catalog_hydration_state
+            (media_type, tmdb_id, outcome, consecutive_failures,
+             last_attempt_at, next_attempt_at, last_success_at)
+        SELECT 'movie', tmdb_id, 'success', 0, NOW(), NOW() + INTERVAL '30 days', NOW()
+        FROM media"#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO user_media (user_id, media_id, status)
+        SELECT $1, id, 'completed' FROM media WHERE tmdb_id = 660012"#,
+    )
+    .bind(user_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let mut config = test_config();
+    config.tmdb_base_url = format!("http://{address}");
+    let tmdb = TmdbService::new(&config);
+    let options = HydrationOptions {
+        budget: 5,
+        request_delay: std::time::Duration::ZERO,
+    };
+    let summary = hydrate_popular_catalog(&pool, &tmdb, options)
+        .await
+        .unwrap();
+    assert_eq!((summary.selected, summary.succeeded), (1, 1));
+    assert!(upstream.await.unwrap().starts_with("GET /movie/660012?"));
+    assert_eq!(
+        sqlx::query_scalar::<_, Option<String>>(
+            "SELECT original_language FROM media WHERE tmdb_id = 660012"
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap()
+        .as_deref(),
+        Some("ja")
+    );
+
+    // Filled, it is not taken again; the untracked one waits for its turn.
+    let summary = hydrate_popular_catalog(&pool, &tmdb, options)
+        .await
+        .unwrap();
+    assert_eq!(summary.selected, 0);
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
 async fn genre_and_popularity_lists_link_the_titles_that_have_pages() {
     let pool = setup_pool().await;
     clean_db(&pool).await;

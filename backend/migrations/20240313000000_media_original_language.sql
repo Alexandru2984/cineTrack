@@ -7,8 +7,8 @@
 -- anime; a Japanese-language film made elsewhere usually is).
 --
 -- Filled by every detail refresh from here on. Rows refreshed before this
--- column existed stay NULL until their next refresh, which is at most 30 days
--- for anything in a library.
+-- column existed stay NULL until their next refresh; catalog hydration takes
+-- the tracked ones among them first (see `hydrate_popular_catalog`).
 ALTER TABLE media
     ADD COLUMN original_language VARCHAR(2),
     ADD CONSTRAINT media_original_language_shape
