@@ -1,8 +1,15 @@
-import { useInfiniteQuery, useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import {
+  keepPreviousData,
+  useInfiniteQuery,
+  useQuery,
+  useMutation,
+  useQueryClient,
+} from '@tanstack/react-query';
 import api from '@/lib/api';
 import type {
   BulkWatchResponse,
   SeasonWatchProgress,
+  TrackingFacets,
   TrackingItem,
   TrackingStatus,
 } from '@/types';
@@ -65,17 +72,62 @@ function invalidateEpisodeWatchState(
   void queryClient.invalidateQueries({ queryKey: ['calendar'] });
 }
 
-export function useTrackingInfinite(status?: string) {
+export type LibrarySort = 'updated' | 'added' | 'title' | 'rating' | 'release';
+
+/** The library's filters, as the URL and the API both spell them. */
+export interface LibraryFilters {
+  status?: TrackingStatus;
+  mediaType?: 'movie' | 'tv';
+  /** A TMDB genre id, or `anime`. */
+  genre?: string;
+  favorite?: boolean;
+  q?: string;
+  sort?: LibrarySort;
+}
+
+function libraryParams(filters: LibraryFilters): Record<string, string> {
+  const params: Record<string, string> = {};
+  if (filters.status) params.status = filters.status;
+  if (filters.mediaType) params.media_type = filters.mediaType;
+  if (filters.genre) params.genre = filters.genre;
+  if (filters.favorite) params.favorite = 'true';
+  const q = filters.q?.trim();
+  if (q) params.q = q;
+  if (filters.sort && filters.sort !== 'updated') params.sort = filters.sort;
+  return params;
+}
+
+export function useTrackingInfinite(filters: LibraryFilters = {}) {
+  const params = libraryParams(filters);
   return useInfiniteQuery({
-    queryKey: ['tracking', status, 'infinite'],
+    queryKey: ['tracking', 'infinite', params],
     queryFn: async ({ pageParam }) => {
-      const params = { ...(status && { status }), page: pageParam, limit: 100 };
-      const res = await api.get('/tracking', { params });
+      const res = await api.get('/tracking', { params: { ...params, page: pageParam, limit: 100 } });
       return res.data as TrackingItem[];
     },
     initialPageParam: 1,
     getNextPageParam: (lastPage, pages) =>
       lastPage.length === 100 ? pages.length + 1 : undefined,
+    // Keep the old list on screen while a new filter loads, instead of
+    // flashing a spinner on every keystroke.
+    placeholderData: keepPreviousData,
+  });
+}
+
+/** How many titles each choice of a filter would show, with the others as they
+ *  are; see `tracking_facets` on the server. */
+export function useTrackingFacets(filters: LibraryFilters, language: string) {
+  const params = libraryParams(filters);
+  delete params.sort;
+  return useQuery({
+    queryKey: ['tracking', 'facets', params, language],
+    queryFn: async () => {
+      const res = await api.get<TrackingFacets>('/tracking/facets', {
+        params: { ...params, language },
+      });
+      return res.data;
+    },
+    placeholderData: keepPreviousData,
   });
 }
 
