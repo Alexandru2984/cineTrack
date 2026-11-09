@@ -133,6 +133,13 @@ pub async fn hydrate_popular_catalog(
     // meantime, and each one's Romanian address would change when the text
     // finally arrived.
     //
+    // The original language joined them in November 2026, but only for
+    // titles somebody tracks: the library's Anime filter reads it, and nothing
+    // else does yet. All 20,000 held titles would take this budget for three
+    // months; the ~900 in libraries take five days, and anyone who tracks an
+    // older title later has it filled the next morning. A refresh always
+    // stores TMDB's two-letter code, so a title cannot stay selected forever.
+    //
     // A query of its own, starting from `media`, rather than a leading term in
     // the ORDER BY below: that term defeats the top-N plan over the inventory
     // and was measured at 5.2 s against 139 ms. This one reads the ~18,000
@@ -158,6 +165,12 @@ pub async fn hydrate_popular_catalog(
           AND (
               media.title_aliases_cached_at IS NULL
               OR media.localizations_cached_at IS NULL
+              OR (
+                  media.original_language IS NULL
+                  AND EXISTS (
+                      SELECT 1 FROM user_media tracked WHERE tracked.media_id = media.id
+                  )
+              )
           )
           AND (
               state.next_attempt_at IS NULL

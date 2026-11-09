@@ -3,11 +3,12 @@ import {
   Check,
   Heart,
   MoreHorizontal,
+  Search as SearchIcon,
   SlidersHorizontal,
   Star,
   Trash2,
 } from 'lucide-react-native';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Alert,
   FlatList,
@@ -15,6 +16,7 @@ import {
   Pressable,
   RefreshControl,
   StyleSheet,
+  TextInput,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -23,18 +25,27 @@ import { AppButton } from '@/components/app-button';
 import { AppText } from '@/components/app-text';
 import { Poster } from '@/components/poster';
 import { ScreenHeader } from '@/components/screen-header';
+import {
+  LIBRARY_SORTS,
+  LibraryFilterSheet,
+  type LibraryFilterChanges,
+} from '@/components/library-filter-sheet';
 import { EmptyState, ErrorState, LoadingState } from '@/components/screen-state';
 import { SegmentedControl } from '@/components/segmented-control';
 import { TrackingFeedbackSheet } from '@/components/tracking-feedback-sheet';
 import { radius, spacing } from '@/constants/theme';
+import { useExportLibrary } from '@/hooks/use-library-export';
 import {
   useDeleteTracking,
+  useTrackingFacets,
   useTrackingInfinite,
   useUpdateTracking,
+  type LibraryFilters,
 } from '@/hooks/use-tracking';
 import { useT } from '@/hooks/use-t';
 import { useTheme } from '@/hooks/use-theme';
 import { getErrorMessage } from '@/lib/http';
+import { useLocaleStore } from '@/store/locale';
 import type { TrackingItem, TrackingStatus } from '@/types';
 
 type LibraryFilter = 'all' | TrackingStatus;
@@ -48,10 +59,33 @@ const FILTERS: readonly LibraryFilter[] = [
   'dropped',
 ];
 
+/** How long typing pauses before the search runs. */
+const SEARCH_DELAY_MS = 300;
+
+type RouteParam = string | string[] | undefined;
+
+function first(value: RouteParam) {
+  return Array.isArray(value) ? value[0] : value;
+}
+
 /** Params arrive as strings from the URL, so anything unrecognised is dropped. */
-function requestedFilter(value: string | string[] | undefined): LibraryFilter | null {
-  const candidate = Array.isArray(value) ? value[0] : value;
+function requestedFilter(value: RouteParam): LibraryFilter | null {
+  const candidate = first(value);
   return FILTERS.find((filter) => filter === candidate) ?? null;
+}
+
+function requestedFilters(params: Record<string, RouteParam>): Omit<LibraryFilters, 'q'> {
+  const status = requestedFilter(params.status);
+  const type = first(params.type);
+  const genre = first(params.genre);
+  const sort = first(params.sort);
+  return {
+    status: status && status !== 'all' ? status : undefined,
+    mediaType: type === 'movie' || type === 'tv' ? type : undefined,
+    genre: genre && (genre === 'anime' || /^[1-9]\d{0,8}$/.test(genre)) ? genre : undefined,
+    favorite: first(params.favorite) === '1' || undefined,
+    sort: LIBRARY_SORTS.find((candidate) => candidate === sort),
+  };
 }
 
 export default function LibraryScreen() {
@@ -70,15 +104,49 @@ export default function LibraryScreen() {
   // every arrival after the first one, and keeping the two in step would mean
   // syncing state to a prop inside an effect. One source of truth avoids both,
   // and makes the current filter a link anyone can open.
-  const params = useLocalSearchParams<{ status?: string }>();
+  // The other filters follow the same rule; only the search box is local,
+  // since a half-typed word is not a place anyone links to.
+  const params = useLocalSearchParams<{
+    status?: string;
+    type?: string;
+    genre?: string;
+    favorite?: string;
+    sort?: string;
+  }>();
   const filter = requestedFilter(params.status) ?? 'all';
   const setFilter = (next: LibraryFilter) => router.setParams({ status: next });
+  const [query, setQuery] = useState('');
+  const [search, setSearch] = useState('');
+  useEffect(() => {
+    const timer = setTimeout(() => setSearch(query.trim()), SEARCH_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [query]);
+  const filters: LibraryFilters = { ...requestedFilters(params), q: search || undefined };
+  const narrowed = Boolean(filters.mediaType || filters.genre || filters.favorite || filters.q);
+  const activeFilterCount = [filters.mediaType, filters.genre, filters.favorite, filters.sort]
+    .filter(Boolean).length;
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const changeFilters = (changes: LibraryFilterChanges) =>
+    router.setParams({
+      ...('type' in changes && { type: changes.type }),
+      ...('genre' in changes && { genre: changes.genre }),
+      ...('favorite' in changes && { favorite: changes.favorite ? '1' : undefined }),
+      ...('sort' in changes && { sort: changes.sort }),
+    });
+  const clearFilters = () => {
+    setQuery('');
+    setSearch('');
+    router.setParams({ type: undefined, genre: undefined, favorite: undefined });
+  };
+  const locale = useLocaleStore((state) => state.locale);
   // The one item whose options sheet is open: status, rating, favorite, removal.
   const [menuItem, setMenuItem] = useState<TrackingItem | null>(null);
   const [feedbackItem, setFeedbackItem] = useState<TrackingItem | null>(null);
-  const tracking = useTrackingInfinite(filter === 'all' ? undefined : filter);
+  const tracking = useTrackingInfinite(filters);
+  const facets = useTrackingFacets(filters, locale);
   const update = useUpdateTracking();
   const remove = useDeleteTracking();
+  const exportLibrary = useExportLibrary();
   const mutationError = update.error || remove.error;
   const items = tracking.data?.pages.flatMap((page) => page) ?? [];
 
@@ -118,13 +186,66 @@ export default function LibraryScreen() {
             <ScreenHeader
               title={t('library.title')}
               subtitle={
-                tracking.data
-                  ? t(items.length === 1 ? 'library.titleCount' : 'library.titleCountPlural', {
-                      count: `${items.length}${tracking.hasNextPage ? '+' : ''}`,
+                facets.data
+                  ? t(facets.data.total === 1 ? 'library.titleCount' : 'library.titleCountPlural', {
+                      count: facets.data.total,
                     })
-                  : t('library.subtitleFallback')
+                  : tracking.data
+                    ? t(items.length === 1 ? 'library.titleCount' : 'library.titleCountPlural', {
+                        count: `${items.length}${tracking.hasNextPage ? '+' : ''}`,
+                      })
+                    : t('library.subtitleFallback')
               }
             />
+            <View style={styles.searchRow}>
+              <View
+                style={[
+                  styles.searchBox,
+                  { backgroundColor: theme.elevated, borderColor: theme.border },
+                ]}
+              >
+                <SearchIcon color={theme.mutedText} size={20} />
+                <TextInput
+                  value={query}
+                  onChangeText={setQuery}
+                  accessibilityLabel={t('library.search')}
+                  placeholder={t('library.searchPlaceholder')}
+                  placeholderTextColor={theme.mutedText}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  returnKeyType="search"
+                  maxLength={100}
+                  style={[styles.input, { color: theme.text }]}
+                />
+              </View>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={
+                  activeFilterCount
+                    ? t('library.filtersActive', { count: activeFilterCount })
+                    : t('library.filters')
+                }
+                onPress={() => setFiltersOpen(true)}
+                style={({ pressed }) => [
+                  styles.filterButton,
+                  {
+                    borderColor: activeFilterCount ? theme.primary : theme.border,
+                    backgroundColor: activeFilterCount ? theme.primarySoft : theme.elevated,
+                    opacity: pressed ? 0.72 : 1,
+                  },
+                ]}
+              >
+                <SlidersHorizontal
+                  color={activeFilterCount ? theme.primary : theme.mutedText}
+                  size={20}
+                />
+                {activeFilterCount ? (
+                  <AppText variant="caption" style={{ color: theme.primary }}>
+                    {activeFilterCount}
+                  </AppText>
+                ) : null}
+              </Pressable>
+            </View>
             <SegmentedControl value={filter} options={filterOptions} onChange={setFilter} />
             {mutationError ? (
               <AppText variant="caption" style={{ color: theme.danger }}>
@@ -141,6 +262,19 @@ export default function LibraryScreen() {
               message={getErrorMessage(tracking.error, t('library.loadError'))}
               onRetry={() => void tracking.refetch()}
             />
+          ) : narrowed ? (
+            <View style={styles.noMatches}>
+              <EmptyState
+                icon={SearchIcon}
+                title={t('library.noMatchesTitle')}
+                message={t('library.noMatchesMessage')}
+              />
+              <AppButton
+                label={t('library.clearFilters')}
+                variant="secondary"
+                onPress={clearFilters}
+              />
+            </View>
           ) : (
             <EmptyState
               icon={SlidersHorizontal}
@@ -174,6 +308,7 @@ export default function LibraryScreen() {
                 </AppText>
                 <AppText variant="caption" muted numberOfLines={1}>
                   {t(item.media_type === 'tv' ? 'mediaType.tv' : 'mediaType.movie')}
+                  {item.release_date ? ` · ${item.release_date.slice(0, 4)}` : ''}
                   {' · '}
                   {t(`status.${item.status}`)}
                 </AppText>
@@ -305,6 +440,25 @@ export default function LibraryScreen() {
           </SafeAreaView>
         </Pressable>
       </Modal>
+      <LibraryFilterSheet
+        visible={filtersOpen}
+        filters={filters}
+        facets={facets.data}
+        onChange={changeFilters}
+        onClear={() => {
+          clearFilters();
+          router.setParams({ sort: undefined });
+        }}
+        onClose={() => {
+          setFiltersOpen(false);
+          exportLibrary.reset();
+        }}
+        onExport={() => exportLibrary.mutate({ filters, language: locale })}
+        exporting={exportLibrary.isPending}
+        exportError={
+          exportLibrary.error ? getErrorMessage(exportLibrary.error, t('library.exportError')) : null
+        }
+      />
       {feedbackItem ? (
         <TrackingFeedbackSheet
           item={feedbackItem}
@@ -374,6 +528,39 @@ const styles = StyleSheet.create({
   header: {
     gap: spacing.lg,
     paddingBottom: spacing.lg,
+  },
+  searchRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  searchBox: {
+    flex: 1,
+    minHeight: 48,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    borderWidth: 1,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+  },
+  input: {
+    flex: 1,
+    minHeight: 46,
+    fontSize: 16,
+  },
+  filterButton: {
+    minWidth: 48,
+    minHeight: 48,
+    flexDirection: 'row',
+    gap: spacing.xs,
+    borderWidth: 1,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  noMatches: {
+    gap: spacing.md,
   },
   row: {
     flexDirection: 'row',

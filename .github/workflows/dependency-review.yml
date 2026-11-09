@@ -38,6 +38,15 @@ jobs:
           # compression, so any actix release that moves it would otherwise
           # be blocked on the spelling of its manifest.
           allow-dependencies-licenses: pkg:cargo/brotli-decompressor
+          # GHSA-3g3m-2fjr-6pw4 (moderate): glob can keep walking the file
+          # system after its AbortSignal fires. Fixed only in glob 14, and
+          # @expo/fingerprint still requires 13, so any mobile lockfile change
+          # that touches it re-adds a 13.x copy under it and is refused here,
+          # zod's HIGH fix with it. That copy runs only in Node build tooling
+          # (fingerprinting the native project for an EAS build), never in the
+          # app and never with a signal anyone outside controls. Remove this
+          # line once @expo/fingerprint accepts glob 14.
+          allow-ghsas: GHSA-3g3m-2fjr-6pw4
           retry-on-snapshot-warnings: true
           retry-on-snapshot-warnings-timeout: 120
           show-patched-versions: true
