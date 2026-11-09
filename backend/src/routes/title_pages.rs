@@ -20,6 +20,7 @@
 //! crawler invents. The one upstream call a page can make is for streaming
 //! availability, which is cached for a day and has a short deadline here.
 
+use std::sync::OnceLock;
 use std::time::Duration;
 
 use actix_web::{http::header, web, HttpRequest, HttpResponse, HttpResponseBuilder};
@@ -33,7 +34,30 @@ use crate::errors::AppError;
 use crate::services::tmdb::TmdbService;
 
 pub(crate) const SITE: &str = "https://vazute.micutu.com";
+/// TMDB's image CDN, for addresses another service fetches: the structured
+/// data and the link preview. The pages' own images use `page_image_base`.
 pub(crate) const IMAGE_BASE: &str = "https://image.tmdb.org/t/p";
+static PAGE_IMAGE_BASE: OnceLock<&'static str> = OnceLock::new();
+
+/// Serve the pages' images from `/api/img`, as the application already does.
+///
+/// They pointed at TMDB's CDN directly, while the application has loaded its
+/// posters from this origin, cached in R2, since `VITE_USE_R2_IMAGES`. A
+/// browser that could not reach the CDN — a filter list, a DNS blocker, a
+/// network that drops it — showed a page opened from search with every image
+/// missing, and the same title opened in the application with its poster.
+///
+/// Called once at startup, and only when R2 is configured: `/api/img` has
+/// nowhere to cache without it.
+pub fn serve_page_images_locally() {
+    let _ = PAGE_IMAGE_BASE.set("/api/img");
+}
+
+/// Where a page's `<img>` tags point: `/api/img` once
+/// `serve_page_images_locally` has run, TMDB's CDN until then.
+pub(crate) fn page_image_base() -> &'static str {
+    PAGE_IMAGE_BASE.get().copied().unwrap_or(IMAGE_BASE)
+}
 /// How long a page waits for streaming availability before rendering without
 /// it. Cached answers return at once; this only bounds a cold fetch.
 const PROVIDERS_DEADLINE: Duration = Duration::from_secs(3);
@@ -792,7 +816,8 @@ fn provider_list(heading: &str, providers: &[WatchProviderEntry]) -> String {
             let name = escape(&provider.name);
             match &provider.logo_path {
                 Some(logo) => format!(
-                    r#"<li><img src="{IMAGE_BASE}/w92{logo}" alt="" width="46" height="46" loading="lazy" decoding="async" /><span>{name}</span></li>"#,
+                    r#"<li><img src="{images}/w92{logo}" alt="" width="46" height="46" loading="lazy" decoding="async" /><span>{name}</span></li>"#,
+                    images = page_image_base(),
                     logo = escape(logo)
                 ),
                 None => format!("<li><span>{name}</span></li>"),
@@ -940,7 +965,8 @@ fn render(page: &Page) -> String {
         .as_deref()
         .map(|poster| {
             format!(
-                r#"<img class="poster" src="{IMAGE_BASE}/w342{poster}" srcset="{IMAGE_BASE}/w342{poster} 1x, {IMAGE_BASE}/w780{poster} 2x" alt="{alt}" width="342" height="513" fetchpriority="high" />"#,
+                r#"<img class="poster" src="{images}/w342{poster}" srcset="{images}/w342{poster} 1x, {images}/w780{poster} 2x" alt="{alt}" width="342" height="513" fetchpriority="high" />"#,
+                images = page_image_base(),
                 poster = escape(poster),
                 alt = escape(&format!("Poster {title}"))
             )
@@ -1279,6 +1305,28 @@ mod tests {
             ["title_pages.rs"],
             "only html_page may set an HTML content type"
         );
+    }
+
+    #[test]
+    fn page_images_do_not_point_at_the_cdn_directly() {
+        // An `<img>` written with IMAGE_BASE goes back to depending on a host
+        // the visitor's browser may not reach (see `serve_page_images_locally`).
+        let needles = [
+            concat!("src=\"{", "IMAGE_BASE}"),
+            concat!("srcset=\"{", "IMAGE_BASE}"),
+        ];
+        let routes = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/routes");
+        for entry in std::fs::read_dir(&routes).unwrap() {
+            let path = entry.unwrap().path();
+            let source = std::fs::read_to_string(&path).unwrap();
+            assert!(
+                needles.iter().all(|needle| !source.contains(needle)),
+                "{} builds a page image from IMAGE_BASE",
+                path.display()
+            );
+        }
+        // Nothing in the test binary turns it on, so pages here still use TMDB.
+        assert_eq!(page_image_base(), IMAGE_BASE);
     }
 
     fn row() -> TitleRow {
