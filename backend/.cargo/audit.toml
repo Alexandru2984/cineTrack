@@ -7,7 +7,27 @@
 # the facts it rests on.
 
 [advisories]
-ignore = []
+ignore = [
+    # libsqlite3-sys 0.30.1: SQLite CVE-2026-119375 (RUSTSEC-2026-0459).
+    #
+    # Listed in Cargo.lock, never compiled. sqlx forwards its features to every
+    # driver with weak dependency features (`sqlx-sqlite?/json`), and Cargo
+    # writes an optional dependency named that way into the lockfile even when
+    # nothing enables it (rust-lang/cargo#10801). sqlx is declared with
+    # `default-features = false` and only `postgres`; `cargo tree` has neither
+    # sqlx-sqlite nor libsqlite3-sys in it. The lock entry also lacks the `cc`
+    # build dependency that the `bundled` feature needs, so even a build of it
+    # would link the system SQLite rather than the vulnerable bundled copy.
+    #
+    # Cannot be lifted by upgrading: sqlx-sqlite 0.9.0 requires
+    # libsqlite3-sys >=0.30.1, <0.38.0 and the fix is in 0.39.0. Remove this
+    # once sqlx accepts it.
+    #
+    # Invalidated by: enabling an sqlx `sqlite` feature, or anything else that
+    # puts sqlx-sqlite or libsqlite3-sys into the built tree. The exception
+    # check builds the tree and fails if either appears.
+    "RUSTSEC-2026-0459",
+]
 
 # RUSTSEC-2026-0258 (h2: unbounded empty DATA frames) used to be ignored here.
 # The reasoning was sound — nothing could reach the h2 codec — but an accepted
@@ -29,6 +49,12 @@ ignore = []
 # that: a green gate expresses an acceptance policy, not a zero-vulnerability
 # inventory.
 #
-# None at the moment. The last one was chacha20 0.10.0, yanked and reached
-# through `rand`; it went away in October 2026 when the lockfile moved to
-# chacha20 0.10.2, a compatible release that was never yanked.
+# pin-utils 0.1.0 is unmaintained (RUSTSEC-2026-0441, 2026-10-01). It comes
+# through aws-smithy-http for the S3 client that uploads backups to R2. The
+# advisory reports no flaw in its code: it is two pinning macros that the
+# standard library has since absorbed (`std::pin::pin!`). It goes when
+# aws-smithy-http stops depending on it.
+#
+# The one before it was chacha20 0.10.0, yanked and reached through `rand`; it
+# went away in October 2026 when the lockfile moved to chacha20 0.10.2, a
+# compatible release that was never yanked.

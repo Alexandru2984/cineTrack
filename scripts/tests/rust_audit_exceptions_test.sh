@@ -23,8 +23,42 @@ mapfile -t ignored < <(
   grep -oE '"RUSTSEC-[0-9]{4}-[0-9]{4}"' "$AUDIT_CONFIG" | tr -d '"' | sort -u
 )
 
+MANIFEST="$ROOT_DIR/backend/Cargo.toml"
+
+# The built dependency tree, one crate per line. Empty when cargo cannot
+# resolve it offline; the checks that need it say so instead of passing.
+built_tree=""
+if command -v cargo >/dev/null 2>&1; then
+  if ! built_tree="$(cd "$ROOT_DIR/backend" && cargo tree --offline --prefix none 2>/dev/null)"; then
+    built_tree=""
+  fi
+fi
+tree_has() {
+  printf '%s\n' "$built_tree" | grep -qE "^$1 v"
+}
+
 for advisory in ${ignored[@]+"${ignored[@]}"}; do
   case "$advisory" in
+    RUSTSEC-2026-0459)
+      # libsqlite3-sys is in Cargo.lock only because sqlx names its SQLite
+      # driver through weak features; it must not be built.
+      sqlx_line="$(grep -E '^sqlx = ' "$MANIFEST" || true)"
+      [[ -n "$sqlx_line" ]] || fail "no sqlx dependency line in backend/Cargo.toml"
+      case "$sqlx_line" in
+        *'default-features = false'*) ;;
+        *) fail "sqlx must keep default-features = false, or its sqlite driver may be built ($advisory)" ;;
+      esac
+      case "$sqlx_line" in
+        *sqlite*) fail "sqlx enables an sqlite feature; libsqlite3-sys would be built ($advisory)" ;;
+      esac
+      if [[ -n "$built_tree" ]]; then
+        tree_has cinetrack || fail "cargo tree output does not name the backend crate"
+        tree_has sqlx-sqlite && fail "sqlx-sqlite is in the built tree ($advisory)"
+        tree_has libsqlite3-sys && fail "libsqlite3-sys is in the built tree ($advisory)"
+      else
+        echo "note: cargo tree unavailable offline; $advisory checked against the manifest only" >&2
+      fi
+      ;;
     *)
       fail "$advisory has no justification check here; add one or remove the ignore"
       ;;
@@ -37,7 +71,6 @@ done
 # reintroduce a vulnerable crate that no ignore entry covers any more, and
 # `cargo audit` would start failing — but it would fail in CI, after the fact.
 # Catch it at the declaration instead.
-MANIFEST="$ROOT_DIR/backend/Cargo.toml"
 actix_web_line="$(grep -E '^actix-web = ' "$MANIFEST" || true)"
 [[ -n "$actix_web_line" ]] || fail "no actix-web dependency line in backend/Cargo.toml"
 
@@ -52,10 +85,8 @@ esac
 
 # The feature list is what keeps h2 out, so prove it against the built tree
 # rather than trusting the manifest text alone.
-if command -v cargo >/dev/null 2>&1; then
-  if (cd "$ROOT_DIR/backend" && cargo tree --offline --prefix none 2>/dev/null | grep -qE '^h2 v0\.3'); then
-    fail "h2 0.3 is back in the dependency tree (RUSTSEC-2026-0258)"
-  fi
+if printf '%s\n' "$built_tree" | grep -qE '^h2 v0\.3'; then
+  fail "h2 0.3 is back in the dependency tree (RUSTSEC-2026-0258)"
 fi
 
 echo "Rust audit exceptions checked: ${#ignored[@]} advisory/advisories still justified; h2 stays out of the tree"
