@@ -1,6 +1,7 @@
 import { isAuthPayload, MalformedAuthResponseError } from '@/lib/api';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import api, { endSession } from '@/lib/api';
+import { localDateStamp, saveFile } from '@/lib/download';
 import { useAuthStore } from '@/store/auth';
 import { useEncryptionStore } from '@/store/encryption';
 import type { AuthResponse, SecurityActivity, Session, User } from '@/types';
@@ -337,6 +338,18 @@ export function useLogoutAllSessions() {
     // The current session is revoked too, so drop local auth and let the caller
     // redirect to login.
     onSuccess: () => logout(),
+  });
+}
+
+/** Everything the account holds, as the JSON file the server builds. Asks for
+ *  the password because it carries messages, sessions and security history. */
+export function useExportAccount() {
+  return useMutation({
+    mutationFn: async (data: { password: string; totp_code?: string }) => {
+      const res = await api.post<unknown>('/users/me/export', data, { timeout: 60_000 });
+      const blob = new Blob([JSON.stringify(res.data, null, 2)], { type: 'application/json' });
+      saveFile(blob, `vazute-account-export-${localDateStamp()}.json`);
+    },
   });
 }
 
