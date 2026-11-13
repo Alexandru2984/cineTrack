@@ -1,3 +1,8 @@
+// First, for its side effect: message encryption needs `crypto.getRandomValues`,
+// which the native runtime does not have. It lives here rather than in
+// `lib/crypto/core.ts` because that file must stay identical to the web copy.
+import '@/lib/crypto/random';
+
 import {
   DarkTheme,
   DefaultTheme,
