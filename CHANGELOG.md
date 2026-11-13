@@ -61,6 +61,10 @@ and release versions follow semantic versioning.
 - Report dialogs trap keyboard focus, close with Escape, and restore focus to
   their trigger.
 - Inline links no longer rely on color alone for identification.
+- Message encryption can be turned on in the native app. Key generation read
+  its randomness from `crypto.getRandomValues`, which React Native does not
+  provide, so setup failed on every phone before anything reached the server;
+  the app now supplies it from expo-crypto.
 
 ### Security
 
