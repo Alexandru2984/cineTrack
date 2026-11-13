@@ -56,6 +56,10 @@
  * are different keys: GCM's requirement is uniqueness per key, not globally.
  */
 
+// First, for its side effect: the @noble calls below need
+// `crypto.getRandomValues`, which the native runtime does not have.
+import '@/lib/crypto/random';
+
 import { ed25519, x25519 } from '@noble/curves/ed25519.js';
 import { gcm } from '@noble/ciphers/aes.js';
 import { argon2id } from '@noble/hashes/argon2.js';
