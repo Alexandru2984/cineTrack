@@ -15,6 +15,8 @@ jest.mock('expo-crypto', () => {
   };
 });
 
+declare const __dirname: string;
+
 const expoGetRandomValues = getRandomValues as jest.MockedFunction<typeof getRandomValues>;
 
 /** Node has `globalThis.crypto`; Hermes does not. These tests take it away to
@@ -65,6 +67,20 @@ describe('installRandomSource', () => {
     );
     expect(bytes).toHaveLength(16);
     expect(expoGetRandomValues).toHaveBeenCalledTimes(1);
+  });
+
+  it('is installed by the root layout before anything else loads', () => {
+    // The key code itself cannot import it: `lib/crypto/core.ts` must stay
+    // byte-identical to the web copy. So the wiring is the root layout, and a
+    // refactor that drops the line would bring the phone failure back silently.
+    const fs = jest.requireActual('fs') as {
+      readFileSync(file: string, encoding: 'utf8'): string;
+    };
+    const path = jest.requireActual('path') as { join(...parts: string[]): string };
+    const layout = fs.readFileSync(path.join(__dirname, '..', '..', 'app', '_layout.tsx'), 'utf8');
+    const firstImport = layout.split('\n').find((line) => line.startsWith('import '));
+
+    expect(firstImport).toBe("import '@/lib/crypto/random';");
   });
 
   it('leaves a runtime that already has the call alone', () => {
