@@ -38,15 +38,21 @@ jobs:
           # compression, so any actix release that moves it would otherwise
           # be blocked on the spelling of its manifest.
           allow-dependencies-licenses: pkg:cargo/brotli-decompressor
-          # GHSA-3g3m-2fjr-6pw4 (moderate): glob can keep walking the file
-          # system after its AbortSignal fires. Fixed only in glob 14, and
-          # @expo/fingerprint still requires 13, so any mobile lockfile change
-          # that touches it re-adds a 13.x copy under it and is refused here,
-          # zod's HIGH fix with it. That copy runs only in Node build tooling
-          # (fingerprinting the native project for an EAS build), never in the
-          # app and never with a signal anyone outside controls. Remove this
-          # line once @expo/fingerprint accepts glob 14.
-          allow-ghsas: GHSA-3g3m-2fjr-6pw4
+          # GHSA-g3hv-75wg-m249 (moderate): minimatch can be made to expand a
+          # crafted pattern into an enormous number of glob parts. Fixed only
+          # in minimatch 11, and both mobile copies sit under packages that
+          # require ^10: @expo/fingerprint (10.2.6, since 0.20.16) and
+          # @typescript-eslint/typescript-estree (10.2.5). Both are Node build
+          # tooling, fingerprinting the native project for an EAS build and
+          # resolving tsconfig globs for ESLint, and every pattern they match
+          # comes from Expo's defaults or this repository's own config, never
+          # from anyone outside. Nothing ships in the app. Remove this line once
+          # both accept minimatch 11.
+          #
+          # It replaces GHSA-3g3m-2fjr-6pw4 (glob 13 under @expo/fingerprint):
+          # fingerprint 0.20.16 no longer depends on glob, and the copies left,
+          # 14.0.4 and 7.2.3, are outside that advisory's range.
+          allow-ghsas: GHSA-g3hv-75wg-m249
           retry-on-snapshot-warnings: true
           retry-on-snapshot-warnings-timeout: 120
           show-patched-versions: true
