@@ -135,6 +135,13 @@ and release versions follow semantic versioning.
   publishes the application port beside unrelated services. `METRICS_BEARER_TOKEN`
   is required in production; see `docs/release-process.md` for the one-time
   setup a deploy needs before it will start.
+- "Sign out everywhere" also turns off the calendar feed link and removes push
+  registrations, as a password change already did. Both work without a
+  session, so a token held for a moment was enough to create either, and both
+  kept delivering the owner's titles and air dates after the button. A pending
+  email change or reset link is cancelled too. Creating or turning off a feed
+  link now appears in the security timeline, and the timeline names the
+  message-encryption events it used to show as a generic update.
 - Blocking is enforced server-side across profiles, follows, activity, lists,
   notifications, and reports rather than being only a client-side filter.
 - Report snapshots are bounded and moderator decisions require a recorded note.

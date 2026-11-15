@@ -17204,6 +17204,168 @@ async fn recovery_cuts_the_capabilities_that_outlive_a_session() {
     );
 }
 
+/// "Sign out everywhere" has to cut them too.
+///
+/// It is the control an owner reaches for when they think someone else holds
+/// the account, and it revoked sessions only. A token held for a moment was
+/// enough to mint a feed URL or register a device, and both kept delivering
+/// the owner's titles and air dates after the button, with nothing in the
+/// security timeline to say a feed had been minted.
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn signing_out_everywhere_cuts_the_feed_and_push_devices() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (token, _, user_id) =
+        register_user(&app, "signoutcaps", "signoutcaps@mailbox.dev", "Pass1234").await;
+    let user_uuid = Uuid::parse_str(&user_id).unwrap();
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/calendar/feed")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .insert_header(("User-Agent", "FeedMinter/1.0"))
+        .peer_addr(peer_addr())
+        .to_request();
+    let feed: Value = actix_test::call_and_read_body_json(&app, req).await;
+    let feed_token = feed["feed_url"]
+        .as_str()
+        .expect("enabling the feed returns its URL")
+        .rsplit('/')
+        .next()
+        .unwrap()
+        .to_string();
+
+    let req = actix_test::TestRequest::put()
+        .uri("/api/push/devices")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .set_json(json!({
+            "expo_push_token": "ExponentPushToken[signoutcaps000000000]",
+            "unregister_secret": "c".repeat(64),
+            "platform": "android",
+            "app_version": "1.2.0",
+            "utc_offset_minutes": 0
+        }))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 200);
+
+    let feed_status = |feed_token: &str| {
+        actix_test::TestRequest::get()
+            .uri(&format!("/api/calendar/feed/{feed_token}"))
+            .peer_addr(peer_addr())
+            .to_request()
+    };
+    let devices = || async {
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM push_devices WHERE user_id = $1")
+            .bind(user_uuid)
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+    };
+    // Armed, so the test cannot pass by never having had either.
+    assert_eq!(
+        actix_test::call_service(&app, feed_status(&feed_token))
+            .await
+            .status(),
+        200
+    );
+    assert_eq!(devices().await, 1);
+
+    let req = actix_test::TestRequest::get()
+        .uri("/api/auth/security-activity")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let events: Value = actix_test::call_and_read_body_json(&app, req).await;
+    let minted = events
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|event| event["event_type"] == "calendar_feed_enabled")
+        .unwrap_or_else(|| panic!("minting a feed is in the timeline: {events}"));
+    assert_eq!(minted["user_agent"], "FeedMinter/1.0");
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/auth/sessions/logout-all")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert!(actix_test::call_service(&app, req)
+        .await
+        .status()
+        .is_success());
+
+    assert_eq!(
+        actix_test::call_service(&app, feed_status(&feed_token))
+            .await
+            .status(),
+        404,
+        "the feed URL still serves the calendar after signing out everywhere"
+    );
+    assert_eq!(
+        devices().await,
+        0,
+        "a device registered before signing out everywhere still receives notifications"
+    );
+}
+
+/// Turning the feed off is in the timeline too, and only when it was on.
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn disabling_the_calendar_feed_is_recorded_once() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (token, _, _) =
+        register_user(&app, "feedtoggler", "feedtoggler@mailbox.dev", "Pass1234").await;
+
+    let call = |method: actix_web::http::Method| {
+        actix_test::TestRequest::default()
+            .method(method)
+            .uri("/api/calendar/feed")
+            .insert_header(("Authorization", format!("Bearer {token}")))
+            .peer_addr(peer_addr())
+            .to_request()
+    };
+    use actix_web::http::Method;
+    assert_eq!(
+        actix_test::call_service(&app, call(Method::POST))
+            .await
+            .status(),
+        200
+    );
+    assert_eq!(
+        actix_test::call_service(&app, call(Method::DELETE))
+            .await
+            .status(),
+        200
+    );
+    assert_eq!(
+        actix_test::call_service(&app, call(Method::DELETE))
+            .await
+            .status(),
+        200
+    );
+
+    let req = actix_test::TestRequest::get()
+        .uri("/api/auth/security-activity")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let events: Value = actix_test::call_and_read_body_json(&app, req).await;
+    let count = |kind: &str| {
+        events
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|event| event["event_type"] == kind)
+            .count()
+    };
+    assert_eq!(count("calendar_feed_enabled"), 1, "{events}");
+    assert_eq!(count("calendar_feed_disabled"), 1, "{events}");
+}
+
 /// The link-preview routes have to carry a budget like everything else.
 ///
 /// Found auditing this codebase after the September round. They are public,

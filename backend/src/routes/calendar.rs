@@ -9,6 +9,7 @@ use crate::errors::AppError;
 use crate::middleware::auth::require_auth;
 use crate::services::ical::{build_calendar, FeedEvent};
 use crate::services::quota;
+use crate::services::security_activity::{self, SecurityActivityKind};
 use crate::utils::calendar_feed;
 
 /// How far ahead the subscribable feed looks, and a cap on entries so a huge
@@ -703,25 +704,56 @@ async fn enable_feed(
     req: HttpRequest,
 ) -> Result<HttpResponse, AppError> {
     let user_id = require_auth(&req).await?;
+    let client = crate::routes::auth::client_info(&req);
     let token = calendar_feed::generate_feed_token();
     let token_hash = calendar_feed::hash_feed_token(&token);
+    let mut tx = pool.begin().await?;
     sqlx::query("UPDATE users SET calendar_feed_token_hash = $2, updated_at = NOW() WHERE id = $1")
         .bind(user_id)
         .bind(&token_hash)
-        .execute(pool.get_ref())
+        .execute(&mut *tx)
         .await?;
+    // In the timeline the owner already reviews: a feed URL outlives every
+    // session, so one minted by somebody else is worth seeing there.
+    security_activity::record_in_transaction(
+        &mut tx,
+        user_id,
+        SecurityActivityKind::CalendarFeedEnabled,
+        client.user_agent.as_deref(),
+        client.ip_address.as_deref(),
+    )
+    .await?;
+    tx.commit().await?;
     let feed_url = format!("{}/api/calendar/feed/{}.ics", config.frontend_url, token);
     Ok(HttpResponse::Ok().json(CalendarFeedCredential { feed_url }))
 }
 
 async fn disable_feed(pool: web::Data<PgPool>, req: HttpRequest) -> Result<HttpResponse, AppError> {
     let user_id = require_auth(&req).await?;
-    sqlx::query(
-        "UPDATE users SET calendar_feed_token_hash = NULL, updated_at = NOW() WHERE id = $1",
+    let client = crate::routes::auth::client_info(&req);
+    let mut tx = pool.begin().await?;
+    let disabled = sqlx::query(
+        "UPDATE users SET calendar_feed_token_hash = NULL, updated_at = NOW()
+         WHERE id = $1 AND calendar_feed_token_hash IS NOT NULL",
     )
     .bind(user_id)
-    .execute(pool.get_ref())
-    .await?;
+    .execute(&mut *tx)
+    .await?
+    .rows_affected()
+        > 0;
+    // Only an actual change is recorded; turning off a feed that was off is not
+    // an event.
+    if disabled {
+        security_activity::record_in_transaction(
+            &mut tx,
+            user_id,
+            SecurityActivityKind::CalendarFeedDisabled,
+            client.user_agent.as_deref(),
+            client.ip_address.as_deref(),
+        )
+        .await?;
+    }
+    tx.commit().await?;
     Ok(HttpResponse::Ok().json(CalendarFeedStatus { enabled: false }))
 }
 
