@@ -458,11 +458,22 @@ pub async fn refresh_token(
     // the client keeps only one of them. Once a token is rotated normally, the
     // client has shown which one it kept, so the siblings are orphans; left
     // alone they would stay valid until expiry. Only siblings older than the
-    // grace window go, so a token handed out in the same burst as this one, and
-    // perhaps still on its way to the client, is not pulled from under it.
+    // grace window are touched, so a token handed out in the same burst as this
+    // one, and perhaps still on its way to the client, is not pulled from under
+    // it.
+    //
+    // They are marked consumed, as of when they were issued, rather than
+    // deleted. A client keeps one token, so nobody legitimate presents an orphan
+    // again; whoever does is holding a second copy of the session. That is the
+    // replay the grace window lets through: a thief presents a stolen token
+    // moments before the owner's client does, both get a successor, and the
+    // next rotation used to delete the other side's. A deleted row answers
+    // "Invalid refresh token", so the owner was quietly signed out and the thief
+    // kept the session. A consumed row outside the window is the theft path:
+    // every session on the account ends, and it is logged and counted.
     if stored.consumed_at.is_none() {
         sqlx::query(
-            "DELETE FROM refresh_tokens
+            "UPDATE refresh_tokens SET consumed_at = created_at
              WHERE family_id = $1 AND id <> $2
                AND consumed_at IS NULL AND revoked_at IS NULL
                AND created_at <= NOW() - ($3 * INTERVAL '1 second')",

@@ -95,6 +95,13 @@ and release versions follow semantic versioning.
   derived from the password any more, so there is nothing to re-seal — and the
   step that used to fail silently, leaving a backup sealed under a password
   nobody would use again, no longer exists.
+- A stolen refresh token can no longer be used to take over a session quietly.
+  Presenting a token again within a minute of its rotation is answered as a
+  retry, so a thief who presented it just before the owner's app did got a
+  session of their own, and the next rotation deleted the other side's copy:
+  the owner looked signed out by expiry and nothing was flagged. That copy is
+  now kept as used, so presenting it is reuse: every session on the account
+  ends, and the event is logged and counted.
 - Plain-text messages are refused once both accounts have published keys. The
   choice between plain text and an encrypted envelope is made by the client,
   which is the only side that knows whether it can encrypt — so the server
