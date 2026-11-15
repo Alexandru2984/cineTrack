@@ -22,6 +22,13 @@ const MAX_BODY_BYTES: usize = 8 * 1024;
 const MAX_URI_LEN: usize = 512;
 const MAX_SAMPLE_LEN: usize = 256;
 const MAX_DIRECTIVE_LEN: usize = 128;
+/// Log lines one report may write. A Reporting-API body is an array, and an
+/// 8 KiB one fits a couple of hundred minimal entries; logging each let one
+/// unauthenticated request write ~60 KB into the same container log that
+/// keeps the `audit:` lines, so a few addresses could rotate those out. Real
+/// browsers batch a handful at a time. Every entry is still counted in the
+/// metric; past the cap, one summary line says how many were not logged.
+const MAX_LOGGED_VIOLATIONS: usize = 10;
 
 pub type CspReportGovernorConfig = RateLimitConfig;
 
@@ -195,34 +202,61 @@ fn parse_violations(raw: &[u8]) -> Vec<Violation> {
     }
 }
 
-async fn receive_csp_report(body: web::Bytes) -> HttpResponse {
-    if body.len() > MAX_BODY_BYTES {
-        return HttpResponse::BadRequest().finish();
-    }
-
-    for violation in parse_violations(&body) {
-        if violation.directive.is_empty() {
+/// The structured log entries for one report: the first
+/// [`MAX_LOGGED_VIOLATIONS`] violations, then one summary entry when more were
+/// left out. Violations without a directive are not reports and are skipped.
+fn log_entries(violations: &[Violation]) -> Vec<serde_json::Value> {
+    let reportable = violations
+        .iter()
+        .filter(|violation| !violation.directive.is_empty());
+    let mut entries = Vec::new();
+    let mut not_logged = 0usize;
+    for violation in reportable {
+        if entries.len() == MAX_LOGGED_VIOLATIONS {
+            not_logged += 1;
             continue;
         }
         let directive = crate::metrics::normalize_csp_directive(&violation.directive);
         let disposition =
             crate::metrics::normalize_csp_disposition(violation.disposition.as_deref());
-        crate::metrics::record_csp_report(directive, disposition);
-        log::warn!(
-            target: "cinetrack::csp",
-            "{}",
-            json!({
-                "event": "csp_violation",
-                "directive": directive,
-                "raw_directive": truncate(&violation.directive, MAX_DIRECTIVE_LEN),
-                "disposition": disposition,
-                "document": violation.document.as_deref().map(strip_uri_secrets),
-                "blocked": violation.blocked.as_deref().map(strip_uri_secrets),
-                "source_file": violation.source_file.as_deref().map(strip_uri_secrets),
-                "line_number": violation.line_number,
-                "sample": violation.sample.as_deref().map(|value| truncate(value, MAX_SAMPLE_LEN)),
-            })
+        entries.push(json!({
+            "event": "csp_violation",
+            "directive": directive,
+            "raw_directive": truncate(&violation.directive, MAX_DIRECTIVE_LEN),
+            "disposition": disposition,
+            "document": violation.document.as_deref().map(strip_uri_secrets),
+            "blocked": violation.blocked.as_deref().map(strip_uri_secrets),
+            "source_file": violation.source_file.as_deref().map(strip_uri_secrets),
+            "line_number": violation.line_number,
+            "sample": violation.sample.as_deref().map(|value| truncate(value, MAX_SAMPLE_LEN)),
+        }));
+    }
+    if not_logged > 0 {
+        entries.push(json!({
+            "event": "csp_violations_not_logged",
+            "count": not_logged,
+        }));
+    }
+    entries
+}
+
+async fn receive_csp_report(body: web::Bytes) -> HttpResponse {
+    if body.len() > MAX_BODY_BYTES {
+        return HttpResponse::BadRequest().finish();
+    }
+
+    let violations = parse_violations(&body);
+    for violation in violations
+        .iter()
+        .filter(|violation| !violation.directive.is_empty())
+    {
+        crate::metrics::record_csp_report(
+            crate::metrics::normalize_csp_directive(&violation.directive),
+            crate::metrics::normalize_csp_disposition(violation.disposition.as_deref()),
         );
+    }
+    for entry in log_entries(&violations) {
+        log::warn!(target: "cinetrack::csp", "{entry}");
     }
 
     HttpResponse::NoContent().finish()
@@ -270,6 +304,43 @@ mod tests {
     fn ignores_non_csp_reporting_api_entries() {
         let raw = br#"[{"type":"deprecation","body":{"id":"x"}}]"#;
         assert!(parse_violations(raw).is_empty());
+    }
+
+    /// The body the audit sent: many minimal entries in one array, under the
+    /// size cap, so the handler accepts it.
+    fn report_with_entries(count: usize) -> Vec<u8> {
+        let entry = r#"{"body":{"effectiveDirective":"x"}}"#;
+        format!("[{}]", vec![entry; count].join(",")).into_bytes()
+    }
+
+    #[test]
+    fn a_report_packed_with_entries_writes_a_bounded_number_of_lines() {
+        let raw = report_with_entries(200);
+        assert!(raw.len() <= MAX_BODY_BYTES, "{} bytes", raw.len());
+        let violations = parse_violations(&raw);
+        assert_eq!(violations.len(), 200);
+
+        let entries = log_entries(&violations);
+
+        assert_eq!(entries.len(), MAX_LOGGED_VIOLATIONS + 1);
+        assert!(entries[..MAX_LOGGED_VIOLATIONS]
+            .iter()
+            .all(|entry| entry["event"] == "csp_violation"));
+        let summary = entries.last().unwrap();
+        assert_eq!(summary["event"], "csp_violations_not_logged");
+        assert_eq!(summary["count"], 200 - MAX_LOGGED_VIOLATIONS);
+    }
+
+    #[test]
+    fn an_ordinary_report_logs_every_violation() {
+        let violations = parse_violations(&report_with_entries(3));
+
+        let entries = log_entries(&violations);
+
+        assert_eq!(entries.len(), 3);
+        assert!(entries
+            .iter()
+            .all(|entry| entry["event"] == "csp_violation"));
     }
 
     #[test]

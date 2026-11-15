@@ -91,6 +91,12 @@ and release versions follow semantic versioning.
   mislaid their code. The cost is real and deliberate: restoring on a new device
   now needs the recovery code, and a forgotten password is no longer a way back
   in.
+- One Content-Security-Policy report writes at most ten log lines, plus one
+  line saying how many more it held. The endpoint takes reports without
+  credentials, as browsers send them, and logged every entry of a report array:
+  an 8 KB body of 227 entries wrote 59 KB into the container log that also
+  keeps the `audit:` lines, so a few addresses could push those out within
+  minutes. Every entry is still counted in the metric.
 - Changing a password no longer carries a re-sealed key backup. Nothing is
   derived from the password any more, so there is nothing to re-seal — and the
   step that used to fail silently, leaving a backup sealed under a password
