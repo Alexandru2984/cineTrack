@@ -16496,6 +16496,129 @@ async fn revoking_a_rotated_session_ends_the_whole_family() {
     );
 }
 
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn test_an_email_change_answers_alike_whether_the_address_is_taken() {
+    // A 409 for a registered address, given before the cooldown, let any
+    // signed-in account test addresses one by one.
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+
+    let (access, _, changer_id) = register_user(
+        &app,
+        "addressprober",
+        "addressprober@mailbox.dev",
+        "Pass1234",
+    )
+    .await;
+    register_user(
+        &app,
+        "addressholder",
+        "addressholder@mailbox.dev",
+        "Pass1234",
+    )
+    .await;
+
+    let change_email = |new_email: &str| {
+        actix_test::TestRequest::post()
+            .uri("/api/auth/email/change")
+            .insert_header(("Authorization", format!("Bearer {access}")))
+            .peer_addr(peer_addr())
+            .set_json(json!({
+                "current_password": "Pass1234",
+                "new_email": new_email,
+            }))
+            .to_request()
+    };
+    let answer = |resp: actix_web::dev::ServiceResponse<_>| async move {
+        let status = resp.status();
+        let body = actix_test::read_body(resp).await;
+        (status, String::from_utf8(body.to_vec()).unwrap())
+    };
+    let end_cooldown = || async {
+        sqlx::query(
+            "UPDATE email_change_tokens SET created_at = NOW() - INTERVAL '1 hour' WHERE user_id = $1",
+        )
+        .bind(Uuid::parse_str(&changer_id).unwrap())
+        .execute(&pool)
+        .await
+        .unwrap();
+    };
+
+    let taken =
+        answer(actix_test::call_service(&app, change_email("addressholder@mailbox.dev")).await)
+            .await;
+    end_cooldown().await;
+    let free =
+        answer(actix_test::call_service(&app, change_email("nobody-yet@mailbox.dev")).await).await;
+
+    assert_eq!(free.0, 200, "{}", free.1);
+    assert_eq!(
+        taken, free,
+        "a taken address must be answered like a free one"
+    );
+
+    // The cooldown comes before the lookup, for a taken address too.
+    let again =
+        answer(actix_test::call_service(&app, change_email("addressholder@mailbox.dev")).await)
+            .await;
+    assert_eq!(again.0, 429, "{}", again.1);
+
+    // And the address stays with its owner.
+    let owner: String = sqlx::query_scalar("SELECT username FROM users WHERE email = $1")
+        .bind("addressholder@mailbox.dev")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(owner, "addressholder");
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn test_staff_like_usernames_cannot_be_registered_or_taken_later() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+
+    for (username, email) in [
+        ("Admin", "admin@mailbox.dev"),
+        ("vazute_team", "vt@mailbox.dev"),
+    ] {
+        let req = actix_test::TestRequest::post()
+            .uri("/api/auth/register")
+            .peer_addr(peer_addr())
+            .set_json(json!({
+                "username": username,
+                "email": email,
+                "password": "Pass1234",
+                "accepted_terms": true,
+                "confirmed_minimum_age": true
+            }))
+            .to_request();
+        let resp = actix_test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 400, "registered {username}");
+    }
+
+    let (access, _, _) =
+        register_user(&app, "plainname", "plainname@mailbox.dev", "Pass1234").await;
+    let req = actix_test::TestRequest::patch()
+        .uri("/api/users/me")
+        .insert_header(("Authorization", format!("Bearer {access}")))
+        .peer_addr(peer_addr())
+        .set_json(json!({ "username": "Support" }))
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 400);
+
+    let count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM users WHERE LOWER(username) IN ('admin', 'vazute_team', 'support')",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(count, 0);
+}
+
 /// Recovering an account must cancel what the old password authorised.
 ///
 /// H03 from the September audit. An attacker holding the old password requests
