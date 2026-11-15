@@ -2384,65 +2384,107 @@ async fn test_grace_retries_do_not_sign_out_other_devices() {
 
 #[actix_web::test]
 #[ignore = "requires test DB"]
-async fn test_rotation_prunes_tokens_orphaned_by_grace_retries() {
-    // A grace retry leaves two live tokens in one family and the client keeps
-    // one. When the kept one rotates normally, the orphan must stop working
-    // rather than stay valid until it expires.
+async fn test_a_sibling_orphaned_by_the_grace_window_is_reuse_when_presented() {
+    // A thief holding a stolen pair knows from `exp` when the client will
+    // refresh, and presents the refresh token just before it does. Inside the
+    // grace window both get a successor. Whoever rotates next, more than a
+    // minute later, used to delete the other side's row, which then answered
+    // "Invalid refresh token": the owner was signed out as if the session had
+    // expired, the thief kept it, and nothing was flagged. The orphan is now a
+    // consumed row, so presenting it is reuse, and every session ends.
     let pool = setup_pool().await;
     clean_db(&pool).await;
     let app = actix_test::init_service(create_app(pool.clone())).await;
 
     let (_, first, _) = register_user(&app, "graceorph", "graceorph@mailbox.dev", "Pass1234").await;
+    let (_, other_device) = login_user(&app, "graceorph@mailbox.dev", "Pass1234").await;
 
+    let refresh = |token: &str| {
+        actix_test::TestRequest::post()
+            .uri("/api/auth/refresh")
+            .set_json(json!({ "refresh_token": token }))
+            .peer_addr(peer_addr())
+            .to_request()
+    };
+
+    // The thief first, the owner's client a moment later: both inside grace.
     let mut successors = Vec::new();
     for _ in 0..2 {
-        let req = actix_test::TestRequest::post()
-            .uri("/api/auth/refresh")
-            .set_json(json!({ "refresh_token": &first }))
-            .peer_addr(peer_addr())
-            .to_request();
-        let resp = actix_test::call_service(&app, req).await;
+        let resp = actix_test::call_service(&app, refresh(&first)).await;
         assert_eq!(resp.status(), 200);
         successors.push(refresh_cookie_from_response(&resp));
     }
-    let (orphan, kept) = (&successors[0], &successors[1]);
+    let (thief, owner) = (&successors[0], &successors[1]);
 
-    // The burst is older than the grace window by the time the client next
-    // refreshes with the token it kept.
+    // More than the window later, the thief rotates its copy.
     sqlx::query("UPDATE refresh_tokens SET created_at = NOW() - INTERVAL '5 minutes'")
         .execute(&pool)
         .await
         .unwrap();
+    let resp = actix_test::call_service(&app, refresh(thief)).await;
+    assert_eq!(resp.status(), 200, "the thief rotates normally");
+    let thief_now = refresh_cookie_from_response(&resp);
+    let body: Value = actix_test::read_body_json(resp).await;
+    let thief_access = body["access_token"].as_str().unwrap().to_string();
 
-    let req = actix_test::TestRequest::post()
-        .uri("/api/auth/refresh")
-        .set_json(json!({ "refresh_token": kept }))
-        .peer_addr(peer_addr())
-        .to_request();
-    let resp = actix_test::call_service(&app, req).await;
-    assert_eq!(resp.status(), 200, "The kept token rotates normally");
-    let current = refresh_cookie_from_response(&resp);
-
-    let req = actix_test::TestRequest::post()
-        .uri("/api/auth/refresh")
-        .set_json(json!({ "refresh_token": orphan }))
-        .peer_addr(peer_addr())
-        .to_request();
-    let resp = actix_test::call_service(&app, req).await;
-    assert_eq!(resp.status(), 401, "The orphaned sibling no longer works");
-
-    // Pruning the orphan is not a theft verdict: the live session is untouched.
-    let req = actix_test::TestRequest::post()
-        .uri("/api/auth/refresh")
-        .set_json(json!({ "refresh_token": &current }))
-        .peer_addr(peer_addr())
-        .to_request();
-    let resp = actix_test::call_service(&app, req).await;
+    // The owner's client presents the copy it holds.
+    let resp = actix_test::call_service(&app, refresh(owner)).await;
+    assert_eq!(resp.status(), 401);
+    let body: Value = actix_test::read_body_json(resp).await;
     assert_eq!(
-        resp.status(),
-        200,
-        "The session the client kept still refreshes"
+        body["message"], "Refresh token reuse detected",
+        "the orphan must trip reuse detection, not read as an expired session"
     );
+
+    // And that ends the thief's session along with every other.
+    let resp = actix_test::call_service(&app, refresh(&thief_now)).await;
+    assert_eq!(resp.status(), 401, "the thief can no longer refresh");
+    let resp = actix_test::call_service(&app, refresh(&other_device)).await;
+    assert_eq!(resp.status(), 401, "every session of the account ends");
+    let req = actix_test::TestRequest::get()
+        .uri("/api/auth/me")
+        .insert_header(("Authorization", format!("Bearer {thief_access}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(
+        actix_test::call_service(&app, req).await.status(),
+        401,
+        "the thief's access token is cut off too"
+    );
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn test_a_client_that_kept_one_grace_successor_keeps_its_session() {
+    // The benign case the window exists for: a lost response, retried. The
+    // client keeps the last token it received and never presents the other.
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+
+    let (_, first, _) = register_user(&app, "gracekeep", "gracekeep@mailbox.dev", "Pass1234").await;
+    let refresh = |token: &str| {
+        actix_test::TestRequest::post()
+            .uri("/api/auth/refresh")
+            .set_json(json!({ "refresh_token": token }))
+            .peer_addr(peer_addr())
+            .to_request()
+    };
+    let mut kept = String::new();
+    for _ in 0..2 {
+        let resp = actix_test::call_service(&app, refresh(&first)).await;
+        assert_eq!(resp.status(), 200);
+        kept = refresh_cookie_from_response(&resp);
+    }
+    for _ in 0..3 {
+        sqlx::query("UPDATE refresh_tokens SET created_at = NOW() - INTERVAL '5 minutes'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let resp = actix_test::call_service(&app, refresh(&kept)).await;
+        assert_eq!(resp.status(), 200, "the session the client kept refreshes");
+        kept = refresh_cookie_from_response(&resp);
+    }
 }
 
 #[actix_web::test]
