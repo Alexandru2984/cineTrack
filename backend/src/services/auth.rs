@@ -1641,6 +1641,34 @@ async fn issue_token_pair(
     let expires_at = Utc::now() + Duration::days(config.jwt_refresh_expiry_days);
 
     let mut tx = pool.begin().await?;
+
+    // Hold the account row shared for the rest of this transaction, and confirm
+    // the password the caller verified is still the account's password.
+    //
+    // The caller read the account once, before verifying, without a lock. A
+    // password change or reset that committed in between revoked with
+    // `UPDATE refresh_tokens ... WHERE user_id = $1` and cut access tokens off
+    // at "now": the session inserted here was outside that statement's snapshot
+    // and its access token was minted after the cutoff, so it survived the
+    // change meant to end it (VAZ-01, 2026-11-15 audit). Both of those paths
+    // update the account row first, so taking it `FOR SHARE` serializes them
+    // with this insert exactly as rotation already does: either the change
+    // waits and then revokes this session too, or this waits, reads the new
+    // hash, and refuses with the same answer as a wrong password.
+    let current_hash = sqlx::query_scalar::<_, Option<String>>(
+        "SELECT password_hash FROM users WHERE id = $1 FOR SHARE",
+    )
+    .bind(user.id)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(|| AppError::Unauthorized("Invalid email or password".to_string()))?;
+    if current_hash != user.password_hash {
+        crate::metrics::record_security_event(crate::metrics::SecurityEvent::LoginRejected);
+        return Err(AppError::Unauthorized(
+            "Invalid email or password".to_string(),
+        ));
+    }
+
     // The row is inserted before the access token is minted, because the access
     // token has to carry this session's identity and the database assigns it.
     let family_id = sqlx::query_scalar::<_, Uuid>(
