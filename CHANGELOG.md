@@ -108,6 +108,17 @@ and release versions follow semantic versioning.
   checked against a durable revocation record on every authenticated request.
   Access tokens issued before this change stop working when it is deployed;
   both clients recover automatically by refreshing.
+- Asking to move an account to an address that another account already uses
+  is answered exactly like a request for a free address. The answer used to be
+  a 409 "already in use", given before the five-minute cooldown, so any
+  signed-in account could test addresses one after another while sign-in and
+  password reset take care to hide the same fact. Now the cooldown comes first,
+  the request is recorded and the current address told as usual, and no
+  confirmation link is sent, so the change can never complete.
+- Usernames that read as the service or its staff (`admin`, `support`,
+  `moderator`, anything containing `vazute` or `cinetrack`, and route names such
+  as `search`) can no longer be registered or taken later, in any case and with
+  or without `_` and `-`. No existing account held one.
 - Credential files are audited by permission mode, not only by whether they are
   gitignored, closing a gap that left a live object-storage key world-readable
   on a host shared with unrelated services.

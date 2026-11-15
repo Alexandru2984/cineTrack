@@ -927,22 +927,6 @@ pub async fn request_email_change(
         ));
     }
 
-    // Checked here for a clear message, and again by the unique constraint when
-    // the change is confirmed — between those two moments somebody else may
-    // register the same address, and the constraint is what actually decides.
-    let taken = sqlx::query_scalar::<_, bool>(
-        "SELECT EXISTS(SELECT 1 FROM users WHERE email = $1 AND id <> $2)",
-    )
-    .bind(&new_email)
-    .bind(user_id)
-    .fetch_one(pool)
-    .await?;
-    if taken {
-        return Err(AppError::Conflict(
-            "That email address is already in use".to_string(),
-        ));
-    }
-
     let token = jwt::generate_refresh_token();
     let token_hash = jwt::hash_refresh_token(&token);
     let expires_at = Utc::now() + Duration::hours(EMAIL_CHANGE_TTL_HOURS);
@@ -974,6 +958,23 @@ pub async fn request_email_change(
             "A change is already pending; check your inbox or try again shortly".to_string(),
         ));
     }
+
+    // Whether another account holds the address is decided after the cooldown
+    // and answered the same way as a free address: the request is recorded and
+    // the old address told, only no link goes out, so the pending change can
+    // never be confirmed. Sign-in and password reset hide which addresses are
+    // registered; an earlier 409 here let any signed-in account test them one
+    // by one, and before the cooldown at that. The unique constraint still
+    // decides at confirmation, should somebody register a free address between
+    // the request and the click.
+    let taken = sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS(SELECT 1 FROM users WHERE email = $1 AND id <> $2)",
+    )
+    .bind(&new_email)
+    .bind(user_id)
+    .fetch_one(&mut *tx)
+    .await?;
+
     security_activity::record_in_transaction(
         &mut tx,
         user_id,
@@ -993,9 +994,11 @@ pub async fn request_email_change(
     let old_address = user.email.clone();
     let new_address = new_email.clone();
     actix_web::rt::spawn(async move {
-        email_service
-            .send_email_change_verification(&new_address, &confirm_url)
-            .await;
+        if !taken {
+            email_service
+                .send_email_change_verification(&new_address, &confirm_url)
+                .await;
+        }
         // The old address is told regardless of whether the new one accepts
         // mail, because its owner is the person who needs to know first.
         email_service
@@ -1003,7 +1006,11 @@ pub async fn request_email_change(
             .await;
     });
 
-    log::info!("audit: email change requested user_id={user_id}");
+    if taken {
+        log::info!("audit: email change requested to an address in use user_id={user_id}");
+    } else {
+        log::info!("audit: email change requested user_id={user_id}");
+    }
 
     Ok(())
 }
