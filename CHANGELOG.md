@@ -68,6 +68,14 @@ and release versions follow semantic versioning.
 
 ### Security
 
+- The block list no longer shows a private account's photo. It was the one
+  list that returned the avatar regardless of the account's privacy, and since
+  blocking ends any follow between the two accounts, whoever blocked a private
+  account could read its photo there and nowhere else.
+- Viewed without signing in, a private profile no longer includes the account's
+  id or the date it joined. It shows that the account exists and is private,
+  which is what the link preview card for the same name already showed.
+  Signed-in viewers still get the id, which reporting the account needs.
 - The URL decoder behind deep-link routing no longer degrades on malformed
   input. `expo-router` parses links through `query-string`, which requires
   `decode-uri-component`; every published version it can load decodes malformed

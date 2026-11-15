@@ -28,7 +28,10 @@ fn validate_username_search_fragment(value: &str) -> Result<(), validator::Valid
 
 #[derive(Debug, Serialize)]
 pub struct PublicUserProfile {
-    pub id: Uuid,
+    /// Left out, with `created_at`, for a private account viewed without a
+    /// session. Both clients fetch profiles only when signed in.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<Uuid>,
     pub username: String,
     pub avatar_url: Option<String>,
     pub bio: Option<String>,
@@ -39,7 +42,8 @@ pub struct PublicUserProfile {
     pub is_followed_by: bool,
     pub follow_status: Option<String>,
     pub can_view_activity: bool,
-    pub created_at: chrono::DateTime<chrono::Utc>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 #[derive(Debug, Serialize)]

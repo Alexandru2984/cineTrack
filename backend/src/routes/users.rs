@@ -276,8 +276,12 @@ async fn get_profile(
         || current_user_id == Some(user.id)
         || (current_user_id.is_some() && is_following);
 
+    // Without a session, a private account shows only that it exists and is
+    // private: no account id and no creation time, as the link preview card
+    // does. Signed-in viewers keep the id, which reporting the account needs.
+    let anonymous_outsider = current_user_id.is_none() && !can_view_private_details;
     Ok(HttpResponse::Ok().json(PublicUserProfile {
-        id: user.id,
+        id: (!anonymous_outsider).then_some(user.id),
         username: user.username,
         avatar_url: if can_view_private_details {
             user.avatar_url
@@ -298,7 +302,7 @@ async fn get_profile(
         is_followed_by,
         follow_status,
         can_view_activity: can_view_private_details,
-        created_at: user.created_at,
+        created_at: (!anonymous_outsider).then_some(user.created_at),
     }))
 }
 
@@ -1160,8 +1164,13 @@ async fn my_blocks(
     pagination: web::Query<PaginationParams>,
 ) -> Result<HttpResponse, AppError> {
     let user_id = require_auth(&req).await?;
+    // A private account's avatar is for its approved followers, and blocking
+    // ends any follow between the two, so the blocker sees it only when the
+    // account is public, the same rule the search results apply.
     let blocked = sqlx::query_as::<_, BlockedUserResponse>(
-        r#"SELECT blocked.id, blocked.username, blocked.avatar_url, block.created_at AS blocked_at
+        r#"SELECT blocked.id, blocked.username,
+            CASE WHEN blocked.is_public THEN blocked.avatar_url END AS avatar_url,
+            block.created_at AS blocked_at
         FROM user_blocks block
         JOIN users blocked ON blocked.id = block.blocked_id
         WHERE block.blocker_id = $1
