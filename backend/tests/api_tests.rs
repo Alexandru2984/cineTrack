@@ -2054,6 +2054,174 @@ async fn test_a_password_change_ends_a_session_that_is_refreshing_in_a_loop() {
     }
 }
 
+/// Sign in with `password` back to back until `done` is set. Returns every
+/// session that came back, and whether an attempt was in flight when `done` was
+/// set: begun before the credential change finished, answered after.
+///
+/// Someone who knows the old password cannot see when the owner acts, so they
+/// keep signing in; between attempts they are almost always inside one, which
+/// is the moment a credential change used to miss.
+async fn sign_in_until(
+    app: &impl actix_web::dev::Service<
+        actix_http::Request,
+        Response = actix_web::dev::ServiceResponse<impl actix_web::body::MessageBody>,
+        Error = actix_web::Error,
+    >,
+    email: &str,
+    password: &str,
+    done: &std::cell::Cell<bool>,
+) -> (Vec<(String, String)>, bool) {
+    let mut sessions = Vec::new();
+    let mut straddled = false;
+    while !done.get() {
+        let req = actix_test::TestRequest::post()
+            .uri("/api/auth/mobile/login")
+            .set_json(json!({ "email": email, "password": password }))
+            .peer_addr(peer_addr())
+            .to_request();
+        let resp = actix_test::call_service(app, req).await;
+        straddled |= done.get();
+        if resp.status() != 200 {
+            break;
+        }
+        let body: Value = actix_test::read_body_json(resp).await;
+        sessions.push((
+            body["access_token"].as_str().unwrap().to_string(),
+            body["refresh_token"].as_str().unwrap().to_string(),
+        ));
+    }
+    (sessions, straddled)
+}
+
+/// Every session in `sessions` must be dead: its access token refused and its
+/// refresh token unable to rotate.
+async fn assert_sessions_refused(
+    app: &impl actix_web::dev::Service<
+        actix_http::Request,
+        Response = actix_web::dev::ServiceResponse<impl actix_web::body::MessageBody>,
+        Error = actix_web::Error,
+    >,
+    sessions: &[(String, String)],
+    what: &str,
+) {
+    for (index, (access, refresh)) in sessions.iter().enumerate() {
+        let req = actix_test::TestRequest::get()
+            .uri("/api/auth/me")
+            .insert_header(("Authorization", format!("Bearer {access}")))
+            .peer_addr(peer_addr())
+            .to_request();
+        assert_eq!(
+            actix_test::call_service(app, req).await.status(),
+            401,
+            "{what}: the access token of old-password sign-in #{index} must be refused"
+        );
+        let req = actix_test::TestRequest::post()
+            .uri("/api/auth/mobile/refresh")
+            .set_json(json!({ "refresh_token": refresh }))
+            .peer_addr(peer_addr())
+            .to_request();
+        assert_eq!(
+            actix_test::call_service(app, req).await.status(),
+            401,
+            "{what}: the refresh token of old-password sign-in #{index} must be refused"
+        );
+    }
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn test_a_password_change_ends_a_sign_in_that_was_in_flight() {
+    // A sign-in read the account once, verified the password against that copy,
+    // and inserted its session without looking again. One that had verified the
+    // old password before a change committed, and inserted after, was outside
+    // the revocation's snapshot and minted its access token after the cutoff: it
+    // kept a working session through the change meant to end it. Measured on a
+    // release build by the 2026-11-15 audit (VAZ-01): 3 in 30 changes from one
+    // address, 12 in 30 from five.
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+
+    let mut straddled_any = false;
+    for trial in 0..6u64 {
+        let password = format!("Old{trial:04}pass");
+        let next_password = format!("New{trial:04}pass");
+        let email = format!("inflight{trial}@mailbox.dev");
+        let (owner, _, _) =
+            register_user(&app, &format!("inflight{trial}"), &email, &password).await;
+
+        let done = std::cell::Cell::new(false);
+        let owner_changes_password = async {
+            // Let the other side get a sign-in or two in first.
+            tokio::time::sleep(std::time::Duration::from_millis(50 + 37 * trial)).await;
+            let req = actix_test::TestRequest::patch()
+                .uri("/api/auth/password")
+                .insert_header(("Authorization", format!("Bearer {owner}")))
+                .set_json(json!({ "current_password": &password, "new_password": &next_password }))
+                .peer_addr(peer_addr())
+                .to_request();
+            let status = actix_test::call_service(&app, req).await.status();
+            done.set(true);
+            status
+        };
+        let ((sessions, in_flight), status) = tokio::join!(
+            sign_in_until(&app, &email, &password, &done),
+            owner_changes_password
+        );
+        assert_eq!(status, 200, "trial {trial}: the password change succeeds");
+        straddled_any |= in_flight;
+        assert_sessions_refused(&app, &sessions, &format!("change trial {trial}")).await;
+    }
+    assert!(
+        straddled_any,
+        "no sign-in was in flight across a password change, so the race was never run"
+    );
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn test_a_password_reset_ends_a_sign_in_that_was_in_flight() {
+    // The same race against the recovery path: a reset is how an owner takes an
+    // account back from someone who knows its password, so a sign-in that
+    // straddles it must not come out the other side.
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+
+    let mut straddled_any = false;
+    for trial in 0..6u64 {
+        let password = format!("Old{trial:04}pass");
+        let email = format!("resetrace{trial}@mailbox.dev");
+        let (_, _, user_id) =
+            register_user(&app, &format!("resetrace{trial}"), &email, &password).await;
+        let reset_token = issue_reset_token(&pool, Uuid::parse_str(&user_id).unwrap()).await;
+
+        let done = std::cell::Cell::new(false);
+        let owner_resets_password = async {
+            tokio::time::sleep(std::time::Duration::from_millis(50 + 37 * trial)).await;
+            let req = actix_test::TestRequest::post()
+                .uri("/api/auth/password/reset")
+                .set_json(json!({ "token": &reset_token, "new_password": format!("Reset{trial:04}pass") }))
+                .peer_addr(peer_addr())
+                .to_request();
+            let status = actix_test::call_service(&app, req).await.status();
+            done.set(true);
+            status
+        };
+        let ((sessions, in_flight), status) = tokio::join!(
+            sign_in_until(&app, &email, &password, &done),
+            owner_resets_password
+        );
+        assert_eq!(status, 200, "trial {trial}: the reset succeeds");
+        straddled_any |= in_flight;
+        assert_sessions_refused(&app, &sessions, &format!("reset trial {trial}")).await;
+    }
+    assert!(
+        straddled_any,
+        "no sign-in was in flight across a password reset, so the race was never run"
+    );
+}
+
 #[actix_web::test]
 #[ignore = "requires test DB"]
 async fn test_second_factor_guesses_through_a_sensitive_action_lock_the_account() {

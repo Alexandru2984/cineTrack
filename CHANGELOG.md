@@ -131,3 +131,10 @@ and release versions follow semantic versioning.
   requires a verified email address plus enabled two-factor authentication.
 - Community safety data has explicit least-privilege grants and bounded
   retention.
+- A sign-in that was already in progress when the password changed, or was
+  reset, no longer comes back with a working session. Sign-in checks the
+  password, then issues the session; a change that committed between those two
+  steps revoked every session that existed, but not the one about to be issued
+  under the old password. The account row is now re-read and locked when the
+  session is issued, so the sign-in either finishes before the change, which
+  then revokes it, or sees the new password and is refused.
