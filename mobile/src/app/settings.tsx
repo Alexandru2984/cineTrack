@@ -130,6 +130,10 @@ const SECURITY_ACTIVITY_LABEL_KEYS: Record<string, string> = {
   session_revoked: 'settings.securityEventSessionRevoked',
   all_sessions_revoked: 'settings.securityEventAllSessionsRevoked',
   account_data_exported: 'settings.securityEventAccountDataExported',
+  encryption_keys_published: 'settings.securityEventEncryptionKeysPublished',
+  encryption_backup_rewrapped: 'settings.securityEventEncryptionBackupRewrapped',
+  calendar_feed_enabled: 'settings.securityEventCalendarFeedEnabled',
+  calendar_feed_disabled: 'settings.securityEventCalendarFeedDisabled',
 };
 
 export default function SettingsScreen() {

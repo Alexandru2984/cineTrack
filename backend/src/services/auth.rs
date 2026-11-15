@@ -1796,9 +1796,11 @@ async fn lock_account_for_revocation(
     Ok(())
 }
 
-/// Revoke a single session by id. Scoped to the owner so one user cannot revoke
-/// another's session; a missing/foreign id yields NotFound (no enumeration).
 /// Cancel every pending action that an older credential authorised.
+///
+/// Called by a password change, a password reset and "sign out everywhere":
+/// each is how an owner takes the account back, and each would be incomplete
+/// while a link or a device registered by someone else kept working.
 ///
 /// H03 from the September audit. Changing or resetting a password revoked
 /// sessions but left `email_change_tokens` alone, so a link requested with the
@@ -1866,6 +1868,8 @@ async fn cancel_pending_credential_actions(
     Ok(())
 }
 
+/// Revoke a single session by id. Scoped to the owner so one user cannot revoke
+/// another's session; a missing/foreign id yields NotFound (no enumeration).
 pub async fn revoke_session(
     pool: &PgPool,
     config: &Config,
@@ -1974,6 +1978,12 @@ pub async fn logout_all_sessions(
     // whose refresh row cap_active_refresh_tokens has already deleted, leaving
     // no id to name while its access token is still alive.
     revocation::revoke_user(&mut tx, user_id).await?;
+    // Sessions were only half of it. The calendar feed URL and push
+    // registrations work without a session, so a token held for a moment was
+    // enough to mint either, and both kept delivering the owner's titles and
+    // air dates after this button. A pending email change or reset link goes
+    // the same way: the owner who pressed this can ask again.
+    cancel_pending_credential_actions(&mut tx, user_id).await?;
     security_activity::record_in_transaction(
         &mut tx,
         user_id,

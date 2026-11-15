@@ -29,6 +29,11 @@ pub enum SecurityActivityKind {
     /// The account re-sealed its private key under a new password. Distinct
     /// from publishing: the key itself did not change, only what opens it.
     EncryptionBackupRewrapped,
+    /// A calendar feed URL was minted (or re-minted). The URL is a bearer
+    /// credential that works without a session, so minting one is what
+    /// somebody holding the account briefly would do to keep reading it.
+    CalendarFeedEnabled,
+    CalendarFeedDisabled,
 }
 
 impl SecurityActivityKind {
@@ -47,6 +52,8 @@ impl SecurityActivityKind {
             Self::AccountDataExported => "account_data_exported",
             Self::EncryptionKeysPublished => "encryption_keys_published",
             Self::EncryptionBackupRewrapped => "encryption_backup_rewrapped",
+            Self::CalendarFeedEnabled => "calendar_feed_enabled",
+            Self::CalendarFeedDisabled => "calendar_feed_disabled",
         }
     }
 }
@@ -192,6 +199,8 @@ mod tests {
                 SecurityActivityKind::AccountDataExported,
                 SecurityActivityKind::EncryptionKeysPublished,
                 SecurityActivityKind::EncryptionBackupRewrapped,
+                SecurityActivityKind::CalendarFeedEnabled,
+                SecurityActivityKind::CalendarFeedDisabled,
             ]
             .map(SecurityActivityKind::as_str),
             [
@@ -208,6 +217,8 @@ mod tests {
                 "account_data_exported",
                 "encryption_keys_published",
                 "encryption_backup_rewrapped",
+                "calendar_feed_enabled",
+                "calendar_feed_disabled",
             ]
         );
     }
