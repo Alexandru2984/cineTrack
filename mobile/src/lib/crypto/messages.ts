@@ -13,6 +13,7 @@ import {
   toHex,
   verifyFrankingSignature,
   type IdentityKeyPair,
+  type MessageParties,
 } from '@/lib/crypto/core';
 import {
   lookup,
@@ -36,7 +37,14 @@ export type MessageContent =
    *  here. */
   | { kind: 'untrusted'; reason: 'forged' | 'malformed' | 'unrecognised' };
 
+/** The two accounts a thread is between, as the reader knows them. */
+export interface ThreadParties {
+  selfId: string;
+  peerId: string;
+}
+
 interface Envelope {
+  sender_id?: string | null;
   ciphertext?: string | null;
   nonce?: string | null;
   sender_ephemeral_key?: string | null;
@@ -57,15 +65,27 @@ interface Envelope {
  *  `trustedSigningKey` is the directory key behind the safety number, never the
  *  key the message arrived with. Checking a signature against a key delivered
  *  beside it would let whoever delivered both declare anything authentic — the
- *  recorded key is used only to tell a rotation apart from tampering. */
+ *  recorded key is used only to tell a rotation apart from tampering.
+ *
+ *  The parties checked are the thread's, never the row's. The signature names
+ *  who the message is from and to, so a copy sealed to somebody else carries a
+ *  signature for the wrong recipient; but checking it against the ids written
+ *  in that same row would let whoever wrote the row choose them. A message is
+ *  from the reader to the peer when the row says the reader sent it, and from
+ *  the peer to the reader otherwise — and has to have been signed that way. */
 function authenticate(
   envelope: Envelope,
   trustedSigningKey: Uint8Array | null,
+  thread: ThreadParties | null,
 ): MessageAuthenticity {
   const { franking_commitment: commitment, franking_signature: signature } = envelope;
-  if (!trustedSigningKey || !commitment || !signature || !envelope.client_nonce) {
+  if (!trustedSigningKey || !thread || !commitment || !signature || !envelope.client_nonce) {
     return 'unchecked';
   }
+  const parties: MessageParties =
+    envelope.sender_id === thread.selfId
+      ? { senderId: thread.selfId, recipientId: thread.peerId }
+      : { senderId: thread.peerId, recipientId: thread.selfId };
   try {
     if (
       verifyFrankingSignature(
@@ -73,6 +93,7 @@ function authenticate(
         fromHex(signature),
         trustedSigningKey,
         envelope.client_nonce,
+        parties,
       )
     ) {
       return 'verified';
@@ -101,6 +122,7 @@ function inspect(
   frankingKey: Uint8Array,
   envelope: Envelope,
   trustedSigningKey: Uint8Array | null,
+  thread: ThreadParties | null,
 ): Pick<DecryptedContent, 'commitmentVerified' | 'authenticity'> {
   let commitmentVerified: boolean | null = null;
   if (envelope.franking_commitment) {
@@ -113,7 +135,7 @@ function inspect(
       commitmentVerified = false;
     }
   }
-  return { commitmentVerified, authenticity: authenticate(envelope, trustedSigningKey) };
+  return { commitmentVerified, authenticity: authenticate(envelope, trustedSigningKey, thread) };
 }
 
 /** What the reader is shown, given what the checks concluded.
@@ -150,6 +172,7 @@ function decryptEnvelope(
   envelope: Envelope,
   identity: IdentityKeyPair | null,
   trustedSigningKey: Uint8Array | null,
+  thread: ThreadParties | null,
 ): MessageContent {
   if (!envelope.ciphertext || !envelope.nonce || !envelope.sender_ephemeral_key) {
     return { kind: 'undecryptable' };
@@ -166,11 +189,11 @@ function decryptEnvelope(
     // that cost an X25519 agreement, is reused as it stands.
     const stale =
       (cached.commitmentVerified === null && Boolean(envelope.franking_commitment)) ||
-      (cached.authenticity === 'unchecked' && trustedSigningKey !== null);
+      (cached.authenticity === 'unchecked' && trustedSigningKey !== null && thread !== null);
     if (!stale) return present(cached);
     const rejudged: DecryptedContent = {
       ...cached,
-      ...inspect(cached.text, cached.frankingKey, envelope, trustedSigningKey),
+      ...inspect(cached.text, cached.frankingKey, envelope, trustedSigningKey, thread),
     };
     remember(id, rejudged);
     return present(rejudged);
@@ -195,7 +218,7 @@ function decryptEnvelope(
     const content: DecryptedContent = {
       text: result.plaintext,
       frankingKey: result.frankingKey,
-      ...inspect(result.plaintext, result.frankingKey, envelope, trustedSigningKey),
+      ...inspect(result.plaintext, result.frankingKey, envelope, trustedSigningKey, thread),
     };
     remember(id, content);
     return present(content);
@@ -211,18 +234,20 @@ function decryptEnvelope(
  *
  *  `trustedSigningKey` is the Ed25519 key of whoever wrote it, as this device
  *  trusts it: the peer's directory entry for an incoming message, the reader's
- *  own for one they sent. Omitting it does not weaken a check into a pass — the
- *  message is reported as unchecked, which the interface says out loud rather
- *  than drawing it as authenticated. */
+ *  own for one they sent. `thread` is the reader's account and the peer's, which
+ *  the signature has to name. Omitting either does not weaken a check into a
+ *  pass — the message is reported as unchecked, which the interface says out
+ *  loud rather than drawing it as authenticated. */
 export function readMessage(
   message: DirectMessage,
   identity: IdentityKeyPair | null,
   trustedSigningKey: Uint8Array | null = null,
+  thread: ThreadParties | null = null,
 ): MessageContent {
   if (message.body !== null && message.body !== undefined) {
     return { kind: 'plain', text: message.body };
   }
-  return decryptEnvelope(message.id, message, identity, trustedSigningKey);
+  return decryptEnvelope(message.id, message, identity, trustedSigningKey, thread);
 }
 
 export function readConversationPreview(
@@ -252,6 +277,7 @@ export function readConversationPreview(
     },
     identity,
     null,
+    null,
   );
 }
 
@@ -268,12 +294,15 @@ export interface EncryptedPayload {
  *
  *  The client nonce is signed along with the commitment: it is the only
  *  identifier the sender knows before the server assigns a row id, and the
- *  server's uniqueness constraint makes it identify exactly one message. */
+ *  server's uniqueness constraint makes it identify exactly one message. So are
+ *  the sender's account and the peer's, so the signature holds only for this
+ *  conversation. */
 export function sealMessage(
   plaintext: string,
   peer: PeerPublicKeys,
   identity: IdentityKeyPair,
   clientNonce: string,
+  senderId: string,
 ): EncryptedPayload {
   // Fail closed on a directory entry that contradicts itself. This does not
   // stop a competent substitution — an attacker swapping the key swaps the
@@ -287,6 +316,7 @@ export function sealMessage(
     identity.exchangePublicKey,
     identity.signingPrivateKey,
     clientNonce,
+    { senderId, recipientId: peer.user_id },
   );
   return {
     ciphertext: toHex(envelope.ciphertext),

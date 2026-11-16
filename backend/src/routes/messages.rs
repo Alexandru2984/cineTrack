@@ -420,8 +420,8 @@ async fn send_message(
     // Check the sender's signature now, and record the key it was checked
     // against.
     //
-    // The signature covers `commitment || client_nonce`, and the server holds
-    // both along with the sender's public key — so there was never a reason to
+    // The signature covers the commitment, the client nonce and both account
+    // ids, and the server holds all of them along with the sender's public key — so there was never a reason to
     // store it unverified. Storing it unverified had a cost that only appeared
     // much later: a client sending a wrong or random signature produced a
     // message that displayed perfectly and could never be reported, because the
@@ -451,6 +451,10 @@ async fn send_message(
                 &envelope.franking_signature,
                 &key,
                 data.client_nonce(),
+                franking::Parties {
+                    sender: sender_id,
+                    recipient: peer.id,
+                },
             ) {
                 log::warn!(
                     "audit: rejected direct message with unusable franking signature \

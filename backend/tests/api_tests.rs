@@ -7616,11 +7616,22 @@ impl TestSigner {
         hex::encode(self.pair.public_key().as_ref())
     }
 
-    /// Sign exactly what the server will check: `commitment || client_nonce`.
-    fn signature_hex(&self, commitment: &[u8], client_nonce: Uuid) -> String {
-        let mut payload = Vec::with_capacity(commitment.len() + 16);
+    /// Sign exactly what the server will check: the label, the commitment, the
+    /// client nonce and both account ids. Written out here rather than borrowed
+    /// from `franking::signing_payload`, so the test restates the layout instead
+    /// of agreeing with whatever the server happens to build.
+    fn signature_hex(
+        &self,
+        commitment: &[u8],
+        client_nonce: Uuid,
+        sender_id: &str,
+        recipient_id: &str,
+    ) -> String {
+        let mut payload = b"vazute/message-signature/v2".to_vec();
         payload.extend_from_slice(commitment);
         payload.extend_from_slice(client_nonce.as_bytes());
+        payload.extend_from_slice(Uuid::parse_str(sender_id).unwrap().as_bytes());
+        payload.extend_from_slice(Uuid::parse_str(recipient_id).unwrap().as_bytes());
         hex::encode(self.pair.sign(&payload).as_ref())
     }
 }
@@ -7670,7 +7681,12 @@ async fn publish_signer_keys(
     );
 }
 
-fn encrypted_body(signer: &TestSigner, client_nonce: Uuid) -> Value {
+fn encrypted_body(
+    signer: &TestSigner,
+    client_nonce: Uuid,
+    sender_id: &str,
+    recipient_id: &str,
+) -> Value {
     let commitment = vec![0x44_u8; 32];
     json!({
         "client_nonce": client_nonce,
@@ -7679,7 +7695,7 @@ fn encrypted_body(signer: &TestSigner, client_nonce: Uuid) -> Value {
         "sender_ephemeral_key": "33".repeat(32),
         "sender_copy": "66".repeat(48),
         "franking_commitment": hex::encode(&commitment),
-        "franking_signature": signer.signature_hex(&commitment, client_nonce),
+        "franking_signature": signer.signature_hex(&commitment, client_nonce, sender_id, recipient_id),
     })
 }
 
@@ -7721,7 +7737,12 @@ async fn an_encrypted_message_round_trips_without_the_server_reading_it() {
     let req = actix_test::TestRequest::post()
         .uri("/api/messages/envrecip")
         .insert_header(("Authorization", format!("Bearer {sender_token}")))
-        .set_json(encrypted_body(&signer, client_nonce))
+        .set_json(encrypted_body(
+            &signer,
+            client_nonce,
+            &sender_id,
+            &recipient_id,
+        ))
         .peer_addr(peer_addr())
         .to_request();
     let resp = actix_test::call_service(&app, req).await;
@@ -7754,7 +7775,7 @@ async fn an_encrypted_message_round_trips_without_the_server_reading_it() {
     // a client that never sees it draws a forgery exactly like a real message.
     assert_eq!(
         message["franking_signature"],
-        signer.signature_hex(&[0x44_u8; 32], client_nonce)
+        signer.signature_hex(&[0x44_u8; 32], client_nonce, &sender_id, &recipient_id)
     );
     // The nonce, because the sender signs before the row has an id and the
     // recipient cannot rebuild the signed bytes without it.
@@ -7849,7 +7870,7 @@ async fn a_malformed_envelope_is_refused_with_a_client_error() {
     let signer = TestSigner::new();
     publish_signer_keys(&app, &sender_token, &signer, &"6".repeat(64)).await;
 
-    let mut body = encrypted_body(&signer, Uuid::new_v4());
+    let mut body = encrypted_body(&signer, Uuid::new_v4(), &sender_id, &recipient_id);
     body["nonce"] = json!("22".repeat(11));
 
     let req = actix_test::TestRequest::post()
@@ -7889,7 +7910,12 @@ async fn resending_an_encrypted_message_is_idempotent() {
         let req = actix_test::TestRequest::post()
             .uri("/api/messages/idemrecip")
             .insert_header(("Authorization", format!("Bearer {sender_token}")))
-            .set_json(encrypted_body(&signer, client_nonce))
+            .set_json(encrypted_body(
+                &signer,
+                client_nonce,
+                &sender_id,
+                &recipient_id,
+            ))
             .peer_addr(peer_addr())
             .to_request();
         assert_eq!(actix_test::call_service(&app, req).await.status(), expected);
@@ -7977,7 +8003,12 @@ async fn plaintext_is_refused_once_both_sides_have_keys() {
     let req = actix_test::TestRequest::post()
         .uri("/api/messages/downrecip")
         .insert_header(("Authorization", format!("Bearer {sender_token}")))
-        .set_json(encrypted_body(&signer, Uuid::new_v4()))
+        .set_json(encrypted_body(
+            &signer,
+            Uuid::new_v4(),
+            &sender_id,
+            &recipient_id,
+        ))
         .peer_addr(peer_addr())
         .to_request();
     assert_eq!(actix_test::call_service(&app, req).await.status(), 201);
@@ -8881,6 +8912,18 @@ async fn insert_franked_message(
     recipient_id: Uuid,
     plaintext: &str,
 ) -> (Uuid, Vec<u8>) {
+    insert_franked_message_signed_for(pool, sender_id, recipient_id, recipient_id, plaintext).await
+}
+
+/// As `insert_franked_message`, with the signature naming `signed_for` as the
+/// recipient: a message somebody re-sealed to a different account.
+async fn insert_franked_message_signed_for(
+    pool: &PgPool,
+    sender_id: Uuid,
+    recipient_id: Uuid,
+    signed_for: Uuid,
+    plaintext: &str,
+) -> (Uuid, Vec<u8>) {
     use aws_lc_rs::signature::{Ed25519KeyPair, KeyPair};
 
     let rng = aws_lc_rs::rand::SystemRandom::new();
@@ -8897,6 +8940,10 @@ async fn insert_franked_message(
         .sign(&cinetrack::services::franking::signing_payload(
             &commitment,
             client_nonce,
+            cinetrack::services::franking::Parties {
+                sender: sender_id,
+                recipient: signed_for,
+            },
         ))
         .as_ref()
         .to_vec();
@@ -9045,6 +9092,130 @@ async fn a_fabricated_report_against_an_encrypted_message_is_refused() {
     assert_eq!(stored, 0, "a refused report must not be recorded at all");
 }
 
+/// The re-addressing the November review found. A message is sealed to a public
+/// key, so whoever knows its text and franking key can seal it to somebody
+/// else, and the sender's signature used to come along and verify there too.
+/// It names both accounts now, and the server checks them before storing.
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn a_signature_made_for_another_recipient_is_refused_at_send() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (sender_token, _, sender_id) =
+        register_user(&app, "readdrsend", "readdrs@mailbox.dev", "Pass1234").await;
+    let (_, _, recipient_id) =
+        register_user(&app, "readdrrecv", "readdrr@mailbox.dev", "Pass1234").await;
+    let (_, _, third_id) =
+        register_user(&app, "readdrthird", "readdrt@mailbox.dev", "Pass1234").await;
+    make_mutual_followers(
+        &pool,
+        Uuid::parse_str(&sender_id).unwrap(),
+        Uuid::parse_str(&recipient_id).unwrap(),
+    )
+    .await;
+
+    let signer = TestSigner::new();
+    publish_signer_keys(&app, &sender_token, &signer, &"e".repeat(64)).await;
+
+    let send = |body: Value| {
+        actix_test::TestRequest::post()
+            .uri("/api/messages/readdrrecv")
+            .insert_header(("Authorization", format!("Bearer {sender_token}")))
+            .set_json(body)
+            .peer_addr(peer_addr())
+            .to_request()
+    };
+
+    let resp = actix_test::call_service(
+        &app,
+        send(encrypted_body(
+            &signer,
+            Uuid::new_v4(),
+            &sender_id,
+            &third_id,
+        )),
+    )
+    .await;
+    assert_eq!(
+        resp.status(),
+        400,
+        "a signature naming another recipient must not be stored in this conversation"
+    );
+
+    let resp = actix_test::call_service(
+        &app,
+        send(encrypted_body(
+            &signer,
+            Uuid::new_v4(),
+            &sender_id,
+            &recipient_id,
+        )),
+    )
+    .await;
+    assert_eq!(
+        resp.status(),
+        201,
+        "the same sender signing for this recipient is accepted"
+    );
+}
+
+/// A report checks the same binding. A row holding a signature for another
+/// recipient — what a re-sealed copy written straight into the table would look
+/// like — cannot be turned into evidence against its sender.
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn a_report_on_a_message_signed_for_somebody_else_is_refused() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (_, _, sender_id) =
+        register_user(&app, "resealsend", "resealsend@mailbox.dev", "Pass1234").await;
+    let (reporter_token, _, reporter_id) =
+        register_user(&app, "resealrecv", "resealrecv@mailbox.dev", "Pass1234").await;
+    let (_, _, third_id) =
+        register_user(&app, "resealthird", "resealthird@mailbox.dev", "Pass1234").await;
+    let sender_id = Uuid::parse_str(&sender_id).unwrap();
+    let reporter_id = Uuid::parse_str(&reporter_id).unwrap();
+    let third_id = Uuid::parse_str(&third_id).unwrap();
+
+    let report = |message_id: Uuid, plaintext: &str, franking_key: &[u8]| {
+        actix_test::TestRequest::post()
+            .uri("/api/reports")
+            .insert_header(("Authorization", format!("Bearer {reporter_token}")))
+            .set_json(json!({
+                "target_type": "message",
+                "target_id": message_id,
+                "reason": "threatening",
+                "revealed_plaintext": plaintext,
+                "franking_key": hex::encode(franking_key),
+            }))
+            .peer_addr(peer_addr())
+            .to_request()
+    };
+
+    // Each report directly after its insert: the helper publishes a fresh key
+    // for the sender every time, and the row records none of its own.
+    let plaintext = "written to somebody else";
+    let (resealed, key) =
+        insert_franked_message_signed_for(&pool, sender_id, reporter_id, third_id, plaintext).await;
+    let resp = actix_test::call_service(&app, report(resealed, plaintext, &key)).await;
+    assert_eq!(
+        resp.status(),
+        400,
+        "a signature for another recipient is not evidence here"
+    );
+
+    let plaintext = "written to you";
+    let (genuine, key) = insert_franked_message(&pool, sender_id, reporter_id, plaintext).await;
+    let resp = actix_test::call_service(&app, report(genuine, plaintext, &key)).await;
+    assert_eq!(
+        resp.status(),
+        201,
+        "the same evidence signed for the reporter is accepted"
+    );
+}
+
 #[actix_web::test]
 #[ignore = "requires test DB"]
 async fn a_report_verifies_against_evidence_the_sender_really_signed() {
@@ -9096,13 +9267,16 @@ async fn a_report_verifies_against_evidence_the_sender_really_signed() {
     let commitment = mac.finalize().into_bytes().to_vec();
 
     let client_nonce = Uuid::new_v4();
-    let mut signed = commitment.clone();
+    let mut signed = b"vazute/message-signature/v2".to_vec();
+    signed.extend_from_slice(&commitment);
     signed.extend_from_slice(client_nonce.as_bytes());
+    signed.extend_from_slice(Uuid::parse_str(&sender_id).unwrap().as_bytes());
+    signed.extend_from_slice(Uuid::parse_str(&recipient_id).unwrap().as_bytes());
     let signature = signing_key.sign(&signed);
 
     // Both crypto fields are replaced below with ones derived from this test's
     // own key pair, so the signer here only supplies the rest of the envelope.
-    let mut body = encrypted_body(&TestSigner::new(), client_nonce);
+    let mut body = encrypted_body(&TestSigner::new(), client_nonce, &sender_id, &recipient_id);
     body["franking_commitment"] = json!(hex::encode(&commitment));
     body["franking_signature"] = json!(hex::encode(signature.as_ref()));
     let req = actix_test::TestRequest::post()
@@ -9198,9 +9372,10 @@ async fn a_report_survives_the_sender_rotating_their_keys() {
     let commitment = mac.finalize().into_bytes().to_vec();
 
     let client_nonce = Uuid::new_v4();
-    let mut body = encrypted_body(&original, client_nonce);
+    let mut body = encrypted_body(&original, client_nonce, &sender_id, &reporter_id);
     body["franking_commitment"] = json!(hex::encode(&commitment));
-    body["franking_signature"] = json!(original.signature_hex(&commitment, client_nonce));
+    body["franking_signature"] =
+        json!(original.signature_hex(&commitment, client_nonce, &sender_id, &reporter_id));
 
     let req = actix_test::TestRequest::post()
         .uri("/api/messages/rotreport")
@@ -9283,8 +9458,9 @@ async fn a_message_signed_with_a_key_the_server_cannot_check_is_refused() {
     // Signed by somebody else. Structurally valid, verifiably not theirs.
     let impostor = TestSigner::new();
     let client_nonce = Uuid::new_v4();
-    let mut body = encrypted_body(&published, client_nonce);
-    body["franking_signature"] = json!(impostor.signature_hex(&[0x44_u8; 32], client_nonce));
+    let mut body = encrypted_body(&published, client_nonce, &sender_id, &recipient_id);
+    body["franking_signature"] =
+        json!(impostor.signature_hex(&[0x44_u8; 32], client_nonce, &sender_id, &recipient_id));
 
     let req = actix_test::TestRequest::post()
         .uri("/api/messages/badsigrecv")
@@ -18393,7 +18569,12 @@ async fn the_account_export_carries_encrypted_message_envelopes() {
     let req = actix_test::TestRequest::post()
         .uri("/api/messages/exportpeer")
         .insert_header(("Authorization", format!("Bearer {sender_token}")))
-        .set_json(encrypted_body(&signer, Uuid::new_v4()))
+        .set_json(encrypted_body(
+            &signer,
+            Uuid::new_v4(),
+            &sender_id,
+            &recipient_id,
+        ))
         .peer_addr(peer_addr())
         .to_request();
     let resp = actix_test::call_service(&app, req).await;

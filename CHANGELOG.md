@@ -128,6 +128,15 @@ and release versions follow semantic versioning.
   the owner looked signed out by expiry and nothing was flagged. That copy is
   now kept as used, so presenting it is reuse: every session on the account
   ends, and the event is logged and counted.
+- A message's signature now names the sending and receiving accounts. It
+  covered the commitment and nonce only, so anyone who knew a message's text
+  and franking key, such as its recipient, could seal it to a third person and
+  have it verify there as the sender's. The server checks the new layout at
+  send and at report, and the apps check it against the conversation they are
+  showing, not the ids written in the row. The old layout is refused rather
+  than kept as a fallback; production held no encrypted messages when it
+  changed. Builds of the Android app before this one can no longer send
+  encrypted messages, and need updating.
 - Plain-text messages are refused once both accounts have published keys. The
   choice between plain text and an encrypted envelope is made by the client,
   which is the only side that knows whether it can encrypt — so the server

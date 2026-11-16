@@ -9,6 +9,7 @@ import {
   generateRecoveryCode,
   safetyNumber,
   unwrapIdentity,
+  verifyFrankingSignature,
   wrapIdentity,
 } from '@/lib/crypto/core';
 
@@ -25,6 +26,9 @@ function clientNonce(): string {
 }
 
 const CLIENT_NONCE = clientNonce();
+/** Who the test messages pass between: account ids, generated for the same
+ *  reason as the nonce. */
+const PARTIES = { senderId: clientNonce(), recipientId: clientNonce() };
 
 /** See the web copy: production cost would add minutes to this suite under
  *  Jest's transformed runtime, and proves nothing the server does not enforce. */
@@ -62,6 +66,7 @@ describe('message encryption', () => {
       alice.exchangePublicKey,
       alice.signingPrivateKey,
       CLIENT_NONCE,
+      PARTIES,
     );
 
     expect(decryptMessage(envelope, alice.exchangePrivateKey).plaintext).toBe(plaintext);
@@ -87,6 +92,7 @@ describe('message encryption', () => {
         alice.exchangePublicKey,
         alice.signingPrivateKey,
         CLIENT_NONCE,
+        PARTIES,
       ),
     ).toThrow(/own sender/);
   });
@@ -102,6 +108,7 @@ describe('message encryption', () => {
       alice.exchangePublicKey,
       alice.signingPrivateKey,
       CLIENT_NONCE,
+      PARTIES,
     );
 
     expect(() => decryptMessage(envelope, eve.exchangePrivateKey)).toThrow();
@@ -118,6 +125,7 @@ describe('message encryption', () => {
       alice.exchangePublicKey,
       alice.signingPrivateKey,
       CLIENT_NONCE,
+      PARTIES,
     );
     const opened = decryptMessage(envelope, bob.exchangePrivateKey);
 
@@ -136,6 +144,7 @@ describe('message encryption', () => {
       alice.exchangePublicKey,
       alice.signingPrivateKey,
       CLIENT_NONCE,
+      PARTIES,
     );
     expect(decryptMessage(envelope, bob.exchangePrivateKey).plaintext).toBe(plaintext);
   });
@@ -151,6 +160,7 @@ describe('message encryption', () => {
       alice.exchangePublicKey,
       alice.signingPrivateKey,
       CLIENT_NONCE,
+      PARTIES,
     );
     expect(() => decryptMessage(envelope, eavesdropper.exchangePrivateKey)).toThrow();
   });
@@ -164,6 +174,7 @@ describe('message encryption', () => {
       alice.exchangePublicKey,
       alice.signingPrivateKey,
       CLIENT_NONCE,
+      PARTIES,
     );
     envelope.ciphertext[0] ^= 0x01;
 
@@ -179,11 +190,63 @@ describe('message encryption', () => {
       alice.exchangePublicKey,
       alice.signingPrivateKey,
       CLIENT_NONCE,
+      PARTIES,
     );
     envelope.frankingCommitment = frankingCommitment(new Uint8Array(32), 'something else');
 
     const opened = decryptMessage(envelope, bob.exchangePrivateKey);
     expect(opened.commitmentVerified).toBe(false);
+  });
+});
+
+describe('message signatures', () => {
+  it('hold only for the two accounts they name', () => {
+    // The re-addressing the November review found. A message is sealed to a
+    // public key, so whoever knows a message's text and franking key — its
+    // recipient, or anyone they reported it to — can seal the same text to a
+    // third person. The commitment and signature come along unchanged, and
+    // before the parties were signed they verified there too, as the original
+    // sender's.
+    const alice = generateIdentity();
+    const bob = generateIdentity();
+    const carol = { id: clientNonce() };
+    const envelope = encryptMessage(
+      'only ever said to Bob',
+      bob.exchangePublicKey,
+      alice.exchangePublicKey,
+      alice.signingPrivateKey,
+      CLIENT_NONCE,
+      PARTIES,
+    );
+    const check = (parties: { senderId: string; recipientId: string }) =>
+      verifyFrankingSignature(
+        envelope.frankingCommitment,
+        envelope.frankingSignature,
+        alice.signingPublicKey,
+        CLIENT_NONCE,
+        parties,
+      );
+
+    expect(check(PARTIES)).toBe(true);
+    expect(check({ senderId: PARTIES.senderId, recipientId: carol.id })).toBe(false);
+    // Nor can the sender be swapped, or the direction reversed.
+    expect(check({ senderId: carol.id, recipientId: PARTIES.recipientId })).toBe(false);
+    expect(check({ senderId: PARTIES.recipientId, recipientId: PARTIES.senderId })).toBe(false);
+  });
+
+  it('refuse an account id that is not a UUID rather than signing something else', () => {
+    const alice = generateIdentity();
+    const bob = generateIdentity();
+    expect(() =>
+      encryptMessage(
+        'x',
+        bob.exchangePublicKey,
+        alice.exchangePublicKey,
+        alice.signingPrivateKey,
+        CLIENT_NONCE,
+        { senderId: 'alice', recipientId: PARTIES.recipientId },
+      ),
+    ).toThrow();
   });
 });
 

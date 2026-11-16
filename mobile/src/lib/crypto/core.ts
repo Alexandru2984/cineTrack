@@ -303,21 +303,54 @@ export function frankingCommitment(frankingKey: Uint8Array, plaintext: string): 
   return hmac(sha256, frankingKey, encoder.encode(plaintext));
 }
 
-/** The bytes the sender signs: the commitment bound to the message it belongs
- *  to, so a signature cannot be lifted onto a different message. */
-/** The bytes a sender signs: the commitment bound to the message it belongs to.
+/** Who a message is from and to, by account id. */
+export interface MessageParties {
+  senderId: string;
+  recipientId: string;
+}
+
+/** Leads every signed payload, so these bytes cannot be mistaken for anything
+ *  else the same key signs, and a later layout cannot be confused with this one.
+ *  The first layout had no label; it is not accepted any more. */
+const MESSAGE_SIGNATURE_LABEL = encoder.encode('vazute/message-signature/v2');
+
+function uuidBytes(value: string): Uint8Array {
+  const bytes = fromHex(value.replace(/-/g, ''));
+  if (bytes.length !== 16) throw new Error('expected a UUID');
+  return bytes;
+}
+
+/** The bytes a sender signs: the commitment bound to the message it belongs to
+ *  and to the two accounts it passes between.
  *
  *  The message is identified by its client nonce rather than its server-side
  *  id, and the reason is timing rather than taste: the id is assigned by the
  *  INSERT, long after the sender has to sign. A scheme demanding it would be one
  *  no client could ever satisfy. The nonce is chosen before the request leaves,
  *  and the server's uniqueness constraint on (sender, nonce) makes it identify
- *  exactly one message — which is the property the binding needs. */
+ *  exactly one message — which is the property the binding needs.
+ *
+ *  The parties are signed because the envelope alone does not fix them. A
+ *  message is sealed to a public key, so anyone who knows a message's text and
+ *  franking key — its recipient, or whoever they reported it to — can seal the
+ *  same text to somebody else. Without the recipient in the signature, that
+ *  copy carried the original sender's valid signature into a conversation they
+ *  never had. Account ids rather than key fingerprints: keys are replaced, and a
+ *  signature over a key that has since been rotated could no longer be checked.
+ *
+ *  Every field has a fixed length, so the concatenation is unambiguous. */
 export function frankingSigningPayload(
   commitment: Uint8Array,
   clientNonce: string,
+  parties: MessageParties,
 ): Uint8Array {
-  return concat(commitment, fromHex(clientNonce.replace(/-/g, '')));
+  return concat(
+    MESSAGE_SIGNATURE_LABEL,
+    commitment,
+    uuidBytes(clientNonce),
+    uuidBytes(parties.senderId),
+    uuidBytes(parties.recipientId),
+  );
 }
 
 /** Did the account we trust actually write this commitment?
@@ -342,11 +375,12 @@ export function verifyFrankingSignature(
   signature: Uint8Array,
   signingPublicKey: Uint8Array,
   clientNonce: string,
+  parties: MessageParties,
 ): boolean {
   try {
     return ed25519.verify(
       signature,
-      frankingSigningPayload(commitment, clientNonce),
+      frankingSigningPayload(commitment, clientNonce, parties),
       signingPublicKey,
     );
   } catch {
@@ -360,6 +394,7 @@ export function encryptMessage(
   senderExchangePublicKey: Uint8Array,
   senderSigningPrivateKey: Uint8Array,
   clientNonce: string,
+  parties: MessageParties,
 ): EncryptedMessage {
   // Refused here, not only where the API refuses it.
   //
@@ -408,7 +443,7 @@ export function encryptMessage(
     senderCopy,
     frankingCommitment: commitment,
     frankingSignature: ed25519.sign(
-      frankingSigningPayload(commitment, clientNonce),
+      frankingSigningPayload(commitment, clientNonce, parties),
       senderSigningPrivateKey,
     ),
   };

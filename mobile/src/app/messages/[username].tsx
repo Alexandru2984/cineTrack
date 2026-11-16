@@ -30,7 +30,7 @@ import { useT } from '@/hooks/use-t';
 import { usePeerTrust } from '@/hooks/use-peer-trust';
 import { useTheme } from '@/hooks/use-theme';
 import { messagePath, safePostAuthRedirect } from '@/lib/deep-links';
-import { readMessage, type MessageContent } from '@/lib/crypto/messages';
+import { readMessage, type MessageContent, type ThreadParties } from '@/lib/crypto/messages';
 import { formatDateTime } from '@/lib/format';
 import { getErrorMessage } from '@/lib/http';
 import {
@@ -143,6 +143,15 @@ export default function MessageThreadScreen() {
       ? (identity?.signingPublicKey ?? null)
       : peerSigningKey;
 
+  /** The two accounts every signature in this thread has to name. A message
+   *  signed for another conversation is not from this one, whoever it names. */
+  const currentUserId = currentUser?.id;
+  const peerUserId = peerKeys.data?.user_id;
+  const threadParties = useMemo<ThreadParties | null>(
+    () => (currentUserId && peerUserId ? { selfId: currentUserId, peerId: peerUserId } : null),
+    [currentUserId, peerUserId],
+  );
+
   /** The evidence a report needs, for a message only this device can read.
    *
    *  Absent for a plaintext message, and absent — deliberately — for one that
@@ -150,7 +159,7 @@ export default function MessageThreadScreen() {
    *  commitment would be refused, and offering a form that cannot succeed is
    *  worse than refusing it here. */
   const reportEvidence = (message: DirectMessage) => {
-    const content = readMessage(message, identity, authorSigningKey(message));
+    const content = readMessage(message, identity, authorSigningKey(message), threadParties);
     if (content.kind !== 'encrypted') return undefined;
     return {
       revealedPlaintext: content.content.text,
@@ -389,7 +398,7 @@ export default function MessageThreadScreen() {
             return (
               <MessageBubble
                 message={item}
-                content={readMessage(item, identity, authorSigningKey(item))}
+                content={readMessage(item, identity, authorSigningKey(item), threadParties)}
                 own={own}
                 isLastOwn={item.id === lastOwnMessageId}
                 onReport={() => setReporting(item)}
