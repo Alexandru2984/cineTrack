@@ -8,7 +8,7 @@ INTEGRATION_DB_PORT=""
 REALSTACK_DB_PORT=""
 FULL=false
 TEMP_DIR=""
-PLAYWRIGHT_IMAGE="mcr.microsoft.com/playwright:v1.62.0-noble@sha256:baed2032d533817f3dbe6425de795788430ba345e819a1201337009ba17c9d07"
+PLAYWRIGHT_IMAGE="mcr.microsoft.com/playwright:v1.65.0-noble@sha256:9beb546099e11f52d62e505537914870e01a67e0e6b00ae41da4775324e73dbe"
 
 usage() {
   cat <<'EOF'
