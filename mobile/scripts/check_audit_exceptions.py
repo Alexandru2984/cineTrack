@@ -23,7 +23,11 @@ from pathlib import Path
 
 MOBILE = Path(__file__).resolve().parent.parent
 LOCKFILE = MOBILE / "package-lock.json"
-AUDIT_LEVEL = "high"
+# Moderate, not high: the November 2026 review found nine moderate advisories
+# that nothing here would ever have reported, all of them one minimatch issue.
+# Accepting it below, by name and version, is the point: an accepted risk is
+# written down and re-examined when the dependency moves, rather than invisible.
+AUDIT_LEVEL = "moderate"
 
 # Running `npm audit` safely — bounding the call, retrying an outage, and
 # telling "no advisories" apart from "no answer" — is the same problem in both
@@ -45,7 +49,18 @@ AuditUnavailable = npm_audit.AuditUnavailable
 # node-forge's GHSA-86w9-cpqp-85rv, accepted from 2026-10-02 until 1.4.1 fixed
 # it, and zod's GHSA-mrhx-c7xc-m3w5, accepted from 2026-10-25 for Expo CLI's
 # own zod 3 until the advisory sweep of 2026-11-08 moved it to a patched one.
-ACCEPTED: dict[tuple[str, str], tuple[str, str]] = {}
+ACCEPTED: dict[tuple[str, str], tuple[str, str]] = {
+    ("minimatch", "GHSA-g3hv-75wg-m249"): (
+        "10.2.5|10.2.6|11.0.5|3.1.5",
+        "Pattern matching that backtracks on crafted globs. The affected 10.x "
+        "copies belong to @expo/fingerprint (hashes the project at build time) "
+        "and @typescript-eslint/typescript-estree (lint), and match only "
+        "patterns written in this repository against its own files. Nothing "
+        "that ships in the app or handles user input reaches them. Dependency "
+        "review accepts the same advisory for the same reason; drop both once "
+        "those packages take minimatch 11.",
+    ),
+}
 
 
 def installed_version(package: str) -> str | None:
@@ -66,7 +81,7 @@ def installed_version(package: str) -> str | None:
 
 
 def audit_findings() -> dict[tuple[str, str], str]:
-    """Map (package, advisory) -> title for every high or critical finding."""
+    """Map (package, advisory) -> title for every finding at AUDIT_LEVEL or above."""
     report = npm_audit.audit(MOBILE, AUDIT_LEVEL)
     return npm_audit.findings(report, AUDIT_LEVEL)
 

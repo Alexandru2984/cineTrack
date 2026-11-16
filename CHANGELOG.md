@@ -161,6 +161,10 @@ and release versions follow semantic versioning.
   `moderator`, anything containing `vazute` or `cinetrack`, and route names such
   as `search`) can no longer be registered or taken later, in any case and with
   or without `_` and `-`. No existing account held one.
+- The native app's dependency gate fails on moderate advisories as well as high
+  and critical ones. Nine moderate findings had gone unreported; all were one
+  minimatch advisory in build and lint tooling, now accepted by name and pinned
+  version so the next dependency move forces another look.
 - Credential files are audited by permission mode, not only by whether they are
   gitignored, closing a gap that left a live object-storage key world-readable
   on a host shared with unrelated services.
