@@ -514,6 +514,7 @@ jobs:
             scripts/tests/ci_contract_test.sh \
             scripts/tests/edge_security_config_test.sh \
             scripts/tests/nginx_unfurl_routing_test.sh \
+            scripts/tests/nginx_domain_move_test.sh \
             scripts/tests/auto_deploy_test.sh \
             scripts/tests/monitoring_watchdog_test.sh
 
@@ -607,6 +608,13 @@ jobs:
       # its own address, which no reading of the file reveals.
       - name: Validate public page addresses
         run: scripts/tests/spa_public_pages_test.sh
+
+      # The move to vazute.com: what each of the three hostnames serves and
+      # what it redirects. The exceptions on the old host keep installed apps
+      # and calendar subscriptions working, and a regex slip there passes
+      # `nginx -t`.
+      - name: Validate the domain move
+        run: scripts/tests/nginx_domain_move_test.sh
 
       - name: Validate the Rust version has one home
         run: scripts/tests/rust_toolchain_test.sh

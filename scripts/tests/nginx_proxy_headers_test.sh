@@ -20,7 +20,7 @@ set -euo pipefail
 # both an ordinary API route and the SSE route.
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-VHOST="$ROOT_DIR/nginx/vazute.micutu.com.conf"
+VHOST="$ROOT_DIR/nginx/vazute.com.conf"
 
 if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then
   echo "nginx proxy headers: skipped, no usable docker" >&2

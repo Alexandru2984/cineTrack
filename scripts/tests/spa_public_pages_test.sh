@@ -9,7 +9,7 @@ set -euo pipefail
 # that by redirecting `/about` to `/about/`, and it built the redirect out of the
 # container's own address:
 #
-#   301 -> http://vazute.micutu.com:8080/about/
+#   301 -> http://vazute.com:8080/about/
 #
 # Wrong scheme, and the internal port leaked into a public response. Following it
 # from outside reaches nothing, so the pages the prerendering exists to get
@@ -74,7 +74,7 @@ failures=0
 # A public page answers where it was asked for, without a detour.
 for path in /about /privacy; do
   read -r code redirect <<<"$(curl --silent --max-time 5 --output /dev/null \
-    --header "Host: vazute.micutu.com" \
+    --header "Host: vazute.com" \
     --write-out '%{http_code} %{redirect_url}' "http://127.0.0.1:$PORT$path")"
   if [[ "$code" != 200 ]]; then
     echo "spa public pages: $path answered $code (redirect: ${redirect:-none});" \
@@ -91,7 +91,7 @@ done
 # The SPA fallback still works for client-rendered routes, and assets still 200.
 for path in /dashboard /assets/app.css /; do
   code="$(curl --silent --max-time 5 --output /dev/null \
-    --header "Host: vazute.micutu.com" \
+    --header "Host: vazute.com" \
     --write-out '%{http_code}' "http://127.0.0.1:$PORT$path")"
   if [[ "$code" != 200 ]]; then
     echo "spa public pages: $path answered $code, want 200" >&2
@@ -100,7 +100,7 @@ for path in /dashboard /assets/app.css /; do
 done
 
 # And the page served at /about is the prerendered one, not the shell.
-body="$(curl --silent --max-time 5 --header "Host: vazute.micutu.com" \
+body="$(curl --silent --max-time 5 --header "Host: vazute.com" \
   "http://127.0.0.1:$PORT/about")"
 if [[ "$body" != *"<title>About</title>"* ]]; then
   echo "spa public pages: /about served the SPA shell instead of its own page" >&2

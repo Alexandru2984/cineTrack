@@ -20,8 +20,8 @@ REPO_DIR="${DEPLOY_DRIFT_REPO_DIR:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 STATE_DIR="${DEPLOY_DRIFT_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/cinetrack}"
 METRICS_FILE="${DEPLOY_DRIFT_METRICS_FILE:-$STATE_DIR/deploy_drift.prom}"
 BRANCH="${DEPLOY_DRIFT_BRANCH:-origin/main}"
-VHOST_SOURCE="${DEPLOY_DRIFT_VHOST_SOURCE:-$REPO_DIR/nginx/vazute.micutu.com.conf}"
-VHOST_DEPLOYED="${DEPLOY_DRIFT_VHOST_DEPLOYED:-/etc/nginx/sites-available/vazute.micutu.com}"
+VHOST_SOURCE="${DEPLOY_DRIFT_VHOST_SOURCE:-$REPO_DIR/nginx/vazute.com.conf}"
+VHOST_DEPLOYED="${DEPLOY_DRIFT_VHOST_DEPLOYED:-/etc/nginx/sites-available/vazute.com}"
 
 # Production is not one artifact. The backend image, the frontend image and the
 # host nginx vhost are built and installed separately, and each can be left

@@ -35,7 +35,7 @@ and SSH reach the host. Keep that in mind before running untrusted code here.
 
 | File | Role |
 |------|------|
-| `vazute.micutu.com.conf` | **The deployed edge vhost.** Exact mirror of `/etc/nginx/sites-available/vazute.micutu.com`. Per-route rate limits, Cloudflare-origin gate, security headers + CSP, LetsEncrypt TLS. The local operations gate fails when the two readable files drift. |
+| `vazute.com.conf` | **The deployed edge vhost.** Exact mirror of `/etc/nginx/sites-available/vazute.com`. Serves `vazute.com`. `www.vazute.com` and the pre-move `vazute.micutu.com` redirect to it with a 301, except that the old host still serves `/api/`, `/.well-known/` and a retiring `/sw.js` for clients installed before the move. Per-route rate limits, Cloudflare-origin gate, security headers + CSP, LetsEncrypt TLS (one certificate for all three names). The local operations gate fails when the two readable files drift. |
 | `nginx.conf` | **Validation fixture only** for `nginx -t`. Not deployed. See the header in that file. |
 
 ## Host dependencies (NOT in this repo — live under `/etc/nginx`)
@@ -67,7 +67,7 @@ tunnel, that is loopback.
 ## Deploy / reload
 
 ```bash
-sudo cp nginx/vazute.micutu.com.conf /etc/nginx/sites-available/vazute.micutu.com
+sudo cp nginx/vazute.com.conf /etc/nginx/sites-available/vazute.com
 sudo nginx -t && sudo systemctl reload nginx
 ```
 

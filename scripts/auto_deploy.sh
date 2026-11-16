@@ -62,8 +62,8 @@ ENV_FILE="${AUTO_DEPLOY_ENV_FILE:-$REPO_DIR/.env.prod}"
 # incident, which repairs nothing and removes the logs.
 LOCAL_BACKEND_URL="${AUTO_DEPLOY_LOCAL_BACKEND_URL:-http://127.0.0.1:8090/api/health/ready}"
 LOCAL_FRONTEND_URL="${AUTO_DEPLOY_LOCAL_FRONTEND_URL:-http://127.0.0.1:8091/}"
-PUBLIC_HEALTH_URL="${AUTO_DEPLOY_HEALTH_URL:-https://vazute.micutu.com/api/health/ready}"
-VHOST_DEPLOYED="${AUTO_DEPLOY_VHOST_DEPLOYED:-/etc/nginx/sites-available/vazute.micutu.com}"
+PUBLIC_HEALTH_URL="${AUTO_DEPLOY_HEALTH_URL:-https://vazute.com/api/health/ready}"
+VHOST_DEPLOYED="${AUTO_DEPLOY_VHOST_DEPLOYED:-/etc/nginx/sites-available/vazute.com}"
 # Resolved from the remote rather than written with gh's `{owner}/{repo}`
 # placeholders: those are expanded by shelling out to git in the *current*
 # directory, and cron runs this from $HOME. The placeholder form failed closed
@@ -542,7 +542,7 @@ fi
 # images and leave the edge behaving as it did before — that failure is silent,
 # which is exactly how the event-stream release went out half-applied.
 if [[ -r "$VHOST_DEPLOYED" ]] \
-  && ! git -C "$REPO_DIR" show "$target:nginx/vazute.micutu.com.conf" 2>/dev/null \
+  && ! git -C "$REPO_DIR" show "$target:nginx/vazute.com.conf" 2>/dev/null \
      | cmp -s - "$VHOST_DEPLOYED"; then
   say "${target:0:8} changes the nginx vhost; that needs root and a shared reload. deploy it by hand."
   report blocked_nginx "$target"

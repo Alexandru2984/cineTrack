@@ -157,6 +157,7 @@ python3 scripts/tests/check_embedded_python.py \
   scripts/tests/ci_contract_test.sh \
   scripts/tests/edge_security_config_test.sh \
   scripts/tests/nginx_unfurl_routing_test.sh \
+  scripts/tests/nginx_domain_move_test.sh \
   scripts/tests/auto_deploy_test.sh \
   scripts/tests/monitoring_watchdog_test.sh
 scripts/tests/ci_contract_test.sh
@@ -180,6 +181,7 @@ scripts/tests/edge_security_config_test.sh
 scripts/tests/nginx_unfurl_routing_test.sh
 scripts/tests/nginx_proxy_headers_test.sh
 scripts/tests/spa_public_pages_test.sh
+scripts/tests/nginx_domain_move_test.sh
 scripts/tests/rust_toolchain_test.sh
 scripts/tests/deployment_hardening_test.sh
 scripts/tests/secret_hygiene_test.sh

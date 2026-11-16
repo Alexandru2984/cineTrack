@@ -2,7 +2,7 @@
 
 A personal movie and TV show tracker with social features, inspired by TV Time. Track what you watch, visualize your activity with a GitHub-style heatmap, and keep detailed stats on your viewing habits.
 
-**Live at [vazute.micutu.com](https://vazute.micutu.com)**
+**Live at [vazute.com](https://vazute.com)**
 
 Release changes are tracked in [`CHANGELOG.md`](CHANGELOG.md), and the manual
 production/EAS procedure is documented in
@@ -191,11 +191,11 @@ docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
 - The `db` service uses a named volume, so rebuilding/redeploying does not touch existing data.
 - Production containers run behind a host-level Nginx reverse proxy with SSL termination, as non-root users on a read-only root filesystem.
 - Moderator access is database-backed, requires verified email plus 2FA, and is managed with `scripts/manage_moderator.sh`. The operating procedure is in [`docs/community-moderation.md`](docs/community-moderation.md).
-- The canonical host vhost is `nginx/vazute.micutu.com.conf`. Activate it through a symlink so `sites-enabled` cannot drift from the tracked configuration:
+- The canonical host vhost is `nginx/vazute.com.conf`. Activate it through a symlink so `sites-enabled` cannot drift from the tracked configuration:
 
 ```bash
-sudo install -o root -g root -m 0644 nginx/vazute.micutu.com.conf /etc/nginx/sites-available/vazute.micutu.com
-sudo ln -sfn /etc/nginx/sites-available/vazute.micutu.com /etc/nginx/sites-enabled/vazute.micutu.com
+sudo install -o root -g root -m 0644 nginx/vazute.com.conf /etc/nginx/sites-available/vazute.com
+sudo ln -sfn /etc/nginx/sites-available/vazute.com /etc/nginx/sites-enabled/vazute.com
 sudo nginx -t
 sudo systemctl reload nginx
 ```

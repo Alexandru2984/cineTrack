@@ -22,7 +22,7 @@ set -euo pipefail
 # upstreams that report which one answered and on what path, and asks.
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-VHOST="$ROOT_DIR/nginx/vazute.micutu.com.conf"
+VHOST="$ROOT_DIR/nginx/vazute.com.conf"
 
 if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then
   echo "nginx unfurl routing: skipped, no usable docker" >&2

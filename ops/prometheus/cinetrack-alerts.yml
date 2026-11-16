@@ -395,7 +395,7 @@ groups:
           severity: critical
         annotations:
           summary: Văzute containers are healthy but the public URL is not
-          description: A deploy succeeded and both containers answer locally, but https://vazute.micutu.com/api/health does not. Check nginx and Cloudflare, not the release.
+          description: A deploy succeeded and both containers answer locally, but https://vazute.com/api/health does not. Check nginx and Cloudflare, not the release.
 
       # Needs a person: the images cannot ship until the vhost is installed by
       # hand, so this state does not clear itself.
@@ -406,7 +406,7 @@ groups:
           severity: warning
         annotations:
           summary: Văzute auto-deploy is waiting on an nginx vhost change
-          description: The pending revision changes nginx/vazute.micutu.com.conf, which is installed by hand. Deploy this revision manually.
+          description: The pending revision changes nginx/vazute.com.conf, which is installed by hand. Deploy this revision manually.
 
       # `main` has been red for hours. Auto-deploy is correctly refusing it, so
       # nothing is broken in production — but nothing can ship either.
