@@ -4,7 +4,9 @@ import {
   DEFAULT_KDF_COST,
   decryptMessage,
   deriveWrappingKey,
+  encryptMessage,
   fromHex,
+  generateIdentity,
   toHex,
   unwrapIdentity,
   verifyFrankingSignature,
@@ -73,15 +75,22 @@ describe('material stored by an earlier release', () => {
     expect(opened.commitmentVerified).toBe(true);
   });
 
-  it('still verifies as written by the account that signed it', () => {
+  it('no longer accepts its signature, which named neither account', () => {
+    // The one deliberate break with this file's rule. The first signature
+    // covered the commitment and nonce only, so a copy sealed to somebody else
+    // still verified as the sender's. Signatures now name both accounts, and
+    // the old layout is refused rather than kept as a fallback: a fallback is a
+    // downgrade anyone who can write a row may choose. It cost nothing to drop:
+    // on 2026-11-16 production held no encrypted message and no published key.
     expect(
       verifyFrankingSignature(
         fromHex(STORED.frankingCommitment),
         fromHex(STORED.frankingSignature),
         fromHex(STORED.senderSigningPublic),
         STORED.clientNonce,
+        { senderId: SIGNED.senderId, recipientId: SIGNED.recipientId },
       ),
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it('still unwraps the stored key backup', () => {
@@ -96,5 +105,55 @@ describe('material stored by an earlier release', () => {
     // be unchanged for this to hold.
     expect(toHex(identity.exchangePrivateKey)).toBe(STORED.recipientPrivate);
     expect(toHex(identity.exchangePublicKey)).toBe(STORED.recipientPublic);
+  });
+});
+
+/** A signature in the current layout, from a fixed key, checked in as literals.
+ *
+ *  Ed25519 is deterministic, so the same key and payload always give these
+ *  bytes. The backend's `franking` tests hold the same literals: a client and a
+ *  server that disagree about the layout by one byte would refuse every
+ *  encrypted message, and only a shared vector shows it before release. */
+const SIGNED = {
+  signingSeed: '07'.repeat(32),
+  signingPublic: 'ea4a6c63e29c520abef5507b132ec5f9954776aebebe7b92421eea691446d22c',
+  senderId: '22222222-2222-4222-8222-222222222222',
+  recipientId: '33333333-3333-4333-8333-333333333333',
+  signature:
+    '5380c3d2d9cb067af61880d4de497903766ba58f2b4db6400fa2b7890686e3b0' +
+    'e656318d5e35c58ec5a31c0b6a606b5c9dd7c29cdca76a44ec43573fc14c8d0b',
+} as const;
+
+describe('the signature layout the server checks', () => {
+  it('signs exactly the bytes the backend verifies', () => {
+    const encryptedBy = encryptMessage(
+      PLAINTEXT,
+      fromHex(STORED.recipientPublic),
+      generateIdentity().exchangePublicKey,
+      fromHex(SIGNED.signingSeed),
+      STORED.clientNonce,
+      { senderId: SIGNED.senderId, recipientId: SIGNED.recipientId },
+    );
+    // The commitment is random per message, so the fixed vector is checked
+    // through the verifier and the sealing path is checked to agree with it.
+    expect(
+      verifyFrankingSignature(
+        encryptedBy.frankingCommitment,
+        encryptedBy.frankingSignature,
+        fromHex(SIGNED.signingPublic),
+        STORED.clientNonce,
+        { senderId: SIGNED.senderId, recipientId: SIGNED.recipientId },
+      ),
+    ).toBe(true);
+
+    expect(
+      verifyFrankingSignature(
+        fromHex(STORED.frankingCommitment),
+        fromHex(SIGNED.signature),
+        fromHex(SIGNED.signingPublic),
+        STORED.clientNonce,
+        { senderId: SIGNED.senderId, recipientId: SIGNED.recipientId },
+      ),
+    ).toBe(true);
   });
 });

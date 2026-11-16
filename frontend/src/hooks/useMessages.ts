@@ -8,6 +8,7 @@ import {
 import api from '@/lib/api';
 import { fetchPeerKeys } from '@/lib/crypto/session';
 import { encryptionKeys } from '@/hooks/useEncryption';
+import { useAuthStore } from '@/store/auth';
 import { useEncryptionStore } from '@/store/encryption';
 import type {
   DirectMessage,
@@ -131,17 +132,25 @@ export function useSendMessage() {
         throw new EncryptionRequiredError();
       }
 
+      // The signature names the sending account as well as the peer's, so a
+      // device that has not loaded its own account yet cannot sign.
+      const senderId = useAuthStore.getState().user?.id;
+      if (peer && identity && !senderId) {
+        throw new Error('The signed-in account is not loaded yet; try again.');
+      }
+
       // Imported here rather than at the top of the file: the navbar pulls this
       // module in for the unread badge, and the primitives are a third of a
       // megabyte that a reader who never sends a message should not download.
       const payload =
-        peer && identity
+        peer && identity && senderId
           ? {
               ...(await import('@/lib/crypto/messages')).sealMessage(
                 body,
                 peer,
                 identity,
                 clientNonce,
+                senderId,
               ),
               client_nonce: clientNonce,
             }

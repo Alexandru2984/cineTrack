@@ -9,6 +9,7 @@ import { apiRequest } from '@/lib/api';
 import { sealMessage } from '@/lib/crypto/messages';
 import { fetchPeerKeys } from '@/lib/crypto/session';
 import { encryptionKeys } from '@/hooks/use-encryption';
+import { useAuthStore } from '@/store/auth';
 import { useEncryptionStore } from '@/store/encryption';
 import { withQuery } from '@/lib/http';
 import {
@@ -129,9 +130,19 @@ export function useSendMessage() {
         throw new EncryptionRequiredError();
       }
 
+      // The signature names the sending account as well as the peer's, so a
+      // device that has not loaded its own account yet cannot sign.
+      const senderId = useAuthStore.getState().user?.id;
+      if (peer && identity && !senderId) {
+        throw new Error('The signed-in account is not loaded yet; try again.');
+      }
+
       const payload =
-        peer && identity
-          ? { ...sealMessage(body, peer, identity, clientNonce), client_nonce: clientNonce }
+        peer && identity && senderId
+          ? {
+              ...sealMessage(body, peer, identity, clientNonce, senderId),
+              client_nonce: clientNonce,
+            }
           : { body, client_nonce: clientNonce };
 
       return apiRequest<DirectMessage>(`/messages/${encodeURIComponent(username)}`, {

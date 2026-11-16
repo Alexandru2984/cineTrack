@@ -23,9 +23,21 @@ function clientNonce(): string {
 
 const CLIENT_NONCE = clientNonce();
 
-function peerFrom(identity: ReturnType<typeof generateIdentity>): PeerPublicKeys {
+/** The accounts in these conversations. Signatures name them, so they have to
+ *  be real UUIDs; generated for the same reason as the nonce. */
+const ALICE_ID = clientNonce();
+const BOB_ID = clientNonce();
+const CAROL_ID = clientNonce();
+
+/** Bob's conversation with Alice, as Bob's device knows it. */
+const BOB_THREAD = { selfId: BOB_ID, peerId: ALICE_ID };
+
+function peerFrom(
+  identity: ReturnType<typeof generateIdentity>,
+  userId: string = BOB_ID,
+): PeerPublicKeys {
   return {
-    user_id: 'peer',
+    user_id: userId,
     username: 'peer',
     exchange_public_key: toHex(identity.exchangePublicKey),
     signing_public_key: toHex(identity.signingPublicKey),
@@ -54,8 +66,8 @@ describe('sealing to a directory entry', () => {
       exchange_public_key: toHex(attacker.exchangePublicKey),
     };
 
-    expect(() => sealMessage('hello', tampered, alice, CLIENT_NONCE)).toThrow(/fingerprint/i);
-    expect(() => sealMessage('hello', peerFrom(bob), alice, CLIENT_NONCE)).not.toThrow();
+    expect(() => sealMessage('hello', tampered, alice, CLIENT_NONCE, ALICE_ID)).toThrow(/fingerprint/i);
+    expect(() => sealMessage('hello', peerFrom(bob), alice, CLIENT_NONCE, ALICE_ID)).not.toThrow();
   });
 });
 
@@ -66,8 +78,8 @@ function messageFrom(
 ): DirectMessage {
   return {
     id,
-    sender_id: 'alice',
-    recipient_id: 'bob',
+    sender_id: ALICE_ID,
+    recipient_id: BOB_ID,
     body: null,
     ciphertext: sealed.ciphertext,
     nonce: sealed.nonce,
@@ -100,7 +112,7 @@ describe('reading messages', () => {
     clearDecryptionCache();
     const alice = generateIdentity();
     const bob = generateIdentity();
-    const sealed = sealMessage('see you at eight', peerFrom(bob), alice, CLIENT_NONCE);
+    const sealed = sealMessage('see you at eight', peerFrom(bob), alice, CLIENT_NONCE, ALICE_ID);
 
     const forBob = readMessage(messageFrom(sealed, 'both-1'), bob);
     expect(forBob).toMatchObject({ kind: 'encrypted' });
@@ -121,7 +133,7 @@ describe('reading messages', () => {
     const alice = generateIdentity();
     const bob = generateIdentity();
     const eve = generateIdentity();
-    const sealed = sealMessage('private', peerFrom(bob), alice, CLIENT_NONCE);
+    const sealed = sealMessage('private', peerFrom(bob), alice, CLIENT_NONCE, ALICE_ID);
 
     // No key at all is something the user can fix by restoring; the wrong key
     // is not, and conflating the two would send them round a loop that cannot
@@ -134,7 +146,7 @@ describe('reading messages', () => {
     clearDecryptionCache();
     const alice = generateIdentity();
     const bob = generateIdentity();
-    const sealed = sealMessage('reportable', peerFrom(bob), alice, CLIENT_NONCE);
+    const sealed = sealMessage('reportable', peerFrom(bob), alice, CLIENT_NONCE, ALICE_ID);
 
     const opened = readMessage(messageFrom(sealed, 'report-1'), bob);
     if (opened.kind !== 'encrypted') throw new Error('unreachable');
@@ -145,7 +157,7 @@ describe('reading messages', () => {
     clearDecryptionCache();
     const alice = generateIdentity();
     const bob = generateIdentity();
-    const sealed = sealMessage('the last thing said', peerFrom(bob), alice, CLIENT_NONCE);
+    const sealed = sealMessage('the last thing said', peerFrom(bob), alice, CLIENT_NONCE, ALICE_ID);
 
     const conversation = {
       user_id: 'alice',
@@ -172,7 +184,7 @@ describe('reading messages', () => {
   it('forgets decrypted text when asked, so it does not outlive a session', () => {
     const alice = generateIdentity();
     const bob = generateIdentity();
-    const sealed = sealMessage('ephemeral', peerFrom(bob), alice, CLIENT_NONCE);
+    const sealed = sealMessage('ephemeral', peerFrom(bob), alice, CLIENT_NONCE, ALICE_ID);
 
     expect(readMessage(messageFrom(sealed, 'cache-1'), bob).kind).toBe('encrypted');
     clearDecryptionCache();
@@ -187,12 +199,13 @@ describe('deciding whether a message is really from the sender', () => {
     clearDecryptionCache();
     const alice = generateIdentity();
     const bob = generateIdentity();
-    const sealed = sealMessage('genuinely mine', peerFrom(bob), alice, CLIENT_NONCE);
+    const sealed = sealMessage('genuinely mine', peerFrom(bob), alice, CLIENT_NONCE, ALICE_ID);
 
     const read = readMessage(
       messageFrom(sealed, 'signed-1'),
       bob,
       alice.signingPublicKey,
+      BOB_THREAD,
     );
     if (read.kind !== 'encrypted') throw new Error('unreachable');
     expect(read.content.authenticity).toBe('verified');
@@ -208,7 +221,7 @@ describe('deciding whether a message is really from the sender', () => {
     const alice = generateIdentity();
     const bob = generateIdentity();
     const server = generateIdentity();
-    const forged = sealMessage('meet me at the docks', peerFrom(bob), server, CLIENT_NONCE);
+    const forged = sealMessage('meet me at the docks', peerFrom(bob), server, CLIENT_NONCE, ALICE_ID);
 
     const read = readMessage(
       // Recorded as signed by Alice's current key, which is what makes this
@@ -216,6 +229,7 @@ describe('deciding whether a message is really from the sender', () => {
       messageFrom(forged, 'forged-1', { sender_signing_key: toHex(alice.signingPublicKey) }),
       bob,
       alice.signingPublicKey,
+      BOB_THREAD,
     );
     expect(read).toEqual({ kind: 'untrusted', reason: 'forged' });
   });
@@ -235,7 +249,7 @@ describe('deciding whether a message is really from the sender', () => {
     const alice = generateIdentity();
     const alicesOldKeys = generateIdentity();
     const bob = generateIdentity();
-    const sealed = sealMessage('sent long ago', peerFrom(bob), alicesOldKeys, CLIENT_NONCE);
+    const sealed = sealMessage('sent long ago', peerFrom(bob), alicesOldKeys, CLIENT_NONCE, ALICE_ID);
 
     const read = readMessage(
       messageFrom(sealed, 'rotated-1', {
@@ -243,6 +257,7 @@ describe('deciding whether a message is really from the sender', () => {
       }),
       bob,
       alice.signingPublicKey,
+      BOB_THREAD,
     );
     expect(read.kind).toBe('untrusted');
     if (read.kind !== 'untrusted') throw new Error('unreachable');
@@ -251,11 +266,63 @@ describe('deciding whether a message is really from the sender', () => {
     expect(JSON.stringify(read)).not.toContain('sent long ago');
   });
 
+  it('withholds a copy sealed to this reader under a signature for somebody else', () => {
+    // The re-addressing the November review found. Alice wrote to Carol; Carol,
+    // or anyone she reported it to, knows the text and the franking key and can
+    // seal the same thing to Bob, carrying Alice's signature along. Sealed to
+    // Bob's keys here while naming Carol, which is exactly what that copy is.
+    clearDecryptionCache();
+    const alice = generateIdentity();
+    const bob = generateIdentity();
+    const resealed = sealMessage(
+      'said to Carol, not to you',
+      peerFrom(bob, CAROL_ID),
+      alice,
+      CLIENT_NONCE,
+      ALICE_ID,
+    );
+
+    const read = readMessage(
+      messageFrom(resealed, 'resealed-1', {
+        sender_signing_key: toHex(alice.signingPublicKey),
+      }),
+      bob,
+      alice.signingPublicKey,
+      BOB_THREAD,
+    );
+    expect(read).toEqual({ kind: 'untrusted', reason: 'forged' });
+
+    // Writing Carol into the row as the recipient does not help: the parties
+    // checked are the thread's, not whatever the row claims.
+    clearDecryptionCache();
+    const rewritten = readMessage(
+      messageFrom(resealed, 'resealed-2', {
+        recipient_id: CAROL_ID,
+        sender_signing_key: toHex(alice.signingPublicKey),
+      }),
+      bob,
+      alice.signingPublicKey,
+      BOB_THREAD,
+    );
+    expect(rewritten).toEqual({ kind: 'untrusted', reason: 'forged' });
+  });
+
+  it('claims nothing when it does not know whose thread this is', () => {
+    clearDecryptionCache();
+    const alice = generateIdentity();
+    const bob = generateIdentity();
+    const sealed = sealMessage('before the account loads', peerFrom(bob), alice, CLIENT_NONCE, ALICE_ID);
+
+    const read = readMessage(messageFrom(sealed, 'no-thread-1'), bob, alice.signingPublicKey, null);
+    if (read.kind !== 'encrypted') throw new Error('unreachable');
+    expect(read.content.authenticity).toBe('unchecked');
+  });
+
   it('claims nothing when there is no key to check against', () => {
     clearDecryptionCache();
     const alice = generateIdentity();
     const bob = generateIdentity();
-    const sealed = sealMessage('while the directory loads', peerFrom(bob), alice, CLIENT_NONCE);
+    const sealed = sealMessage('while the directory loads', peerFrom(bob), alice, CLIENT_NONCE, ALICE_ID);
 
     const read = readMessage(messageFrom(sealed, 'unchecked-1'), bob, null);
     if (read.kind !== 'encrypted') throw new Error('unreachable');
@@ -269,8 +336,8 @@ describe('deciding whether a message is really from the sender', () => {
     clearDecryptionCache();
     const alice = generateIdentity();
     const bob = generateIdentity();
-    const sealed = sealMessage('what they will actually read', peerFrom(bob), alice, CLIENT_NONCE);
-    const decoy = sealMessage('what they committed to', peerFrom(bob), alice, clientNonce());
+    const sealed = sealMessage('what they will actually read', peerFrom(bob), alice, CLIENT_NONCE, ALICE_ID);
+    const decoy = sealMessage('what they committed to', peerFrom(bob), alice, clientNonce(), ALICE_ID);
 
     const read = readMessage(
       messageFrom(sealed, 'malformed-1', { franking_commitment: decoy.franking_commitment }),
@@ -290,7 +357,7 @@ describe('a preview does not decide anything for the thread', () => {
     clearDecryptionCache();
     const alice = generateIdentity();
     const bob = generateIdentity();
-    const sealed = sealMessage('perfectly ordinary', peerFrom(bob), alice, CLIENT_NONCE);
+    const sealed = sealMessage('perfectly ordinary', peerFrom(bob), alice, CLIENT_NONCE, ALICE_ID);
     const id = 'shared-id-1';
 
     const conversation = {
@@ -316,7 +383,12 @@ describe('a preview does not decide anything for the thread', () => {
     expect(preview.content.commitmentVerified).toBeNull();
     expect(preview.content.authenticity).toBe('unchecked');
 
-    const inThread = readMessage(messageFrom(sealed, id), bob, alice.signingPublicKey);
+    const inThread = readMessage(
+      messageFrom(sealed, id),
+      bob,
+      alice.signingPublicKey,
+      BOB_THREAD,
+    );
     if (inThread.kind !== 'encrypted') throw new Error('unreachable');
     expect(inThread.content.commitmentVerified).toBe(true);
     expect(inThread.content.authenticity).toBe('verified');
@@ -333,7 +405,7 @@ describe('the shared crypto modules', () => {
     const alice = generateIdentity();
     const bob = generateIdentity();
     const server = generateIdentity();
-    const forged = sealMessage('trust me', peerFrom(bob), server, CLIENT_NONCE);
+    const forged = sealMessage('trust me', peerFrom(bob), server, CLIENT_NONCE, ALICE_ID);
 
     const read = readMessage(
       // Everything the server controls says this is fine: its own signature,
@@ -343,6 +415,7 @@ describe('the shared crypto modules', () => {
       }),
       bob,
       fromHex(toHex(alice.signingPublicKey)),
+      BOB_THREAD,
     );
     // Not merely "not verified": withheld. Everything the server controls says
     // the message is fine, and the only disagreement is the directory, so the

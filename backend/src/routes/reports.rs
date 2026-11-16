@@ -137,11 +137,17 @@ async fn report_message_target(
 
     // The nonce, not `data.target_id`: the sender signed before the row had an
     // id to sign over. See `franking::signing_payload`.
+    // The reporter is the recipient: the row was selected on that, so this is
+    // the conversation the sender's signature has to name.
     if let Err(failure) = franking::verify(
         &commitment,
         &signature,
         &signing_key,
         client_nonce,
+        franking::Parties {
+            sender: sender_id,
+            recipient: reporter_id,
+        },
         plaintext,
         &franking_key,
     ) {

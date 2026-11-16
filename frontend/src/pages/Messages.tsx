@@ -37,6 +37,7 @@ import {
   readConversationPreview,
   readMessage,
   type MessageContent,
+  type ThreadParties,
 } from '@/lib/crypto/messages';
 import { useEncryptionStore } from '@/store/encryption';
 import { useAuthStore } from '@/store/auth';
@@ -374,6 +375,15 @@ function MessagesContent({ username }: { username: string }) {
       ? (identity?.signingPublicKey ?? null)
       : peerSigningKey;
 
+  /** The two accounts every signature in this thread has to name. A message
+   *  signed for another conversation is not from this one, whoever it names. */
+  const currentUserId = currentUser?.id;
+  const peerUserId = peerKeys.data?.user_id;
+  const threadParties = useMemo<ThreadParties | null>(
+    () => (currentUserId && peerUserId ? { selfId: currentUserId, peerId: peerUserId } : null),
+    [currentUserId, peerUserId],
+  );
+
   // True when anything in this thread arrived encrypted. Derived from the
   // messages rather than from the peer's key, so the notice describes what the
   // user is actually looking at instead of what a future message would be.
@@ -386,7 +396,7 @@ function MessagesContent({ username }: { username: string }) {
    *  commitment would be refused, and offering the user a form that cannot
    *  succeed is worse than refusing it here. */
   const reportEvidence = (message: DirectMessage) => {
-    const content = readMessage(message, identity, authorSigningKey(message));
+    const content = readMessage(message, identity, authorSigningKey(message), threadParties);
     if (content.kind !== 'encrypted') return undefined;
     return {
       revealedPlaintext: content.content.text,
@@ -612,7 +622,7 @@ function MessagesContent({ username }: { username: string }) {
                 <MessageBubble
                   key={message.id}
                   message={message}
-                  content={readMessage(message, identity, authorSigningKey(message))}
+                  content={readMessage(message, identity, authorSigningKey(message), threadParties)}
                   own={message.sender_id === currentUser?.id}
                   locale={locale}
                   isLastOwn={message.id === lastOwnMessageId}

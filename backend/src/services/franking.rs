@@ -10,15 +10,16 @@
 //!
 //! ```text
 //! commitment = HMAC-SHA256(franking_key, plaintext)
-//! signature  = Ed25519(sender_signing_key, commitment || client_nonce)
+//! signature  = Ed25519(sender_signing_key,
+//!                      label || commitment || client_nonce || sender_id || recipient_id)
 //! ```
 //!
 //! The franking key travels *inside* the ciphertext, so only the participants
 //! learn it. The server stores the commitment and the signature.
 //!
-//! It can verify the *signature* immediately, and does: the payload is
-//! `commitment || client_nonce`, both of which it holds, and the sender's
-//! signing public key is in its own directory. This module used to claim the
+//! It can verify the *signature* immediately, and does: everything in the
+//! payload is something it holds, and the sender's signing public key is in
+//! its own directory. This module used to claim the
 //! server could verify neither half, which was true of the commitment and
 //! wrong about the signature — and the cost of that error was that an
 //! unverified signature went into storage and only failed years later, when a
@@ -114,7 +115,21 @@ pub fn commit(franking_key: &[u8], plaintext: &str) -> Result<Vec<u8>, FrankingF
     Ok(mac.finalize().into_bytes().to_vec())
 }
 
-/// The bytes a sender signs: the commitment bound to the message it belongs to.
+/// Leads every signed payload, so these bytes cannot be taken for anything else
+/// the same key signs, and a later layout cannot be confused with this one. The
+/// first layout had no label and is not accepted any more: production held no
+/// encrypted message when it was replaced, so there was no history to keep.
+pub const SIGNATURE_LABEL: &[u8] = b"vazute/message-signature/v2";
+
+/// Who a message is from and to, by account id.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Parties {
+    pub sender: Uuid,
+    pub recipient: Uuid,
+}
+
+/// The bytes a sender signs: the commitment bound to the message it belongs to
+/// and to the two accounts it passes between.
 ///
 /// The binding is what stops a signature being lifted from one message and
 /// presented for another. Without it, a commitment signed once would validate a
@@ -127,10 +142,24 @@ pub fn commit(franking_key: &[u8], plaintext: &str) -> Result<Vec<u8>, FrankingF
 /// nonce is chosen by the sender before the request leaves, and
 /// `direct_messages_sender_nonce_unique` makes (sender, nonce) identify exactly
 /// one message — which is precisely the property the binding needs.
-pub fn signing_payload(commitment: &[u8], client_nonce: Uuid) -> Vec<u8> {
-    let mut payload = Vec::with_capacity(commitment.len() + 16);
+///
+/// The parties are signed because the envelope alone does not fix them. A
+/// message is sealed to a public key, so anyone who knows a message's text and
+/// franking key — its recipient, or whoever they showed it to — can seal it to
+/// somebody else, and the copy carried the sender's valid signature into a
+/// conversation they never had. Account ids rather than key fingerprints:
+/// keys are replaced, and a signature over a rotated key could not be checked.
+///
+/// Every field has a fixed length, so the concatenation is unambiguous. The
+/// clients build the same bytes in `lib/crypto/core.ts`, and both test suites
+/// check one shared vector.
+pub fn signing_payload(commitment: &[u8], client_nonce: Uuid, parties: Parties) -> Vec<u8> {
+    let mut payload = Vec::with_capacity(SIGNATURE_LABEL.len() + commitment.len() + 48);
+    payload.extend_from_slice(SIGNATURE_LABEL);
     payload.extend_from_slice(commitment);
     payload.extend_from_slice(client_nonce.as_bytes());
+    payload.extend_from_slice(parties.sender.as_bytes());
+    payload.extend_from_slice(parties.recipient.as_bytes());
     payload
 }
 
@@ -140,6 +169,7 @@ pub fn verify(
     stored_signature: &[u8],
     sender_signing_key: &[u8],
     client_nonce: Uuid,
+    parties: Parties,
     revealed_plaintext: &str,
     franking_key: &[u8],
 ) -> Result<(), FrankingFailure> {
@@ -165,6 +195,7 @@ pub fn verify(
         stored_signature,
         sender_signing_key,
         client_nonce,
+        parties,
     )
 }
 
@@ -179,6 +210,7 @@ pub fn verify_signature(
     signature: &[u8],
     sender_signing_key: &[u8],
     client_nonce: Uuid,
+    parties: Parties,
 ) -> Result<(), FrankingFailure> {
     if commitment.len() != COMMITMENT_BYTES
         || signature.len() != SIGNATURE_BYTES
@@ -187,7 +219,7 @@ pub fn verify_signature(
         return Err(FrankingFailure::MalformedEvidence);
     }
 
-    let payload = signing_payload(commitment, client_nonce);
+    let payload = signing_payload(commitment, client_nonce, parties);
     UnparsedPublicKey::new(&ED25519, sender_signing_key)
         .verify(&payload, signature)
         .map_err(|_| FrankingFailure::SignatureInvalid)
@@ -208,6 +240,11 @@ mod tests {
     use super::*;
     use aws_lc_rs::signature::{Ed25519KeyPair, KeyPair};
 
+    const PARTIES: Parties = Parties {
+        sender: Uuid::from_u128(0x2222_2222_2222_4222_8222_2222_2222_2222),
+        recipient: Uuid::from_u128(0x3333_3333_3333_4333_8333_3333_3333_3333),
+    };
+
     struct Sender {
         key_pair: Ed25519KeyPair,
     }
@@ -227,7 +264,7 @@ mod tests {
 
         fn sign(&self, commitment: &[u8], client_nonce: Uuid) -> Vec<u8> {
             self.key_pair
-                .sign(&signing_payload(commitment, client_nonce))
+                .sign(&signing_payload(commitment, client_nonce, PARTIES))
                 .as_ref()
                 .to_vec()
         }
@@ -258,6 +295,7 @@ mod tests {
             &signature,
             &sender.public_key(),
             client_nonce,
+            PARTIES,
             &plaintext,
             &key,
         )
@@ -274,6 +312,7 @@ mod tests {
             &signature,
             &sender.public_key(),
             client_nonce,
+            PARTIES,
             "something the sender never wrote",
             &key,
         );
@@ -290,6 +329,7 @@ mod tests {
             &signature,
             &sender.public_key(),
             client_nonce,
+            PARTIES,
             &plaintext,
             &[9u8; FRANKING_KEY_BYTES],
         );
@@ -311,6 +351,7 @@ mod tests {
             &forged,
             &victim.public_key(),
             client_nonce,
+            PARTIES,
             &plaintext,
             &key,
         );
@@ -330,10 +371,101 @@ mod tests {
             &signature,
             &sender.public_key(),
             other_message,
+            PARTIES,
             &plaintext,
             &key,
         );
         assert_eq!(result, Err(FrankingFailure::SignatureInvalid));
+    }
+
+    #[test]
+    fn a_signature_made_for_one_recipient_fails_for_another() {
+        // The re-addressing the November review found: whoever knows a
+        // message's text and franking key can seal it to a third person, and
+        // the sender's signature came along and verified there too.
+        let (sender, client_nonce, key, plaintext, commitment, signature) = evidence();
+        let somebody_else = Uuid::new_v4();
+
+        for parties in [
+            Parties {
+                sender: PARTIES.sender,
+                recipient: somebody_else,
+            },
+            Parties {
+                sender: somebody_else,
+                recipient: PARTIES.recipient,
+            },
+            Parties {
+                sender: PARTIES.recipient,
+                recipient: PARTIES.sender,
+            },
+        ] {
+            assert_eq!(
+                verify(
+                    &commitment,
+                    &signature,
+                    &sender.public_key(),
+                    client_nonce,
+                    parties,
+                    &plaintext,
+                    &key,
+                ),
+                Err(FrankingFailure::SignatureInvalid),
+                "a signature for {PARTIES:?} must not hold for {parties:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_unlabelled_first_layout_is_refused() {
+        let (sender, client_nonce, _key, _plaintext, commitment, _signature) = evidence();
+        let mut first_layout = commitment.clone();
+        first_layout.extend_from_slice(client_nonce.as_bytes());
+        let old = sender.key_pair.sign(&first_layout);
+
+        assert_eq!(
+            verify_signature(
+                &commitment,
+                old.as_ref(),
+                &sender.public_key(),
+                client_nonce,
+                PARTIES
+            ),
+            Err(FrankingFailure::SignatureInvalid)
+        );
+    }
+
+    /// The vector `crypto-wire-format` checks in both clients. A client and a
+    /// server that disagree about the layout by one byte refuse every encrypted
+    /// message, and only a shared literal shows it before a release does.
+    #[test]
+    fn the_server_checks_the_bytes_the_clients_sign() {
+        let commitment =
+            hex::decode("6908752814eae5c0f8b59b162c08f224373ef87800e01880e420adbb5a48f873")
+                .unwrap();
+        let client_nonce = Uuid::parse_str("11111111-1111-4111-8111-111111111111").unwrap();
+        let key_pair = Ed25519KeyPair::from_seed_unchecked(&[7u8; 32]).expect("seed");
+        assert_eq!(
+            hex::encode(key_pair.public_key().as_ref()),
+            "ea4a6c63e29c520abef5507b132ec5f9954776aebebe7b92421eea691446d22c"
+        );
+
+        let signature = key_pair.sign(&signing_payload(&commitment, client_nonce, PARTIES));
+        assert_eq!(
+            hex::encode(signature.as_ref()),
+            concat!(
+                "5380c3d2d9cb067af61880d4de497903766ba58f2b4db6400fa2b7890686e3b0",
+                "e656318d5e35c58ec5a31c0b6a606b5c9dd7c29cdca76a44ec43573fc14c8d0b"
+            )
+        );
+        assert!(verify_signature(
+            &commitment,
+            signature.as_ref(),
+            key_pair.public_key().as_ref(),
+            client_nonce,
+            PARTIES
+        )
+        .is_ok());
     }
 
     #[test]
@@ -367,6 +499,7 @@ mod tests {
                     signature,
                     &public_key,
                     client_nonce,
+                    PARTIES,
                     &plaintext,
                     franking_key,
                 ),
