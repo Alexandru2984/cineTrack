@@ -4,16 +4,16 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 for config in \
-  "$ROOT_DIR/nginx/vazute.micutu.com.conf" \
+  "$ROOT_DIR/nginx/vazute.com.conf" \
   "$ROOT_DIR/nginx/nginx.conf"; do
   grep -Fq 'location = /.well-known/security.txt' "$config"
   grep -Fq 'Contact: mailto:' "$config"
   grep -Fq 'Expires: 2027-07-27T23:59:59Z' "$config"
-  grep -Fq 'Canonical: https://vazute.micutu.com/.well-known/security.txt' "$config"
-  grep -Fq 'Policy: https://vazute.micutu.com/privacy' "$config"
+  grep -Fq 'Canonical: https://vazute.com/.well-known/security.txt' "$config"
+  grep -Fq 'Policy: https://vazute.com/privacy' "$config"
 done
 
-VHOST="$ROOT_DIR/nginx/vazute.micutu.com.conf"
+VHOST="$ROOT_DIR/nginx/vazute.com.conf"
 FRONTEND_VHOST="$ROOT_DIR/frontend/nginx-spa.conf"
 
 # The origin must not be reachable directly, and an attacker-supplied XFF chain
@@ -151,7 +151,7 @@ PY
 # On the production host, make configuration drift fail the local operations
 # gate. GitHub runners do not have the host file, so CI still validates the
 # repository copy and the invariant checks above.
-HOST_VHOST="/etc/nginx/sites-available/vazute.micutu.com"
+HOST_VHOST="/etc/nginx/sites-available/vazute.com"
 if [ -r "$HOST_VHOST" ] && ! cmp -s "$VHOST" "$HOST_VHOST"; then
   echo "edge security error: repository and deployed Văzute vhosts differ" >&2
   exit 1

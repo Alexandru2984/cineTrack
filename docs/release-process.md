@@ -128,7 +128,7 @@ the deploy above stops the database rather than reloading it.
 
 ### The nginx vhost is a separate artifact
 
-`nginx/vazute.micutu.com.conf` is not in any image. Compose will not install it,
+`nginx/vazute.com.conf` is not in any image. Compose will not install it,
 so a release that changes it is only half deployed until it is copied to the
 host by hand — and the symptom is subtle: the site stays up and serves the new
 bundle while the edge behaves as it did before.
@@ -140,9 +140,9 @@ unchanged, so the stream would have worked while delivering in batches.
 ```bash
 # Nothing here is destructive until `cp`, and `nginx -t` runs before reload, so
 # a bad config is refused rather than loaded.
-sudo cp /etc/nginx/sites-available/vazute.micutu.com \
-  "/etc/nginx/sites-available/vazute.micutu.com.bak.$(date -u +%Y%m%dT%H%M%SZ)"
-sudo cp nginx/vazute.micutu.com.conf /etc/nginx/sites-available/vazute.micutu.com
+sudo cp /etc/nginx/sites-available/vazute.com \
+  "/etc/nginx/sites-available/vazute.com.bak.$(date -u +%Y%m%dT%H%M%SZ)"
+sudo cp nginx/vazute.com.conf /etc/nginx/sites-available/vazute.com
 sudo nginx -t && sudo systemctl reload nginx
 ```
 
@@ -156,8 +156,8 @@ main authenticated flows:
 
 ```bash
 docker compose -f docker-compose.prod.yml --env-file .env.prod ps
-curl --fail --silent --show-error https://vazute.micutu.com/api/health
-curl --fail --silent --show-error https://vazute.micutu.com/.well-known/security.txt
+curl --fail --silent --show-error https://vazute.com/api/health
+curl --fail --silent --show-error https://vazute.com/.well-known/security.txt
 
 # Confirm every artifact actually moved. Both images carry the commit they were
 # built from, and the check compares each against the paths that affect it —

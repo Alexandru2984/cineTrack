@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 BACKEND_MAIN="$ROOT_DIR/backend/src/main.rs"
-EDGE_CONFIG="$ROOT_DIR/nginx/vazute.micutu.com.conf"
+EDGE_CONFIG="$ROOT_DIR/nginx/vazute.com.conf"
 FIXTURE_CONFIG="$ROOT_DIR/nginx/nginx.conf"
 
 assert_contains() {

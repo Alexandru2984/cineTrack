@@ -29,7 +29,7 @@ printf 'services: {}\n' > "$REPO/docker-compose.prod.yml"
 mkdir -p "$REPO/ops/prometheus"
 printf 'global: {}\n' > "$REPO/ops/prometheus/prometheus.yml"
 printf 'groups: [] # base rules\n' > "$REPO/ops/prometheus/cinetrack-alerts.yml"
-printf 'vhost\n' > "$REPO/nginx/vazute.micutu.com.conf"
+printf 'vhost\n' > "$REPO/nginx/vazute.com.conf"
 cat > "$REPO/scripts/provision_db_role.sh" <<'PROV'
 #!/usr/bin/env bash
 exit 0
