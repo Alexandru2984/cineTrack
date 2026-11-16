@@ -302,3 +302,22 @@ tests:
                 request or job may have carried on, but something is failing. Read the
                 backend log with docker logs cinetrack-backend-1.
 
+  - name: a spent image budget warns, and ordinary misses do not
+    interval: 1m
+    input_series:
+      - series: 'cinetrack_tmdb_cache_events_total{cache="poster", result="refused"}'
+        values: "0x10 0+5x20"
+      - series: 'cinetrack_tmdb_cache_events_total{cache="poster", result="miss"}'
+        values: "0+50x30"
+    alert_rule_test:
+      - eval_time: 9m
+        alertname: CineTrackPosterFetchBudgetSpent
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: CineTrackPosterFetchBudgetSpent
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: Văzute stopped fetching new images for now
+              description: The image proxy refused cache misses because one address, or all of them together, used up the day's budget. Cached images still serve. Look in the nginx access log for the address requesting many different /api/img names.

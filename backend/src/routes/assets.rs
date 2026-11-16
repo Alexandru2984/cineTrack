@@ -29,10 +29,121 @@ const MAX_AVATAR_DIMENSION: u32 = 4096;
 const MAX_AVATAR_PIXELS: u64 = 16_000_000;
 const MAX_POSTER_DIMENSION: u32 = 8192;
 const MAX_POSTER_PIXELS: u64 = 40_000_000;
-/// TMDB image sizes the poster cache is allowed to fetch.
-const POSTER_SIZES: &[&str] = &[
-    "w45", "w92", "w154", "w185", "w300", "w342", "w500", "w780", "w1280", "original",
-];
+/// TMDB image sizes the poster cache is allowed to fetch: the ones the web
+/// app, the native app and the title pages ask for, and no others. `original`
+/// (up to 15 MB a file) and `w45`/`w500` were never requested through here, so
+/// accepting them only widened what an anonymous caller could make the server
+/// download and keep.
+const POSTER_SIZES: &[&str] = &["w92", "w154", "w185", "w300", "w342", "w780", "w1280"];
+
+/// Cache misses one address may cause in a UTC day, and all addresses together.
+/// A miss is the expensive path: an R2 read, a TMDB download and an R2 write
+/// kept for 175 days, all on an unauthenticated route. A person browsing
+/// misses a few dozen posters a page at most, and most posters are already
+/// cached, so these are far above use and well below what a script could
+/// otherwise spend.
+const POSTER_MISSES_PER_ADDRESS_PER_DAY: u32 = 1_000;
+const POSTER_MISSES_PER_DAY: u32 = 20_000;
+/// How long a name TMDB does not have is answered from memory.
+const POSTER_NOT_FOUND_TTL: std::time::Duration = std::time::Duration::from_secs(60 * 60);
+const POSTER_NOT_FOUND_CAPACITY: usize = 10_000;
+
+/// What `/api/img` may spend on names it has not served before.
+///
+/// Every new well-formed name used to cost a TMDB download and an R2 write,
+/// and a name TMDB does not have was not remembered, so asking again cost the
+/// read and the download attempt every time. Volume was bounded only by the
+/// request rate. Cached images are never counted against this: once the
+/// budget is spent, what is already stored keeps serving and only new
+/// fetches wait for the next day.
+///
+/// In memory, per process. A restart resets it, which at worst grants one more
+/// day's budget; the metric and the alert are what make sustained use visible.
+pub(crate) struct PosterMissBudget {
+    per_address: u32,
+    total: u32,
+    state: std::sync::Mutex<PosterMissState>,
+}
+
+struct PosterMissState {
+    day: chrono::NaiveDate,
+    spent: u32,
+    by_address: std::collections::HashMap<String, u32>,
+    not_found: std::collections::HashMap<String, std::time::Instant>,
+}
+
+impl PosterMissBudget {
+    fn new(per_address: u32, total: u32) -> Self {
+        Self {
+            per_address,
+            total,
+            state: std::sync::Mutex::new(PosterMissState {
+                day: chrono::NaiveDate::MIN,
+                spent: 0,
+                by_address: std::collections::HashMap::new(),
+                not_found: std::collections::HashMap::new(),
+            }),
+        }
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, PosterMissState> {
+        self.state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// Spend one miss for `address` on `today`, or refuse. The per-address
+    /// map holds at most one entry per miss granted today, so it is bounded by
+    /// the daily total.
+    fn try_spend(&self, address: &str, today: chrono::NaiveDate) -> bool {
+        let mut state = self.lock();
+        if state.day != today {
+            state.day = today;
+            state.spent = 0;
+            state.by_address.clear();
+        }
+        if state.spent >= self.total {
+            return false;
+        }
+        let used = state.by_address.get(address).copied().unwrap_or(0);
+        if used >= self.per_address {
+            return false;
+        }
+        state.spent += 1;
+        state.by_address.insert(address.to_string(), used + 1);
+        true
+    }
+
+    fn known_missing(&self, key: &str, now: std::time::Instant) -> bool {
+        let mut state = self.lock();
+        match state.not_found.get(key) {
+            Some(until) if *until > now => true,
+            Some(_) => {
+                state.not_found.remove(key);
+                false
+            }
+            None => false,
+        }
+    }
+
+    fn remember_missing(&self, key: &str, now: std::time::Instant) {
+        let mut state = self.lock();
+        if state.not_found.len() >= POSTER_NOT_FOUND_CAPACITY {
+            state.not_found.retain(|_, until| *until > now);
+        }
+        // Still full of live entries: skip rather than grow. The miss budget
+        // still bounds what asking again costs.
+        if state.not_found.len() < POSTER_NOT_FOUND_CAPACITY {
+            state
+                .not_found
+                .insert(key.to_string(), now + POSTER_NOT_FOUND_TTL);
+        }
+    }
+}
+
+static POSTER_MISSES: std::sync::LazyLock<PosterMissBudget> = std::sync::LazyLock::new(|| {
+    PosterMissBudget::new(POSTER_MISSES_PER_ADDRESS_PER_DAY, POSTER_MISSES_PER_DAY)
+});
 /// Avatar upload and delete: authenticated writes, so they stay on the normal
 /// API budget. Registered inside the shared `/api` scope.
 pub fn configure(cfg: &mut web::ServiceConfig) {
@@ -598,6 +709,7 @@ async fn serve_cached_poster(
 /// Write-through cache for TMDB poster/backdrop images: serve from R2 if present,
 /// otherwise fetch the image from TMDB, store it under `posters/`, and serve it.
 async fn serve_poster(
+    req: HttpRequest,
     storage: web::Data<Option<StorageService>>,
     config: web::Data<Config>,
     tmdb: web::Data<TmdbService>,
@@ -610,6 +722,14 @@ async fn serve_poster(
     }
     let store = storage_or_503(storage.get_ref())?;
     let key = format!("posters/{spec}");
+    let budget = &*POSTER_MISSES;
+
+    // A name TMDB said it does not have is answered from memory, without the
+    // R2 read or the download attempt.
+    if budget.known_missing(&key, std::time::Instant::now()) {
+        crate::metrics::record_tmdb_cache("poster", "known_missing");
+        return Err(AppError::NotFound("Image not found".to_string()));
+    }
 
     if let Some(bytes) = store
         .get(&key, MAX_POSTER_BYTES)
@@ -619,19 +739,43 @@ async fn serve_poster(
         let info = inspect_image(&bytes)
             .filter(|info| dimensions_within(*info, MAX_POSTER_DIMENSION, MAX_POSTER_PIXELS))
             .ok_or_else(|| AppError::NotFound("Image not found".to_string()))?;
+        crate::metrics::record_tmdb_cache("poster", "hit");
         return Ok(serve_image(bytes, info.content_type));
     }
 
-    let bytes = tmdb
+    // Only a miss is counted, and only here, after the cache: what is stored
+    // keeps serving however much of the budget is gone.
+    let address = crate::middleware::rate_limit::client_ip(&req)
+        .map(|ip| ip.to_string())
+        .unwrap_or_default();
+    if !budget.try_spend(&address, chrono::Utc::now().date_naive()) {
+        crate::metrics::record_tmdb_cache("poster", "refused");
+        return Err(AppError::TooManyRequests(
+            "Image fetching is paused; try again later".to_string(),
+        ));
+    }
+
+    let fetched = tmdb
         .fetch_image(&config.tmdb_image_base_url, &spec, MAX_POSTER_BYTES)
-        .await
-        .map_err(|error| match error {
-            AppError::NotFound(_) => AppError::NotFound("Image not found".to_string()),
-            other => other,
-        })?;
-    let info = inspect_image(&bytes)
+        .await;
+    let bytes = match fetched {
+        Ok(bytes) => bytes,
+        Err(AppError::NotFound(_)) => {
+            budget.remember_missing(&key, std::time::Instant::now());
+            crate::metrics::record_tmdb_cache("poster", "not_found");
+            return Err(AppError::NotFound("Image not found".to_string()));
+        }
+        Err(other) => return Err(other),
+    };
+    let Some(info) = inspect_image(&bytes)
         .filter(|info| dimensions_within(*info, MAX_POSTER_DIMENSION, MAX_POSTER_PIXELS))
-        .ok_or_else(|| AppError::TmdbError("Invalid image response".to_string()))?;
+    else {
+        // Not an image we would store: remembered like a missing one, so
+        // asking again does not download it again.
+        budget.remember_missing(&key, std::time::Instant::now());
+        return Err(AppError::TmdbError("Invalid image response".to_string()));
+    };
+    crate::metrics::record_tmdb_cache("poster", "miss");
     if let Err(e) = store.put(&key, &bytes, info.content_type).await {
         log::warn!("poster cache put {key} failed: {e:#}");
     }
@@ -648,6 +792,72 @@ fn serve_image(bytes: Vec<u8>, content_type: &str) -> HttpResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_the_image_sizes_the_clients_use_are_fetched() {
+        for size in ["w92", "w154", "w185", "w300", "w342", "w780", "w1280"] {
+            assert!(valid_poster_spec(&format!("{size}/poster.jpg")), "{size}");
+        }
+        for size in ["original", "w45", "w500", "w2000"] {
+            assert!(!valid_poster_spec(&format!("{size}/poster.jpg")), "{size}");
+        }
+    }
+
+    #[test]
+    fn the_miss_budget_stops_one_address_then_everyone_and_resets_daily() {
+        let budget = PosterMissBudget::new(3, 5);
+        let day = chrono::NaiveDate::from_ymd_opt(2026, 11, 16).unwrap();
+
+        for _ in 0..3 {
+            assert!(budget.try_spend("198.51.100.7", day));
+        }
+        assert!(
+            !budget.try_spend("198.51.100.7", day),
+            "one address cannot spend past its share"
+        );
+        assert!(budget.try_spend("203.0.113.9", day));
+        assert!(budget.try_spend("203.0.113.10", day));
+        assert!(
+            !budget.try_spend("203.0.113.11", day),
+            "nor can many addresses together spend past the day's total"
+        );
+
+        let next_day = day.succ_opt().unwrap();
+        assert!(budget.try_spend("198.51.100.7", next_day));
+    }
+
+    #[test]
+    fn a_name_tmdb_does_not_have_is_remembered_for_a_while() {
+        let budget = PosterMissBudget::new(10, 10);
+        let now = std::time::Instant::now();
+        let key = "posters/w342/missing.jpg";
+
+        assert!(!budget.known_missing(key, now));
+        budget.remember_missing(key, now);
+        assert!(budget.known_missing(key, now + std::time::Duration::from_secs(60)));
+        assert!(!budget.known_missing(key, now + POSTER_NOT_FOUND_TTL));
+        assert!(!budget.known_missing("posters/w342/other.jpg", now));
+    }
+
+    #[test]
+    fn the_miss_budget_is_spent_after_the_cache_and_never_for_a_hit() {
+        // The order is the guarantee: a cached image is served before the
+        // budget is consulted, so a spent budget never hides a stored poster,
+        // and a remembered 404 is answered before the R2 read.
+        let body = flattened("serve_poster");
+        let known = body
+            .find("budget.known_missing(")
+            .expect("negative cache check");
+        let read = body.find(".get(&key, MAX_POSTER_BYTES)").expect("R2 read");
+        let hit = body
+            .find("return Ok(serve_image(")
+            .expect("cache hit return");
+        let spend = body.find("budget.try_spend(").expect("budget check");
+        let fetch = body.find("tmdb .fetch_image(").expect("TMDB fetch");
+        assert!(known < read, "a remembered 404 skips the R2 read");
+        assert!(read < hit && hit < spend, "a hit returns before the budget");
+        assert!(spend < fetch, "the budget is checked before downloading");
+    }
 
     /// The body of one function in this file, by brace matching.
     ///
@@ -833,10 +1043,10 @@ mod tests {
 
     #[test]
     fn poster_specs_cannot_redirect_or_traverse() {
-        assert!(valid_poster_spec("w500/safe_path.jpg"));
-        assert!(!valid_poster_spec("w500/../../private.jpg"));
-        assert!(!valid_poster_spec("w500/https://example.com/x.jpg"));
-        assert!(!valid_poster_spec("w500/nested/path.jpg"));
+        assert!(valid_poster_spec("w342/safe_path.jpg"));
+        assert!(!valid_poster_spec("w342/../../private.jpg"));
+        assert!(!valid_poster_spec("w342/https://example.com/x.jpg"));
+        assert!(!valid_poster_spec("w342/nested/path.jpg"));
         assert!(!valid_poster_spec("giant/safe.jpg"));
     }
 
@@ -846,17 +1056,17 @@ mod tests {
         // smuggle it past a naive substring check. All of them must fail on the
         // allowed-character rule, not by accident.
         for spec in [
-            r"w500\..\..\private.jpg",   // backslash separators
-            "w500/%2e%2e%2fprivate.jpg", // percent-encoded ../
-            "w500/%2E%2E/private.jpg",   // mixed-case encoding
-            "w500/..%2fprivate.jpg",     // half-encoded
-            "w500/\0/private.jpg",       // null byte
-            "w500/pri vate.jpg",         // space
-            "w500/private.jpg?x=1",      // query suffix
-            "w500/private.jpg#frag",     // fragment
-            "w500/private.svg",          // disallowed extension
-            "w500/private.jpg.svg",      // double extension
-            "/w500/private.jpg",         // leading slash -> empty size
+            r"w342\..\..\private.jpg",   // backslash separators
+            "w342/%2e%2e%2fprivate.jpg", // percent-encoded ../
+            "w342/%2E%2E/private.jpg",   // mixed-case encoding
+            "w342/..%2fprivate.jpg",     // half-encoded
+            "w342/\0/private.jpg",       // null byte
+            "w342/pri vate.jpg",         // space
+            "w342/private.jpg?x=1",      // query suffix
+            "w342/private.jpg#frag",     // fragment
+            "w342/private.svg",          // disallowed extension
+            "w342/private.jpg.svg",      // double extension
+            "/w342/private.jpg",         // leading slash -> empty size
         ] {
             assert!(!valid_poster_spec(spec), "expected {spec:?} to be rejected");
         }
@@ -864,10 +1074,10 @@ mod tests {
 
     #[test]
     fn poster_spec_allows_a_bare_extension_name() {
-        // "w500/.jpg" passes the filter: it is a legal (if odd) object name, not
+        // "w342/.jpg" passes the filter: it is a legal (if odd) object name, not
         // a traversal. Nothing generates such a key, so the lookup just misses
         // and 404s. Recorded so the permissiveness is a known boundary.
-        assert!(valid_poster_spec("w500/.jpg"));
+        assert!(valid_poster_spec("w342/.jpg"));
     }
 
     #[test]
@@ -884,7 +1094,7 @@ mod tests {
     #[test]
     fn avatar_keys_reject_traversal_in_the_uuid_position() {
         for key in [
-            "avatars/../posters/w500/x.jpg",
+            "avatars/../posters/w342/x.jpg",
             "avatars/../../backups/dump.gz",
             "avatars/550e8400-e29b-41d4-a716-446655440000", // no extension
             "avatars/550e8400-e29b-41d4-a716-446655440000.", // empty extension
@@ -903,7 +1113,7 @@ mod tests {
         assert!(valid_public_asset_key(
             "avatars/550e8400-e29b-41d4-a716-446655440000.webp"
         ));
-        assert!(valid_public_asset_key("posters/w500/safe_path.jpg"));
+        assert!(valid_public_asset_key("posters/w342/safe_path.jpg"));
         assert!(!valid_public_asset_key("avatars/not-a-uuid.png"));
         assert!(!valid_public_asset_key(
             "avatars/550e8400-e29b-41d4-a716-446655440000.svg"
