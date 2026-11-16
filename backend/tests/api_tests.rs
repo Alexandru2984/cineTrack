@@ -14471,7 +14471,7 @@ async fn test_rate_limited_wiring_resolves_every_route_class() {
     // miss — the point is the request is routed at all, so assert it is not the
     // one thing that would mean the scope vanished: it must not be a 401 (which
     // would mean it fell through into the authed /api scope).
-    for path in ["/api/img/w500/x.jpg", "/api/assets/posters/w500/x.jpg"] {
+    for path in ["/api/img/w342/x.jpg", "/api/assets/posters/w342/x.jpg"] {
         let req = actix_test::TestRequest::get()
             .uri(path)
             .peer_addr(peer_addr())

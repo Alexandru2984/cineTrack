@@ -296,6 +296,14 @@ groups:
           summary: Văzute is blocking an unusual number of scripts
           description: More than five enforced script CSP violations arrived in fifteen minutes. Check for a broken release or attempted script injection.
 
+      - alert: CineTrackPosterFetchBudgetSpent
+        expr: sum(increase(cinetrack_tmdb_cache_events_total{cache="poster",result="refused"}[15m])) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: Văzute stopped fetching new images for now
+          description: The image proxy refused cache misses because one address, or all of them together, used up the day's budget. Cached images still serve. Look in the nginx access log for the address requesting many different /api/img names.
+
   - name: cinetrack-community-safety
     rules:
       - alert: CineTrackModerationMetricsMissing

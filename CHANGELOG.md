@@ -164,6 +164,13 @@ and release versions follow semantic versioning.
 - Blocking is enforced server-side across profiles, follows, activity, lists,
   notifications, and reports rather than being only a client-side filter.
 - Report snapshots are bounded and moderator decisions require a recorded note.
+- The public image proxy has a daily budget for images it has not stored yet:
+  1,000 per address and 20,000 in all. Each new name used to cost a download
+  from TMDB and a stored copy kept for 175 days, on a route that needs no
+  sign-in, and a name TMDB does not have was asked for again every time. Names
+  TMDB does not have are now remembered for an hour, only the image sizes the
+  apps use are fetched (no more `original`, up to 15 MB each), cached images
+  keep serving when the budget is spent, and an alert fires when it is.
 - Moderator eligibility is checked from the database on every request and
   requires a verified email address plus enabled two-factor authentication.
 - Community safety data has explicit least-privilege grants and bounded
