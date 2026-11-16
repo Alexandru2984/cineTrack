@@ -18,4 +18,4 @@ Disallow: /
 User-agent: SemrushBot
 Disallow: /
 
-Sitemap: https://vazute.micutu.com/sitemap.xml
+Sitemap: https://vazute.com/sitemap.xml

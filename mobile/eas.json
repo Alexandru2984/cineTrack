@@ -12,7 +12,7 @@
       "channel": "development",
       "environment": "development",
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://vazute.micutu.com",
+        "EXPO_PUBLIC_API_URL": "https://vazute.com",
         "EXPO_PUBLIC_USE_R2_IMAGES": "true",
         "EXPO_UPDATES_ENABLED": "false"
       }
@@ -27,7 +27,7 @@
         "buildType": "apk"
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://vazute.micutu.com",
+        "EXPO_PUBLIC_API_URL": "https://vazute.com",
         "EXPO_PUBLIC_USE_R2_IMAGES": "true",
         "EXPO_UPDATES_ENABLED": "false"
       }
@@ -39,7 +39,7 @@
       "channel": "production",
       "environment": "production",
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://vazute.micutu.com",
+        "EXPO_PUBLIC_API_URL": "https://vazute.com",
         "EXPO_PUBLIC_USE_R2_IMAGES": "true",
         "EXPO_UPDATES_ENABLED": "false"
       }

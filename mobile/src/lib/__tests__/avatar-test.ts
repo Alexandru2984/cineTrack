@@ -105,7 +105,7 @@ describe('mobile avatar upload', () => {
 
   it('validates the server URL after multipart upload', async () => {
     mockUpload
-      .mockResolvedValueOnce({ avatar_url: 'https://vazute.micutu.com/api/assets/avatar.jpg' })
+      .mockResolvedValueOnce({ avatar_url: 'https://vazute.com/api/assets/avatar.jpg' })
       .mockResolvedValueOnce({ avatar_url: 'http://attacker.test/avatar.jpg' });
     const file = {
       uri: 'file:///cache/avatar.jpg',
@@ -114,7 +114,7 @@ describe('mobile avatar upload', () => {
     };
 
     await expect(uploadAvatar(file)).resolves.toEqual({
-      avatar_url: 'https://vazute.micutu.com/api/assets/avatar.jpg',
+      avatar_url: 'https://vazute.com/api/assets/avatar.jpg',
     });
     await expect(uploadAvatar(file)).rejects.toThrow('Avatar URL must use HTTPS');
     expect(mockUpload).toHaveBeenCalledWith('/users/me/avatar', {

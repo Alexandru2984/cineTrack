@@ -7,7 +7,7 @@ import { useLocation } from 'react-router';
  * Hardcoded rather than read from `window.location.origin` so a preview or
  * staging host can never publish itself as the canonical site.
  */
-const SITE_ORIGIN = 'https://vazute.micutu.com';
+const SITE_ORIGIN = 'https://vazute.com';
 
 /**
  * Point `<link rel="canonical">` at the current route.

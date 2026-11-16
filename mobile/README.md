@@ -162,7 +162,7 @@ after update signing is configured and a newly signed runtime is distributed.
 
 Android App Links are enabled for password resets, media details, episode
 details, profiles, public lists, and direct-message conversations under
-`https://vazute.micutu.com`. Protected profile and conversation links preserve
+`https://vazute.com`. Protected profile and conversation links preserve
 a strictly validated internal destination through login; an external or
 malformed redirect value is discarded. The domain association contains the
 SHA-256 fingerprint of the EAS Android keystore. After Google Play App Signing

@@ -74,7 +74,7 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
     );
 }
 
-const SITE: &str = "https://vazute.micutu.com";
+const SITE: &str = "https://vazute.com";
 const DEFAULT_TITLE: &str = "Văzute — track what you watch";
 const DEFAULT_DESCRIPTION: &str =
     "A personal movie and TV tracker: watchlist, episode tracking, release calendar and statistics.";
@@ -353,7 +353,7 @@ mod tests {
         ] {
             assert_eq!(
                 media_image(path),
-                "https://vazute.micutu.com/og-image.png",
+                "https://vazute.com/og-image.png",
                 "{path:?}"
             );
         }

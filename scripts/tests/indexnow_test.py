@@ -15,7 +15,7 @@ assert SPEC is not None and SPEC.loader is not None
 indexnow = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(indexnow)
 
-SITE = "https://vazute.micutu.com"
+SITE = "https://vazute.com"
 
 
 def urlset(*urls: str) -> bytes:
@@ -78,7 +78,7 @@ class IndexNowTests(unittest.TestCase):
         sent = indexnow.run(self.state, False, site(f"{SITE}/ro/film/550-x"), send)
         self.assertEqual(sent, 3)
         payload = send.payloads[0]
-        self.assertEqual(payload["host"], "vazute.micutu.com")
+        self.assertEqual(payload["host"], "vazute.com")
         self.assertEqual(payload["keyLocation"], f"{SITE}/{payload['key']}.txt")
 
         # A day later the hydration has added one title: only it goes out.

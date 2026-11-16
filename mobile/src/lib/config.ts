@@ -1,4 +1,4 @@
-const DEFAULT_API_ORIGIN = 'https://vazute.micutu.com';
+const DEFAULT_API_ORIGIN = 'https://vazute.com';
 
 function resolveApiOrigin(configuredOrigin: string | undefined) {
   const rawOrigin = configuredOrigin?.trim() || DEFAULT_API_ORIGIN;

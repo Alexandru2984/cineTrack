@@ -71,7 +71,7 @@ event property in these counters.
   on iOS.
 - **Can users request deletion?** Yes, in-app: Settings → delete account, which
   removes the account and all associated rows. The account-deletion URL for the
-  store listing is `https://vazute.micutu.com/account-deletion`.
+  store listing is `https://vazute.com/account-deletion`.
 - **Is data collection optional?** Email and username are required for an
   account. Everything else — direct messages, push token, ratings, reactions,
   lists, avatar, and aggregate interaction counts for optional features — is
@@ -113,7 +113,7 @@ Play now requires a deletion path reachable **without** installing the app, plus
 the in-app one. Both exist:
 
 - In-app: Settings → delete account (requires the password).
-- Web: `https://vazute.micutu.com/account-deletion` — must be listed in the
+- Web: `https://vazute.com/account-deletion` — must be listed in the
   store entry's "Account deletion" field.
 
 ## What still needs the real Play account
@@ -121,5 +121,5 @@ the in-app one. Both exist:
 - The **app signing** SHA-256 fingerprint (Play re-signs uploads) must be added
   to `frontend/public/.well-known/assetlinks.json` before Android App Links
   verify on store builds. The upload-key fingerprint alone is not enough.
-- The privacy policy URL (`https://vazute.micutu.com/privacy`, already live) goes
+- The privacy policy URL (`https://vazute.com/privacy`, already live) goes
   in the store listing and must stay reachable.

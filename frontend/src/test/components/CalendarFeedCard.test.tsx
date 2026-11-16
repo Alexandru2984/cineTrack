@@ -39,14 +39,14 @@ describe('CalendarFeedCard', () => {
   it('reveals the generated URL once for copying', async () => {
     const user = userEvent.setup();
     mocks.enableMutate.mockImplementation((_input: undefined, options?: MutateOptions) => {
-      options?.onSuccess?.({ feed_url: 'https://vazute.micutu.com/api/calendar/feed/abc.ics' });
+      options?.onSuccess?.({ feed_url: 'https://vazute.com/api/calendar/feed/abc.ics' });
     });
 
     render(<CalendarFeedCard />);
     await user.click(screen.getByRole('button', { name: 'Generate feed URL' }));
 
     expect(screen.getByLabelText('Calendar feed URL')).toHaveValue(
-      'https://vazute.micutu.com/api/calendar/feed/abc.ics',
+      'https://vazute.com/api/calendar/feed/abc.ics',
     );
     expect(screen.getByText(/won.t be shown again/i)).toBeVisible();
   });

@@ -20,7 +20,7 @@ use crate::errors::AppError;
 use crate::routes::hubs::{genre_counts, hub_path, listed_genres};
 use crate::routes::title_pages::{page_path, Kind, Language};
 
-const SITE: &str = "https://vazute.micutu.com";
+const SITE: &str = "https://vazute.com";
 /// URLs per file. The protocol allows 50,000; a smaller slice keeps each
 /// response quick to build and to fetch.
 const PER_FILE: i64 = 10_000;
@@ -274,12 +274,12 @@ mod tests {
     fn the_index_names_the_static_pages_and_every_title_file() {
         let newest = Utc.with_ymd_and_hms(2026, 10, 19, 8, 0, 0).single();
         let index = render_index(PER_FILE + 1, newest);
-        assert!(index.contains("<loc>https://vazute.micutu.com/sitemap-pages.xml</loc>"));
-        assert!(index.contains("<loc>https://vazute.micutu.com/sitemaps/lists.xml</loc>"));
+        assert!(index.contains("<loc>https://vazute.com/sitemap-pages.xml</loc>"));
+        assert!(index.contains("<loc>https://vazute.com/sitemaps/lists.xml</loc>"));
         for file in ["titles-ro-1", "titles-ro-2", "titles-en-1", "titles-en-2"] {
             assert!(
                 index.contains(&format!(
-                    "<loc>https://vazute.micutu.com/sitemaps/{file}.xml</loc><lastmod>2026-10-19</lastmod>"
+                    "<loc>https://vazute.com/sitemaps/{file}.xml</loc><lastmod>2026-10-19</lastmod>"
                 )),
                 "{file}"
             );
@@ -316,15 +316,15 @@ mod tests {
         }];
         let ro = render_titles(Language::Ro, &entries);
         assert!(ro.contains(
-            "<url><loc>https://vazute.micutu.com/ro/serial/1399-urzeala-tronurilor</loc><lastmod>2026-10-18</lastmod>"
+            "<url><loc>https://vazute.com/ro/serial/1399-urzeala-tronurilor</loc><lastmod>2026-10-18</lastmod>"
         ));
         assert!(ro.contains(
-            r#"<xhtml:link rel="alternate" hreflang="en" href="https://vazute.micutu.com/en/tv/1399-game-of-thrones"/>"#
+            r#"<xhtml:link rel="alternate" hreflang="en" href="https://vazute.com/en/tv/1399-game-of-thrones"/>"#
         ));
         let en = render_titles(Language::En, &entries);
-        assert!(en.contains("<loc>https://vazute.micutu.com/en/tv/1399-game-of-thrones</loc>"));
+        assert!(en.contains("<loc>https://vazute.com/en/tv/1399-game-of-thrones</loc>"));
         assert!(en.contains(
-            r#"hreflang="ro" href="https://vazute.micutu.com/ro/serial/1399-urzeala-tronurilor"/>"#
+            r#"hreflang="ro" href="https://vazute.com/ro/serial/1399-urzeala-tronurilor"/>"#
         ));
     }
 

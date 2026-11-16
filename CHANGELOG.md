@@ -35,6 +35,14 @@ and release versions follow semantic versioning.
 
 ### Changed
 
+- Văzute moved to vazute.com. Pages on vazute.micutu.com and www.vazute.com
+  redirect there permanently, path and query intact. The old host keeps
+  serving the API, so installed Android builds and calendar subscriptions made
+  before the move keep working, and the Android app opens links on both hosts.
+  Web sessions are tied to the host, so everybody signs in once more on the
+  new address. A web app installed from the old address replaces its service
+  worker with one that unregisters itself and reloads into the new address.
+  Mail is still sent from micutu.com.
 - The Terms of Service, Community Guidelines, and Privacy Policy describe how
   message encryption works, including the key material the service stores and
   cannot open. **The terms version moves to `2026-08-19`, so every existing

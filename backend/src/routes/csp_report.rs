@@ -270,18 +270,18 @@ mod tests {
     #[test]
     fn strip_uri_secrets_drops_query_and_fragment() {
         assert_eq!(
-            strip_uri_secrets("https://vazute.micutu.com/reset?token=secret"),
-            "https://vazute.micutu.com/reset"
+            strip_uri_secrets("https://vazute.com/reset?token=secret"),
+            "https://vazute.com/reset"
         );
         assert_eq!(
-            strip_uri_secrets("https://vazute.micutu.com/#access_token=secret"),
-            "https://vazute.micutu.com/"
+            strip_uri_secrets("https://vazute.com/#access_token=secret"),
+            "https://vazute.com/"
         );
     }
 
     #[test]
     fn parses_legacy_report_uri_payload() {
-        let raw = br#"{"csp-report":{"document-uri":"https://vazute.micutu.com/","violated-directive":"script-src 'self'","effective-directive":"script-src","blocked-uri":"https://evil.example/x.js","disposition":"enforce"}}"#;
+        let raw = br#"{"csp-report":{"document-uri":"https://vazute.com/","violated-directive":"script-src 'self'","effective-directive":"script-src","blocked-uri":"https://evil.example/x.js","disposition":"enforce"}}"#;
         let violations = parse_violations(raw);
         assert_eq!(violations.len(), 1);
         assert_eq!(violations[0].directive, "script-src");
@@ -293,7 +293,7 @@ mod tests {
 
     #[test]
     fn parses_modern_reporting_api_payload() {
-        let raw = br#"[{"type":"csp-violation","body":{"documentURL":"https://vazute.micutu.com/","effectiveDirective":"img-src","blockedURL":"https://evil.example/p.png","disposition":"report"}}]"#;
+        let raw = br#"[{"type":"csp-violation","body":{"documentURL":"https://vazute.com/","effectiveDirective":"img-src","blockedURL":"https://evil.example/p.png","disposition":"report"}}]"#;
         let violations = parse_violations(raw);
         assert_eq!(violations.len(), 1);
         assert_eq!(violations[0].directive, "img-src");

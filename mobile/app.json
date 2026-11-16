@@ -23,6 +23,7 @@
       "bundleIdentifier": "com.micutu.vazute",
       "supportsTablet": true,
       "associatedDomains": [
+        "applinks:vazute.com",
         "applinks:vazute.micutu.com"
       ],
       "infoPlist": {
@@ -37,6 +38,36 @@
           "action": "VIEW",
           "autoVerify": true,
           "data": [
+            {
+              "scheme": "https",
+              "host": "vazute.com",
+              "pathPrefix": "/reset-password"
+            },
+            {
+              "scheme": "https",
+              "host": "vazute.com",
+              "pathPrefix": "/media"
+            },
+            {
+              "scheme": "https",
+              "host": "vazute.com",
+              "pathPrefix": "/episodes"
+            },
+            {
+              "scheme": "https",
+              "host": "vazute.com",
+              "pathPrefix": "/profile"
+            },
+            {
+              "scheme": "https",
+              "host": "vazute.com",
+              "pathPrefix": "/lists"
+            },
+            {
+              "scheme": "https",
+              "host": "vazute.com",
+              "pathPrefix": "/messages"
+            },
             {
               "scheme": "https",
               "host": "vazute.micutu.com",

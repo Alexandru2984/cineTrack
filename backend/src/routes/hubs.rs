@@ -686,10 +686,10 @@ mod tests {
         let listed = listed_genres(Kind::Tv, &[(18, 100), (35, 100)]);
         let html = render(Language::Ro, Kind::Tv, genre_by_id(18), &listed, &items);
         assert!(html.contains("<h1>Cele mai populare seriale din genul Dramă</h1>"));
-        assert!(html.contains(
-            r#"<link rel="canonical" href="https://vazute.micutu.com/ro/seriale/drama" />"#
-        ));
-        assert!(html.contains(r#"hreflang="en" href="https://vazute.micutu.com/en/series/drama""#));
+        assert!(
+            html.contains(r#"<link rel="canonical" href="https://vazute.com/ro/seriale/drama" />"#)
+        );
+        assert!(html.contains(r#"hreflang="en" href="https://vazute.com/en/series/drama""#));
         assert!(html.contains(
             r#"<a href="/ro/serial/1399-urzeala-tronurilor"><img src="https://image.tmdb.org/t/p/w185/p.jpg""#
         ));

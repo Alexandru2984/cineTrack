@@ -2,7 +2,7 @@ import type { Href } from 'expo-router';
 
 import type { MediaType } from '@/types';
 
-export const PUBLIC_WEB_ORIGIN = 'https://vazute.micutu.com';
+export const PUBLIC_WEB_ORIGIN = 'https://vazute.com';
 
 const MAX_REDIRECT_LENGTH = 256;
 const MAX_TMDB_ID = 2_147_483_647;

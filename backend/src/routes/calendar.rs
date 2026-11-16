@@ -813,7 +813,10 @@ async fn serve_feed(
             };
             FeedEvent {
                 // episode id is a UUID, so this UID is globally unique and
-                // stable across refreshes.
+                // stable across refreshes. The domain is the one the feed
+                // launched on and stays after the move to vazute.com: a UID is
+                // a name, not an address, and changing it would make every
+                // subscribed calendar drop and re-add each event.
                 uid: format!("{}@vazute.micutu.com", row.episode_id),
                 date: row.air_date,
                 summary,
