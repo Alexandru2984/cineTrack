@@ -177,6 +177,13 @@ and release versions follow semantic versioning.
   TMDB does not have are now remembered for an hour, only the image sizes the
   apps use are fetched (no more `original`, up to 15 MB each), cached images
   keep serving when the budget is spent, and an alert fires when it is.
+- Sign-in can no longer be crowded out by a few dozen addresses. Every
+  sign-in and registration costs an Argon2 hash from a pool of four workers,
+  and each address's burst used to queue in full, so a coordinated burst left
+  real sign-ins answering "busy". An address now holds at most two places in
+  that pool, the rest of its burst is refused before hashing, and the edge
+  allows sign-in and registration six times a minute per address instead of
+  thirty.
 - Moderator eligibility is checked from the database on every request and
   requires a verified email address plus enabled two-factor authentication.
 - Community safety data has explicit least-privilege grants and bounded
