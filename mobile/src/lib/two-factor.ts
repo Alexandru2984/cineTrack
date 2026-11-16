@@ -2,10 +2,17 @@ export type SecondFactorMode = 'authenticator' | 'recovery';
 
 type Translate = (key: string, params?: Record<string, string | number>) => string;
 
-const RECOVERY_CODE_PATTERN = /^[a-f0-9]{4}(?:-[a-f0-9]{4}){3}$/i;
+/** Sixteen characters in four groups of four: base32 (`a-z`, `2-7`) for codes
+ *  issued from 2026-11-16, lowercase hex for the ones before. The server
+ *  accepts both, so this does too. */
+const RECOVERY_CODE_PATTERN = /^[a-z0-9]{4}(?:-[a-z0-9]{4}){3}$/;
 
+/** Lower-cased and trimmed; a recovery code typed without its dashes, or with
+ *  spaces, is regrouped the way the server stores it. */
 export function normalizeSecondFactorInput(value: string) {
-  return value.trim().toLowerCase();
+  const trimmed = value.trim().toLowerCase();
+  const compact = trimmed.replace(/[\s-]/g, '');
+  return /^[a-z0-9]{16}$/.test(compact) ? compact.replace(/(.{4})(?=.)/g, '$1-') : trimmed;
 }
 
 export function validateSecondFactorInput(t: Translate, mode: SecondFactorMode, value: string) {

@@ -3156,6 +3156,90 @@ async fn test_two_factor_enable_login_and_recovery() {
     assert_eq!(status, 200);
 }
 
+/// Recovery codes are stored as unsalted SHA-256, so after a database leak the
+/// code's own size is what keeps them out of reach. They were 64 bits of hex.
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn test_recovery_codes_are_80_bits_and_old_ones_still_work() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    let (access, _, user_id) =
+        register_user(&app, "codesize", "codesize@mailbox.dev", "Pass1234").await;
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/auth/2fa/setup")
+        .insert_header(("Authorization", format!("Bearer {access}")))
+        .set_json(json!({ "password": "Pass1234" }))
+        .peer_addr(peer_addr())
+        .to_request();
+    assert_eq!(actix_test::call_service(&app, req).await.status(), 200);
+    let secret = totp_secret_bytes(&pool, "codesize@mailbox.dev").await;
+    let req = actix_test::TestRequest::post()
+        .uri("/api/auth/2fa/enable")
+        .insert_header(("Authorization", format!("Bearer {access}")))
+        .set_json(json!({ "code": current_totp_code(&secret) }))
+        .peer_addr(peer_addr())
+        .to_request();
+    let body: Value = actix_test::call_and_read_body_json(&app, req).await;
+    let codes: Vec<String> = body["recovery_codes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|code| code.as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(codes.len(), 10);
+    for code in &codes {
+        let chars: String = code.chars().filter(|ch| *ch != '-').collect();
+        assert_eq!(chars.len(), 16, "{code}");
+        assert!(
+            chars.chars().all(|ch| matches!(ch, 'a'..='z' | '2'..='7')),
+            "16 base32 characters are 80 bits: {code}"
+        );
+    }
+    let stored: Vec<String> =
+        sqlx::query_scalar("SELECT code_hash FROM two_factor_recovery_codes WHERE user_id = $1")
+            .bind(Uuid::parse_str(&user_id).unwrap())
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(stored.len(), 10);
+    assert!(
+        stored
+            .iter()
+            .all(|hash| hash.len() == 64 && hash.chars().all(|ch| ch.is_ascii_hexdigit())),
+        "stored as SHA-256 hex, never the code itself"
+    );
+    assert!(!stored.iter().any(|hash| codes.contains(hash)));
+
+    // Typed the way people copy codes: upper case, no dashes.
+    let typed = codes[0].replace('-', "").to_uppercase();
+    let (status, _) = login_json(
+        &app,
+        json!({ "email": "codesize@mailbox.dev", "password": "Pass1234", "totp_code": typed }),
+    )
+    .await;
+    assert_eq!(
+        status, 200,
+        "a code typed in capitals without dashes is accepted"
+    );
+
+    // A 64-bit hex code issued before the change still completes sign-in.
+    let legacy = "0a1b-2c3d-4e5f-6789";
+    sqlx::query("INSERT INTO two_factor_recovery_codes (user_id, code_hash) VALUES ($1, $2)")
+        .bind(Uuid::parse_str(&user_id).unwrap())
+        .bind(cinetrack::utils::jwt::hash_refresh_token(legacy))
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (status, _) = login_json(
+        &app,
+        json!({ "email": "codesize@mailbox.dev", "password": "Pass1234", "totp_code": legacy }),
+    )
+    .await;
+    assert_eq!(status, 200, "an existing code keeps working");
+}
+
 #[actix_web::test]
 #[ignore = "requires test DB"]
 async fn test_account_login_throttle_survives_ips_and_resets_after_success() {
