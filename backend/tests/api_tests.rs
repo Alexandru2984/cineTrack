@@ -11434,6 +11434,136 @@ async fn test_social_notifications_are_deduplicated_private_and_owner_scoped() {
 
 #[actix_web::test]
 #[ignore = "requires test DB"]
+async fn test_the_block_list_hides_a_private_accounts_avatar() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+
+    let (blocker_token, _, _) =
+        register_user(&app, "listblocker", "listblocker@mailbox.dev", "Pass1234").await;
+    let (_, _, private_id) = register_user(
+        &app,
+        "blockedprivate",
+        "blockedprivate@mailbox.dev",
+        "Pass1234",
+    )
+    .await;
+    let (_, _, public_id) = register_user(
+        &app,
+        "blockedpublic",
+        "blockedpublic@mailbox.dev",
+        "Pass1234",
+    )
+    .await;
+    for (id, is_public, avatar) in [
+        (&private_id, false, "https://example.com/private.jpg"),
+        (&public_id, true, "https://example.com/public.jpg"),
+    ] {
+        sqlx::query("UPDATE users SET is_public = $2, avatar_url = $3 WHERE id = $1")
+            .bind(Uuid::parse_str(id).unwrap())
+            .bind(is_public)
+            .bind(avatar)
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+
+    for username in ["blockedprivate", "blockedpublic"] {
+        let req = actix_test::TestRequest::post()
+            .uri(&format!("/api/users/{username}/block"))
+            .insert_header(("Authorization", format!("Bearer {blocker_token}")))
+            .peer_addr(peer_addr())
+            .to_request();
+        let resp = actix_test::call_service(&app, req).await;
+        assert!(
+            resp.status().is_success(),
+            "block {username}: {}",
+            resp.status()
+        );
+    }
+
+    let req = actix_test::TestRequest::get()
+        .uri("/api/users/me/blocks")
+        .insert_header(("Authorization", format!("Bearer {blocker_token}")))
+        .peer_addr(peer_addr())
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let body: Value = actix_test::read_body_json(resp).await;
+    let avatar_of = |username: &str| {
+        body.as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["username"] == username)
+            .unwrap_or_else(|| panic!("{username} in the block list: {body}"))["avatar_url"]
+            .clone()
+    };
+    assert_eq!(
+        avatar_of("blockedprivate"),
+        Value::Null,
+        "a private account's avatar is for its approved followers"
+    );
+    assert_eq!(avatar_of("blockedpublic"), "https://example.com/public.jpg");
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn test_an_anonymous_caller_learns_no_id_or_join_date_of_a_private_account() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+
+    let (viewer_token, _, _) = register_user(
+        &app,
+        "profileviewer",
+        "profileviewer@mailbox.dev",
+        "Pass1234",
+    )
+    .await;
+    let (_, _, private_id) =
+        register_user(&app, "quietaccount", "quietaccount@mailbox.dev", "Pass1234").await;
+    let (_, _, public_id) =
+        register_user(&app, "openaccount", "openaccount@mailbox.dev", "Pass1234").await;
+    sqlx::query("UPDATE users SET is_public = false WHERE id = $1")
+        .bind(Uuid::parse_str(&private_id).unwrap())
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let profile = |username: &str, token: Option<&str>| {
+        let mut req = actix_test::TestRequest::get()
+            .uri(&format!("/api/users/{username}"))
+            .peer_addr(peer_addr());
+        if let Some(token) = token {
+            req = req.insert_header(("Authorization", format!("Bearer {token}")));
+        }
+        req.to_request()
+    };
+
+    let resp = actix_test::call_service(&app, profile("quietaccount", None)).await;
+    assert_eq!(resp.status(), 200);
+    let body: Value = actix_test::read_body_json(resp).await;
+    assert_eq!(body["is_public"], false);
+    assert!(body.get("id").is_none(), "account id leaked: {body}");
+    assert!(body.get("created_at").is_none(), "join date leaked: {body}");
+
+    // A signed-in viewer still gets the id, which reporting the account needs,
+    // and a public account shows both to anyone.
+    let resp = actix_test::call_service(&app, profile("quietaccount", Some(&viewer_token))).await;
+    assert_eq!(resp.status(), 200);
+    let body: Value = actix_test::read_body_json(resp).await;
+    assert_eq!(body["id"], private_id.as_str());
+    assert!(body["created_at"].is_string(), "{body}");
+
+    let resp = actix_test::call_service(&app, profile("openaccount", None)).await;
+    assert_eq!(resp.status(), 200);
+    let body: Value = actix_test::read_body_json(resp).await;
+    assert_eq!(body["id"], public_id.as_str());
+    assert!(body["created_at"].is_string(), "{body}");
+}
+
+#[actix_web::test]
+#[ignore = "requires test DB"]
 async fn test_user_search_is_literal_paginated_and_privacy_safe() {
     let pool = setup_pool().await;
     clean_db(&pool).await;
