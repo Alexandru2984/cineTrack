@@ -1,6 +1,7 @@
 import type { User } from '@/types';
 import axios from 'axios';
 import { useAuthStore } from '@/store/auth';
+import { forgetKeysOfEndedSessions } from '@/lib/crypto/retention';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8080';
 
@@ -222,11 +223,15 @@ export async function bootstrapSession(): Promise<void> {
       }
     }
     useAuthStore.getState().logout();
+    await forgetKeysOfEndedSessions(null);
     return;
   }
 
   try {
     await refreshAccessToken();
+    // Keys of an account whose unkept session ended here, while another one
+    // is signed in now, have no reason to stay.
+    await forgetKeysOfEndedSessions(useAuthStore.getState().user?.id ?? null);
   } catch (error) {
     if (error instanceof SessionSupersededError) {
       // Somebody signed in or out while this was in flight; their transition
@@ -235,6 +240,9 @@ export async function bootstrapSession(): Promise<void> {
     }
     if (isCredentialRejection(error)) {
       useAuthStore.getState().logout();
+      // No session survived: a sign-in that was not kept ended when the
+      // browser closed, and its keys go with it.
+      await forgetKeysOfEndedSessions(null);
       return;
     }
     // Transport failure. The credential may be perfectly good, so leave the

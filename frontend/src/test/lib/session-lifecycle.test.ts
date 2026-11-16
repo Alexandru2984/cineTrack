@@ -37,6 +37,14 @@ vi.mock('axios', async () => {
 
 const mockedPost = vi.mocked(axios.post);
 
+// The keys of a sign-in that was not kept go when its session is found gone.
+const { forgetKeysOfEndedSessions } = vi.hoisted(() => ({
+  forgetKeysOfEndedSessions: vi.fn<(currentUserId: string | null) => Promise<void>>(
+    async () => undefined,
+  ),
+}));
+vi.mock('@/lib/crypto/retention', () => ({ forgetKeysOfEndedSessions }));
+
 function rejection(status: number) {
   const error = new Error(`HTTP ${status}`) as Error & {
     isAxiosError: boolean;
@@ -95,6 +103,27 @@ describe('web session lifecycle', () => {
     mockedPost.mockResolvedValueOnce({ data: { access_token: 'fresh', user } } as never);
     await expect(refreshAccessToken()).resolves.toBe('fresh');
     expect(useAuthStore.getState().status).toBe('authenticated');
+  });
+
+  it('drops the keys of unkept sign-ins when no session survived', async () => {
+    // VAZ-13. A sign-in without "keep me signed in" ends when the browser
+    // closes; the next visit finds no session and its keys go too.
+    mockedPost.mockRejectedValueOnce(rejection(401));
+    await bootstrapSession();
+    expect(forgetKeysOfEndedSessions).toHaveBeenCalledWith(null);
+  });
+
+  it('keeps every key when the network failed, and spares the live account', async () => {
+    // The refusal in the test above closed the refresh circuit; reopen it.
+    useAuthStore.setState({ refreshRejected: false });
+    forgetKeysOfEndedSessions.mockClear();
+    mockedPost.mockRejectedValueOnce(transportFailure());
+    await bootstrapSession();
+    expect(forgetKeysOfEndedSessions).not.toHaveBeenCalled();
+
+    mockedPost.mockResolvedValueOnce({ data: { access_token: 'fresh', user } } as never);
+    await bootstrapSession();
+    expect(forgetKeysOfEndedSessions).toHaveBeenCalledWith('user-1');
   });
 
   it('stops trying once the server has actually refused the credential', async () => {

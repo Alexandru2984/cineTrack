@@ -99,7 +99,9 @@ function SignOutCard() {
   const navigate = useNavigate();
   const logout = useLogout();
 
-  const handleSignOut = async (forgetKeys = false) => {
+  // Plain sign-out keeps the keys or not as the sign-in chose; the second
+  // button forgets them either way.
+  const handleSignOut = async (forgetKeys?: boolean) => {
     await logout.mutateAsync({ forgetKeys });
     navigate('/login', { replace: true });
   };
@@ -109,7 +111,7 @@ function SignOutCard() {
       <button
         type="button"
         disabled={logout.isPending}
-        onClick={() => void handleSignOut(false)}
+        onClick={() => void handleSignOut()}
         className="flex h-12 w-full items-center justify-between px-1 text-sm font-medium text-[hsl(var(--destructive))] disabled:opacity-50"
       >
         <span className="flex items-center gap-2">

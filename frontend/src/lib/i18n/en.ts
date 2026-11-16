@@ -48,6 +48,8 @@ export const en = {
     password: 'Password',
     forgotPassword: 'Forgot password?',
     rememberMe: 'Keep me signed in',
+    rememberMeOffHint:
+      'Your message keys will be removed from this browser when you sign out, or on your next visit after closing it.',
     authCode: 'Authentication code',
     authCodeHint: 'Enter the 6-digit code from your authenticator app, or a recovery code.',
     loginFailed: 'Login failed',

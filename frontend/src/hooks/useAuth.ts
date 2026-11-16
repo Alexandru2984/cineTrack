@@ -1,6 +1,12 @@
 import { isAuthPayload, MalformedAuthResponseError } from '@/lib/api';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import api, { endSession } from '@/lib/api';
+import {
+  clearKeyRetention,
+  forgetKeysOfEndedSessions,
+  keysLeaveWithSession,
+  recordKeyRetention,
+} from '@/lib/crypto/retention';
 import { localDateStamp, saveFile } from '@/lib/download';
 import { useAuthStore } from '@/store/auth';
 import { useEncryptionStore } from '@/store/encryption';
@@ -20,11 +26,12 @@ export function useRegister() {
       const res = await api.post<AuthResponse>('/auth/register', data);
       return res.data;
     },
-    onSuccess: (data) => {
+    onSuccess: (data, variables) => {
       // The same guard the rotation uses. A body that is not an authentication
       // result must not become a half-signed-in store.
       if (!isAuthPayload(data)) throw new MalformedAuthResponseError();
       setAuth(data.access_token, data.user);
+      settleKeyRetention(data.user.id, variables.remember_me);
     },
   });
 }
@@ -56,13 +63,22 @@ export function useLogin() {
       const res = await api.post<AuthResponse>('/auth/login', data);
       return res.data;
     },
-    onSuccess: (data) => {
+    onSuccess: (data, variables) => {
       // The same guard the rotation uses. A body that is not an authentication
       // result must not become a half-signed-in store.
       if (!isAuthPayload(data)) throw new MalformedAuthResponseError();
       setAuth(data.access_token, data.user);
+      settleKeyRetention(data.user.id, variables.remember_me);
     },
   });
+}
+
+/** Record whether this sign-in keeps its keys past the session, and drop the
+ *  keys of any earlier account here whose session was not kept. `remember_me`
+ *  absent means kept, as it does on the server. */
+function settleKeyRetention(userId: string, rememberMe: boolean | undefined): void {
+  recordKeyRetention(userId, rememberMe !== false);
+  void forgetKeysOfEndedSessions(userId);
 }
 
 export function useLogout() {
@@ -70,14 +86,18 @@ export function useLogout() {
   const clearKeys = useEncryptionStore((s) => s.clear);
   const userId = useAuthStore((s) => s.user?.id ?? null);
   return useMutation({
-    // `forgetKeys` is the shared-device answer. Keeping them is the default
-    // because forgetting costs a recovery code on the next sign-in, which is
-    // the wrong tax on a device somebody owns — but leaving
-    // them behind on a borrowed browser hands the next person every past
-    // message, so it has to be offered rather than decided here.
-    mutationFn: async ({ forgetKeys = false }: { forgetKeys?: boolean } = {}) => {
+    // `forgetKeys` is the shared-device answer. Without it, the keys go when
+    // the sign-in did not ask to be kept ("Keep me signed in" unticked) and
+    // stay otherwise: forgetting costs a recovery code on the next sign-in,
+    // the wrong tax on a device somebody owns, but leaving them behind on a
+    // borrowed browser hands the next person every past message.
+    mutationFn: async ({ forgetKeys }: { forgetKeys?: boolean } = {}) => {
+      const forget = forgetKeys ?? keysLeaveWithSession(userId);
       await endSession();
-      if (forgetKeys) await clearKeys(userId);
+      if (forget) {
+        await clearKeys(userId);
+        if (userId) clearKeyRetention(userId);
+      }
     },
     onSuccess: () => logout(),
   });

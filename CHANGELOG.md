@@ -92,6 +92,12 @@ and release versions follow semantic versioning.
   of reach. Codes can now be typed in capitals or without dashes, and codes
   issued before keep working. The native app accepts the new format from this
   release on; until then, a new code can be used on the web.
+- On the web, a sign-in without "Keep me signed in" no longer leaves the
+  message keys behind. They are stored unwrapped in the browser, and signing
+  out kept them unless a second button was used, so a borrowed browser handed
+  the next person every past message. Now they are removed on sign-out, or on
+  the next visit after the browser was closed, and the sign-in form says so
+  when the box is unticked. A kept sign-in still keeps them.
 - The encrypted key backup is no longer sealed under the account password. It
   used to be sealed twice — once under a recovery code the server never sees,
   and once under a key derived from the account password, which the server

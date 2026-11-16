@@ -96,6 +96,11 @@ export default function LoginPage() {
             />
             <span>{t('auth.rememberMe')}</span>
           </label>
+          {!remember && (
+            <p className="-mt-2 text-xs text-[hsl(var(--muted-foreground))]">
+              {t('auth.rememberMeOffHint')}
+            </p>
+          )}
 
           {mfaRequired && (
             <div>
