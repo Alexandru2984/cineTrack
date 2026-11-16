@@ -78,6 +78,12 @@ and release versions follow semantic versioning.
   `query-string` is CommonJS, so it cannot simply be required; the fixed
   algorithm is vendored as CommonJS instead and wired in, with tests that check
   both the timing and that it agrees with upstream output.
+- Two-factor recovery codes carry 80 bits instead of 64: sixteen base32
+  characters in the same `xxxx-xxxx-xxxx-xxxx` shape. They are stored as
+  unsalted SHA-256, so after a database leak their size is what keeps them out
+  of reach. Codes can now be typed in capitals or without dashes, and codes
+  issued before keep working. The native app accepts the new format from this
+  release on; until then, a new code can be used on the web.
 - The encrypted key backup is no longer sealed under the account password. It
   used to be sealed twice — once under a recovery code the server never sees,
   and once under a key derived from the account password, which the server

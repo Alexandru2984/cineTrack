@@ -1288,7 +1288,7 @@ async fn verify_second_factor(
     }
 
     // Recovery code: mark the matching unconsumed row consumed in one statement.
-    let code_hash = jwt::hash_refresh_token(code.trim());
+    let code_hash = jwt::hash_refresh_token(&normalize_recovery_code(code));
     let mut tx = pool.begin().await?;
     let consumed = sqlx::query(
         "UPDATE two_factor_recovery_codes SET consumed_at = NOW()
@@ -1598,22 +1598,50 @@ pub async fn disable_two_factor(
     Ok(())
 }
 
-/// A grouped, human-legible recovery code (64 bits of entropy as
-/// `xxxx-xxxx-xxxx-xxxx`), so the global unique index on the code hash has a
-/// negligible collision probability across accounts.
+/// A grouped, human-legible recovery code: 80 bits from the OS generator, as
+/// sixteen lowercase base32 characters in `xxxx-xxxx-xxxx-xxxx`.
+///
+/// Codes are stored as unsalted SHA-256, which is fine only while guessing is
+/// out of reach. Online, the second-factor lock stops it. Offline, after a
+/// database leak, every stored hash is attacked at once, so the code itself
+/// has to carry the margin: they were 64 bits of hex, and 80 bits keeps a
+/// leaked table out of reach without a key the server would have to keep
+/// forever. Base32 fits the extra bits into the same sixteen characters, and
+/// its alphabet has no `0`, `1`, `8` or `9` to confuse with letters. The
+/// global unique index on the hash stays collision-free across accounts.
 fn generate_recovery_code() -> String {
-    let mut bytes = [0u8; 8];
+    let mut bytes = [0u8; 10];
     rand::rngs::SysRng
         .try_fill_bytes(&mut bytes)
         .expect("OS RNG unavailable while generating a recovery code");
-    let hex = hex::encode(bytes);
+    group_recovery_code(&crate::utils::totp::base32_encode(&bytes).to_ascii_lowercase())
+}
+
+fn group_recovery_code(chars: &str) -> String {
     format!(
         "{}-{}-{}-{}",
-        &hex[0..4],
-        &hex[4..8],
-        &hex[8..12],
-        &hex[12..16]
+        &chars[0..4],
+        &chars[4..8],
+        &chars[8..12],
+        &chars[12..16]
     )
+}
+
+/// The form a recovery code was hashed in, from however it was typed: case
+/// and spacing do not matter, and the dashes are optional. Codes issued
+/// before the move to base32 were lowercase hex in the same grouping, so they
+/// normalize to exactly what was stored for them and keep working.
+fn normalize_recovery_code(input: &str) -> String {
+    let chars: String = input
+        .chars()
+        .filter(|ch| !ch.is_whitespace() && *ch != '-')
+        .map(|ch| ch.to_ascii_lowercase())
+        .collect();
+    if chars.len() == 16 && chars.is_ascii() {
+        group_recovery_code(&chars)
+    } else {
+        input.trim().to_string()
+    }
 }
 
 pub async fn get_current_user(pool: &PgPool, user_id: Uuid) -> Result<UserResponse, AppError> {
@@ -2010,6 +2038,54 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn recovery_codes_carry_80_bits_in_the_familiar_shape() {
+        let codes: Vec<String> = (0..200).map(|_| generate_recovery_code()).collect();
+        for code in &codes {
+            let groups: Vec<&str> = code.split('-').collect();
+            assert_eq!(groups.len(), 4, "{code}");
+            assert!(groups.iter().all(|group| group.len() == 4), "{code}");
+            // Sixteen characters of a 32-letter alphabet: 16 * 5 = 80 bits.
+            assert!(
+                code.chars()
+                    .filter(|ch| *ch != '-')
+                    .all(|ch| matches!(ch, 'a'..='z' | '2'..='7')),
+                "{code}"
+            );
+        }
+        let distinct: std::collections::HashSet<_> = codes.iter().collect();
+        assert_eq!(distinct.len(), codes.len());
+        // The old generator only ever produced hex. Two hundred base32 codes
+        // without a letter past `f` would be a 1-in-10^150 accident.
+        assert!(codes
+            .iter()
+            .any(|code| code.chars().any(|ch| matches!(ch, 'g'..='z'))));
+    }
+
+    #[test]
+    fn a_recovery_code_matches_however_it_is_typed() {
+        let stored = "abcd-efgh-ijkl-mn23";
+        for typed in [
+            "abcd-efgh-ijkl-mn23",
+            "ABCD-EFGH-IJKL-MN23",
+            "abcdefghijklmn23",
+            " abcd efgh ijkl mn23 ",
+        ] {
+            assert_eq!(normalize_recovery_code(typed), stored, "{typed:?}");
+        }
+        // A code issued before base32 normalizes to what was stored for it.
+        assert_eq!(
+            normalize_recovery_code("0a1b-2c3d-4e5f-6789"),
+            "0a1b-2c3d-4e5f-6789"
+        );
+        assert_eq!(
+            normalize_recovery_code("0A1B2C3D4E5F6789"),
+            "0a1b-2c3d-4e5f-6789"
+        );
+        // Anything else is passed through and simply fails to match.
+        assert_eq!(normalize_recovery_code(" 123456 "), "123456");
+    }
 
     #[test]
     fn test_normalize_email_lowercases_and_trims() {
