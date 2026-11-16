@@ -110,7 +110,9 @@ services:
   backend:
     image: cinetrack-backend
     # FQDN so outbound mail (lettre Message-ID + SMTP EHLO) doesn't carry a
-    # random container id — Gmail scores that as a spam signal.
+    # random container id — Gmail scores that as a spam signal. It stays on
+    # micutu.com after the site moved to vazute.com, because mail is still sent
+    # from noreply@micutu.com and should name the domain it comes from.
     hostname: vazute.micutu.com
     build:
       context: ./backend

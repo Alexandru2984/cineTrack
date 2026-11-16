@@ -12,7 +12,7 @@ hydration added since. Resubmitting every page every day is what the protocol
 asks clients not to do.
 
 The key is public by design: IndexNow proves ownership by fetching it from
-https://vazute.micutu.com/<key>.txt, which is frontend/public/<key>.txt.
+https://vazute.com/<key>.txt, which is frontend/public/<key>.txt.
 """
 
 from __future__ import annotations
@@ -29,8 +29,8 @@ import urllib.request
 import xml.etree.ElementTree as ElementTree
 from pathlib import Path
 
-SITE = "https://vazute.micutu.com"
-HOST = "vazute.micutu.com"
+SITE = "https://vazute.com"
+HOST = "vazute.com"
 ENDPOINT = "https://api.indexnow.org/indexnow"
 SITEMAP_NS = "{http://www.sitemaps.org/schemas/sitemap/0.9}"
 # The protocol's limit per request.

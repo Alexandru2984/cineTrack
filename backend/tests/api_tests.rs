@@ -15112,7 +15112,7 @@ async fn genre_and_popularity_lists_link_the_titles_that_have_pages() {
 
     let (status, body) = get!("/en/movies/drama");
     assert_eq!(status, 200);
-    assert!(body.contains(r#"hreflang="ro" href="https://vazute.micutu.com/ro/filme/drama""#));
+    assert!(body.contains(r#"hreflang="ro" href="https://vazute.com/ro/filme/drama""#));
     assert!(body.contains(r#"<a href="/en/movie/920001-drama-1">"#));
 
     // An empty kind still has its overall list.
@@ -15138,7 +15138,7 @@ async fn genre_and_popularity_lists_link_the_titles_that_have_pages() {
         "/en/series",
     ] {
         assert!(
-            lists.contains(&format!("<loc>https://vazute.micutu.com{loc}</loc>")),
+            lists.contains(&format!("<loc>https://vazute.com{loc}</loc>")),
             "{loc}"
         );
     }
@@ -15286,8 +15286,8 @@ async fn the_new_episodes_page_lists_the_week_day_by_day() {
         "too few dramas for a list"
     );
     let (_, lists) = get!("/sitemaps/lists.xml");
-    assert!(lists.contains("<loc>https://vazute.micutu.com/ro/seriale/episoade-noi</loc>"));
-    assert!(lists.contains("<loc>https://vazute.micutu.com/en/series/new-episodes</loc>"));
+    assert!(lists.contains("<loc>https://vazute.com/ro/seriale/episoade-noi</loc>"));
+    assert!(lists.contains("<loc>https://vazute.com/en/series/new-episodes</loc>"));
 
     // Every public page links to it.
     let (_, page) = get!("/ro/serial/940001-drama-saptamanala");
@@ -15461,7 +15461,7 @@ async fn a_shared_title_unfurls_with_its_poster() {
 
     for (id, image) in [
         (930001, "https://image.tmdb.org/t/p/w780/poster930001.jpg"),
-        (930002, "https://vazute.micutu.com/og-image.png"),
+        (930002, "https://vazute.com/og-image.png"),
     ] {
         let response = actix_test::call_service(
             &app,
@@ -15637,8 +15637,7 @@ async fn public_title_pages_are_served_in_both_languages() {
     assert!(body.contains("<p>Un funcționar cu insomnii.</p>"));
     assert!(body.contains("<span>Netflix</span>"));
     assert!(body.contains("<strong>La cinema:</strong> 26 noiembrie 1999"));
-    assert!(body
-        .contains(r#"hreflang="en" href="https://vazute.micutu.com/en/movie/910001-fight-club""#));
+    assert!(body.contains(r#"hreflang="en" href="https://vazute.com/en/movie/910001-fight-club""#));
     assert!(body.contains(r#"href="/login?returnTo=%2Fmedia%2F910001%3Ftype%3Dmovie""#));
 
     let (status, _, body) = get!(&app, "/en/movie/910001-fight-club");
@@ -15687,20 +15686,16 @@ async fn public_title_pages_are_served_in_both_languages() {
     // The sitemaps list exactly the titles that have a page.
     let (status, _, index) = get!(&app, "/sitemap.xml");
     assert_eq!(status, 200);
-    assert!(index.contains("<loc>https://vazute.micutu.com/sitemap-pages.xml</loc>"));
-    assert!(index.contains("<loc>https://vazute.micutu.com/sitemaps/titles-ro-1.xml</loc>"));
-    assert!(index.contains("<loc>https://vazute.micutu.com/sitemaps/titles-en-1.xml</loc>"));
+    assert!(index.contains("<loc>https://vazute.com/sitemap-pages.xml</loc>"));
+    assert!(index.contains("<loc>https://vazute.com/sitemaps/titles-ro-1.xml</loc>"));
+    assert!(index.contains("<loc>https://vazute.com/sitemaps/titles-en-1.xml</loc>"));
     let (status, _, titles) = get!(&app, "/sitemaps/titles-ro-1.xml");
     assert_eq!(status, 200);
+    assert!(titles.contains("<loc>https://vazute.com/ro/film/910001-clubul-luptatorilor</loc>"));
     assert!(
-        titles.contains("<loc>https://vazute.micutu.com/ro/film/910001-clubul-luptatorilor</loc>")
+        titles.contains(r#"hreflang="en" href="https://vazute.com/en/movie/910001-fight-club"/>"#)
     );
-    assert!(titles.contains(
-        r#"hreflang="en" href="https://vazute.micutu.com/en/movie/910001-fight-club"/>"#
-    ));
-    assert!(
-        titles.contains("<loc>https://vazute.micutu.com/ro/serial/910002-northern-lights</loc>")
-    );
+    assert!(titles.contains("<loc>https://vazute.com/ro/serial/910002-northern-lights</loc>"));
     assert!(!titles.contains("910003"));
     assert_eq!(get!(&app, "/sitemaps/titles-ro-2.xml").0, 404);
     assert_eq!(get!(&app, "/sitemaps/titles-de-1.xml").0, 404);

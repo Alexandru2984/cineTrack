@@ -23,7 +23,7 @@ describe('mobile calendar feed', () => {
 
   it('parses the credential returned when enabling', async () => {
     mockApiRequest.mockResolvedValueOnce({
-      feed_url: 'https://vazute.micutu.com/api/calendar/feed/abc.ics',
+      feed_url: 'https://vazute.com/api/calendar/feed/abc.ics',
     });
     const credential = await enableCalendarFeed();
     expect(credential.feed_url).toContain('/calendar/feed/');

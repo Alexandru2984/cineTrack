@@ -33,7 +33,7 @@ use crate::dto::media::{TmdbGenre, WatchProviderEntry, WatchProvidersResponse};
 use crate::errors::AppError;
 use crate::services::tmdb::TmdbService;
 
-pub(crate) const SITE: &str = "https://vazute.micutu.com";
+pub(crate) const SITE: &str = "https://vazute.com";
 /// TMDB's image CDN, for addresses another service fetches: the structured
 /// data and the link preview. The pages' own images use `page_image_base`.
 pub(crate) const IMAGE_BASE: &str = "https://image.tmdb.org/t/p";
@@ -1413,13 +1413,11 @@ mod tests {
         let html = render(&page(Language::Ro, Kind::Movie));
         assert!(html.contains(r#"<html lang="ro">"#));
         assert!(html.contains(
-            r#"<link rel="canonical" href="https://vazute.micutu.com/ro/film/550-clubul-luptatorilor" />"#
+            r#"<link rel="canonical" href="https://vazute.com/ro/film/550-clubul-luptatorilor" />"#
         ));
+        assert!(html.contains(r#"hreflang="en" href="https://vazute.com/en/movie/550-fight-club""#));
         assert!(html
-            .contains(r#"hreflang="en" href="https://vazute.micutu.com/en/movie/550-fight-club""#));
-        assert!(html.contains(
-            r#"hreflang="x-default" href="https://vazute.micutu.com/en/movie/550-fight-club""#
-        ));
+            .contains(r#"hreflang="x-default" href="https://vazute.com/en/movie/550-fight-club""#));
         assert!(html.contains("<h1>Clubul luptătorilor (1999)</h1>"));
         assert!(html.contains("Film · 1999 · 2 h 19 min"));
         // A known genre links to its list; one TMDB added later keeps its own

@@ -35,7 +35,7 @@ pub struct StorageService {
     bucket: String,
     public_base_url: Option<String>,
     /// Site origin used to build absolute proxy URLs when no public bucket
-    /// domain is configured (e.g. https://vazute.micutu.com).
+    /// domain is configured (e.g. https://vazute.com).
     proxy_origin: String,
 }
 

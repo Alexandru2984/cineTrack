@@ -5,7 +5,7 @@ import { PAGES, renderPageHtml } from '../../../scripts/prerender-public-pages.m
 /** What this guards.
  *
  *  Every route used to ship the same index.html, so every URL carried
- *  `<link rel="canonical" href="https://vazute.micutu.com/">`. That is not a
+ *  `<link rel="canonical" href="https://vazute.com/">`. That is not a
  *  missed opportunity — it tells a search engine that /about, /privacy, /terms
  *  and the rest are the same page as the homepage and should be dropped. The
  *  sitemap asked for eight pages while the HTML asked for one.
@@ -21,15 +21,15 @@ const TEMPLATE = `<!doctype html>
       name="description"
       content="Track the movies and TV shows you watch."
     />
-    <link rel="canonical" href="https://vazute.micutu.com/" />
+    <link rel="canonical" href="https://vazute.com/" />
     <meta property="og:type" content="website" />
     <meta property="og:title" content="Văzute — track what you watch" />
     <meta property="og:description" content="A personal movie and TV tracker." />
-    <meta property="og:url" content="https://vazute.micutu.com/" />
-    <meta property="og:image" content="https://vazute.micutu.com/og-image.png" />
+    <meta property="og:url" content="https://vazute.com/" />
+    <meta property="og:image" content="https://vazute.com/og-image.png" />
     <meta name="twitter:title" content="Văzute — track what you watch" />
     <meta name="twitter:description" content="A personal movie and TV tracker." />
-    <meta name="twitter:image" content="https://vazute.micutu.com/og-image.png" />
+    <meta name="twitter:image" content="https://vazute.com/og-image.png" />
   </head>
   <body><div id="root"></div></body>
 </html>`;
@@ -45,9 +45,9 @@ describe('prerenderPublicPages', () => {
   it('points the canonical at the page itself, not the homepage', () => {
     const html = renderPageHtml(TEMPLATE, page);
 
-    expect(attribute(html, 'rel="canonical"', 'href')).toBe('https://vazute.micutu.com/about');
+    expect(attribute(html, 'rel="canonical"', 'href')).toBe('https://vazute.com/about');
     expect(attribute(html, 'property="og:url"', 'content')).toBe(
-      'https://vazute.micutu.com/about',
+      'https://vazute.com/about',
     );
   });
 
@@ -67,10 +67,10 @@ describe('prerenderPublicPages', () => {
     // silently rewrites og:image to the page address, which then unfurls as a
     // broken preview everywhere the link is posted.
     expect(attribute(html, 'property="og:image"', 'content')).toBe(
-      'https://vazute.micutu.com/og-image.png',
+      'https://vazute.com/og-image.png',
     );
     expect(attribute(html, 'name="twitter:image"', 'content')).toBe(
-      'https://vazute.micutu.com/og-image.png',
+      'https://vazute.com/og-image.png',
     );
   });
 
@@ -86,7 +86,7 @@ describe('prerenderPublicPages', () => {
     );
 
     expect(new Set(canonicals).size).toBe(PAGES.length);
-    expect(canonicals).not.toContain('https://vazute.micutu.com/');
+    expect(canonicals).not.toContain('https://vazute.com/');
   });
 
   it('describes each page differently, since duplicates are what search engines drop', () => {

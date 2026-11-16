@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 
 const BASE = 'Văzute';
-const SITE = 'https://vazute.micutu.com';
+const SITE = 'https://vazute.com';
 const DEFAULT_TITLE = `${BASE} — track what you watch`;
 
 function setAttribute(selector: string, attribute: string, value: string) {

@@ -24,12 +24,12 @@ describe('native multipart upload', () => {
   it('parses a successful response', async () => {
     mockUpload.mockResolvedValueOnce({
       status: 200,
-      body: '{"avatar_url":"https://vazute.micutu.com/a.jpg"}',
+      body: '{"avatar_url":"https://vazute.com/a.jpg"}',
       headers: {},
     });
 
     await expect(rawMultipartRequest('/users/me/avatar', file)).resolves.toEqual({
-      avatar_url: 'https://vazute.micutu.com/a.jpg',
+      avatar_url: 'https://vazute.com/a.jpg',
     });
   });
 

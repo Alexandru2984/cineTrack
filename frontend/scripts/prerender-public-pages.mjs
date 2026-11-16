@@ -2,7 +2,7 @@
  * Give each public page its own metadata in the HTML that is actually served.
  *
  * Every route shipped the same `index.html`, which meant every URL carried
- * `<link rel="canonical" href="https://vazute.micutu.com/">`. That is not a
+ * `<link rel="canonical" href="https://vazute.com/">`. That is not a
  * missed opportunity — it is an instruction telling search engines that
  * /about, /privacy, /terms and the rest are the same page as the homepage and
  * should be dropped from the index. The sitemap listed eight pages while the
@@ -20,7 +20,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-const SITE = 'https://vazute.micutu.com';
+const SITE = 'https://vazute.com';
 const BASE = 'Văzute';
 const DIST = path.resolve(import.meta.dirname, '../dist');
 

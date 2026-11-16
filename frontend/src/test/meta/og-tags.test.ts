@@ -13,7 +13,7 @@ describe('index.html social meta', () => {
   });
 
   it('points at the absolute social image', () => {
-    expect(html).toContain('property="og:image" content="https://vazute.micutu.com/og-image.png"');
-    expect(html).toContain('name="twitter:image" content="https://vazute.micutu.com/og-image.png"');
+    expect(html).toContain('property="og:image" content="https://vazute.com/og-image.png"');
+    expect(html).toContain('name="twitter:image" content="https://vazute.com/og-image.png"');
   });
 });

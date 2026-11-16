@@ -12,16 +12,16 @@ describe('mobile deep links', () => {
 
   it('builds web URLs that map directly to native routes', () => {
     expect(publicUrl(mediaPath(1396, 'tv'))).toBe(
-      'https://vazute.micutu.com/media/1396?type=tv',
+      'https://vazute.com/media/1396?type=tv',
     );
     expect(publicUrl(episodePath(episodeId))).toBe(
-      `https://vazute.micutu.com/episodes/${episodeId}`,
+      `https://vazute.com/episodes/${episodeId}`,
     );
     expect(publicUrl(profilePath('alex_984'))).toBe(
-      'https://vazute.micutu.com/profile/alex_984',
+      'https://vazute.com/profile/alex_984',
     );
     expect(publicUrl(messagePath('alex_984'))).toBe(
-      'https://vazute.micutu.com/messages/alex_984',
+      'https://vazute.com/messages/alex_984',
     );
   });
 

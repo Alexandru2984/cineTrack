@@ -16,6 +16,9 @@ REPOSITORY_ROOT = ROOT.parent
 ANDROID_NS = "{http://schemas.android.com/apk/res/android}"
 TOOLS_NS = "{http://schemas.android.com/tools}"
 ASSOCIATED_PATHS = {"/reset-password", "/media", "/episodes", "/profile", "/lists"}
+# vazute.com is the site. vazute.micutu.com was, and links shared before the
+# move still point there, so the app keeps claiming both hosts.
+APP_LINK_HOSTS = ("vazute.com", "vazute.micutu.com")
 FINGERPRINT_PATTERN = re.compile(r"^(?:[0-9A-F]{2}:){31}[0-9A-F]{2}$")
 ANDROID_COMPONENT_TAGS = ("activity", "activity-alias", "service", "receiver", "provider")
 ANDROID_RELEASE_PERMISSIONS = {
@@ -121,11 +124,12 @@ def validate_android(config: dict[str, object]) -> None:
                     )
                 )
     require(config["scheme"] in custom_schemes, "custom URL scheme is missing")
-    for path in ASSOCIATED_PATHS:
-        require(
-            ("https", "vazute.micutu.com", path) in verified_links,
-            f"verified Android app link is missing: {path}",
-        )
+    for host in APP_LINK_HOSTS:
+        for path in ASSOCIATED_PATHS:
+            require(
+                ("https", host, path) in verified_links,
+                f"verified Android app link is missing: {host}{path}",
+            )
 
     package = config["android"]["package"]  # type: ignore[index]
     package_path = Path(*str(package).split("."))
@@ -293,10 +297,11 @@ def validate_ios(config: dict[str, object]) -> None:
     }
     require(config["scheme"] in schemes, "iOS custom URL scheme is missing")
     associated_domains = entitlements.get("com.apple.developer.associated-domains", [])
-    require(
-        "applinks:vazute.micutu.com" in associated_domains,
-        "iOS associated domain is missing",
-    )
+    for host in APP_LINK_HOSTS:
+        require(
+            f"applinks:{host}" in associated_domains,
+            f"iOS associated domain is missing: {host}",
+        )
 
 
 def validate_android_asset_links(config: dict[str, object]) -> None:

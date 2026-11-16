@@ -526,10 +526,9 @@ mod tests {
         let html = render(Language::Ro, today, &days);
         assert!(html.contains("<h1>Episoade noi săptămâna aceasta</h1>"));
         assert!(html.contains(
-            r#"<link rel="canonical" href="https://vazute.micutu.com/ro/seriale/episoade-noi" />"#
+            r#"<link rel="canonical" href="https://vazute.com/ro/seriale/episoade-noi" />"#
         ));
-        assert!(html
-            .contains(r#"hreflang="en" href="https://vazute.micutu.com/en/series/new-episodes""#));
+        assert!(html.contains(r#"hreflang="en" href="https://vazute.com/en/series/new-episodes""#));
         assert!(html.contains(r#"<a href="/ro/serial/1399-urzeala-tronurilor">"#));
         assert!(html.contains("S02E05 · Pilot &lt;1&gt;"));
         assert!(html.contains(r#"<time datetime="2026-10-27">Marți, 27 octombrie</time>"#));

@@ -24,35 +24,35 @@ describe('useCanonicalUrl', () => {
   // root, so every route used to declare itself a duplicate of the home page.
   it('claims the current route rather than the site root', () => {
     renderHook(() => useCanonicalUrl(), { wrapper: at('/terms') });
-    expect(canonical()).toBe('https://vazute.micutu.com/terms');
+    expect(canonical()).toBe('https://vazute.com/terms');
   });
 
   it('keeps the root path intact', () => {
     renderHook(() => useCanonicalUrl(), { wrapper: at('/') });
-    expect(canonical()).toBe('https://vazute.micutu.com/');
+    expect(canonical()).toBe('https://vazute.com/');
   });
 
   it('ignores query strings and fragments, which select within a page', () => {
     renderHook(() => useCanonicalUrl(), {
       wrapper: at('/about?ref=twitter#team'),
     });
-    expect(canonical()).toBe('https://vazute.micutu.com/about');
+    expect(canonical()).toBe('https://vazute.com/about');
   });
 
   it('drops a trailing slash so one page cannot claim two addresses', () => {
     renderHook(() => useCanonicalUrl(), { wrapper: at('/privacy/') });
-    expect(canonical()).toBe('https://vazute.micutu.com/privacy');
+    expect(canonical()).toBe('https://vazute.com/privacy');
   });
 
   it('reuses the tag already in the document instead of adding another', () => {
     const existing = document.createElement('link');
     existing.rel = 'canonical';
-    existing.href = 'https://vazute.micutu.com/';
+    existing.href = 'https://vazute.com/';
     document.head.appendChild(existing);
 
     renderHook(() => useCanonicalUrl(), { wrapper: at('/about') });
 
     expect(document.querySelectorAll('link[rel="canonical"]')).toHaveLength(1);
-    expect(canonical()).toBe('https://vazute.micutu.com/about');
+    expect(canonical()).toBe('https://vazute.com/about');
   });
 });
