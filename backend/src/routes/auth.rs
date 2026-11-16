@@ -10,10 +10,11 @@ use crate::config::Config;
 use crate::dto::auth::*;
 use crate::errors::AppError;
 use crate::middleware::auth::require_auth;
-use crate::middleware::rate_limit::{RateLimit, RateLimitConfig};
+use crate::middleware::rate_limit::{client_ip, RateLimit, RateLimitConfig};
 use crate::services;
 use crate::services::email::EmailService;
 use crate::services::password_breach::BreachChecker;
+use crate::utils::password;
 
 const REFRESH_COOKIE_NAME: &str = "cinetrack_refresh";
 const REFRESH_COOKIE_PATH: &str = "/api/auth";
@@ -73,6 +74,7 @@ async fn register(
     body: web::Json<RegisterRequest>,
 ) -> Result<HttpResponse, AppError> {
     body.validate()?;
+    let _place = password::claim_password_request(client_ip(&req))?;
     breach.ensure_not_breached(&body.password).await?;
     let client = client_info(&req);
     let (resp, refresh_token, persistent) = services::auth::register(
@@ -96,6 +98,7 @@ async fn login(
     body: web::Json<LoginRequest>,
 ) -> Result<HttpResponse, AppError> {
     body.validate()?;
+    let _place = password::claim_password_request(client_ip(&req))?;
     let client = client_info(&req);
     let (resp, refresh_token, persistent) = services::auth::login(
         pool.get_ref(),
@@ -119,6 +122,7 @@ async fn mobile_register(
     body: web::Json<RegisterRequest>,
 ) -> Result<HttpResponse, AppError> {
     body.validate()?;
+    let _place = password::claim_password_request(client_ip(&req))?;
     breach.ensure_not_breached(&body.password).await?;
     let client = client_info(&req);
     // Mobile stores the refresh token itself and decides persistence on the
@@ -142,6 +146,7 @@ async fn mobile_login(
     body: web::Json<LoginRequest>,
 ) -> Result<HttpResponse, AppError> {
     body.validate()?;
+    let _place = password::claim_password_request(client_ip(&req))?;
     let client = client_info(&req);
     let (resp, refresh_token, _persistent) = services::auth::login(
         pool.get_ref(),

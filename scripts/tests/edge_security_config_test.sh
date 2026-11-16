@@ -33,6 +33,24 @@ grep -Fq 'client_max_body_size 64k;' "$VHOST"
 grep -Fq 'client_max_body_size 25M;' "$VHOST"
 grep -Fq 'client_max_body_size 4M;' "$VHOST"
 grep -Fq 'limit_req zone=vazute_auth burst=10 nodelay;' "$VHOST"
+# Sign-in and registration hash a password; their own, lower per-address rate is
+# what keeps a few dozen addresses from filling the Argon2 pool (VAZ-14).
+grep -Fq 'zone=vazute_password:10m rate=6r/m;' "$VHOST"
+python3 - "$VHOST" <<'PY'
+import re
+import sys
+text = open(sys.argv[1], encoding="utf-8").read()
+block = re.search(
+    r'location ~ "\^/api/auth/\(mobile/\)\?\(login\|register\)\$" \{(.*?)\n    \}',
+    text,
+    re.S,
+)
+if not block or "limit_req zone=vazute_password burst=5 nodelay;" not in block.group(1):
+    sys.exit("edge security error: sign-in and registration must carry the vazute_password limit")
+for required in ("zone=vazute_api ", "zone=vazute_auth ", "limit_conn vazute_api_conn", "proxy_pass http://127.0.0.1:8090;"):
+    if required not in block.group(1):
+        sys.exit(f"edge security error: the sign-in location lost {required.strip()}")
+PY
 grep -Fq 'limit_req zone=vazute_import burst=2 nodelay;' "$VHOST"
 grep -Fq 'limit_conn vazute_api_conn 20;' "$VHOST"
 

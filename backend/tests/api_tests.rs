@@ -3240,6 +3240,52 @@ async fn test_recovery_codes_are_80_bits_and_old_ones_still_work() {
     assert_eq!(status, 200, "an existing code keeps working");
 }
 
+/// Four Argon2 workers and a two-second queue serve every sign-in. Each address
+/// arrives with the edge's burst allowance, so a few dozen of them firing at once
+/// used to fill that queue until real sign-ins answered 429. An address now holds
+/// at most two places; the rest of its burst is refused before any hashing, and
+/// another address is not held up by it.
+#[actix_web::test]
+#[ignore = "requires test DB"]
+async fn test_one_address_cannot_queue_more_than_its_share_of_sign_ins() {
+    let pool = setup_pool().await;
+    clean_db(&pool).await;
+    let app = actix_test::init_service(create_app(pool.clone())).await;
+    register_user(&app, "pooled", "pooled@mailbox.dev", "Pass1234").await;
+
+    // Through the trusted proxy, as nginx forwards in production.
+    let sign_in = |client: &str| {
+        actix_test::TestRequest::post()
+            .uri("/api/auth/login")
+            .peer_addr(peer_addr())
+            .insert_header(("X-Forwarded-For", client.to_string()))
+            .set_json(json!({ "email": "pooled@mailbox.dev", "password": "WrongPass9" }))
+            .to_request()
+    };
+    let burst = futures_util::future::join_all(
+        (0..6).map(|_| actix_test::call_service(&app, sign_in("203.0.113.9"))),
+    );
+    let elsewhere = actix_test::call_service(&app, sign_in("198.51.100.7"));
+    let (burst, elsewhere) = tokio::join!(burst, elsewhere);
+
+    let mut statuses: Vec<u16> = burst.iter().map(|resp| resp.status().as_u16()).collect();
+    statuses.sort_unstable();
+    assert_eq!(
+        statuses,
+        vec![401, 401, 429, 429, 429, 429],
+        "one address gets two attempts at a time; the rest of its burst is turned away"
+    );
+    assert_eq!(
+        elsewhere.status().as_u16(),
+        401,
+        "another address is answered normally while the first is at its share"
+    );
+
+    // The places are given back once those requests end.
+    let resp = actix_test::call_service(&app, sign_in("203.0.113.9")).await;
+    assert_eq!(resp.status().as_u16(), 401);
+}
+
 #[actix_web::test]
 #[ignore = "requires test DB"]
 async fn test_account_login_throttle_survives_ips_and_resets_after_success() {

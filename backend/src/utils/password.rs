@@ -1,3 +1,6 @@
+use std::collections::HashMap;
+use std::net::IpAddr;
+use std::sync::{LazyLock, Mutex};
 use std::time::Duration;
 
 use argon2::{
@@ -42,6 +45,104 @@ const PASSWORD_QUEUE_TIMEOUT: Duration = Duration::from_secs(2);
 const DUMMY_PASSWORD: &str = "cinetrack-dummy-password-never-used-for-login";
 
 static PASSWORD_JOB_SLOTS: Semaphore = Semaphore::const_new(MAX_CONCURRENT_PASSWORD_JOBS);
+
+/// How many sign-ins or registrations one client address may have waiting on
+/// the pool above at once.
+///
+/// Four workers and a two-second queue are shared by everyone who has not
+/// signed in yet. Without a per-address share, each address arrives with the
+/// edge's burst allowance and every request of that burst queues for a hash: a
+/// few dozen addresses firing at once fill the queue for long enough that real
+/// sign-ins time out with 429. Capped, an address holds at most this many
+/// places and the rest of its burst is refused before any hashing, so filling
+/// the queue takes as many addresses as the queue has places. Two rather than
+/// one, so a double-submitted form does not answer itself with "busy".
+pub const MAX_PASSWORD_REQUESTS_PER_ADDRESS: u8 = 2;
+
+pub struct AddressShare {
+    in_flight: Mutex<HashMap<IpAddr, u8>>,
+    limit: u8,
+}
+
+/// A place held by one address until the request that claimed it ends.
+#[must_use = "the place is released when this is dropped"]
+pub struct AddressClaim<'a> {
+    share: &'a AddressShare,
+    address: Option<IpAddr>,
+}
+
+impl AddressShare {
+    pub fn new(limit: u8) -> Self {
+        Self {
+            in_flight: Mutex::new(HashMap::new()),
+            limit,
+        }
+    }
+
+    /// Hold a place for `address`, or refuse when it already holds its share.
+    ///
+    /// A request with no known address is not counted. In production every
+    /// request has a peer, so this only happens in tests built without one.
+    pub fn claim(&self, address: Option<IpAddr>) -> Result<AddressClaim<'_>, AppError> {
+        if let Some(ip) = address {
+            let mut in_flight = self
+                .in_flight
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let held = in_flight.entry(ip).or_insert(0);
+            if *held >= self.limit {
+                return Err(AppError::TooManyRequests(
+                    "Authentication service is busy; retry shortly".to_string(),
+                ));
+            }
+            *held += 1;
+        }
+        Ok(AddressClaim {
+            share: self,
+            address,
+        })
+    }
+
+    fn release(&self, ip: IpAddr) {
+        let mut in_flight = self
+            .in_flight
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(held) = in_flight.get_mut(&ip) {
+            *held = held.saturating_sub(1);
+            // Removed at zero, so the map holds only addresses with a request
+            // in progress and cannot grow with the number of addresses seen.
+            if *held == 0 {
+                in_flight.remove(&ip);
+            }
+        }
+    }
+
+    #[cfg(test)]
+    fn tracked(&self) -> usize {
+        self.in_flight
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .len()
+    }
+}
+
+impl Drop for AddressClaim<'_> {
+    fn drop(&mut self) {
+        if let Some(ip) = self.address {
+            self.share.release(ip);
+        }
+    }
+}
+
+static PASSWORD_REQUESTS: LazyLock<AddressShare> =
+    LazyLock::new(|| AddressShare::new(MAX_PASSWORD_REQUESTS_PER_ADDRESS));
+
+/// Claim one of this address's places for a request that will hash a password.
+/// Hold the result for the whole request; dropping it gives the place back.
+pub fn claim_password_request(address: Option<IpAddr>) -> Result<AddressClaim<'static>, AppError> {
+    PASSWORD_REQUESTS.claim(address)
+}
 static DUMMY_PASSWORD_HASH: OnceCell<String> = OnceCell::const_new();
 
 /// Build the salt from our own RNG rather than password_hash's re-exported
@@ -152,6 +253,49 @@ pub async fn verify_password_or_dummy(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn address(last: u8) -> Option<IpAddr> {
+        Some(IpAddr::from([203, 0, 113, last]))
+    }
+
+    #[test]
+    fn one_address_cannot_hold_more_than_its_share_of_the_pool() {
+        let share = AddressShare::new(2);
+        let first = share.claim(address(1)).expect("first place");
+        let second = share.claim(address(1)).expect("second place");
+
+        let third = share.claim(address(1));
+        assert!(
+            matches!(third, Err(AppError::TooManyRequests(_))),
+            "a third concurrent request from the same address must be refused before hashing"
+        );
+
+        // Somebody else is not affected by that address filling its share.
+        let other = share
+            .claim(address(2))
+            .expect("another address still gets in");
+
+        drop(first);
+        let again = share
+            .claim(address(1))
+            .expect("a finished request gives its place back");
+        drop((second, other, again));
+        assert_eq!(
+            share.tracked(),
+            0,
+            "idle addresses must not stay in the map"
+        );
+    }
+
+    #[test]
+    fn a_request_without_an_address_is_not_counted() {
+        let share = AddressShare::new(1);
+        let held: Vec<_> = (0..5)
+            .map(|_| share.claim(None).expect("no address, no share"))
+            .collect();
+        assert_eq!(share.tracked(), 0);
+        drop(held);
+    }
 
     // Tests that assert cryptographic behaviour — salting, verification, the
     // recorded cost — call the synchronous functions directly. The asynchronous
