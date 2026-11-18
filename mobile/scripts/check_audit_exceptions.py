@@ -17,8 +17,6 @@ upstream fixes them instead of accumulating forever.
 from __future__ import annotations
 
 import importlib.util
-import json
-import sys
 from pathlib import Path
 
 MOBILE = Path(__file__).resolve().parent.parent
@@ -49,35 +47,29 @@ AuditUnavailable = npm_audit.AuditUnavailable
 # node-forge's GHSA-86w9-cpqp-85rv, accepted from 2026-10-02 until 1.4.1 fixed
 # it, and zod's GHSA-mrhx-c7xc-m3w5, accepted from 2026-10-25 for Expo CLI's
 # own zod 3 until the advisory sweep of 2026-11-08 moved it to a patched one.
+# minimatch's GHSA-g3hv-75wg-m249 was accepted from 2026-11-16 for the 10.x
+# copies under @expo/fingerprint and @typescript-eslint/typescript-estree, and
+# left on 2026-11-18 when package.json overrode both to 11.0.5: they call only
+# minimatch(), new Minimatch(), match, negate and pattern, which 11 keeps, and
+# the Expo fingerprint hashes came out identical.
 ACCEPTED: dict[tuple[str, str], tuple[str, str]] = {
-    ("minimatch", "GHSA-g3hv-75wg-m249"): (
-        "10.2.5|10.2.6|11.0.5|3.1.5",
-        "Pattern matching that backtracks on crafted globs. The affected 10.x "
-        "copies belong to @expo/fingerprint (hashes the project at build time) "
-        "and @typescript-eslint/typescript-estree (lint), and match only "
-        "patterns written in this repository against its own files. Nothing "
-        "that ships in the app or handles user input reaches them. Dependency "
-        "review accepts the same advisory for the same reason; drop both once "
-        "those packages take minimatch 11.",
+    ("picomatch", "GHSA-fc5q-39xc-vjpf"): (
+        "2.3.2|4.0.5",
+        "Regular-expression backtracking on crafted extglob patterns such as "
+        "+(*). No release fixes it: GitHub reviewed it on 2026-11-17 for every "
+        "version through 4.0.7, the latest. The copies here belong to Jest "
+        "(jest-util, micromatch), Metro and the Expo CLI (anymatch, fdir, "
+        "@expo/metro-config, @expo/cli), which match patterns from their own "
+        "config and this repository's against its own files. None of them is "
+        "in the app: the exported Android bundle carries no picomatch code. "
+        "Delete this once a fixed picomatch reaches them.",
     ),
 }
 
 
 def installed_version(package: str) -> str | None:
     """Resolve what the lockfile actually pins, so an upgrade breaks the entry."""
-    lock = json.loads(LOCKFILE.read_text())
-    suffix = f"node_modules/{package}"
-    versions = {
-        entry.get("version")
-        for path, entry in lock.get("packages", {}).items()
-        if path == suffix or path.endswith(f"/{suffix}")
-    }
-    versions.discard(None)
-    if len(versions) == 1:
-        return versions.pop()
-    # Several copies of the same package means the reviewed version is no longer
-    # the whole story; report it rather than picking one.
-    return None if not versions else "|".join(sorted(versions))
+    return npm_audit.lockfile_versions(LOCKFILE, package)
 
 
 def audit_findings() -> dict[tuple[str, str], str]:
@@ -92,36 +84,7 @@ def main() -> int:
     except AuditUnavailable as error:
         npm_audit.warn_unavailable(error)
         return 0
-
-    errors: list[str] = []
-
-    for key, title in sorted(findings.items()):
-        package, advisory = key
-        if key not in ACCEPTED:
-            errors.append(f"unreviewed {AUDIT_LEVEL}+ advisory {advisory} in {package}: {title}")
-            continue
-        reviewed, _ = ACCEPTED[key]
-        current = installed_version(package)
-        if current != reviewed:
-            errors.append(
-                f"{package} moved from the reviewed {reviewed} to {current}; "
-                f"re-assess {advisory} and update the exception"
-            )
-
-    for key in sorted(ACCEPTED):
-        if key not in findings:
-            errors.append(
-                f"{key[0]} no longer reports {key[1]}; delete the stale exception"
-            )
-
-    if errors:
-        for error in errors:
-            print(f"audit policy error: {error}", file=sys.stderr)
-        return 1
-
-    accepted = ", ".join(f"{package} {advisory}" for package, advisory in sorted(ACCEPTED))
-    print(f"npm audit passed with {len(ACCEPTED)} reviewed exception(s): {accepted}")
-    return 0
+    return npm_audit.enforce_exceptions(findings, ACCEPTED, installed_version, AUDIT_LEVEL)
 
 
 if __name__ == "__main__":

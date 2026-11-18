@@ -137,6 +137,71 @@ def warn_unavailable(error: AuditUnavailable) -> None:
     print(f"npm audit was unreachable after {ATTEMPTS} attempts: {error}", file=sys.stderr)
 
 
+def lockfile_versions(lockfile: Path, package: str) -> str | None:
+    """Every version of `package` the lockfile pins, joined with `|`.
+
+    Reading the lockfile rather than `node_modules` means an upgrade breaks a
+    reviewed exception even before anybody installs it. Several copies are
+    reported together, so a new copy also breaks it.
+    """
+    lock = json.loads(lockfile.read_text())
+    suffix = f"node_modules/{package}"
+    versions = {
+        entry.get("version")
+        for path, entry in lock.get("packages", {}).items()
+        if path == suffix or path.endswith(f"/{suffix}")
+    }
+    versions.discard(None)
+    return "|".join(sorted(versions)) if versions else None
+
+
+def enforce_exceptions(
+    found: dict[tuple[str, str], str],
+    accepted: dict[tuple[str, str], tuple[str, str]],
+    installed_version,
+    audit_level: str,
+) -> int:
+    """Fail on any finding not reviewed in `accepted`, and on any stale review.
+
+    `accepted` maps (package, advisory) to (reviewed versions, reason). Both
+    clients keep their own list next to their own lockfile; the policy is here
+    so they cannot apply it differently:
+
+    * an advisory nobody has reviewed fails;
+    * a reviewed one fails once the package moves off the versions reviewed,
+      so the assessment is made again rather than inherited;
+    * a review whose advisory no longer appears fails, so entries are deleted
+      when upstream fixes them instead of accumulating.
+    """
+    errors: list[str] = []
+
+    for key, title in sorted(found.items()):
+        package, advisory = key
+        if key not in accepted:
+            errors.append(f"unreviewed {audit_level}+ advisory {advisory} in {package}: {title}")
+            continue
+        reviewed, _ = accepted[key]
+        current = installed_version(package)
+        if current != reviewed:
+            errors.append(
+                f"{package} moved from the reviewed {reviewed} to {current}; "
+                f"re-assess {advisory} and update the exception"
+            )
+
+    for key in sorted(accepted):
+        if key not in found:
+            errors.append(f"{key[0]} no longer reports {key[1]}; delete the stale exception")
+
+    if errors:
+        for error in errors:
+            print(f"audit policy error: {error}", file=sys.stderr)
+        return 1
+
+    listed = ", ".join(f"{package} {advisory}" for package, advisory in sorted(accepted))
+    print(f"npm audit passed with {len(accepted)} reviewed exception(s): {listed}")
+    return 0
+
+
 def main(argv: list[str]) -> int:
     if len(argv) != 2:
         print(f"usage: {Path(__file__).name} <project-dir> <audit-level>", file=sys.stderr)

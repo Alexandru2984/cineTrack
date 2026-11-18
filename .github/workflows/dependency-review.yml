@@ -38,21 +38,15 @@ jobs:
           # compression, so any actix release that moves it would otherwise
           # be blocked on the spelling of its manifest.
           allow-dependencies-licenses: pkg:cargo/brotli-decompressor
-          # GHSA-g3hv-75wg-m249 (moderate): minimatch can be made to expand a
-          # crafted pattern into an enormous number of glob parts. Fixed only
-          # in minimatch 11, and both mobile copies sit under packages that
-          # require ^10: @expo/fingerprint (10.2.6, since 0.20.16) and
-          # @typescript-eslint/typescript-estree (10.2.5). Both are Node build
-          # tooling, fingerprinting the native project for an EAS build and
-          # resolving tsconfig globs for ESLint, and every pattern they match
-          # comes from Expo's defaults or this repository's own config, never
-          # from anyone outside. Nothing ships in the app. Remove this line once
-          # both accept minimatch 11.
-          #
-          # It replaces GHSA-3g3m-2fjr-6pw4 (glob 13 under @expo/fingerprint):
-          # fingerprint 0.20.16 no longer depends on glob, and the copies left,
-          # 14.0.4 and 7.2.3, are outside that advisory's range.
-          allow-ghsas: GHSA-g3hv-75wg-m249
+          # GHSA-fc5q-39xc-vjpf (high): picomatch backtracks on crafted extglob
+          # patterns. No release fixes it; GitHub reviewed it on 2026-11-17 for
+          # every version through 4.0.7, the latest. Every copy is build and
+          # test tooling (Vite, Vitest, Jest, Metro, the Expo CLI) matching
+          # patterns from its own config and this repository's, and neither
+          # the site nor the app bundles it. Both audit gates accept it by
+          # version in check_audit_exceptions.py; remove this line with those
+          # entries once a fixed picomatch is out.
+          allow-ghsas: GHSA-fc5q-39xc-vjpf
           retry-on-snapshot-warnings: true
           retry-on-snapshot-warnings-timeout: 120
           show-patched-versions: true

@@ -156,15 +156,19 @@ require(
     "npm run check:bundle" in ci and "npm run check:bundle" in local_gate,
     "frontend transfer budgets must be gated in CI and locally",
 )
-# The audit level travels with the runner now, as its argument. Matching the
-# whole invocation keeps both halves of the requirement in one assertion: that
-# the frontend is audited at MODERATE, and that it goes through the runner
-# rather than a bare `npm audit` — which is what it was when npm's advisory
-# endpoint stalled for five minutes and took the job down with it.
-FRONTEND_AUDIT = "python3 ../scripts/npm_audit.py . moderate"
+# The frontend is audited through its exception gate, which runs the shared
+# runner rather than a bare `npm audit` — that is what it was when npm's
+# advisory endpoint stalled for five minutes and took the job down with it.
+# The level lives in the gate, so it is checked there.
+FRONTEND_AUDIT = "python3 scripts/check_audit_exceptions.py"
 require(
     FRONTEND_AUDIT in ci and FRONTEND_AUDIT in local_gate,
-    "frontend runtime and build dependencies must reject MODERATE advisories in CI and locally",
+    "frontend runtime and build dependencies must go through the audit gate in CI and locally",
+)
+frontend_gate = (root / "frontend/scripts/check_audit_exceptions.py").read_text()
+require(
+    'AUDIT_LEVEL = "moderate"' in frontend_gate and "scripts/npm_audit.py" in frontend_gate,
+    "the frontend audit gate must reject MODERATE advisories through scripts/npm_audit.py",
 )
 require(
     "npm audit" not in ci_steps,

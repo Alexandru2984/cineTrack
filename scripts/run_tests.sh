@@ -113,7 +113,7 @@ section "Frontend"
   npm test
   npm run build
   npm run check:bundle
-  python3 ../scripts/npm_audit.py . moderate
+  python3 scripts/check_audit_exceptions.py
 )
 
 section "Mobile"

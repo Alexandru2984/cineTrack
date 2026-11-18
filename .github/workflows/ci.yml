@@ -265,9 +265,10 @@ jobs:
       # spent five minutes on npm's default `--fetch-timeout` and then failed
       # the job with a network timeout, on a diff that had nothing to do with
       # it. The runner bounds the call, retries the outage, and refuses to read
-      # a registry error as a clean tree — see `scripts/npm_audit.py`.
+      # a registry error as a clean tree — see `scripts/npm_audit.py`. The gate
+      # adds the reviewed exceptions, for advisories no release fixes yet.
       - name: Audit runtime and build dependencies
-        run: python3 ../scripts/npm_audit.py . moderate
+        run: python3 scripts/check_audit_exceptions.py
 
   mobile:
     name: Mobile
