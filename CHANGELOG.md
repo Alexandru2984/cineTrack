@@ -76,6 +76,16 @@ and release versions follow semantic versioning.
 
 ### Security
 
+- actix-http moves to 3.22.0, which fixes three HTTP/1.1 parsing advisories
+  published on 2026-11-16: RUSTSEC-2026-0552 (a bare LF in chunked trailers
+  could consume pipelined requests), RUSTSEC-2026-0553 (malformed chunk
+  extensions could end a request body early) and RUSTSEC-2026-0554 (partial
+  requests on a keep-alive connection could slip past the header timeout).
+- lettre moves to 0.11.24, which fixes six SMTP advisories published on
+  2026-11-17, RUSTSEC-2026-0560 to RUSTSEC-2026-0565. Among them are SMTP
+  command injection through missing dot-stuffing, mail for a quoted local
+  part being delivered to a different address, and STARTTLS reply
+  injection.
 - The mobile app's build tooling takes minimatch 11.0.5, which fixes
   GHSA-g3hv-75wg-m249. @expo/fingerprint and the TypeScript ESLint parser are
   overridden onto it; the Expo fingerprint hashes are unchanged.
