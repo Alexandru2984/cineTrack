@@ -33,18 +33,12 @@ _SPEC.loader.exec_module(npm_audit)
 AuditUnavailable = npm_audit.AuditUnavailable
 
 # (package, advisory) -> (reviewed versions, why it is accepted)
-ACCEPTED: dict[tuple[str, str], tuple[str, str]] = {
-    ("picomatch", "GHSA-fc5q-39xc-vjpf"): (
-        "4.0.7",
-        "Regular-expression backtracking on crafted extglob patterns such as "
-        "+(*). No release fixes it: GitHub reviewed it on 2026-11-17 for every "
-        "version through 4.0.7, the latest. Here it belongs to Vite, Vitest, "
-        "@rollup/pluginutils and fdir, which match patterns from their own "
-        "config and this repository's against its own files at build and test "
-        "time. None of it is in the site: the built bundle carries no picomatch "
-        "code. Delete this once a fixed picomatch reaches them.",
-    ),
-}
+#
+# Empty since 2026-11-22. picomatch's GHSA-fc5q-39xc-vjpf opened the list on
+# 2026-11-18 and GitHub withdrew the advisory later that day, so this gate
+# reported the entry as stale on the next run, as it should. The list stays so
+# the next advisory without a fix has somewhere reviewed to go.
+ACCEPTED: dict[tuple[str, str], tuple[str, str]] = {}
 
 
 def installed_version(package: str) -> str | None:
