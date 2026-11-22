@@ -48,12 +48,17 @@ pub fn generate_access_token(
         exp: (now + Duration::minutes(expiry_minutes)).timestamp(),
     };
 
-    encode(
-        &Header::default(),
-        &claims,
-        &EncodingKey::from_secret(secret.as_bytes()),
-    )
-    .map_err(|_| AppError::InternalError(anyhow::anyhow!("Failed to generate access token")))
+    let key = EncodingKey::from_secret(secret.as_bytes()).map_err(|_| unusable_secret())?;
+    encode(&Header::default(), &claims, &key)
+        .map_err(|_| AppError::InternalError(anyhow::anyhow!("Failed to generate access token")))
+}
+
+/// jsonwebtoken 12 refuses an empty HMAC key, which 11 would sign with.
+/// `Config` already requires 32 to 1024 bytes, so this is unreachable in a
+/// running server; if it ever happens it is the server's fault, not the
+/// caller's, so it is a 500 rather than the 401 a bad token gets.
+fn unusable_secret() -> AppError {
+    AppError::InternalError(anyhow::anyhow!("JWT secret is not a usable HMAC key"))
 }
 
 pub fn validate_token(token: &str, secret: &str) -> Result<Claims, AppError> {
@@ -72,11 +77,8 @@ pub fn validate_token(token: &str, secret: &str) -> Result<Claims, AppError> {
     // mobile clients already answer by refreshing and retrying.
     validation.set_required_spec_claims(&["exp", "sub"]);
 
-    let token_data = decode::<Claims>(
-        token,
-        &DecodingKey::from_secret(secret.as_bytes()),
-        &validation,
-    )?;
+    let key = DecodingKey::from_secret(secret.as_bytes()).map_err(|_| unusable_secret())?;
+    let token_data = decode::<Claims>(token, &key, &validation)?;
     Ok(token_data.claims)
 }
 
@@ -144,6 +146,20 @@ mod tests {
     }
 
     #[test]
+    fn test_an_empty_secret_is_a_server_error_not_a_signature() {
+        let user_id = Uuid::new_v4();
+        assert!(matches!(
+            generate_access_token(user_id, Uuid::new_v4(), "", 15),
+            Err(AppError::InternalError(_))
+        ));
+        let token = generate_access_token(user_id, Uuid::new_v4(), "secret_one", 15).unwrap();
+        assert!(matches!(
+            validate_token(&token, ""),
+            Err(AppError::InternalError(_))
+        ));
+    }
+
+    #[test]
     fn test_validate_token_rejects_garbage() {
         let result = validate_token("not.a.jwt", "secret");
         assert!(result.is_err());
@@ -161,7 +177,7 @@ mod tests {
         let token = encode(
             &Header::default(),
             &claims,
-            &EncodingKey::from_secret(secret.as_bytes()),
+            &EncodingKey::from_secret(secret.as_bytes()).unwrap(),
         )
         .unwrap();
 
@@ -183,7 +199,7 @@ mod tests {
         let token = encode(
             &Header::default(),
             &claims,
-            &EncodingKey::from_secret(secret.as_bytes()),
+            &EncodingKey::from_secret(secret.as_bytes()).unwrap(),
         )
         .unwrap();
 
@@ -202,7 +218,7 @@ mod tests {
         let token = encode(
             &Header::default(),
             &claims,
-            &EncodingKey::from_secret(secret.as_bytes()),
+            &EncodingKey::from_secret(secret.as_bytes()).unwrap(),
         )
         .unwrap();
 
