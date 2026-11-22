@@ -76,6 +76,9 @@ and release versions follow semantic versioning.
 
 ### Security
 
+- url moves to 2.5.9, which fixes RUSTSEC-2026-0592 (published on
+  2026-11-20): `Url::origin()` could overflow the stack on nested `blob:`
+  URLs.
 - actix-http moves to 3.22.0, which fixes three HTTP/1.1 parsing advisories
   published on 2026-11-16: RUSTSEC-2026-0552 (a bare LF in chunked trailers
   could consume pipelined requests), RUSTSEC-2026-0553 (malformed chunk
