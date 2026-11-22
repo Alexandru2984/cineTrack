@@ -197,6 +197,9 @@ def enforce_exceptions(
             print(f"audit policy error: {error}", file=sys.stderr)
         return 1
 
+    if not accepted:
+        print(f"npm audit passed: no {audit_level}+ advisories and no reviewed exceptions in use")
+        return 0
     listed = ", ".join(f"{package} {advisory}" for package, advisory in sorted(accepted))
     print(f"npm audit passed with {len(accepted)} reviewed exception(s): {listed}")
     return 0

@@ -89,10 +89,9 @@ and release versions follow semantic versioning.
 - The mobile app's build tooling takes minimatch 11.0.5, which fixes
   GHSA-g3hv-75wg-m249. @expo/fingerprint and the TypeScript ESLint parser are
   overridden onto it; the Expo fingerprint hashes are unchanged.
-- picomatch GHSA-fc5q-39xc-vjpf has no fixed release yet. It is accepted, by
-  version, in both audit gates: only build and test tooling carries it, and
-  neither the site nor the app bundles it. The web audit gate now keeps
-  reviewed exceptions under the same policy as the mobile one.
+- The web audit gate keeps reviewed exceptions under the same policy as the
+  mobile one. Its first entry, picomatch GHSA-fc5q-39xc-vjpf, was removed from
+  both gates once GitHub withdrew that advisory; neither list has an entry now.
 - The block list no longer shows a private account's photo. It was the one
   list that returned the avatar regardless of the account's privacy, and since
   blocking ends any follow between the two accounts, whoever blocked a private

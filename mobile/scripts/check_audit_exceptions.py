@@ -51,20 +51,10 @@ AuditUnavailable = npm_audit.AuditUnavailable
 # copies under @expo/fingerprint and @typescript-eslint/typescript-estree, and
 # left on 2026-11-18 when package.json overrode both to 11.0.5: they call only
 # minimatch(), new Minimatch(), match, negate and pattern, which 11 keeps, and
-# the Expo fingerprint hashes came out identical.
-ACCEPTED: dict[tuple[str, str], tuple[str, str]] = {
-    ("picomatch", "GHSA-fc5q-39xc-vjpf"): (
-        "2.3.2|4.0.5",
-        "Regular-expression backtracking on crafted extglob patterns such as "
-        "+(*). No release fixes it: GitHub reviewed it on 2026-11-17 for every "
-        "version through 4.0.7, the latest. The copies here belong to Jest "
-        "(jest-util, micromatch), Metro and the Expo CLI (anymatch, fdir, "
-        "@expo/metro-config, @expo/cli), which match patterns from their own "
-        "config and this repository's against its own files. None of them is "
-        "in the app: the exported Android bundle carries no picomatch code. "
-        "Delete this once a fixed picomatch reaches them.",
-    ),
-}
+# the Expo fingerprint hashes came out identical. picomatch's
+# GHSA-fc5q-39xc-vjpf was accepted on 2026-11-18 because no release fixed it,
+# and removed on 2026-11-22 because GitHub had withdrawn the advisory itself.
+ACCEPTED: dict[tuple[str, str], tuple[str, str]] = {}
 
 
 def installed_version(package: str) -> str | None:

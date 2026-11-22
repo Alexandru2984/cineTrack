@@ -38,15 +38,6 @@ jobs:
           # compression, so any actix release that moves it would otherwise
           # be blocked on the spelling of its manifest.
           allow-dependencies-licenses: pkg:cargo/brotli-decompressor
-          # GHSA-fc5q-39xc-vjpf (high): picomatch backtracks on crafted extglob
-          # patterns. No release fixes it; GitHub reviewed it on 2026-11-17 for
-          # every version through 4.0.7, the latest. Every copy is build and
-          # test tooling (Vite, Vitest, Jest, Metro, the Expo CLI) matching
-          # patterns from its own config and this repository's, and neither
-          # the site nor the app bundles it. Both audit gates accept it by
-          # version in check_audit_exceptions.py; remove this line with those
-          # entries once a fixed picomatch is out.
-          allow-ghsas: GHSA-fc5q-39xc-vjpf
           retry-on-snapshot-warnings: true
           retry-on-snapshot-warnings-timeout: 120
           show-patched-versions: true
